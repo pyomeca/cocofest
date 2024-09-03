@@ -173,4 +173,5 @@ ocp = OcpFes().prepare_ocp(model=DingModelFrequency(sum_stim_truncation=5))
 But if you use `Cocofest` in your research, please kindly cite this zenodo link [10.5281/zenodo.10427934](https://doi.org/10.5281/zenodo.10427934).
 
 # Acknowledgements
+The software development was supported by Ingénierie de technologies interactives en réadaptation [INTER #160 OptiStim](https://regroupementinter.com/fr/mandat/160-optistim/).
 The Cocofest [logo](docs/cocofest_logo.png) has been design by [MaxMV](https://www.instagram.com/max_mv3/)
