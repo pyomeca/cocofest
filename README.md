@@ -9,11 +9,11 @@ To solve the OCP, the robust solver [Ipopt](https://github.com/coin-or/Ipopt) ha
 
 ## Status
 
-| Type          | Status                                                                                                                                                                |
-|---------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| License       | <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/license-MIT-success" alt="License"/></a>                                         |
-| Code coverage | [![codecov](https://codecov.io/github/Kev1CO/cocofest/graph/badge.svg?token=85XHAQGLWQ)](https://codecov.io/github/Kev1CO/cocofest)                                   |
-| Code climate  | <a href="https://codeclimate.com/github/Kev1CO/cocofest/maintainability"><img src="https://api.codeclimate.com/v1/badges/b9fcbc434d8be931dce7/maintainability" /></a> |
+| Type          | Status                                                                                                                                                                  |
+|---------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| License       | <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/license-MIT-success" alt="License"/></a>                                           |
+| Code coverage | [![codecov](https://codecov.io/github/Kev1CO/cocofest/graph/badge.svg?token=85XHAQGLWQ)](https://codecov.io/github/Kev1CO/cocofest)                                     |
+| Code climate  | <a href="https://codeclimate.com/github/pyomeca/cocofest/maintainability"><img src="https://api.codeclimate.com/v1/badges/68cd9855a07be8bfb8c5/maintainability" /></a>  |
 
 # Table of Contents 
 
@@ -128,7 +128,7 @@ result = ocp.solve()
 ```
 
 # Examples
-You can find all the available examples in the [examples](https://github.com/Kev1CO/cocofest/tree/main/examples) file.
+You can find all the available examples in the [examples](https://github.com/pyomeca/cocofest/tree/main/examples) file.
 ## Musculoskeletal model driven by FES models
 The following example is a musculoskeletal model driven by the Ding2007 FES model.
 The objective function is to reach a 90° forearm position and 0° arm position at the movement end.
@@ -173,4 +173,5 @@ ocp = OcpFes().prepare_ocp(model=DingModelFrequency(sum_stim_truncation=5))
 But if you use `Cocofest` in your research, please kindly cite this zenodo link [10.5281/zenodo.10427934](https://doi.org/10.5281/zenodo.10427934).
 
 # Acknowledgements
+The software development was supported by Ingénierie de technologies interactives en réadaptation [INTER #160 OptiStim](https://regroupementinter.com/fr/mandat/160-optistim/).
 The Cocofest [logo](docs/cocofest_logo.png) has been design by [MaxMV](https://www.instagram.com/max_mv3/)

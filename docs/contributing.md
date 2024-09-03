@@ -1,6 +1,6 @@
 # Contributing to `cocofest`
 We warmly welcome all contributions, including bug reports, bug fixes, documentation improvements, enhancements, and innovative ideas. 
-But first take a look at our list of [`issues`](https://github.com/Kev1CO/cocofest/issues) on GitHub.
+But first take a look at our list of [`issues`](https://github.com/pyomeca/cocofest/issues) on GitHub.
 You might find issues that already matches your needs.
 
 
@@ -8,7 +8,7 @@ You might find issues that already matches your needs.
 
 To make contributions, you'll need to create your own fork of the cocofest repository. Here's how to get started:
 
-1. Visit the [cocofest project page](https://github.com/Kev1CO/cocofest).
+1. Visit the [cocofest project page](https://github.com/pyomeca/cocofest).
 2. Click the Fork button to create your personal fork.
 
 After forking, clone your repository to your local machine using the following command:
