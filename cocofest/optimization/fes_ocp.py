@@ -57,6 +57,7 @@ class OcpFes:
         use_sx: bool = True,
         ode_solver: OdeSolver = OdeSolver.RK4(n_integration_steps=1),
         n_threads: int = 1,
+        stim_time: list = None,
     ):
         """
         Prepares the Optimal Control Program (OCP) to be solved.
@@ -156,16 +157,6 @@ class OcpFes:
             None if force_tracking is None else OcpFes._build_fourier_coefficient(force_tracking)
         )
 
-        models = [model] * n_stim
-        n_shooting = [n_shooting] * n_stim
-
-        final_time_phase = OcpFes._build_phase_time(
-            final_time=final_time,
-            n_stim=n_stim,
-            pulse_mode=pulse_mode,
-            time_min=time_min,
-            time_max=time_max,
-        )
         parameters, parameters_bounds, parameters_init, parameter_objectives, constraints = OcpFes._build_parameters(
             model=model,
             n_stim=n_stim,
@@ -181,6 +172,7 @@ class OcpFes:
             pulse_intensity_max=pulse_intensity_max,
             pulse_intensity_bimapping=pulse_intensity_bimapping,
             use_sx=use_sx,
+            stim_time=stim_time,
         )
 
         if len(constraints) == 0 and len(parameters) == 0:
@@ -189,17 +181,17 @@ class OcpFes:
                 " add parameter to optimize or use the IvpFes method to build your problem"
             )
 
-        dynamics = OcpFes._declare_dynamics(models, n_stim)
-        x_bounds, x_init = OcpFes._set_bounds(model, n_stim)
+        dynamics = OcpFes._declare_dynamics(model)
+        x_bounds, x_init = OcpFes._set_bounds(model)
         objective_functions = OcpFes._set_objective(
             n_stim, n_shooting, force_fourier_coefficient, end_node_tracking, custom_objective, time_min, time_max
         )
 
         return OptimalControlProgram(
-            bio_model=models,
+            bio_model=[model],
             dynamics=dynamics,
             n_shooting=n_shooting,
-            phase_time=final_time_phase,
+            phase_time=[final_time],
             objective_functions=objective_functions,
             x_init=x_init,
             x_bounds=x_bounds,
@@ -539,6 +531,7 @@ class OcpFes:
         pulse_intensity_max,
         pulse_intensity_bimapping,
         use_sx,
+        stim_time,
     ):
         parameters = ParameterList(use_sx=use_sx)
         parameters_bounds = BoundsList()
@@ -546,35 +539,33 @@ class OcpFes:
         parameter_objectives = ParameterObjectiveList()
         constraints = ConstraintList()
 
-        if time_min:
-            parameters.add(
-                name="pulse_apparition_time",
-                function=DingModelFrequency.set_pulse_apparition_time,
-                size=n_stim,
-                scaling=VariableScaling("pulse_apparition_time", [1] * n_stim),
-            )
+        parameters.add(
+            name="pulse_apparition_time",
+            function=DingModelFrequency.set_pulse_apparition_time,
+            size=n_stim,
+            scaling=VariableScaling("pulse_apparition_time", [1] * n_stim),
+        )
 
-            if time_min and time_max:
-                time_min_list = [time_min * n for n in range(n_stim)]
-                time_max_list = [time_max * n for n in range(n_stim)]
-            else:
-                time_min_list = [0] * n_stim
-                time_max_list = [100] * n_stim
-            parameters_bounds.add(
-                "pulse_apparition_time",
-                min_bound=np.array(time_min_list),
-                max_bound=np.array(time_max_list),
-                interpolation=InterpolationType.CONSTANT,
-            )
+        if time_min and time_max:
+            time_min_list = np.array([0] + list(np.cumsum([time_min]*(n_stim-1))))
+            time_max_list = np.array([0] + list(np.cumsum([time_max]*(n_stim-1))))
+            parameters_init["pulse_apparition_time"] = np.array([(time_max_list[i] + time_min_list[i]) / 2 for i in range(n_stim)])
+        else:
+            time_min_list = stim_time
+            time_max_list = stim_time
+            parameters_init["pulse_apparition_time"] = np.array(stim_time)
 
-            parameters_init["pulse_apparition_time"] = np.array([0] * n_stim)
-
-            for i in range(n_stim):
-                constraints.add(CustomConstraint.pulse_time_apparition_as_phase, node=Node.START, phase=i, target=0)
+        parameters_bounds.add(
+            "pulse_apparition_time",
+            min_bound=time_min_list,
+            max_bound=time_max_list,
+            interpolation=InterpolationType.CONSTANT,
+        )
 
         if time_bimapping and time_min and time_max:
             for i in range(n_stim):
                 constraints.add(CustomConstraint.equal_to_first_pulse_interval_time, node=Node.START, target=0, phase=i)
+                #TODO : Modify this for single phase
 
         if isinstance(model, DingModelPulseDurationFrequency):
             if fixed_pulse_duration:
@@ -668,22 +659,19 @@ class OcpFes:
         return parameters, parameters_bounds, parameters_init, parameter_objectives, constraints
 
     @staticmethod
-    def _declare_dynamics(models, n_stim):
+    def _declare_dynamics(model):
         dynamics = DynamicsList()
-        for i in range(n_stim):
-            dynamics.add(
-                models[i].declare_ding_variables,
-                dynamic_function=models[i].dynamics,
-                expand_dynamics=True,
-                expand_continuity=False,
-                phase=i,
-                phase_dynamics=PhaseDynamics.SHARED_DURING_THE_PHASE,
-            )
+        dynamics.add(
+            model.declare_ding_variables,
+            dynamic_function=model.dynamics,
+            expand_dynamics=True,
+            phase_dynamics=PhaseDynamics.SHARED_DURING_THE_PHASE,
+        )
 
         return dynamics
 
     @staticmethod
-    def _set_bounds(model, n_stim):
+    def _set_bounds(model):
         # ---- STATE BOUNDS REPRESENTATION ---- #
         #
         #                    |‾‾‾‾‾‾‾‾‾‾x_max_middle‾‾‾‾‾‾‾‾‾‾‾‾x_max_end‾
@@ -714,32 +702,18 @@ class OcpFes:
 
         starting_bounds_min = np.concatenate((starting_bounds, min_bounds, min_bounds), axis=1)
         starting_bounds_max = np.concatenate((starting_bounds, max_bounds, max_bounds), axis=1)
-        middle_bound_min = np.concatenate((min_bounds, min_bounds, min_bounds), axis=1)
-        middle_bound_max = np.concatenate((max_bounds, max_bounds, max_bounds), axis=1)
 
-        for i in range(n_stim):
-            for j in range(len(variable_bound_list)):
-                if i == 0:
-                    x_bounds.add(
-                        variable_bound_list[j],
-                        min_bound=np.array([starting_bounds_min[j]]),
-                        max_bound=np.array([starting_bounds_max[j]]),
-                        phase=i,
-                        interpolation=InterpolationType.CONSTANT_WITH_FIRST_AND_LAST_DIFFERENT,
-                    )
-                else:
-                    x_bounds.add(
-                        variable_bound_list[j],
-                        min_bound=np.array([middle_bound_min[j]]),
-                        max_bound=np.array([middle_bound_max[j]]),
-                        phase=i,
-                        interpolation=InterpolationType.CONSTANT_WITH_FIRST_AND_LAST_DIFFERENT,
-                    )
+        for j in range(len(variable_bound_list)):
+            x_bounds.add(
+                variable_bound_list[j],
+                min_bound=np.array([starting_bounds_min[j]]),
+                max_bound=np.array([starting_bounds_max[j]]),
+                interpolation=InterpolationType.CONSTANT_WITH_FIRST_AND_LAST_DIFFERENT,
+            )
 
         x_init = InitialGuessList()
-        for i in range(n_stim):
-            for j in range(len(variable_bound_list)):
-                x_init.add(variable_bound_list[j], model.standard_rest_values()[j], phase=i)
+        for j in range(len(variable_bound_list)):
+            x_init.add(variable_bound_list[j], model.standard_rest_values()[j])
 
         return x_bounds, x_init
 
@@ -776,19 +750,10 @@ class OcpFes:
                     quadratic=True,
                     weight=1,
                     target=end_node_tracking,
-                    phase=n_stim - 1,
                 )
 
         if time_min and time_max:
-            for i in range(n_stim):
-                objective_functions.add(
-                    ObjectiveFcn.Mayer.MINIMIZE_TIME,
-                    weight=0.001 / n_shooting[i],
-                    min_bound=time_min,
-                    max_bound=time_max,
-                    quadratic=True,
-                    phase=i,
-                )
+            objective_functions.add(ObjectiveFcn.Mayer.MINIMIZE_TIME, weight=0.001, quadratic=True)
 
         return objective_functions
 

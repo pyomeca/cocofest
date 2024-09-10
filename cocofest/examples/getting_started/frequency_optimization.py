@@ -11,16 +11,17 @@ from cocofest import DingModelFrequencyWithFatigue, OcpFes
 
 ocp = OcpFes().prepare_ocp(
     model=DingModelFrequencyWithFatigue(),
-    n_stim=10,
-    n_shooting=20,
+    n_stim=11,
+    n_shooting=100,
     final_time=1,
-    pulse_event={"min": 0.01, "max": 0.1, "bimapping": True},
     objective={"end_node_tracking": 270},
     use_sx=True,
+    stim_time=[0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1],
+
 )
 
 # --- Solve the program --- #
 sol = ocp.solve()
 
 # --- Show results --- #
-sol.graphs()
+sol.graphs(show_bounds=True)

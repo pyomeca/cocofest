@@ -12,18 +12,18 @@ from cocofest import DingModelPulseDurationFrequencyWithFatigue, OcpFes
 # The flag with_fatigue is set to True by default, this will include the fatigue model
 minimum_pulse_duration = DingModelPulseDurationFrequencyWithFatigue().pd0
 ocp = OcpFes().prepare_ocp(
-    model=DingModelPulseDurationFrequencyWithFatigue(),
-    n_stim=10,
-    n_shooting=20,
-    final_time=1,
-    pulse_event={"min": 0.01, "max": 0.1, "bimapping": True},
+    model=DingModelPulseDurationFrequencyWithFatigue(sum_stim_truncation=10),
+    n_stim=11,
+    n_shooting=100,
+    final_time=0.5,
     pulse_duration={
         "min": minimum_pulse_duration,
         "max": 0.0006,
         "bimapping": False,
     },
-    objective={"end_node_tracking": 200},
+    objective={"end_node_tracking": 100},
     use_sx=True,
+    stim_time=[0, 0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 0.45, 0.5],
 )
 
 # --- Solve the program --- #

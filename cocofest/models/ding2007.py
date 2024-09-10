@@ -1,7 +1,7 @@
 from typing import Callable
 
 import numpy as np
-from casadi import MX, vertcat, exp
+from casadi import MX, vertcat, exp, if_else
 
 from bioptim import (
     ConfigureProblem,
@@ -122,7 +122,7 @@ class DingModelPulseDurationFrequency(DingModelFrequency):
         """
         r0 = self.km_rest + self.r0_km_relationship  # Simplification
         cn_dot = self.cn_dot_fun(cn, r0, t, t_stim_prev=t_stim_prev)  # Equation n°1 from Ding's 2003 article
-        a = self.a_calculation(a_scale=self.a_scale, impulse_time=impulse_time)  # Equation n°3 from Ding's 2007 article
+        a = self.a_calculation(a_scale=self.a_scale, impulse_time=impulse_time, t=t, t_stim_prev=t_stim_prev)  # Equation n°3 from Ding's 2007 article
         f_dot = self.f_dot_fun(
             cn,
             f,
@@ -134,7 +134,7 @@ class DingModelPulseDurationFrequency(DingModelFrequency):
         )  # Equation n°2 from Ding's 2003 article
         return vertcat(cn_dot, f_dot)
 
-    def a_calculation(self, a_scale: float | MX, impulse_time: MX) -> MX:
+    def a_calculation(self, a_scale: float | MX, impulse_time: MX, t: float | MX, t_stim_prev: list[float] | list[MX]) -> MX:
         """
         Parameters
         ----------
@@ -142,11 +142,23 @@ class DingModelPulseDurationFrequency(DingModelFrequency):
             The scaling factor of the current stimulation (unitless)
         impulse_time: MX
             The pulsation duration of the current stimulation (s)
+        t: float | MX
+            The current time at which the dynamics is evaluated (s)
+        t_stim_prev: float | MX
+            The time of the previous stimulation (s)
 
         Returns
         -------
         The value of scaling factor (unitless)
         """
+        impulse_time_list = impulse_time
+        for i in range(len(t_stim_prev)):
+            if i == 0:
+                impulse_time = impulse_time_list[0]
+            else:
+                coefficient = if_else(t_stim_prev[i] <= t, 1, 0)
+                temp_impulse_time = impulse_time_list[i] * coefficient
+                impulse_time = if_else(temp_impulse_time != 0, temp_impulse_time, impulse_time)
         return a_scale * (1 - exp(-(impulse_time - self.pd0) / self.pdt))
 
     def set_impulse_duration(self, value: list[MX]):
@@ -161,7 +173,7 @@ class DingModelPulseDurationFrequency(DingModelFrequency):
         self.impulse_time = value
 
     @staticmethod
-    def get_pulse_duration_parameters(nlp, parameters: ParameterList, muscle_name: str = None) -> MX:
+    def get_pulse_duration_parameters(nlp, parameters: ParameterList, muscle_name: str = None) -> list[MX]:
         """
         Get the nlp list of pulse_duration parameters
 
@@ -178,16 +190,14 @@ class DingModelPulseDurationFrequency(DingModelFrequency):
         -------
         The list of list of pulse_duration parameters
         """
-        pulse_duration_parameters = vertcat()
+
+        pulse_duration_parameters = []
         for j in range(parameters.shape[0]):
             if muscle_name:
-                # if "pulse_duration_" + muscle_name in str(nlp.parameters.scaled.cx[j].name()):
                 if "pulse_duration_" + muscle_name in nlp.parameters.scaled.cx[j].str():
-                    pulse_duration_parameters = vertcat(pulse_duration_parameters, parameters[j])
-            # elif "pulse_duration" in str(nlp.parameters.scaled.cx[j].name()):
+                    pulse_duration_parameters.append(parameters[j])
             elif "pulse_duration" in nlp.parameters.scaled.cx[j].str():
-                pulse_duration_parameters = vertcat(pulse_duration_parameters, parameters[j])
-
+                pulse_duration_parameters.append(parameters[j])
         return pulse_duration_parameters
 
     @staticmethod
@@ -235,16 +245,11 @@ class DingModelPulseDurationFrequency(DingModelFrequency):
         -------
         The derivative of the states in the tuple[MX] format
         """
-        pulse_duration_parameters = (
+        impulse_time = (
             nlp.model.get_pulse_duration_parameters(nlp, parameters)
             if fes_model is None
             else fes_model.get_pulse_duration_parameters(nlp, parameters, muscle_name=fes_model.muscle_name)
         )
-
-        if pulse_duration_parameters.shape[0] == 1:  # check if pulse duration is mapped
-            impulse_time = pulse_duration_parameters[0]
-        else:
-            impulse_time = pulse_duration_parameters[nlp.phase_idx]
 
         dxdt_fun = fes_model.system_dynamics if fes_model else nlp.model.system_dynamics
         stim_apparition = (

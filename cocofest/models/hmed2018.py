@@ -1,6 +1,6 @@
 from typing import Callable
 
-from casadi import MX, vertcat, tanh
+from casadi import MX, vertcat, tanh, if_else
 import numpy as np
 
 from bioptim import (
@@ -179,15 +179,13 @@ class DingModelIntensityFrequency(DingModelFrequency):
         enough_stim_to_truncate = self._sum_stim_truncation and len(t_stim_prev) > self._sum_stim_truncation
         if enough_stim_to_truncate:
             t_stim_prev = t_stim_prev[-self._sum_stim_truncation :]
-        for i in range(len(t_stim_prev)):  # Eq from [1]
-            if i == 0 and len(t_stim_prev) == 1:  # Eq from Hmed et al.
-                ri = 1
-            else:
-                previous_phase_time = t_stim_prev[i] - t_stim_prev[i - 1]
-                ri = self.ri_fun(r0, previous_phase_time)
-            exp_time = self.exp_time_fun(t, t_stim_prev[i])
+        for i in range(len(t_stim_prev)):
+            previous_phase_time = t_stim_prev[i] - t_stim_prev[i - 1]
+            ri = 1 if i == 0 else self.ri_fun(r0, previous_phase_time)  # Part of Eq n°1
+            exp_time = self.exp_time_fun(t, t_stim_prev[i])  # Part of Eq n°1
             lambda_i = self.lambda_i_calculation(intensity_stim[i])
-            sum_multiplier += lambda_i * ri * exp_time
+            sum_result = if_else(t_stim_prev[i] <= t,  lambda_i * ri * exp_time, 0)
+            sum_multiplier += sum_result  # Part of Eq n°1
         return sum_multiplier
 
     def lambda_i_calculation(self, intensity_stim: MX):
@@ -299,13 +297,6 @@ class DingModelIntensityFrequency(DingModelFrequency):
             else fes_model.get_intensity_parameters(nlp, parameters, muscle_name=fes_model.muscle_name)
         )
 
-        if intensity_parameters.shape[0] == 1:  # check if pulse duration is mapped
-            for i in range(nlp.phase_idx + 1):
-                intensity_stim_prev.append(intensity_parameters[0])
-        else:
-            for i in range(nlp.phase_idx + 1):
-                intensity_stim_prev.append(intensity_parameters[i])
-
         dxdt_fun = fes_model.system_dynamics if fes_model else nlp.model.system_dynamics
         stim_apparition = (
             (
@@ -325,7 +316,7 @@ class DingModelIntensityFrequency(DingModelFrequency):
                 f=states[1],
                 t=time,
                 t_stim_prev=stim_apparition,
-                intensity_stim=intensity_stim_prev,
+                intensity_stim=intensity_parameters,
                 force_length_relationship=force_length_relationship,
                 force_velocity_relationship=force_velocity_relationship,
             ),

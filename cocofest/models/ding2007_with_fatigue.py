@@ -142,7 +142,7 @@ class DingModelPulseDurationFrequencyWithFatigue(DingModelPulseDurationFrequency
         """
         r0 = km + self.r0_km_relationship  # Simplification
         cn_dot = self.cn_dot_fun(cn, r0, t, t_stim_prev=t_stim_prev)  # Equation n°1 from Ding's 2003 article
-        a_calculated = self.a_calculation(a_scale=a, impulse_time=impulse_time)  # Equation n°3 from Ding's 2007 article
+        a_calculated = self.a_calculation(a_scale=a, impulse_time=impulse_time, t=t, t_stim_prev=t_stim_prev)  # Equation n°3 from Ding's 2007 article
         f_dot = self.f_dot_fun(
             cn,
             f,
@@ -247,16 +247,11 @@ class DingModelPulseDurationFrequencyWithFatigue(DingModelPulseDurationFrequency
         -------
         The derivative of the states in the tuple[MX] format
         """
-        pulse_duration_parameters = (
+        impulse_time = (
             nlp.model.get_pulse_duration_parameters(nlp, parameters)
             if fes_model is None
             else fes_model.get_pulse_duration_parameters(nlp, parameters, muscle_name=fes_model.muscle_name)
         )
-
-        if pulse_duration_parameters.shape[0] == 1:  # check if pulse duration is mapped
-            impulse_time = pulse_duration_parameters[0]
-        else:
-            impulse_time = pulse_duration_parameters[nlp.phase_idx]
 
         dxdt_fun = fes_model.system_dynamics if fes_model else nlp.model.system_dynamics
         stim_apparition = (

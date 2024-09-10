@@ -9,10 +9,6 @@ from bioptim import PenaltyController
 
 class CustomConstraint:
     @staticmethod
-    def pulse_time_apparition_as_phase(controller: PenaltyController) -> MX | SX:
-        return controller.time.cx - controller.parameters["pulse_apparition_time"].cx[controller.phase_idx]
-
-    @staticmethod
     def equal_to_first_pulse_interval_time(controller: PenaltyController) -> MX | SX:
         if controller.ocp.n_phases <= 1:
             RuntimeError("There is only one phase, the bimapping constraint is not possible")
