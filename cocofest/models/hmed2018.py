@@ -120,6 +120,7 @@ class DingModelIntensityFrequency(DingModelFrequency):
         The value of the derivative of each state dx/dt at the current time t
         """
         r0 = self.km_rest + self.r0_km_relationship  # Simplification
+        t_stim_prev = self.slice_stim(t, t_stim_prev)
         cn_dot = self.cn_dot_fun(cn, r0, t, t_stim_prev=t_stim_prev, intensity_stim=intensity_stim)  # Equation n°1
         f_dot = self.f_dot_fun(
             cn,
@@ -176,16 +177,17 @@ class DingModelIntensityFrequency(DingModelFrequency):
         A part of the n°1 equation
         """
         sum_multiplier = 0
-        enough_stim_to_truncate = self._sum_stim_truncation and len(t_stim_prev) > self._sum_stim_truncation
-        if enough_stim_to_truncate:
-            t_stim_prev = t_stim_prev[-self._sum_stim_truncation :]
+        # enough_stim_to_truncate = self._sum_stim_truncation and len(t_stim_prev) > self._sum_stim_truncation
+        # if enough_stim_to_truncate:
+        #     t_stim_prev = t_stim_prev[-self._sum_stim_truncation :]
+        # TODO : Truncation not working for single phase
+
         for i in range(len(t_stim_prev)):
             previous_phase_time = t_stim_prev[i] - t_stim_prev[i - 1]
             ri = 1 if i == 0 else self.ri_fun(r0, previous_phase_time)  # Part of Eq n°1
             exp_time = self.exp_time_fun(t, t_stim_prev[i])  # Part of Eq n°1
             lambda_i = self.lambda_i_calculation(intensity_stim[i])
-            sum_result = if_else(t_stim_prev[i] <= t,  lambda_i * ri * exp_time, 0)
-            sum_multiplier += sum_result  # Part of Eq n°1
+            sum_multiplier += lambda_i * ri * exp_time  # Part of Eq n°1
         return sum_multiplier
 
     def lambda_i_calculation(self, intensity_stim: MX):

@@ -12,7 +12,7 @@ from cocofest import DingModelPulseDurationFrequencyWithFatigue, OcpFes
 # The flag with_fatigue is set to True by default, this will include the fatigue model
 minimum_pulse_duration = DingModelPulseDurationFrequencyWithFatigue().pd0
 ocp = OcpFes().prepare_ocp(
-    model=DingModelPulseDurationFrequencyWithFatigue(sum_stim_truncation=10),
+    model=DingModelPulseDurationFrequencyWithFatigue(),
     n_stim=11,
     n_shooting=100,
     final_time=0.5,

@@ -153,6 +153,7 @@ class DingModelFrequencyWithFatigue(DingModelFrequency):
         The value of the derivative of each state dx/dt at the current time t
         """
         r0 = km + self.r0_km_relationship  # Simplification
+        t_stim_prev = self.slice_stim(t, t_stim_prev)
         cn_dot = self.cn_dot_fun(cn, r0, t, t_stim_prev=t_stim_prev)  # Equation n°1
         f_dot = self.f_dot_fun(
             cn,
