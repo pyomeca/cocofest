@@ -123,7 +123,7 @@ class DingModelPulseDurationFrequency(DingModelFrequency):
         r0 = self.km_rest + self.r0_km_relationship  # Simplification
         t_stim_prev = self.slice_stim(t, t_stim_prev)
         cn_dot = self.cn_dot_fun(cn, r0, t, t_stim_prev=t_stim_prev)  # Equation n°1 from Ding's 2003 article
-        a = self.a_calculation(a_scale=self.a_scale, impulse_time=impulse_time, t=t, t_stim_prev=t_stim_prev)  # Equation n°3 from Ding's 2007 article
+        a = self.a_calculation(a_scale=self.a_scale, impulse_time=impulse_time, t_stim_prev=t_stim_prev)  # Equation n°3 from Ding's 2007 article
         f_dot = self.f_dot_fun(
             cn,
             f,

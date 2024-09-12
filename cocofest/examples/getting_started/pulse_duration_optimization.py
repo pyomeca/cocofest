@@ -13,7 +13,7 @@ from cocofest import DingModelPulseDurationFrequencyWithFatigue, OcpFes
 minimum_pulse_duration = DingModelPulseDurationFrequencyWithFatigue().pd0
 ocp = OcpFes().prepare_ocp(
     model=DingModelPulseDurationFrequencyWithFatigue(),
-    n_stim=11,
+    n_stim=10,
     n_shooting=100,
     final_time=0.5,
     pulse_duration={
@@ -23,7 +23,7 @@ ocp = OcpFes().prepare_ocp(
     },
     objective={"end_node_tracking": 100},
     use_sx=True,
-    stim_time=[0, 0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 0.45, 0.5],
+    stim_time=[0, 0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 0.45],
 )
 
 # --- Solve the program --- #

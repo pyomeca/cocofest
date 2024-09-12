@@ -6,15 +6,13 @@ The nmpc cyclic problem is composed of 3 cycles and will move forward 1 cycle at
 Only the middle cycle is kept in the optimization problem, the nmpc cyclic problem stops once the last 6th cycle is reached.
 """
 
-import numpy as np
-
 from bioptim import Solver
 from cocofest import NmpcFes, DingModelPulseDurationFrequencyWithFatigue
 
 
 # --- Build nmpc cyclic --- #
 cycles_len = 100
-cycle_duration = 0.25
+cycle_duration = 0.5
 n_cycles = 3
 
 minimum_pulse_duration = DingModelPulseDurationFrequencyWithFatigue().pd0
@@ -22,9 +20,9 @@ fes_model = DingModelPulseDurationFrequencyWithFatigue()
 fes_model.alpha_a = -4.0 * 10e-1  # Increasing the fatigue rate to make the fatigue more visible
 nmpc = NmpcFes.prepare_nmpc(
     model=fes_model,
-    n_stim=11,
+    n_stim=10,
     n_shooting=cycles_len,
-    final_time=0.5,
+    final_time=cycle_duration,
     pulse_duration={
         "min": minimum_pulse_duration,
         "max": 0.0006,
@@ -36,10 +34,10 @@ nmpc = NmpcFes.prepare_nmpc(
     cycle_duration=cycle_duration,
     # n_cycles=n_cycles,
     use_sx=True,
-    stim_time=list(np.linspace(0, 0.5, 11)),
+    stim_time=[0, 0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 0.45],
 
 )
 
 
-sol = nmpc.solve(nmpc.update_functions, solver=Solver.IPOPT())
+sol = nmpc.solve(nmpc.update_functions, solver=Solver.IPOPT(), cyclic_options={"states": {}})
 sol.graphs()
