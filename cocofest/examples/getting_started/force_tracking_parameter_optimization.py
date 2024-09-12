@@ -14,7 +14,7 @@ from cocofest import (
 )
 
 # --- Building force to track ---#
-time = np.linspace(0, 1, 100)
+time = np.linspace(0, 1, 101)
 force = abs(np.sin(time * 5) + np.random.normal(scale=0.1, size=len(time))) * 100
 force_tracking = [time, force]
 
@@ -28,7 +28,7 @@ minimum_pulse_intensity = model.min_pulse_intensity()
 ocp = OcpFes().prepare_ocp(
     model=model,
     n_stim=10,
-    n_shooting=20,
+    n_shooting=200,
     final_time=1,
     pulse_intensity={
         "min": minimum_pulse_intensity,
@@ -37,6 +37,7 @@ ocp = OcpFes().prepare_ocp(
     },
     objective={"force_tracking": force_tracking},
     use_sx=True,
+    stim_time=[0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9],
 )
 
 # --- Solve the program --- #
@@ -56,7 +57,7 @@ plt.plot(time, force, color="red", label="force from file")
 plt.plot(time, y_approx, color="orange", label="force after fourier transform")
 
 solution_time = sol.decision_time(to_merge=SolutionMerge.KEYS, continuous=True)
-solution_time = [float(j) for sub in solution_time for j in sub]
+solution_time = [float(j) for j in solution_time]
 
 plt.plot(solution_time, sol_merged["F"].squeeze(), color="blue", label="force from optimized stimulation")
 plt.xlabel("Time (s)")

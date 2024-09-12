@@ -595,11 +595,11 @@ class OcpFes:
             elif pulse_duration_min is not None and pulse_duration_max is not None:
                 parameters_bounds.add(
                     "pulse_duration",
-                    min_bound=[pulse_duration_min],
-                    max_bound=[pulse_duration_max],
+                    min_bound=pulse_duration_min,
+                    max_bound=pulse_duration_max,
                     interpolation=InterpolationType.CONSTANT,
                 )
-                parameters_init["pulse_duration"] = np.array([0] * n_stim)
+                parameters_init["pulse_duration"] = np.array([(pulse_duration_min + pulse_duration_max) / 2 for i in range(n_stim)])
                 parameters.add(
                     name="pulse_duration",
                     function=DingModelPulseDurationFrequency.set_impulse_duration,
@@ -728,18 +728,13 @@ class OcpFes:
                 objective_functions.add(custom_objective[0][i])
 
         if force_fourier_coefficient is not None:
-            for phase in range(n_stim):
-                for i in range(n_shooting[phase]):
-                    objective_functions.add(
-                        CustomObjective.track_state_from_time,
-                        custom_type=ObjectiveFcn.Mayer,
-                        node=i,
-                        fourier_coeff=force_fourier_coefficient,
-                        key="F",
-                        quadratic=True,
-                        weight=1,
-                        phase=phase,
-                    )
+
+            force_to_track = FourierSeries().fit_func_by_fourier_series_with_real_coeffs(
+            np.linspace(0, 1, n_shooting + 1),
+            force_fourier_coefficient,
+        )[np.newaxis, :]
+
+            objective_functions.add(ObjectiveFcn.Lagrange.TRACK_STATE, key="F", weight=100, target=force_to_track, node=Node.ALL, quadratic=True)
 
         if end_node_tracking:
             if isinstance(end_node_tracking, int | float):

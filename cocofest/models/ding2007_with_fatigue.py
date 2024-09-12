@@ -153,7 +153,6 @@ class DingModelPulseDurationFrequencyWithFatigue(DingModelPulseDurationFrequency
         The value of the derivative of each state dx/dt at the current time t
         """
         r0 = km + self.r0_km_relationship  # Simplification
-        t_stim_prev = self.slice_stim(t, t_stim_prev)
         cn_dot = self.cn_dot_fun(cn, r0, t, t_stim_prev=t_stim_prev)  # Equation n°1 from Ding's 2003 article
         a_calculated = self.a_calculation(a_scale=a, impulse_time=impulse_time, t_stim_prev=t_stim_prev)  # Equation n°3 from Ding's 2007 article
         f_dot = self.f_dot_fun(

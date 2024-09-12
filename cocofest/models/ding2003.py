@@ -146,7 +146,6 @@ class DingModelFrequency(FesModel):
         The value of the derivative of each state dx/dt at the current time t
         """
         r0 = self.km_rest + self.r0_km_relationship  # Simplification
-        t_stim_prev = self.slice_stim(t, t_stim_prev)
         cn_dot = self.cn_dot_fun(cn, r0, t, t_stim_prev=t_stim_prev)  # Equation n°1
         f_dot = self.f_dot_fun(
             cn,
@@ -216,7 +215,8 @@ class DingModelFrequency(FesModel):
             previous_phase_time = t_stim_prev[i] - t_stim_prev[i - 1]
             ri = 1 if i == 0 else self.ri_fun(r0, previous_phase_time)  # Part of Eq n°1
             exp_time = self.exp_time_fun(t, t_stim_prev[i])  # Part of Eq n°1
-            sum_multiplier += ri * exp_time
+            coefficient = if_else(t_stim_prev[i] <= t, 1, 0)
+            sum_multiplier += ri * exp_time * coefficient
         return sum_multiplier
 
     def cn_dot_fun(self, cn: MX, r0: MX | float, t: MX, t_stim_prev: list[MX]) -> MX | float:
@@ -277,19 +277,6 @@ class DingModelFrequency(FesModel):
             * force_length_relationship
             * force_velocity_relationship
         )  # Equation n°2
-
-    @staticmethod
-    def slice_stim(t, t_stim_prev: list[MX] | list[float]) -> list[MX] | list[float]:
-
-        sliced_list = []
-        for i in range(len(t_stim_prev)):
-            is_included = if_else(t_stim_prev[i] <= t, 1, 0)
-            stim_value = if_else(is_included, t_stim_prev[i], MX(0))
-
-            if not stim_value.is_zero():
-                sliced_list.append(stim_value)
-
-        return sliced_list
 
     @staticmethod
     def dynamics(
