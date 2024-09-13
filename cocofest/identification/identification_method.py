@@ -252,7 +252,7 @@ def sparse_data_extraction(model_data_path, force_curve_number=5):
     # )
 
 
-def force_at_node_in_ocp(time, force, n_shooting, final_time_phase, sparse=None):
+def force_at_node_in_ocp(time, force, n_shooting, final_time, sparse=None):
     """
     Interpolates the force at each node in the optimal control problem (OCP).
 
@@ -262,10 +262,8 @@ def force_at_node_in_ocp(time, force, n_shooting, final_time_phase, sparse=None)
         List of time data.
     force : list
         List of force data.
-    n_shooting : list
+    n_shooting : int
         List of number of shooting points for each phase.
-    final_time_phase : list
-        List of final time for each phase.
     sparse : int, optional
         Number of sparse points, by default None.
 
@@ -275,11 +273,8 @@ def force_at_node_in_ocp(time, force, n_shooting, final_time_phase, sparse=None)
         List of force at each node in the OCP.
     """
 
-    temp_time = []
-    for i in range(len(final_time_phase)):
-        for j in range(n_shooting[i]):
-            temp_time.append(sum(final_time_phase[:i]) + j * final_time_phase[i] / (n_shooting[i]))
-    force_at_node = np.interp(temp_time, time, force).tolist()
+    temp_time = np.linspace(0, final_time, int((n_shooting / final_time) + 1))
+    force_at_node = list(np.interp(temp_time, time, force))
     # if sparse:  # TODO check this part
     #     force_at_node = force_at_node[0:sparse] + force_at_node[:-sparse]
     return force_at_node

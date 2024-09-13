@@ -8,8 +8,8 @@ from cocofest import (
 # --- Build ocp --- #
 # This problem was build to be integrated and has no objectives nor parameter to optimize.
 
-fes_parameters = {"model": DingModelFrequencyWithFatigue(), "n_stim": 10}
-ivp_parameters = {"n_shooting": 20, "final_time": 1}
+fes_parameters = {"model": DingModelFrequencyWithFatigue(), "n_stim": 10, "stim_time": [0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]}
+ivp_parameters = {"n_shooting": 100, "final_time": 1, "use_sx": True}
 
 ivp = IvpFes(fes_parameters, ivp_parameters)
 

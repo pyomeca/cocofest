@@ -11,12 +11,17 @@ from cocofest import DingModelFrequencyWithFatigue, IvpFes
 # --- Build ocp --- #
 # This example shows how to create a problem with single pulses.
 # The stimulation won't be optimized.
-ns = 10
+ns = 200
 n_stim = 10
 final_time = 1
 
-fes_parameters = {"model": DingModelFrequencyWithFatigue(), "n_stim": n_stim, "pulse_mode": "single"}
-ivp_parameters = {"n_shooting": ns, "final_time": final_time, "use_sx": True}
+fes_parameters = {"model": DingModelFrequencyWithFatigue(),
+                  "n_stim": n_stim,
+                  "pulse_mode": "single",
+                  "stim_time": [0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]}
+ivp_parameters = {"n_shooting": ns,
+                  "final_time": final_time,
+                  "use_sx": True}
 
 ivp = IvpFes(
     fes_parameters,
@@ -25,18 +30,13 @@ ivp = IvpFes(
 
 result_single, time_single = ivp.integrate()
 force_single = result_single["F"][0]
-stimulation_single = np.concatenate((np.array([0]), np.cumsum(np.array(ivp.final_time_phase))))
-
+stimulation_single = ivp.stim_time
 
 # --- Example n°2 : Doublets --- #
 # --- Build ocp --- #
 # This example shows how to create a problem with doublet pulses.
 # The stimulation won't be optimized.
-ns = 10
-n_stim = 20
-final_time = 1
-fes_parameters = {"model": DingModelFrequencyWithFatigue(), "n_stim": n_stim, "pulse_mode": "doublet"}
-ivp_parameters = {"n_shooting": ns, "final_time": final_time, "use_sx": True}
+fes_parameters["pulse_mode"] = "doublet"
 ivp = IvpFes(
     fes_parameters,
     ivp_parameters,
@@ -44,15 +44,12 @@ ivp = IvpFes(
 
 result_doublet, time_doublet = ivp.integrate()
 force_doublet = result_doublet["F"][0]
-stimulation_doublet = np.concatenate((np.array([0]), np.cumsum(np.array(ivp.final_time_phase))))
-
+stimulation_doublet = ivp.stim_time
 
 # --- Example n°3 : Triplets --- #
 # --- Build ocp --- #
 # This example shows how to create a problem with triplet pulses.
-n_stim = 30
-fes_parameters = {"model": DingModelFrequencyWithFatigue(), "n_stim": n_stim, "pulse_mode": "triplet"}
-ivp_parameters = {"n_shooting": 10, "final_time": 1, "use_sx": True}
+fes_parameters["pulse_mode"] = "triplet"
 ivp = IvpFes(
     fes_parameters,
     ivp_parameters,
@@ -60,7 +57,7 @@ ivp = IvpFes(
 
 result_triplet, time_triplet = ivp.integrate()
 force_triplet = result_triplet["F"][0]
-stimulation_triplet = np.concatenate((np.array([0]), np.cumsum(np.array(ivp.final_time_phase))))
+stimulation_triplet = ivp.stim_time
 
 # --- Show results --- #
 plt.title("Force state result for single, doublet and triplet")
@@ -70,7 +67,7 @@ plt.plot(time_doublet, force_doublet, color="red", label="force doublet")
 plt.plot(time_triplet, force_triplet, color="green", label="force triplet")
 
 plt.vlines(
-    x=stimulation_single[:-1],
+    x=stimulation_single,
     ymin=max(force_single) - 30,
     ymax=max(force_single),
     colors="blue",
@@ -79,7 +76,7 @@ plt.vlines(
     label="stimulation single",
 )
 plt.vlines(
-    x=stimulation_doublet[:-1],
+    x=stimulation_doublet,
     ymin=max(force_doublet) - 30,
     ymax=max(force_doublet),
     colors="red",
@@ -88,7 +85,7 @@ plt.vlines(
     label="stimulation doublet",
 )
 plt.vlines(
-    x=stimulation_triplet[:-1],
+    x=stimulation_triplet,
     ymin=max(force_triplet) - 30,
     ymax=max(force_triplet),
     colors="green",

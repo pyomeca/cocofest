@@ -30,6 +30,7 @@ class DingModelFrequencyForceParameterIdentification(ParameterIdentification):
         key_parameter_to_identify: list = None,
         additional_key_settings: dict = None,
         n_shooting: int = 5,
+        final_time: float = 1,
         custom_objective: list[Objective] = None,
         use_sx: bool = True,
         ode_solver: OdeSolver = OdeSolver.RK4(n_integration_steps=1),
@@ -96,6 +97,7 @@ class DingModelFrequencyForceParameterIdentification(ParameterIdentification):
         self.force_ocp = None
         self.force_identification_result = None
         self.n_shooting = n_shooting
+        self.final_time = final_time
         self.custom_objective = custom_objective
         self.use_sx = use_sx
         self.ode_solver = ode_solver
@@ -129,21 +131,21 @@ class DingModelFrequencyForceParameterIdentification(ParameterIdentification):
                 "min_bound": 0.001,
                 "max_bound": 1,
                 "function": model.set_km_rest,
-                "scaling": 1,  # 1000
+                "scaling": 1,
             },
             "tau1_rest": {
                 "initial_guess": 0.5,
                 "min_bound": 0.0001,
                 "max_bound": 1,
                 "function": model.set_tau1_rest,
-                "scaling": 1,  # 1000
+                "scaling": 1,
             },
             "tau2": {
                 "initial_guess": 0.5,
                 "min_bound": 0.0001,
                 "max_bound": 1,
                 "function": model.set_tau2,
-                "scaling": 1,  # 1000
+                "scaling": 1,
             },
         }
 
