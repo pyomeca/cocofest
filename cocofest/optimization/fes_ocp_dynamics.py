@@ -42,6 +42,7 @@ class OcpFesMsk:
         n_stim: int = None,
         n_shooting: int = None,
         final_time: int | float = None,
+        stim_time: list = None,
         pulse_event: dict = None,
         pulse_duration: dict = None,
         pulse_intensity: dict = None,
@@ -195,10 +196,6 @@ class OcpFesMsk:
 
         OcpFesMsk._sanity_check_muscle_model(biorbd_model_path=biorbd_model_path, fes_muscle_models=fes_muscle_models)
 
-        n_stim, final_time = OcpFes._build_phase_parameter(
-            n_stim=n_stim, final_time=final_time, frequency=frequency, pulse_mode=pulse_mode, round_down=round_down
-        )
-
         force_fourier_coef = [] if force_tracking else None
         if force_tracking:
             for i in range(len(force_tracking[1])):
@@ -209,14 +206,6 @@ class OcpFesMsk:
             for i in range(len(q_tracking[1])):
                 q_fourier_coef.append(OcpFes._build_fourier_coefficient([q_tracking[0], q_tracking[1][i]]))
 
-        n_shooting = [n_shooting] * n_stim
-        final_time_phase = OcpFes._build_phase_time(
-            final_time=final_time,
-            n_stim=n_stim,
-            pulse_mode=pulse_mode,
-            time_min=time_min,
-            time_max=time_max,
-        )
         (
             parameters,
             parameters_bounds,
@@ -226,6 +215,7 @@ class OcpFesMsk:
         ) = OcpFesMsk._build_parameters(
             model=fes_muscle_models,
             n_stim=n_stim,
+            stim_time=stim_time,
             time_min=time_min,
             time_max=time_max,
             time_bimapping=time_bimapping,
@@ -258,10 +248,9 @@ class OcpFesMsk:
                 activate_force_length_relationship=activate_force_length_relationship,
                 activate_force_velocity_relationship=activate_force_velocity_relationship,
             )
-            for i in range(n_stim)
         ]
 
-        dynamics = OcpFesMsk._declare_dynamics(bio_models, n_stim)
+        dynamics = OcpFesMsk._declare_dynamics(bio_models)
         initial_state = (
             get_initial_guess(biorbd_model_path, final_time, n_stim, n_shooting, objective) if warm_start else None
         )
@@ -295,7 +284,7 @@ class OcpFesMsk:
             bio_model=bio_models,
             dynamics=dynamics,
             n_shooting=n_shooting,
-            phase_time=final_time_phase,
+            phase_time=final_time,
             objective_functions=objective_functions,
             x_init=x_init,
             x_bounds=x_bounds,
@@ -313,23 +302,23 @@ class OcpFesMsk:
         )
 
     @staticmethod
-    def _declare_dynamics(bio_models, n_stim):
+    def _declare_dynamics(bio_models):
         dynamics = DynamicsList()
-        for i in range(n_stim):
-            dynamics.add(
-                bio_models[i].declare_model_variables,
-                dynamic_function=bio_models[i].muscle_dynamic,
-                expand_dynamics=True,
-                expand_continuity=False,
-                phase=i,
-                phase_dynamics=PhaseDynamics.SHARED_DURING_THE_PHASE,
-            )
+        dynamics.add(
+            bio_models[0].declare_model_variables,
+            dynamic_function=bio_models[0].muscle_dynamic,
+            expand_dynamics=True,
+            expand_continuity=False,
+            phase=0,
+            phase_dynamics=PhaseDynamics.SHARED_DURING_THE_PHASE,
+        )
         return dynamics
 
     @staticmethod
     def _build_parameters(
         model,
         n_stim,
+        stim_time,
         time_min,
         time_max,
         time_bimapping,
@@ -351,35 +340,22 @@ class OcpFesMsk:
         parameter_objectives = ParameterObjectiveList()
         constraints = ConstraintList()
 
-        if time_min:
-            parameters.add(
-                name="pulse_apparition_time",
-                function=DingModelFrequency.set_pulse_apparition_time,
-                size=n_stim,
-                scaling=VariableScaling("pulse_apparition_time", [1] * n_stim),
-            )
+        # if time_min:
+        parameters.add(
+            name="pulse_apparition_time",
+            function=DingModelFrequency.set_pulse_apparition_time,
+            size=n_stim,
+            scaling=VariableScaling("pulse_apparition_time", [1] * n_stim),
+        )
 
-            if time_min and time_max:
-                time_min_list = [time_min * n for n in range(n_stim)]
-                time_max_list = [time_max * n for n in range(n_stim)]
-            else:
-                time_min_list = [0] * n_stim
-                time_max_list = [100] * n_stim
-            parameters_bounds.add(
-                "pulse_apparition_time",
-                min_bound=np.array(time_min_list),
-                max_bound=np.array(time_max_list),
-                interpolation=InterpolationType.CONSTANT,
-            )
+        parameters_bounds.add(
+            "pulse_apparition_time",
+            min_bound=np.array(stim_time),
+            max_bound=np.array(stim_time),
+            interpolation=InterpolationType.CONSTANT,
+        )
 
-            parameters_init["pulse_apparition_time"] = np.array([0] * n_stim)
-
-            for i in range(n_stim):
-                constraints.add(CustomConstraint.pulse_time_apparition_as_phase, node=Node.START, phase=i, target=0)
-
-        if time_bimapping and time_min and time_max:
-            for i in range(n_stim):
-                constraints.add(CustomConstraint.equal_to_first_pulse_interval_time, node=Node.START, target=0, phase=i)
+        parameters_init["pulse_apparition_time"] = np.array(stim_time)
 
         for i in range(len(model)):
             if isinstance(model[i], DingModelPulseDurationFrequency):
@@ -551,31 +527,18 @@ class OcpFesMsk:
 
             starting_bounds_min = np.concatenate((starting_bounds, min_bounds, min_bounds), axis=1)
             starting_bounds_max = np.concatenate((starting_bounds, max_bounds, max_bounds), axis=1)
-            middle_bound_min = np.concatenate((min_bounds, min_bounds, min_bounds), axis=1)
-            middle_bound_max = np.concatenate((max_bounds, max_bounds, max_bounds), axis=1)
 
-            for i in range(n_stim):
-                for j in range(len(variable_bound_list)):
-                    if i == 0:
-                        x_bounds.add(
-                            variable_bound_list[j],
-                            min_bound=np.array([starting_bounds_min[j]]),
-                            max_bound=np.array([starting_bounds_max[j]]),
-                            phase=i,
-                            interpolation=InterpolationType.CONSTANT_WITH_FIRST_AND_LAST_DIFFERENT,
-                        )
-                    else:
-                        x_bounds.add(
-                            variable_bound_list[j],
-                            min_bound=np.array([middle_bound_min[j]]),
-                            max_bound=np.array([middle_bound_max[j]]),
-                            phase=i,
-                            interpolation=InterpolationType.CONSTANT_WITH_FIRST_AND_LAST_DIFFERENT,
-                        )
+            for j in range(len(variable_bound_list)):
+                x_bounds.add(
+                    variable_bound_list[j],
+                    min_bound=np.array([starting_bounds_min[j]]),
+                    max_bound=np.array([starting_bounds_max[j]]),
+                    phase=0,
+                    interpolation=InterpolationType.CONSTANT_WITH_FIRST_AND_LAST_DIFFERENT,
+                )
 
-            for i in range(n_stim):
-                for j in range(len(variable_bound_list)):
-                    x_init.add(variable_bound_list[j], model.standard_rest_values()[j], phase=i)
+            for j in range(len(variable_bound_list)):
+                x_init.add(variable_bound_list[j], model.standard_rest_values()[j], phase=0)
 
         if bound_type == "start_end":
             start_bounds = []
@@ -594,53 +557,46 @@ class OcpFesMsk:
             for i in range(bio_models[0].nb_q):
                 end_bounds.append(3.14 / (180 / bound_data[i]) if bound_data[i] != 0 else 0)
 
-        for i in range(n_stim):
-            q_x_bounds = bio_models[i].bounds_from_ranges("q")
-            qdot_x_bounds = bio_models[i].bounds_from_ranges("qdot")
+        q_x_bounds = bio_models[0].bounds_from_ranges("q")
+        qdot_x_bounds = bio_models[0].bounds_from_ranges("qdot")
 
-            if i == 0:
-                if bound_type == "start_end":
-                    for j in range(bio_models[i].nb_q):
-                        q_x_bounds[j, [0]] = start_bounds[j]
-                elif bound_type == "start":
-                    for j in range(bio_models[i].nb_q):
-                        q_x_bounds[j, [0]] = start_bounds[j]
-                qdot_x_bounds[:, [0]] = 0  # Start without any velocity
+        if bound_type == "start_end":
+            for j in range(bio_models[0].nb_q):
+                q_x_bounds[j, [0]] = start_bounds[j]
+                q_x_bounds[j, [-1]] = end_bounds[j]
+        elif bound_type == "start":
+            for j in range(bio_models[0].nb_q):
+                q_x_bounds[j, [0]] = start_bounds[j]
+        elif bound_type == "end":
+            for j in range(bio_models[0].nb_q):
+                q_x_bounds[j, [-1]] = end_bounds[j]
+        qdot_x_bounds[:, [0]] = 0  # Start without any velocity
 
-            if i == n_stim - 1:
-                if bound_type == "start_end":
-                    for j in range(bio_models[i].nb_q):
-                        q_x_bounds[j, [-1]] = end_bounds[j]
-                elif bound_type == "end":
-                    for j in range(bio_models[i].nb_q):
-                        q_x_bounds[j, [-1]] = end_bounds[j]
-
-            x_bounds.add(key="q", bounds=q_x_bounds, phase=i)
-            x_bounds.add(key="qdot", bounds=qdot_x_bounds, phase=i)
+        x_bounds.add(key="q", bounds=q_x_bounds, phase=0)
+        x_bounds.add(key="qdot", bounds=qdot_x_bounds, phase=0)
 
         # Sets the initial state of q, qdot and muscle forces for all the phases if a warm start is used
         if initial_state:
             muscle_names = bio_models[0].muscle_names
-            for i in range(n_stim):
+            x_init.add(
+                key="q", initial_guess=initial_state["q"][0], interpolation=InterpolationType.EACH_FRAME, phase=0
+            )
+            x_init.add(
+                key="qdot",
+                initial_guess=initial_state["qdot"][0],
+                interpolation=InterpolationType.EACH_FRAME,
+                phase=0,
+            )
+            for j in range(len(muscle_names)):
                 x_init.add(
-                    key="q", initial_guess=initial_state["q"][i], interpolation=InterpolationType.EACH_FRAME, phase=i
-                )
-                x_init.add(
-                    key="qdot",
-                    initial_guess=initial_state["qdot"][i],
+                    key="F_" + muscle_names[j],
+                    initial_guess=initial_state[muscle_names[j]][0],
                     interpolation=InterpolationType.EACH_FRAME,
-                    phase=i,
+                    phase=0,
                 )
-                for j in range(len(muscle_names)):
-                    x_init.add(
-                        key="F_" + muscle_names[j],
-                        initial_guess=initial_state[muscle_names[j]][i],
-                        interpolation=InterpolationType.EACH_FRAME,
-                        phase=i,
-                    )
         else:
             for i in range(n_stim):
-                x_init.add(key="q", initial_guess=[0] * bio_models[i].nb_q, phase=i)
+                x_init.add(key="q", initial_guess=[0] * bio_models[0].nb_q, phase=0)
 
         return x_bounds, x_init
 
@@ -654,13 +610,11 @@ class OcpFesMsk:
             tau_min, tau_max, tau_init = [0] * nb_tau, [0] * nb_tau, [0] * nb_tau
 
         u_bounds = BoundsList()
-        for i in range(n_stim):
-            u_bounds.add(key="tau", min_bound=tau_min, max_bound=tau_max, phase=i)
+        u_bounds.add(key="tau", min_bound=tau_min, max_bound=tau_max, phase=0)
 
         # Controls initial guess
         u_init = InitialGuessList()
-        for i in range(n_stim):
-            u_init.add(key="tau", initial_guess=tau_init, phase=i)
+        u_init.add(key="tau", initial_guess=tau_init, phase=0)
 
         return u_bounds, u_init
 

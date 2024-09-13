@@ -5,14 +5,19 @@ Only the pulse duration is optimized, frequency is fixed.
 The nmpc cyclic problem is composed of 3 cycles and will move forward 1 cycle at each step.
 Only the middle cycle is kept in the optimization problem, the nmpc cyclic problem stops once the last 6th cycle is reached.
 """
-
+import numpy as np
 from bioptim import Solver
 from cocofest import NmpcFes, DingModelPulseDurationFrequencyWithFatigue
 
 
+# --- Building force to track ---#
+time = np.linspace(0, 1, 101)
+force = abs(np.sin(time * 5) + np.random.normal(scale=0.1, size=len(time))) * 100
+force_tracking = [time, force]
+
 # --- Build nmpc cyclic --- #
 cycles_len = 100
-cycle_duration = 0.5
+cycle_duration = 1
 n_cycles = 3
 
 minimum_pulse_duration = DingModelPulseDurationFrequencyWithFatigue().pd0
@@ -28,13 +33,12 @@ nmpc = NmpcFes.prepare_nmpc(
         "max": 0.0006,
         "bimapping": False,
     },
-    # objective={"force_tracking": force_tracking},
-    objective={"end_node_tracking": 100},
+    objective={"force_tracking": force_tracking},
     cycle_len=cycles_len,
     cycle_duration=cycle_duration,
     # n_cycles=n_cycles,
     use_sx=True,
-    stim_time=[0, 0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 0.45],
+    stim_time=[0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9],
 
 )
 

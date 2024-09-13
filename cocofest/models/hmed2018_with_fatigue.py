@@ -254,13 +254,6 @@ class DingModelIntensityFrequencyWithFatigue(DingModelIntensityFrequency):
             else fes_model.get_intensity_parameters(nlp, parameters, muscle_name=fes_model.muscle_name)
         )
 
-        if intensity_parameters.shape[0] == 1:  # check if pulse duration is mapped
-            for i in range(nlp.phase_idx + 1):
-                intensity_stim_prev.append(intensity_parameters[0])
-        else:
-            for i in range(nlp.phase_idx + 1):
-                intensity_stim_prev.append(intensity_parameters[i])
-
         dxdt_fun = fes_model.system_dynamics if fes_model else nlp.model.system_dynamics
         stim_apparition = (
             (
@@ -273,6 +266,13 @@ class DingModelIntensityFrequencyWithFatigue(DingModelIntensityFrequency):
         )  # Get the previous stimulation apparition time from the parameters
         # if not provided from stim_prev, this way of getting the list is not optimal, but it is the only way to get it.
         # Otherwise, it will create issues with free variables or wrong mx or sx type while calculating the dynamics
+
+        if len(intensity_parameters) == 1:  # check if pulse duration is mapped
+            for i in range(len(stim_apparition)):
+                intensity_stim_prev.append(intensity_parameters[0])
+        else:
+            for i in range(len(stim_apparition)):
+                intensity_stim_prev.append(intensity_parameters[i])
 
         return DynamicsEvaluation(
             dxdt=dxdt_fun(

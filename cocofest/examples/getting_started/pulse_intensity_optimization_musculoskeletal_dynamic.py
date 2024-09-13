@@ -16,8 +16,7 @@ from cocofest import DingModelIntensityFrequencyWithFatigue, OcpFesMsk
 
 objective_functions = ObjectiveList()
 n_stim = 10
-for i in range(n_stim):
-    objective_functions.add(ObjectiveFcn.Lagrange.MINIMIZE_CONTROL, key="tau", weight=1, quadratic=True, phase=i)
+objective_functions.add(ObjectiveFcn.Lagrange.MINIMIZE_CONTROL, key="tau", weight=1, quadratic=True, phase=0)
 
 minimum_pulse_intensity = DingModelIntensityFrequencyWithFatigue.min_pulse_intensity(
     DingModelIntensityFrequencyWithFatigue()
@@ -29,9 +28,9 @@ ocp = OcpFesMsk.prepare_ocp(
     bound_data=[[5], [120]],
     fes_muscle_models=[DingModelIntensityFrequencyWithFatigue(muscle_name="BIClong")],
     n_stim=n_stim,
-    n_shooting=10,
+    n_shooting=100,
     final_time=1,
-    pulse_event={"min": 0.01, "max": 0.1, "bimapping": True},
+    stim_time=[0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9],
     pulse_intensity={"min": minimum_pulse_intensity, "max": 130, "bimapping": False},
     objective={"custom": objective_functions},
     with_residual_torque=True,
