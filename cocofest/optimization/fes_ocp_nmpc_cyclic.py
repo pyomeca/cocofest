@@ -11,12 +11,19 @@ from bioptim import (
     ParameterList,
     InterpolationType,
     VariableScaling,
+    ObjectiveList,
+    ObjectiveFcn,
+    Node,
+    Axis,
 )
 
 from .fes_ocp import OcpFes
 from ..models.fes_model import FesModel
 from ..models.ding2003 import DingModelFrequency
 from ..models.ding2007 import DingModelPulseDurationFrequency
+from ..custom_objectives import CustomObjective
+from ..dynamics.inverse_kinematics_and_dynamics import get_circle_coord
+from ..fourier_approx import FourierSeries
 
 
 class NmpcFes(CyclicNonlinearModelPredictiveControl):
@@ -203,6 +210,120 @@ class NmpcFes(CyclicNonlinearModelPredictiveControl):
         return parameters, parameters_bounds, parameters_init
 
     @staticmethod
+    def _set_objectives(n_stim,
+                        n_shooting,
+                        force_fourier_coef,
+                        end_node_tracking,
+                        cycling_objective,
+                        custom_objective,
+                        q_fourier_coef,
+                        minimize_muscle_fatigue,
+                        minimize_muscle_force,
+                        muscle_force_key,
+                        time_min,
+                        time_max,):
+
+        # Creates the objective for our problem
+        objective_functions = ObjectiveList()
+        if custom_objective:
+            for i in range(len(custom_objective)):
+                if custom_objective[i]:
+                    for j in range(len(custom_objective[i])):
+                        objective_functions.add(custom_objective[i][j])
+
+        if force_fourier_coef is not None:
+            for j in range(len(muscle_force_key)):
+                force_to_track = FourierSeries().fit_func_by_fourier_series_with_real_coeffs(
+                    np.linspace(0, 1, n_shooting + 1),
+                    force_fourier_coef[j],
+                )[np.newaxis, :]
+
+                objective_functions.add(ObjectiveFcn.Lagrange.TRACK_STATE, key=muscle_force_key, weight=100, target=force_to_track,
+                                        node=Node.ALL, quadratic=True)
+
+        if end_node_tracking is not None:
+            for j in range(len(muscle_force_key)):
+                objective_functions.add(
+                    ObjectiveFcn.Mayer.MINIMIZE_STATE,
+                    node=Node.END,
+                    key=muscle_force_key[j],
+                    quadratic=True,
+                    weight=1,
+                    target=end_node_tracking[j],
+                    phase=0,
+                )
+
+        if cycling_objective:
+            x_center = cycling_objective["x_center"]
+            y_center = cycling_objective["y_center"]
+            radius = cycling_objective["radius"]
+            circle_coord_list = np.array(
+                [
+                    get_circle_coord(theta, x_center, y_center, radius)[:-1]
+                    for theta in np.linspace(0, -2 * np.pi, n_shooting[0] * n_stim + 1)
+                ]
+            )
+
+            objective_functions.add(
+                ObjectiveFcn.Mayer.TRACK_MARKERS,
+                weight=100000,
+                axes=[Axis.X, Axis.Y],
+                marker_index=0,
+                target=circle_coord_list.T,
+                node=Node.ALL,
+                phase=0,
+                quadratic=True,
+            )
+
+        # if q_fourier_coef:
+        #     for j in range(len(q_fourier_coef)):
+        #         for phase in range(n_stim):
+        #             for i in range(n_shooting[phase]):
+        #                 objective_functions.add(
+        #                     CustomObjective.track_state_from_time,
+        #                     custom_type=ObjectiveFcn.Mayer,
+        #                     node=i,
+        #                     fourier_coeff=q_fourier_coef[j],
+        #                     key="q",
+        #                     quadratic=True,
+        #                     weight=1,
+        #                     phase=phase,
+        #                     index=j,
+        #                 )
+
+        if minimize_muscle_fatigue:
+            objective_functions.add(
+                CustomObjective.minimize_overall_muscle_fatigue,
+                custom_type=ObjectiveFcn.Mayer,
+                node=Node.END,
+                quadratic=True,
+                weight=-1,
+                phase=0,
+            )
+
+        if minimize_muscle_force:
+            objective_functions.add(
+                CustomObjective.minimize_overall_muscle_force_production,
+                custom_type=ObjectiveFcn.Lagrange,
+                quadratic=True,
+                weight=1,
+                phase=0,
+            )
+
+        # if time_min and time_max:
+        #     for i in range(n_stim):
+        #         objective_functions.add(
+        #             ObjectiveFcn.Mayer.MINIMIZE_TIME,
+        #             weight=0.001 / n_shooting[i],
+        #             min_bound=time_min,
+        #             max_bound=time_max,
+        #             quadratic=True,
+        #             phase=i,
+        #         )
+
+        return objective_functions
+
+    @staticmethod
     def prepare_nmpc(
         model: FesModel = None,
         n_stim: int = None,
@@ -218,6 +339,9 @@ class NmpcFes(CyclicNonlinearModelPredictiveControl):
         stim_time: list = None,
         cycle_len: int = None,
         cycle_duration: int | float = None,
+        with_residual_torque=True,
+        activate_force_length_relationship=True,
+        activate_force_velocity_relationship=True,
     ):
         (pulse_event, pulse_duration, pulse_intensity, objective) = OcpFes._fill_dict(
             pulse_event, pulse_duration, pulse_intensity, objective
@@ -302,7 +426,7 @@ class NmpcFes(CyclicNonlinearModelPredictiveControl):
 
         dynamics = OcpFes._declare_dynamics(model)
         x_bounds, x_init = OcpFes._set_bounds(model)
-        objective_functions = OcpFes._set_objective(
+        objective_functions = NmpcFes._set_objective(
             n_stim, n_shooting, force_fourier_coefficient, end_node_tracking, custom_objective, time_min, time_max
         )
 

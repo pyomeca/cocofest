@@ -267,12 +267,8 @@ class DingModelIntensityFrequencyWithFatigue(DingModelIntensityFrequency):
         # if not provided from stim_prev, this way of getting the list is not optimal, but it is the only way to get it.
         # Otherwise, it will create issues with free variables or wrong mx or sx type while calculating the dynamics
 
-        if len(intensity_parameters) == 1:  # check if pulse duration is mapped
-            for i in range(len(stim_apparition)):
-                intensity_stim_prev.append(intensity_parameters[0])
-        else:
-            for i in range(len(stim_apparition)):
-                intensity_stim_prev.append(intensity_parameters[i])
+        if len(intensity_parameters) == 1 and len(stim_apparition) != 1:
+            intensity_parameters = intensity_parameters * len(stim_apparition)
 
         return DynamicsEvaluation(
             dxdt=dxdt_fun(
@@ -283,7 +279,7 @@ class DingModelIntensityFrequencyWithFatigue(DingModelIntensityFrequency):
                 km=states[4],
                 t=time,
                 t_stim_prev=stim_apparition,
-                intensity_stim=intensity_stim_prev,
+                intensity_stim=intensity_parameters,
                 force_length_relationship=force_length_relationship,
                 force_velocity_relationship=force_velocity_relationship,
             ),

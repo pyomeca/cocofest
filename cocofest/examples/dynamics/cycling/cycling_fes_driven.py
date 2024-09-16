@@ -9,35 +9,33 @@ import pickle
 
 import numpy as np
 
-from bioptim import CostType, ObjectiveFcn, ObjectiveList, SolutionMerge, Solver
+from bioptim import CostType, SolutionMerge, Solver
 
 import biorbd
 
 from pyorerun import BiorbdModel, PhaseRerun
 
-from cocofest import DingModelPulseDurationFrequencyWithFatigue, OcpFesMsk, PlotCyclingResult, SolutionToPickle
+from cocofest import DingModelPulseDurationFrequencyWithFatigue, OcpFesMsk, PlotCyclingResult, SolutionToPickle, FesMskModel
 
 
 def main():
-    n_stim = 40
-    n_shooting = 10
-
-    objective_functions = ObjectiveList()
-    for i in range(n_stim):
-        objective_functions.add(ObjectiveFcn.Lagrange.MINIMIZE_CONTROL, key="tau", weight=100, quadratic=True, phase=i)
-
+    n_shooting = 100
     minimum_pulse_duration = DingModelPulseDurationFrequencyWithFatigue().pd0
 
+    model = FesMskModel(name=None,
+                        biorbd_path="../../msk_models/simplified_UL_Seth.bioMod",
+                        muscles_model=[DingModelPulseDurationFrequencyWithFatigue(muscle_name="DeltoideusClavicle_A"),
+                                       DingModelPulseDurationFrequencyWithFatigue(muscle_name="DeltoideusScapula_P"),
+                                       DingModelPulseDurationFrequencyWithFatigue(muscle_name="TRIlong"),
+                                       DingModelPulseDurationFrequencyWithFatigue(muscle_name="BIC_long"),
+                                       DingModelPulseDurationFrequencyWithFatigue(muscle_name="BIC_brevis")],
+                        activate_force_length_relationship=True,
+                        activate_force_velocity_relationship=True,
+                        )
+
     ocp = OcpFesMsk.prepare_ocp(
-        biorbd_model_path="../../msk_models/simplified_UL_Seth.bioMod",
-        fes_muscle_models=[
-            DingModelPulseDurationFrequencyWithFatigue(muscle_name="DeltoideusClavicle_A"),
-            DingModelPulseDurationFrequencyWithFatigue(muscle_name="DeltoideusScapula_P"),
-            DingModelPulseDurationFrequencyWithFatigue(muscle_name="TRIlong"),
-            DingModelPulseDurationFrequencyWithFatigue(muscle_name="BIC_long"),
-            DingModelPulseDurationFrequencyWithFatigue(muscle_name="BIC_brevis"),
-        ],
-        n_stim=n_stim,
+        model=model,
+        stim_time=list(np.round(np.linspace(0, 1, 11), 3))[:-1],
         n_shooting=n_shooting,
         final_time=1,
         pulse_duration={
@@ -45,14 +43,11 @@ def main():
             "max": 0.0006,
             "bimapping": False,
         },
-        with_residual_torque=True,
+        msk_info={"with_residual_torque": True},
         objective={
-            "custom": objective_functions,
             "cycling": {"x_center": 0.35, "y_center": 0, "radius": 0.1, "target": "marker"},
+            "minimize_residual_torque": True,
         },
-        activate_force_length_relationship=True,
-        activate_force_velocity_relationship=True,
-        minimize_muscle_fatigue=False,
         warm_start=False,
         n_threads=5,
     )

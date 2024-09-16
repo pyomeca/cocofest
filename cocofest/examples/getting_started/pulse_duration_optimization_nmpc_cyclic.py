@@ -2,13 +2,12 @@
 This example showcases a moving time horizon simulation problem of cyclic muscle force tracking.
 The FES model used here is Ding's 2007 pulse duration and frequency model with fatigue.
 Only the pulse duration is optimized, frequency is fixed.
-The nmpc cyclic problem is composed of 3 cycles and will move forward 1 cycle at each step.
-Only the middle cycle is kept in the optimization problem, the nmpc cyclic problem stops once the last 6th cycle is reached.
+The nmpc cyclic problem stops once the last cycle is reached.
 """
 import matplotlib.pyplot as plt
 import numpy as np
 from bioptim import Solver, SolutionMerge
-from cocofest import NmpcFes, DingModelPulseDurationFrequencyWithFatigue, FourierSeries
+from cocofest import NmpcFes, DingModelPulseDurationFrequencyWithFatigue
 
 
 # --- Building force to track ---#
@@ -43,9 +42,7 @@ nmpc = NmpcFes.prepare_nmpc(
 )
 
 sol = nmpc.solve(nmpc.update_functions, solver=Solver.IPOPT(), cyclic_options={"states": {}}, get_all_iterations=True)
-
 sol_merged = sol[0].decision_states(to_merge=[SolutionMerge.PHASES, SolutionMerge.NODES])
-
 
 time = sol[0].decision_time(to_merge=SolutionMerge.KEYS, continuous=True)
 time = [float(j) for j in time]

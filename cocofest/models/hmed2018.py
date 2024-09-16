@@ -312,6 +312,9 @@ class DingModelIntensityFrequency(DingModelFrequency):
         # if not provided from stim_prev, this way of getting the list is not optimal, but it is the only way to get it.
         # Otherwise, it will create issues with free variables or wrong mx or sx type while calculating the dynamics
 
+        if len(intensity_parameters) == 1 and len(stim_apparition) != 1:
+            intensity_parameters = intensity_parameters * len(stim_apparition)
+
         return DynamicsEvaluation(
             dxdt=dxdt_fun(
                 cn=states[0],

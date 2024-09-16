@@ -47,6 +47,7 @@ class FesMskModel(BiorbdModel):
         self._name = name
         self.bio_model = BiorbdModel(biorbd_path)
 
+        self._model_sanity(muscles_model, activate_force_length_relationship, activate_force_velocity_relationship)
         self.muscles_dynamics_model = muscles_model
         self.bio_stim_model = [self.bio_model] + self.muscles_dynamics_model
 
@@ -264,3 +265,23 @@ class FesMskModel(BiorbdModel):
             state_name_list=state_name_list,
             stim_prev=stim_prev,
         )
+
+    @staticmethod
+    def _model_sanity(muscles_model, activate_force_length_relationship, activate_force_velocity_relationship):
+        if not isinstance(muscles_model, list):
+            for muscle_model in muscles_model:
+                if not isinstance(muscle_model, FesModel):
+                    raise TypeError(
+                        f"The current model type used is {type(muscles_model)}, it must be a FesModel type."
+                        f"Current available models are: DingModelFrequency, DingModelFrequencyWithFatigue,"
+                        f"DingModelPulseDurationFrequency, DingModelPulseDurationFrequencyWithFatigue,"
+                        f"DingModelIntensityFrequency, DingModelIntensityFrequencyWithFatigue"
+                    )
+
+            raise TypeError("The given muscles_model must be a list of FesModel")
+
+        if not isinstance(activate_force_length_relationship, bool):
+            raise TypeError("The activate_force_length_relationship must be a boolean")
+
+        if not isinstance(activate_force_velocity_relationship, bool):
+            raise TypeError("The activate_force_velocity_relationship must be a boolean")
