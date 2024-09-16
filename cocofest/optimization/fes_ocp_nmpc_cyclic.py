@@ -202,7 +202,6 @@ class NmpcFes(CyclicNonlinearModelPredictiveControl):
 
         return parameters, parameters_bounds, parameters_init
 
-
     @staticmethod
     def prepare_nmpc(
         model: FesModel = None,
@@ -328,4 +327,4 @@ class NmpcFes(CyclicNonlinearModelPredictiveControl):
 
     @staticmethod
     def update_functions(_nmpc: CyclicNonlinearModelPredictiveControl, cycle_idx: int, _sol: Solution):
-        return cycle_idx < 2  # True if there are still some cycle to perform
+        return cycle_idx < 8  # True if there are still some cycle to perform

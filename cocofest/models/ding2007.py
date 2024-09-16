@@ -32,6 +32,18 @@ class DingModelPulseDurationFrequency(DingModelFrequency):
         model_name: str = "ding_2007",
         muscle_name: str = None,
         sum_stim_truncation: int = None,
+        tauc: float = None,
+        a_rest: float = None,
+        tau1_rest: float = None,
+        km_rest: float = None,
+        tau2: float = None,
+        pd0: float = None,
+        pdt: float = None,
+        a_scale: float = None,
+        alpha_a: float = None,
+        alpha_tau1: float = None,
+        alpha_km: float = None,
+        tau_fat: float = None,
     ):
         super(DingModelPulseDurationFrequency, self).__init__(
             model_name=model_name, muscle_name=muscle_name, sum_stim_truncation=sum_stim_truncation
