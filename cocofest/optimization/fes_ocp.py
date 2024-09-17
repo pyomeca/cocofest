@@ -36,6 +36,57 @@ class OcpFes:
     """
 
     @staticmethod
+    def _prepare_optimization_problem(input_dict: dict) -> dict:
+
+        (pulse_event, pulse_duration, pulse_intensity, objective) = OcpFes._fill_dict(
+            input_dict["pulse_event"], input_dict["pulse_duration"], input_dict["pulse_intensity"], input_dict["objective"]
+        )
+
+        OcpFes._sanity_check(
+            model=input_dict["model"],
+            n_shooting=input_dict["n_shooting"],
+            final_time=input_dict["final_time"],
+            pulse_event=pulse_event,
+            pulse_duration=pulse_duration,
+            pulse_intensity=pulse_intensity,
+            objective=objective,
+            use_sx=input_dict["use_sx"],
+            ode_solver=input_dict["ode_solver"],
+            n_threads=input_dict["n_threads"],
+        )
+
+        parameters, parameters_bounds, parameters_init, parameter_objectives, constraints = OcpFes._build_parameters(
+            model=input_dict["model"],
+            stim_time=input_dict["stim_time"],
+            pulse_event=pulse_event,
+            pulse_duration=pulse_duration,
+            pulse_intensity=pulse_intensity,
+            use_sx=input_dict["use_sx"],
+        )
+
+        dynamics = OcpFes._declare_dynamics(input_dict["model"])
+        x_bounds, x_init = OcpFes._set_bounds(input_dict["model"])
+        objective_functions = OcpFes._set_objective(input_dict["n_shooting"], objective)
+
+        optimization_dict = {"model": input_dict["model"],
+                             "dynamics": dynamics,
+                             "n_shooting": input_dict["n_shooting"],
+                             "final_time": input_dict["final_time"],
+                             "objective_functions": objective_functions,
+                             "x_init": x_init,
+                             "x_bounds": x_bounds,
+                             "constraints": constraints,
+                             "parameters": parameters,
+                             "parameters_bounds": parameters_bounds,
+                             "parameters_init": parameters_init,
+                             "parameter_objectives": parameter_objectives,
+                             "use_sx": input_dict["use_sx"],
+                             "ode_solver": input_dict["ode_solver"],
+                             "n_threads": input_dict["n_threads"]}
+
+        return optimization_dict
+
+    @staticmethod
     def prepare_ocp(
         model: FesModel = None,
         stim_time: list = None,
@@ -85,53 +136,37 @@ class OcpFes:
             The prepared Optimal Control Program.
         """
 
-        (pulse_event, pulse_duration, pulse_intensity, objective) = OcpFes._fill_dict(
-            pulse_event, pulse_duration, pulse_intensity, objective
-        )
+        input_dict = {"model": model,
+                      "stim_time": stim_time,
+                      "n_shooting": n_shooting,
+                      "final_time": final_time,
+                      "pulse_event": pulse_event,
+                      "pulse_duration": pulse_duration,
+                      "pulse_intensity": pulse_intensity,
+                      "objective": objective,
+                      "use_sx": use_sx,
+                      "ode_solver": ode_solver,
+                      "n_threads": n_threads}
 
-        OcpFes._sanity_check(
-            model=model,
-            n_shooting=n_shooting,
-            final_time=final_time,
-            pulse_event=pulse_event,
-            pulse_duration=pulse_duration,
-            pulse_intensity=pulse_intensity,
-            objective=objective,
-            use_sx=use_sx,
-            ode_solver=ode_solver,
-            n_threads=n_threads,
-        )
-
-        parameters, parameters_bounds, parameters_init, parameter_objectives, constraints = OcpFes._build_parameters(
-            model=model,
-            stim_time=stim_time,
-            pulse_event=pulse_event,
-            pulse_duration=pulse_duration,
-            pulse_intensity=pulse_intensity,
-            use_sx=use_sx,
-        )
-
-        dynamics = OcpFes._declare_dynamics(model)
-        x_bounds, x_init = OcpFes._set_bounds(model)
-        objective_functions = OcpFes._set_objective(n_shooting, objective)
+        optimization_dict = OcpFes._prepare_optimization_problem(input_dict)
 
         return OptimalControlProgram(
-            bio_model=[model],
-            dynamics=dynamics,
-            n_shooting=n_shooting,
-            phase_time=[final_time],
-            objective_functions=objective_functions,
-            x_init=x_init,
-            x_bounds=x_bounds,
-            constraints=constraints,
-            parameters=parameters,
-            parameter_bounds=parameters_bounds,
-            parameter_init=parameters_init,
-            parameter_objectives=parameter_objectives,
+            bio_model=[optimization_dict["model"]],
+            dynamics=optimization_dict["dynamics"],
+            n_shooting=optimization_dict["n_shooting"],
+            phase_time=[optimization_dict["final_time"]],
+            objective_functions=optimization_dict["objective_functions"],
+            x_init=optimization_dict["x_init"],
+            x_bounds=optimization_dict["x_bounds"],
+            constraints=optimization_dict["constraints"],
+            parameters=optimization_dict["parameters"],
+            parameter_bounds=optimization_dict["parameters_bounds"],
+            parameter_init=optimization_dict["parameters_init"],
+            parameter_objectives=optimization_dict["parameter_objectives"],
             control_type=ControlType.CONSTANT,
-            use_sx=use_sx,
-            ode_solver=ode_solver,
-            n_threads=n_threads,
+            use_sx=optimization_dict["use_sx"],
+            ode_solver=optimization_dict["ode_solver"],
+            n_threads=optimization_dict["n_threads"],
         )
 
     @staticmethod

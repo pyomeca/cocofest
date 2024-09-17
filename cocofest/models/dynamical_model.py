@@ -55,8 +55,17 @@ class FesMskModel(BiorbdModel):
         self.activate_force_velocity_relationship = activate_force_velocity_relationship
 
     # ---- Absolutely needed methods ---- #
-    def serialize(self, index: int = 0) -> tuple[Callable, dict]:
-        return self.muscles_dynamics_model[index].serialize()
+    def serialize(self) -> tuple[Callable, dict]:
+        return (
+            FesMskModel,
+            {
+                "name": self._name,
+                "biorbd_path": self.bio_model.path,
+                "muscles_model": self.muscles_dynamics_model,
+                "activate_force_length_relationship": self.activate_force_length_relationship,
+                "activate_force_velocity_relationship": self.activate_force_velocity_relationship,
+            },
+        )
 
     # ---- Needed for the example ---- #
     @property

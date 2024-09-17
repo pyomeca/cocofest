@@ -20,7 +20,6 @@ from bioptim import (
     VariableScaling,
 )
 
-from ..custom_constraints import CustomConstraint
 from ..custom_objectives import CustomObjective
 from ..dynamics.inverse_kinematics_and_dynamics import get_circle_coord
 from ..dynamics.warm_start import get_initial_guess
@@ -33,6 +32,93 @@ from ..fourier_approx import FourierSeries
 
 
 class OcpFesMsk:
+
+    @staticmethod
+    def _prepare_optimization_problem(input_dict: dict) -> dict:
+
+        (pulse_event, pulse_duration, pulse_intensity, objective) = OcpFes._fill_dict(
+            input_dict["pulse_event"], input_dict["pulse_duration"], input_dict["pulse_intensity"],
+            input_dict["objective"]
+        )
+
+        (pulse_duration, pulse_intensity, objective, msk_info) = OcpFesMsk._fill_msk_dict(
+            pulse_duration, pulse_intensity, objective, input_dict["msk_info"])
+
+        OcpFes._sanity_check(
+            model=input_dict["model"],
+            n_shooting=input_dict["n_shooting"],
+            final_time=input_dict["final_time"],
+            pulse_event=pulse_event,
+            pulse_duration=pulse_duration,
+            pulse_intensity=pulse_intensity,
+            objective=objective,
+            use_sx=input_dict["use_sx"],
+            ode_solver=input_dict["ode_solver"],
+            n_threads=input_dict["n_threads"],
+        )
+
+        OcpFesMsk._sanity_check_msk_inputs(
+            model=input_dict["model"],
+            msk_info=msk_info,
+            objective=objective,
+        )
+
+        (
+            parameters,
+            parameters_bounds,
+            parameters_init,
+            parameter_objectives,
+            constraints,
+        ) = OcpFesMsk._build_parameters(
+            model=input_dict["model"],
+            stim_time=input_dict["stim_time"],
+            pulse_event=pulse_event,
+            pulse_duration=pulse_duration,
+            pulse_intensity=pulse_intensity,
+            use_sx=input_dict["use_sx"],
+        )
+
+        constraints = OcpFesMsk._set_constraints(constraints, msk_info["custom_constraint"])
+
+        dynamics = OcpFesMsk._declare_dynamics(input_dict["model"])
+        initial_state = (
+            get_initial_guess(input_dict["model"].path, input_dict["final_time"], input_dict["n_shooting"], objective) if input_dict["warm_start"] else None
+        )
+
+        x_bounds, x_init = OcpFesMsk._set_bounds(
+            input_dict["model"],
+            msk_info,
+            initial_state,
+        )
+        u_bounds, u_init = OcpFesMsk._set_controls(input_dict["model"], msk_info["with_residual_torque"])
+        muscle_force_key = ["F_" + input_dict["model"].muscles_dynamics_model[i].muscle_name for i in
+                            range(len(input_dict["model"].muscles_dynamics_model))]
+        objective_functions = OcpFesMsk._set_objective(
+            input_dict["n_shooting"],
+            muscle_force_key,
+            objective,
+        )
+
+        optimization_dict = {"model": input_dict["model"],
+                             "dynamics": dynamics,
+                             "n_shooting": input_dict["n_shooting"],
+                             "final_time": input_dict["final_time"],
+                             "objective_functions": objective_functions,
+                             "x_init": x_init,
+                             "x_bounds": x_bounds,
+                             "u_init": u_init,
+                             "u_bounds": u_bounds,
+                             "constraints": constraints,
+                             "parameters": parameters,
+                             "parameters_bounds": parameters_bounds,
+                             "parameters_init": parameters_init,
+                             "parameter_objectives": parameter_objectives,
+                             "use_sx": input_dict["use_sx"],
+                             "ode_solver": input_dict["ode_solver"],
+                             "n_threads": input_dict["n_threads"]}
+
+        return optimization_dict
+
     @staticmethod
     def prepare_ocp(
         model: FesMskModel = None,
@@ -43,9 +129,7 @@ class OcpFesMsk:
         pulse_duration: dict = None,
         pulse_intensity: dict = None,
         objective: dict = None,
-
         msk_info: dict = None,
-
         use_sx: bool = True,
         warm_start: bool = False,
         ode_solver: OdeSolverBase = OdeSolver.RK4(n_integration_steps=1),
@@ -97,85 +181,41 @@ class OcpFesMsk:
             The prepared Optimal Control Program.
         """
 
-        (pulse_event, pulse_duration, pulse_intensity, objective) = OcpFes._fill_dict(
-            pulse_event, pulse_duration, pulse_intensity, objective
-        )
-        (pulse_duration, pulse_intensity, objective, msk_info) = OcpFesMsk._fill_msk_dict(
-            pulse_duration, pulse_intensity, objective, msk_info)
+        input_dict = {"model": model,
+                      "stim_time": stim_time,
+                      "n_shooting": n_shooting,
+                      "final_time": final_time,
+                      "pulse_event": pulse_event,
+                      "pulse_duration": pulse_duration,
+                      "pulse_intensity": pulse_intensity,
+                      "objective": objective,
+                      "msk_info": msk_info,
+                      "warm_start": warm_start,
+                      "use_sx": use_sx,
+                      "ode_solver": ode_solver,
+                      "n_threads": n_threads}
 
-        OcpFes._sanity_check(
-            model=model,
-            n_shooting=n_shooting,
-            final_time=final_time,
-            pulse_event=pulse_event,
-            pulse_duration=pulse_duration,
-            pulse_intensity=pulse_intensity,
-            objective=objective,
-            use_sx=use_sx,
-            ode_solver=ode_solver,
-            n_threads=n_threads,
-        )
-
-        OcpFesMsk._sanity_check_msk_inputs(
-            model=model,
-            msk_info=msk_info,
-            objective=objective,
-        )
-
-        (
-            parameters,
-            parameters_bounds,
-            parameters_init,
-            parameter_objectives,
-            constraints,
-        ) = OcpFesMsk._build_parameters(
-            model=model,
-            stim_time=stim_time,
-            pulse_event=pulse_event,
-            pulse_duration=pulse_duration,
-            pulse_intensity=pulse_intensity,
-            use_sx=use_sx,
-        )
-
-        constraints = OcpFesMsk._set_constraints(constraints, msk_info["custom_constraint"])
-
-        dynamics = OcpFesMsk._declare_dynamics(model)
-        initial_state = (
-            get_initial_guess(model.path, final_time, n_shooting, objective) if warm_start else None
-        )
-
-        x_bounds, x_init = OcpFesMsk._set_bounds(
-            model,
-            msk_info,
-            initial_state,
-        )
-        u_bounds, u_init = OcpFesMsk._set_controls(model, msk_info["with_residual_torque"])
-        muscle_force_key = ["F_" + model.muscles_dynamics_model[i].muscle_name for i in range(len(model.muscles_dynamics_model))]
-        objective_functions = OcpFesMsk._set_objective(
-            n_shooting,
-            muscle_force_key,
-            objective,
-        )
+        optimization_dict = OcpFesMsk._prepare_optimization_problem(input_dict)
 
         return OptimalControlProgram(
-            bio_model=[model],
-            dynamics=dynamics,
-            n_shooting=n_shooting,
-            phase_time=final_time,
-            objective_functions=objective_functions,
-            x_init=x_init,
-            x_bounds=x_bounds,
-            u_init=u_init,
-            u_bounds=u_bounds,
-            constraints=constraints,
-            parameters=parameters,
-            parameter_bounds=parameters_bounds,
-            parameter_init=parameters_init,
-            parameter_objectives=parameter_objectives,
+            bio_model=[optimization_dict["model"]],
+            dynamics=optimization_dict["dynamics"],
+            n_shooting=optimization_dict["n_shooting"],
+            phase_time=optimization_dict["final_time"],
+            objective_functions=optimization_dict["objective_functions"],
+            x_init=optimization_dict["x_init"],
+            x_bounds=optimization_dict["x_bounds"],
+            u_init=optimization_dict["u_init"],
+            u_bounds=optimization_dict["u_bounds"],
+            constraints=optimization_dict["constraints"],
+            parameters=optimization_dict["parameters"],
+            parameter_bounds=optimization_dict["parameters_bounds"],
+            parameter_init=optimization_dict["parameters_init"],
+            parameter_objectives=optimization_dict["parameter_objectives"],
             control_type=control_type,
-            use_sx=use_sx,
-            ode_solver=ode_solver,
-            n_threads=n_threads,
+            use_sx=optimization_dict["use_sx"],
+            ode_solver=optimization_dict["ode_solver"],
+            n_threads=optimization_dict["n_threads"],
         )
 
     @staticmethod
@@ -485,18 +525,18 @@ class OcpFesMsk:
         if initial_state:
             muscle_names = bio_models.muscle_names
             x_init.add(
-                key="q", initial_guess=initial_state["q"][0], interpolation=InterpolationType.EACH_FRAME, phase=0
+                key="q", initial_guess=initial_state["q"], interpolation=InterpolationType.EACH_FRAME, phase=0
             )
             x_init.add(
                 key="qdot",
-                initial_guess=initial_state["qdot"][0],
+                initial_guess=initial_state["qdot"],
                 interpolation=InterpolationType.EACH_FRAME,
                 phase=0,
             )
             for j in range(len(muscle_names)):
                 x_init.add(
                     key="F_" + muscle_names[j],
-                    initial_guess=initial_state[muscle_names[j]][0],
+                    initial_guess=initial_state[muscle_names[j]],
                     interpolation=InterpolationType.EACH_FRAME,
                     phase=0,
                 )
@@ -579,7 +619,7 @@ class OcpFesMsk:
             )
             objective_functions.add(
                 ObjectiveFcn.Mayer.TRACK_MARKERS,
-                weight=100000,
+                weight=10000000,
                 axes=[Axis.X, Axis.Y],
                 marker_index=0,
                 target=circle_coord_list.T,
@@ -627,7 +667,7 @@ class OcpFesMsk:
             )
 
         if objective["minimize_residual_torque"]:
-            objective_functions.add(ObjectiveFcn.Lagrange.MINIMIZE_CONTROL, key="tau", weight=1, quadratic=True,
+            objective_functions.add(ObjectiveFcn.Lagrange.MINIMIZE_CONTROL, key="tau", weight=10000, quadratic=True,
                                     phase=0)
 
         return objective_functions

@@ -7,22 +7,17 @@ from bioptim import (
     ControlType,
     Solution,)
 
-from .fes_ocp import OcpFes
-from ..models.fes_model import FesModel
+from .fes_ocp_dynamics import OcpFesMsk
+from ..models.dynamical_model import FesMskModel
 
 
-class NmpcFes:
+class NmpcFesMsk:
     def __init__(self):
         self.n_cycles = 1
 
     def advance_window_bounds_states(self, sol, **extra):
         # Reimplementation of the advance_window method so the rotation of the wheel restart at -pi
         CyclicNonlinearModelPredictiveControl.advance_window_bounds_states(sol, **extra)
-
-        # self.nlp[0].x_bounds["Cn"][0, 0] = 0
-        # self.nlp[0].x_bounds["F"][0, 0] = 0
-
-        # self.nlp[0].parameters, self.nlp[0].parameter_bounds, self.nlp[0].parameter_init = self.update_stim(sol)
         # TODO
 
         return True
@@ -51,7 +46,7 @@ class NmpcFes:
 
     @staticmethod
     def prepare_nmpc(
-            model: FesModel = None,
+            model: FesMskModel = None,
             stim_time: list = None,
             cycle_len: int = None,
             cycle_duration: int | float = None,
@@ -59,6 +54,8 @@ class NmpcFes:
             pulse_duration: dict = None,
             pulse_intensity: dict = None,
             objective: dict = None,
+            msk_info: dict = None,
+            warm_start: bool = False,
             use_sx: bool = True,
             ode_solver: OdeSolver = OdeSolver.RK4(n_integration_steps=1),
             n_threads: int = 1, ):
@@ -71,11 +68,13 @@ class NmpcFes:
                       "pulse_duration": pulse_duration,
                       "pulse_intensity": pulse_intensity,
                       "objective": objective,
+                      "msk_info": msk_info,
+                      "warm_start": warm_start,
                       "use_sx": use_sx,
                       "ode_solver": ode_solver,
                       "n_threads": n_threads}
 
-        optimization_dict = OcpFes._prepare_optimization_problem(input_dict)
+        optimization_dict = OcpFesMsk._prepare_optimization_problem(input_dict)
 
         return CyclicNonlinearModelPredictiveControl(
             bio_model=[optimization_dict["model"]],
@@ -96,5 +95,6 @@ class NmpcFes:
             n_threads=optimization_dict["n_threads"],
         )
 
+    # @staticmethod
     def update_functions(self, _nmpc: CyclicNonlinearModelPredictiveControl, cycle_idx: int, _sol: Solution):
         return cycle_idx < self.n_cycles  # True if there are still some cycle to perform

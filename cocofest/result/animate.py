@@ -26,11 +26,11 @@ class PickleAnimate:
             self.model = biorbd.Model(model_path)
         self.time = self.data["time"]
         self.state_q = self.data["states"]["q"]
+        self.state_q = self.state_q if self.state_q.ndim == 2 else np.expand_dims(self.state_q, axis=0)
         self.frames = self.state_q.shape[1]
 
-    def animate(self, model_path: str = None):
-        if model_path:
-            self.model = biorbd.Model(model_path)
+    def animate(self, model: biorbd.Model = None):
+        self.model = model
         self.load()
 
         # pyorerun animation

@@ -23,25 +23,25 @@ n_cycles = 8
 minimum_pulse_duration = DingModelPulseDurationFrequencyWithFatigue().pd0
 fes_model = DingModelPulseDurationFrequencyWithFatigue()
 fes_model.alpha_a = -4.0 * 10e-1  # Increasing the fatigue rate to make the fatigue more visible
-nmpc = NmpcFes.prepare_nmpc(
+
+nmpc_fes_msk = NmpcFes()
+nmpc_fes_msk.n_cycles = n_cycles
+nmpc = nmpc_fes_msk.prepare_nmpc(
     model=fes_model,
-    n_stim=30,
-    n_shooting=cycles_len,
-    final_time=cycle_duration,
+    stim_time=list(np.round(np.linspace(0, 1, 31), 3))[:-1],
+    cycle_len=cycles_len,
+    cycle_duration=cycle_duration,
     pulse_duration={
         "min": minimum_pulse_duration,
         "max": 0.0006,
         "bimapping": False,
     },
     objective={"force_tracking": force_tracking},
-    cycle_len=cycles_len,
-    cycle_duration=cycle_duration,
     use_sx=True,
-    stim_time=list(np.round(np.linspace(0, 1, 31), 3))[:-1],
     n_threads=4,
 )
 
-sol = nmpc.solve(nmpc.update_functions, solver=Solver.IPOPT(), cyclic_options={"states": {}}, get_all_iterations=True)
+sol = nmpc.solve(nmpc_fes_msk.update_functions, solver=Solver.IPOPT(), cyclic_options={"states": {}}, get_all_iterations=True)
 sol_merged = sol[0].decision_states(to_merge=[SolutionMerge.PHASES, SolutionMerge.NODES])
 
 time = sol[0].decision_time(to_merge=SolutionMerge.KEYS, continuous=True)
