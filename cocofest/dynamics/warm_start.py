@@ -22,7 +22,7 @@ from bioptim import (
 from ..dynamics.inverse_kinematics_and_dynamics import get_circle_coord, inverse_kinematics_cycling
 
 
-def get_initial_guess(biorbd_model_path: str, final_time: int, n_shooting: int, objective: dict) -> dict:
+def get_initial_guess(biorbd_model_path: str, final_time: int, n_shooting: int, objective: dict, n_threads: int) -> dict:
     """
     Get the initial guess for the ocp
 
@@ -36,6 +36,8 @@ def get_initial_guess(biorbd_model_path: str, final_time: int, n_shooting: int, 
         The shooting points number
     objective: dict
         The ocp objective
+    n_threads: int
+        The number of threads
 
     Returns
     -------
@@ -48,7 +50,7 @@ def get_initial_guess(biorbd_model_path: str, final_time: int, n_shooting: int, 
         raise ValueError("Only a cycling objective is implemented for the warm start")
 
     # Getting q and qdot from the inverse kinematics
-    ocp, q, qdot = prepare_muscle_driven_ocp(biorbd_model_path, n_shooting, final_time, objective)
+    ocp, q, qdot = prepare_muscle_driven_ocp(biorbd_model_path, n_shooting, final_time, objective, n_threads)
 
     # Solving the ocp to get muscle controls
     sol = ocp.solve(Solver.IPOPT(_tol=1e-4))
@@ -77,6 +79,7 @@ def prepare_muscle_driven_ocp(
     n_shooting: int,
     final_time: int,
     objective: dict,
+    n_threads: int,
 ) -> tuple:
     """
     Prepare the muscle driven ocp with a cycling objective
@@ -164,6 +167,7 @@ def prepare_muscle_driven_ocp(
             u_init=u_init,
             objective_functions=objective_functions,
             ode_solver=OdeSolver.RK4(),
+            n_threads=n_threads,
         ),
         q_guess,
         qdot_guess,

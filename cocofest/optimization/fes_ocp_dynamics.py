@@ -82,7 +82,7 @@ class OcpFesMsk:
 
         dynamics = OcpFesMsk._declare_dynamics(input_dict["model"])
         initial_state = (
-            get_initial_guess(input_dict["model"].path, input_dict["final_time"], input_dict["n_shooting"], objective) if input_dict["warm_start"] else None
+            get_initial_guess(input_dict["model"].path, input_dict["final_time"], input_dict["n_shooting"], objective, n_threads=input_dict["n_threads"]) if input_dict["warm_start"] else None
         )
 
         x_bounds, x_init = OcpFesMsk._set_bounds(
