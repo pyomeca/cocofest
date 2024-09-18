@@ -652,7 +652,7 @@ class OcpFesMsk:
                 custom_type=ObjectiveFcn.Mayer,
                 node=Node.END,
                 quadratic=True,
-                weight=-1,
+                weight=1,
                 phase=0,
             )
 

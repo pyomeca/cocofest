@@ -2,7 +2,7 @@
 This example will do a 10 stimulation example with Ding's 2007 pulse duration and frequency model.
 This ocp was build to match a force value of 200N at the end of the last node.
 """
-
+from bioptim import Solver
 from cocofest import DingModelPulseDurationFrequencyWithFatigue, OcpFes
 
 # --- Build ocp --- #
@@ -15,7 +15,7 @@ ocp = OcpFes().prepare_ocp(
     model=DingModelPulseDurationFrequencyWithFatigue(),
     stim_time=[0, 0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 0.45],
     n_shooting=100,
-    final_time=0.5,
+    final_time=5,
     pulse_duration={
         "min": minimum_pulse_duration,
         "max": 0.0006,
@@ -26,7 +26,6 @@ ocp = OcpFes().prepare_ocp(
 )
 
 # --- Solve the program --- #
-sol = ocp.solve()
-
+sol = ocp.solve(Solver.IPOPT(_hessian_approximation="limited-memory"))
 # --- Show results --- #
 sol.graphs()

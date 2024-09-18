@@ -85,10 +85,13 @@ class CustomObjective:
         The sum of each force scaling factor
         """
         muscle_name_list = controller.model.bio_model.muscle_names
+        muscle_fatigue_rest = horzcat(
+            *[controller.model.bio_stim_model[x].a_rest for x in range(1, len(muscle_name_list) + 1)]
+        )
         muscle_fatigue = horzcat(
             *[controller.states["A_" + muscle_name_list[x]].cx for x in range(len(muscle_name_list))]
         )
-        return sum1(muscle_fatigue)
+        return sum1(muscle_fatigue_rest) / sum1(muscle_fatigue)
 
     @staticmethod
     def minimize_overall_muscle_force_production(controller: PenaltyController) -> MX:
