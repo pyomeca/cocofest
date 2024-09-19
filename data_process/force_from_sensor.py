@@ -21,15 +21,23 @@ class ForceSensorToMuscleForce:  # TODO : Enable several muscles (biceps, tricep
         if pickle_path is None:
             raise ValueError("Please provide a path to the pickle file(s).")
         if not isinstance(pickle_path, str) and not isinstance(pickle_path, list):
-            raise TypeError("Please provide a pickle_path list of str type or a str type path.")
-        if not isinstance(out_pickle_path, str) and not isinstance(out_pickle_path, list):
-            raise TypeError("Please provide a out_pickle_path list of str type or a str type path.")
+            raise TypeError(
+                "Please provide a pickle_path list of str type or a str type path."
+            )
+        if not isinstance(out_pickle_path, str) and not isinstance(
+            out_pickle_path, list
+        ):
+            raise TypeError(
+                "Please provide a out_pickle_path list of str type or a str type path."
+            )
         if out_pickle_path is not None:
             if isinstance(out_pickle_path, str):
                 out_pickle_path = [out_pickle_path]
             if len(out_pickle_path) != 1:
                 if len(out_pickle_path) != len(pickle_path):
-                    raise ValueError("If not str type, out_pickle_path must be the same length as pickle_path.")
+                    raise ValueError(
+                        "If not str type, out_pickle_path must be the same length as pickle_path."
+                    )
 
         self.path = pickle_path
         self.plot = plot
@@ -43,7 +51,9 @@ class ForceSensorToMuscleForce:  # TODO : Enable several muscles (biceps, tricep
         self.biceps_moment_arm = None
         self.biceps_force_vector = None
 
-        pickle_path_list = [pickle_path] if isinstance(pickle_path, str) else pickle_path
+        pickle_path_list = (
+            [pickle_path] if isinstance(pickle_path, str) else pickle_path
+        )
 
         for i in range(len(pickle_path_list)):
             self.t_local = self.load_data(pickle_path_list[i], forearm_angle)
@@ -63,7 +73,11 @@ class ForceSensorToMuscleForce:  # TODO : Enable several muscles (biceps, tricep
                     if isinstance(muscle_name, str)
                     else muscle_name[i] if isinstance(muscle_name, list) else "biceps"
                 )
-                dictionary = {"time": self.time, muscle_name: self.all_biceps_force_vector, "stim_time": self.stim_time}
+                dictionary = {
+                    "time": self.time,
+                    muscle_name: self.all_biceps_force_vector,
+                    "stim_time": self.stim_time,
+                }
                 with open(save_pickle_path, "wb") as file:
                     pickle.dump(dictionary, file)
 
@@ -150,10 +164,12 @@ class ForceSensorToMuscleForce:  # TODO : Enable several muscles (biceps, tricep
         global_orientation_sensor_data = []
         for i in range(len(sensor_data[0])):
             sensor_data_temp_torque = (
-                rotation_matrix @ np.array([sensor_data[0][i], sensor_data[1][i], sensor_data[2][i]])
+                rotation_matrix
+                @ np.array([sensor_data[0][i], sensor_data[1][i], sensor_data[2][i]])
             ).tolist()
             sensor_data_temp_force = (
-                rotation_matrix @ np.array([sensor_data[3][i], sensor_data[4][i], sensor_data[5][i]])
+                rotation_matrix
+                @ np.array([sensor_data[3][i], sensor_data[4][i], sensor_data[5][i]])
             ).tolist()
             global_orientation_sensor_data.append(
                 [
@@ -179,19 +195,28 @@ class ForceSensorToMuscleForce:  # TODO : Enable several muscles (biceps, tricep
         # Choose a position/velocity/acceleration to compute dynamics from
         if nq != 2:
             raise ValueError("The number of degrees of freedom has changed.")  # 0
-        self.Q = np.array([0.0, np.radians(forearm_angle)])  # "0" arm along body and "1.57" 90° forearm position  |__.
+        self.Q = np.array(
+            [0.0, np.radians(forearm_angle)]
+        )  # "0" arm along body and "1.57" 90° forearm position  |__.
         self.Qdot = np.zeros((nqdot,))  # speed null
         self.Qddot = np.zeros((nqddot,))  # acceleration null
 
         # Biceps moment arm
         self.model.musclesLengthJacobian(self.Q).to_array()
         if self.model.muscleNames()[1].to_string() != "BIClong":
-            raise ValueError("Biceps muscle index as changed.")  # biceps is index 1 in the model
-        self.biceps_moment_arm = self.model.musclesLengthJacobian(self.Q).to_array()[1][1]
+            raise ValueError(
+                "Biceps muscle index as changed."
+            )  # biceps is index 1 in the model
+        self.biceps_moment_arm = self.model.musclesLengthJacobian(self.Q).to_array()[1][
+            1
+        ]
 
         # Expressing the external force array [Mx, My, Mz, Fx, Fy, Fz]
         # experimentally applied at the hand into the last joint
-        if self.model.segments()[15].name().to_string() != "r_ulna_radius_hand_r_elbow_flex":
+        if (
+            self.model.segments()[15].name().to_string()
+            != "r_ulna_radius_hand_r_elbow_flex"
+        ):
             raise ValueError("r_ulna_radius_hand_r_elbow_flex index as changed.")
 
         if self.model.markerNames()[3].to_string() != "r_ulna_radius_hand":
@@ -242,7 +267,9 @@ class ForceSensorToMuscleForce:  # TODO : Enable several muscles (biceps, tricep
                 )
 
                 # tau = self.model.InverseDynamics(self.Q, self.Qdot, self.Qddot, f_ext=external_forces_v).to_array()[1]
-                tau = self.model.InverseDynamics(self.Q, self.Qdot, self.Qddot, external_forces_set).to_array()
+                tau = self.model.InverseDynamics(
+                    self.Q, self.Qdot, self.Qddot, external_forces_set
+                ).to_array()
                 tau = tau[1]
                 biceps_force = tau / self.biceps_moment_arm
                 self.biceps_force_vector.append(biceps_force)

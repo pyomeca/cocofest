@@ -1,4 +1,7 @@
 """
+/!\ This example is not functional yet. /!\
+/!\ It is a work in progress muscles can not be stimulated seperatly /!\
+
 This example will do a pulse apparition optimization to either minimize overall muscle force or muscle fatigue
 for a reaching task. Those ocp were build to move from starting position (arm: 0°, elbow: 5°) to a target position
 defined in the bioMod file. At the end of the simulation 2 files will be created, one for each optimization.
@@ -6,6 +9,8 @@ The files will contain the time, states, controls and parameters of the ocp.
 """
 
 import pickle
+
+import numpy as np
 
 from bioptim import (
     Axis,
@@ -16,7 +21,7 @@ from bioptim import (
     SolutionMerge,
 )
 
-from cocofest import DingModelFrequencyWithFatigue, OcpFesMsk
+from cocofest import DingModelFrequencyWithFatigue, OcpFesMsk, FesMskModel
 
 # Fiber type proportion from [1]
 biceps_fiber_type_2_proportion = 0.607
@@ -58,19 +63,30 @@ fes_muscle_models = [
 ]
 
 for i in range(len(fes_muscle_models)):
-    fes_muscle_models[i].alpha_a = fes_muscle_models[i].alpha_a * alpha_a_proportion_list[i]
-    fes_muscle_models[i].a_rest = fes_muscle_models[i].a_rest * a_rest_proportion_list[i]
+    fes_muscle_models[i].alpha_a = (
+        fes_muscle_models[i].alpha_a * alpha_a_proportion_list[i]
+    )
+    fes_muscle_models[i].a_rest = (
+        fes_muscle_models[i].a_rest * a_rest_proportion_list[i]
+    )
+
+model = FesMskModel(
+    name=None,
+    biorbd_path="../../msk_models/arm26.bioMod",
+    muscles_model=fes_muscle_models,
+    activate_force_length_relationship=True,
+    activate_force_velocity_relationship=True,
+)
 
 pickle_file_list = ["minimize_muscle_fatigue.pkl", "minimize_muscle_force.pkl"]
-n_stim = 40
-n_shooting = 5
+stim_time = list(np.round(np.linspace(0, 1, 41), 3))[:-1]
 
 constraint = ConstraintList()
 constraint.add(
     ConstraintFcn.SUPERIMPOSE_MARKERS,
     first_marker="COM_hand",
     second_marker="reaching_target",
-    phase=n_stim - 1,
+    phase=0,
     node=Node.END,
     axes=[Axis.X, Axis.Y],
 )
@@ -82,20 +98,26 @@ for i in range(len(pickle_file_list)):
     parameters = []
 
     ocp = OcpFesMsk.prepare_ocp(
-        biorbd_model_path="../../msk_models/arm26.bioMod",
-        bound_type="start",
-        bound_data=[0, 5],
-        fes_muscle_models=fes_muscle_models,
-        n_stim=n_stim,
-        n_shooting=n_shooting,
+        model=model,
+        stim_time=stim_time,
+        n_shooting=1000,
         final_time=1,
         pulse_event={"min": 0.01, "max": 0.1, "bimapping": False},
-        with_residual_torque=False,
-        custom_constraint=constraint,
-        activate_force_length_relationship=True,
-        activate_force_velocity_relationship=True,
-        minimize_muscle_fatigue=True if pickle_file_list[i] == "minimize_muscle_fatigue.pkl" else False,
-        minimize_muscle_force=True if pickle_file_list[i] == "minimize_muscle_force.pkl" else False,
+        objective={
+            "minimize_fatigue": (
+                True if pickle_file_list[i] == "minimize_muscle_fatigue.pkl" else False
+            ),
+            "minimize_force": (
+                True if pickle_file_list[i] == "minimize_muscle_force.pkl" else False
+            ),
+        },
+        msk_info={
+            "with_residual_torque": False,
+            "bound_type": "start",
+            "bound_data": [0, 5],
+            "custom_constraint": constraint,
+        },
+        n_threads=5,
         use_sx=False,
     )
 
@@ -103,7 +125,9 @@ for i in range(len(pickle_file_list)):
 
     time = sol.decision_time(to_merge=[SolutionMerge.PHASES, SolutionMerge.NODES])
     states = sol.decision_states(to_merge=[SolutionMerge.PHASES, SolutionMerge.NODES])
-    controls = sol.decision_controls(to_merge=[SolutionMerge.PHASES, SolutionMerge.NODES])
+    controls = sol.decision_controls(
+        to_merge=[SolutionMerge.PHASES, SolutionMerge.NODES]
+    )
     parameters = sol.decision_parameters()
 
     dictionary = {

@@ -4,6 +4,7 @@ The FES model used here is Ding's 2007 pulse duration and frequency model with f
 Only the pulse duration is optimized, frequency is fixed.
 The nmpc cyclic problem stops once the last cycle is reached.
 """
+
 import matplotlib.pyplot as plt
 import numpy as np
 from bioptim import Solver, SolutionMerge
@@ -22,7 +23,9 @@ n_cycles = 8
 
 minimum_pulse_duration = DingModelPulseDurationFrequencyWithFatigue().pd0
 fes_model = DingModelPulseDurationFrequencyWithFatigue()
-fes_model.alpha_a = -4.0 * 10e-1  # Increasing the fatigue rate to make the fatigue more visible
+fes_model.alpha_a = (
+    -4.0 * 10e-1
+)  # Increasing the fatigue rate to make the fatigue more visible
 
 nmpc_fes_msk = NmpcFes()
 nmpc_fes_msk.n_cycles = n_cycles
@@ -38,11 +41,18 @@ nmpc = nmpc_fes_msk.prepare_nmpc(
     },
     objective={"force_tracking": force_tracking},
     use_sx=True,
-    n_threads=4,
+    n_threads=5,
 )
 
-sol = nmpc.solve(nmpc_fes_msk.update_functions, solver=Solver.IPOPT(), cyclic_options={"states": {}}, get_all_iterations=True)
-sol_merged = sol[0].decision_states(to_merge=[SolutionMerge.PHASES, SolutionMerge.NODES])
+sol = nmpc.solve(
+    nmpc_fes_msk.update_functions,
+    solver=Solver.IPOPT(),
+    cyclic_options={"states": {}},
+    get_all_iterations=True,
+)
+sol_merged = sol[0].decision_states(
+    to_merge=[SolutionMerge.PHASES, SolutionMerge.NODES]
+)
 
 time = sol[0].decision_time(to_merge=SolutionMerge.KEYS, continuous=True)
 time = [float(j) for j in time]
@@ -69,7 +79,9 @@ ax2.set_ylabel("Force (N)")
 plt.legend()
 
 barWidth = 0.25  # set width of bar
-cycles = [sol[1][i].parameters["pulse_duration"] for i in range(len(sol[1]))]  # set height of bar
+cycles = [
+    sol[1][i].parameters["pulse_duration"] for i in range(len(sol[1]))
+]  # set height of bar
 bar = []  # Set position of bar on X axis
 for i in range(n_cycles):
     if i == 0:

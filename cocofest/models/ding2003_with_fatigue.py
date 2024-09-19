@@ -33,7 +33,11 @@ class DingModelFrequencyWithFatigue(DingModelFrequency):
         muscle_name: str = None,
         sum_stim_truncation: int = None,
     ):
-        super().__init__(model_name=model_name, muscle_name=muscle_name, sum_stim_truncation=sum_stim_truncation)
+        super().__init__(
+            model_name=model_name,
+            muscle_name=muscle_name,
+            sum_stim_truncation=sum_stim_truncation,
+        )
         self._with_fatigue = True
         # ---- Fatigue models ---- #
         self.alpha_a = -4.0 * 10e-7  # Value from Ding's experimentation [1] (s^-2)
@@ -83,8 +87,16 @@ class DingModelFrequencyWithFatigue(DingModelFrequency):
     # ---- Needed for the example ---- #
     @property
     def name_dof(self, with_muscle_name: bool = False) -> list[str]:
-        muscle_name = "_" + self.muscle_name if self.muscle_name and with_muscle_name else ""
-        return ["Cn" + muscle_name, "F" + muscle_name, "A" + muscle_name, "Tau1" + muscle_name, "Km" + muscle_name]
+        muscle_name = (
+            "_" + self.muscle_name if self.muscle_name and with_muscle_name else ""
+        )
+        return [
+            "Cn" + muscle_name,
+            "F" + muscle_name,
+            "A" + muscle_name,
+            "Tau1" + muscle_name,
+            "Km" + muscle_name,
+        ]
 
     @property
     def nb_state(self) -> int:
@@ -196,7 +208,9 @@ class DingModelFrequencyWithFatigue(DingModelFrequency):
         -------
         The value of the derivative time_state_force_no_cross_bridge (ms)
         """
-        return -(tau1 - self.tau1_rest) / self.tau_fat + self.alpha_tau1 * f  # Equation n°9
+        return (
+            -(tau1 - self.tau1_rest) / self.tau_fat + self.alpha_tau1 * f
+        )  # Equation n°9
 
     def km_dot_fun(self, km: MX, f: MX) -> MX | float:
         """
@@ -262,9 +276,13 @@ class DingModelFrequencyWithFatigue(DingModelFrequency):
         dxdt_fun = fes_model.system_dynamics if fes_model else nlp.model.system_dynamics
         stim_apparition = (
             (
-                fes_model.get_stim_prev(nlp=nlp, parameters=parameters, idx=nlp.phase_idx)
+                fes_model.get_stim_prev(
+                    nlp=nlp, parameters=parameters, idx=nlp.phase_idx
+                )
                 if fes_model
-                else nlp.model.get_stim_prev(nlp=nlp, parameters=parameters, idx=nlp.phase_idx)
+                else nlp.model.get_stim_prev(
+                    nlp=nlp, parameters=parameters, idx=nlp.phase_idx
+                )
             )
             if stim_prev is None
             else stim_prev
@@ -288,7 +306,10 @@ class DingModelFrequencyWithFatigue(DingModelFrequency):
         )
 
     def declare_ding_variables(
-        self, ocp: OptimalControlProgram, nlp: NonLinearProgram, numerical_data_timeseries: dict[str, np.ndarray] = None
+        self,
+        ocp: OptimalControlProgram,
+        nlp: NonLinearProgram,
+        numerical_data_timeseries: dict[str, np.ndarray] = None,
     ):
         """
         Tell the program which variables are states and controls.
@@ -308,4 +329,6 @@ class DingModelFrequencyWithFatigue(DingModelFrequency):
             if "pulse_apparition_time" not in nlp.parameters.keys()
             else None
         )
-        ConfigureProblem.configure_dynamics_function(ocp, nlp, dyn_func=self.dynamics, stim_prev=stim_prev)
+        ConfigureProblem.configure_dynamics_function(
+            ocp, nlp, dyn_func=self.dynamics, stim_prev=stim_prev
+        )

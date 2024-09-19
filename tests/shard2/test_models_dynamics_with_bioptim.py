@@ -230,11 +230,21 @@ minimum_pulse_intensity = DingModelIntensityFrequency().min_pulse_intensity()
 
 @pytest.mark.parametrize("use_sx", [True])  # Later add False
 @pytest.mark.parametrize(
-    "model", [DingModelFrequency(), DingModelPulseDurationFrequency(), DingModelIntensityFrequency()]
+    "model",
+    [
+        DingModelFrequency(),
+        DingModelPulseDurationFrequency(),
+        DingModelIntensityFrequency(),
+    ],
 )
 @pytest.mark.parametrize("force_tracking", [init_force_tracking])
-@pytest.mark.parametrize("min_pulse_duration, min_pulse_intensity", [(minimum_pulse_duration, minimum_pulse_intensity)])
-def test_ocp_output(model, force_tracking, use_sx, min_pulse_duration, min_pulse_intensity):
+@pytest.mark.parametrize(
+    "min_pulse_duration, min_pulse_intensity",
+    [(minimum_pulse_duration, minimum_pulse_intensity)],
+)
+def test_ocp_output(
+    model, force_tracking, use_sx, min_pulse_duration, min_pulse_intensity
+):
     if isinstance(model, DingModelPulseDurationFrequency):
         ocp = OcpFes().prepare_ocp(
             model=model,
@@ -314,7 +324,9 @@ def test_time_dependent_ocp_output(use_sx, bimapped):
     if use_sx and not bimapped:
         return  # This test works offline but not in GitHub actions
     sol = ocp.solve(Solver.IPOPT(show_online_optim=False, _max_iter=10000))
-    sol_states = sol.decision_states(to_merge=[SolutionMerge.PHASES, SolutionMerge.NODES])
+    sol_states = sol.decision_states(
+        to_merge=[SolutionMerge.PHASES, SolutionMerge.NODES]
+    )
     sol_time = sol.decision_time(to_merge=[SolutionMerge.PHASES, SolutionMerge.NODES])
 
     if bimapped:

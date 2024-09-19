@@ -5,38 +5,47 @@ The stimulation frequency will be set to 40Hz and pulse duration will be optimiz
 reducing residual torque.
 """
 
-import pickle
-
 import numpy as np
 
-from bioptim import CostType, SolutionMerge, Solver
+from bioptim import CostType, Solver
 
 import biorbd
 
-from pyorerun import BiorbdModel, PhaseRerun
-
-from cocofest import DingModelPulseDurationFrequencyWithFatigue, OcpFesMsk, PlotCyclingResult, SolutionToPickle, FesMskModel
+from cocofest import (
+    DingModelPulseDurationFrequencyWithFatigue,
+    OcpFesMsk,
+    PlotCyclingResult,
+    SolutionToPickle,
+    FesMskModel,
+    PickleAnimate,
+)
 
 
 def main():
-    n_shooting = 100
     minimum_pulse_duration = DingModelPulseDurationFrequencyWithFatigue().pd0
 
-    model = FesMskModel(name=None,
-                        biorbd_path="../../msk_models/simplified_UL_Seth.bioMod",
-                        muscles_model=[DingModelPulseDurationFrequencyWithFatigue(muscle_name="DeltoideusClavicle_A"),
-                                       DingModelPulseDurationFrequencyWithFatigue(muscle_name="DeltoideusScapula_P"),
-                                       DingModelPulseDurationFrequencyWithFatigue(muscle_name="TRIlong"),
-                                       DingModelPulseDurationFrequencyWithFatigue(muscle_name="BIC_long"),
-                                       DingModelPulseDurationFrequencyWithFatigue(muscle_name="BIC_brevis")],
-                        activate_force_length_relationship=True,
-                        activate_force_velocity_relationship=True,
-                        )
+    model = FesMskModel(
+        name=None,
+        biorbd_path="../../msk_models/simplified_UL_Seth.bioMod",
+        muscles_model=[
+            DingModelPulseDurationFrequencyWithFatigue(
+                muscle_name="DeltoideusClavicle_A"
+            ),
+            DingModelPulseDurationFrequencyWithFatigue(
+                muscle_name="DeltoideusScapula_P"
+            ),
+            DingModelPulseDurationFrequencyWithFatigue(muscle_name="TRIlong"),
+            DingModelPulseDurationFrequencyWithFatigue(muscle_name="BIC_long"),
+            DingModelPulseDurationFrequencyWithFatigue(muscle_name="BIC_brevis"),
+        ],
+        activate_force_length_relationship=True,
+        activate_force_velocity_relationship=True,
+    )
 
     ocp = OcpFesMsk.prepare_ocp(
         model=model,
         stim_time=list(np.round(np.linspace(0, 1, 11), 3))[:-1],
-        n_shooting=n_shooting,
+        n_shooting=100,
         final_time=1,
         pulse_duration={
             "min": minimum_pulse_duration,
@@ -45,7 +54,12 @@ def main():
         },
         msk_info={"with_residual_torque": True},
         objective={
-            "cycling": {"x_center": 0.35, "y_center": 0, "radius": 0.1, "target": "marker"},
+            "cycling": {
+                "x_center": 0.35,
+                "y_center": 0,
+                "radius": 0.1,
+                "target": "marker",
+            },
             "minimize_residual_torque": True,
         },
         warm_start=False,
@@ -56,16 +70,9 @@ def main():
     SolutionToPickle(sol, "cycling_fes_driven_min_residual_torque.pkl", "").pickle()
 
     biorbd_model = biorbd.Model("../../msk_models/simplified_UL_Seth_full_mesh.bioMod")
-    prr_model = BiorbdModel.from_biorbd_object(biorbd_model)
-
-    nb_frames = 440
-    nb_seconds = 1
-    t_span = np.linspace(0, nb_seconds, nb_frames)
-
-    viz = PhaseRerun(t_span)
-    q = sol.decision_states(to_merge=[SolutionMerge.PHASES, SolutionMerge.NODES])["q"]
-    viz.add_animated_model(prr_model, q)
-    viz.rerun("msk_model")
+    PickleAnimate("cycling_fes_driven_min_residual_torque.pkl").animate(
+        model=biorbd_model
+    )
 
     sol.graphs(show_bounds=False)
     PlotCyclingResult(sol).plot(starting_location="E")

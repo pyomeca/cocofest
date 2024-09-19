@@ -19,10 +19,19 @@ from bioptim import (
     Solver,
 )
 
-from ..dynamics.inverse_kinematics_and_dynamics import get_circle_coord, inverse_kinematics_cycling
+from ..dynamics.inverse_kinematics_and_dynamics import (
+    get_circle_coord,
+    inverse_kinematics_cycling,
+)
 
 
-def get_initial_guess(biorbd_model_path: str, final_time: int, n_shooting: int, objective: dict, n_threads: int) -> dict:
+def get_initial_guess(
+    biorbd_model_path: str,
+    final_time: int,
+    n_shooting: int,
+    objective: dict,
+    n_threads: int,
+) -> dict:
     """
     Get the initial guess for the ocp
 
@@ -50,11 +59,15 @@ def get_initial_guess(biorbd_model_path: str, final_time: int, n_shooting: int, 
         raise ValueError("Only a cycling objective is implemented for the warm start")
 
     # Getting q and qdot from the inverse kinematics
-    ocp, q, qdot = prepare_muscle_driven_ocp(biorbd_model_path, n_shooting, final_time, objective, n_threads)
+    ocp, q, qdot = prepare_muscle_driven_ocp(
+        biorbd_model_path, n_shooting, final_time, objective, n_threads
+    )
 
     # Solving the ocp to get muscle controls
     sol = ocp.solve(Solver.IPOPT(_tol=1e-4))
-    muscles_control = sol.decision_controls(to_merge=[SolutionMerge.PHASES, SolutionMerge.NODES])
+    muscles_control = sol.decision_controls(
+        to_merge=[SolutionMerge.PHASES, SolutionMerge.NODES]
+    )
     model = biorbd.Model(biorbd_model_path)
 
     # Reorganizing the q and qdot shape for the warm start
@@ -66,11 +79,19 @@ def get_initial_guess(biorbd_model_path: str, final_time: int, n_shooting: int, 
 
     # Creating initial muscle forces guess from the muscle controls and the muscles max iso force characteristics
     for i in range(muscles_control["muscles"].shape[0]):
-        fmax = model.muscle(i).characteristics().forceIsoMax()  # Get the max iso force of the muscle
-        states_init[model.muscle(i).name().to_string()] = np.array(muscles_control["muscles"][i]) * fmax
-        states_init[model.muscle(i).name().to_string()] = np.append(states_init[model.muscle(i).name().to_string()],
-                                                                    states_init[model.muscle(i).name().to_string()][-1])
-        states_init[model.muscle(i).name().to_string()] = np.array([states_init[model.muscle(i).name().to_string()]])
+        fmax = (
+            model.muscle(i).characteristics().forceIsoMax()
+        )  # Get the max iso force of the muscle
+        states_init[model.muscle(i).name().to_string()] = (
+            np.array(muscles_control["muscles"][i]) * fmax
+        )
+        states_init[model.muscle(i).name().to_string()] = np.append(
+            states_init[model.muscle(i).name().to_string()],
+            states_init[model.muscle(i).name().to_string()][-1],
+        )
+        states_init[model.muscle(i).name().to_string()] = np.array(
+            [states_init[model.muscle(i).name().to_string()]]
+        )
     return states_init
 
 
@@ -94,6 +115,8 @@ def prepare_muscle_driven_ocp(
         The ocp final time
     objective: dict
         The ocp objective
+    n_threads: int
+        The number of threads
 
     Returns
     -------
@@ -115,7 +138,10 @@ def prepare_muscle_driven_ocp(
     y_center = objective["cycling"]["y_center"]
     radius = objective["cycling"]["radius"]
     get_circle_coord_list = np.array(
-        [get_circle_coord(theta, x_center, y_center, radius)[:-1] for theta in np.linspace(0, -2 * np.pi, n_shooting)]
+        [
+            get_circle_coord(theta, x_center, y_center, radius)[:-1]
+            for theta in np.linspace(0, -2 * np.pi, n_shooting)
+        ]
     )
     objective_functions = ObjectiveList()
     for i in range(n_shooting):
@@ -132,7 +158,11 @@ def prepare_muscle_driven_ocp(
 
     # Dynamics
     dynamics = DynamicsList()
-    dynamics.add(DynamicsFcn.MUSCLE_DRIVEN, expand_dynamics=True, phase_dynamics=PhaseDynamics.SHARED_DURING_THE_PHASE)
+    dynamics.add(
+        DynamicsFcn.MUSCLE_DRIVEN,
+        expand_dynamics=True,
+        phase_dynamics=PhaseDynamics.SHARED_DURING_THE_PHASE,
+    )
 
     # Path constraint
     x_bounds = BoundsList()

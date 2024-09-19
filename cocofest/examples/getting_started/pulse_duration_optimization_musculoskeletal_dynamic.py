@@ -7,12 +7,13 @@ threshold and 600us to satisfy the flexion and minimizing required elbow torque 
 
 from cocofest import DingModelPulseDurationFrequencyWithFatigue, OcpFesMsk, FesMskModel
 
-model = FesMskModel(name=None,
-                    biorbd_path="../msk_models/arm26_biceps_1dof.bioMod",
-                    muscles_model=[DingModelPulseDurationFrequencyWithFatigue(muscle_name="BIClong")],
-                    activate_force_length_relationship=True,
-                    activate_force_velocity_relationship=True,
-                    )
+model = FesMskModel(
+    name=None,
+    biorbd_path="../msk_models/arm26_biceps_1dof.bioMod",
+    muscles_model=[DingModelPulseDurationFrequencyWithFatigue(muscle_name="BIClong")],
+    activate_force_length_relationship=True,
+    activate_force_velocity_relationship=True,
+)
 
 minimum_pulse_duration = DingModelPulseDurationFrequencyWithFatigue().pd0
 ocp = OcpFesMsk.prepare_ocp(
@@ -26,9 +27,11 @@ ocp = OcpFesMsk.prepare_ocp(
         "bimapping": False,
     },
     objective={"minimize_residual_torque": True},
-    msk_info={"bound_type": "start_end",
-              "bound_data": [[5], [120]],
-              "with_residual_torque": True},
+    msk_info={
+        "bound_type": "start_end",
+        "bound_data": [[5], [120]],
+        "with_residual_torque": True,
+    },
 )
 
 sol = ocp.solve()

@@ -14,13 +14,13 @@ import matplotlib.pyplot as plt
 # This problem was build to be integrated and has no objectives nor parameter to optimize.
 n_shooting = 100
 final_time = 1
-n_stim = 10
 stim_time = [0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]
 pulse_intensity_values = [20, 20, 30, 40, 50, 60, 70, 80, 90, 100]
-fes_parameters = {"model": DingModelIntensityFrequency(),
-                  "n_stim": n_stim,
-                  "pulse_intensity": pulse_intensity_values,
-                  "stim_time": stim_time}
+fes_parameters = {
+    "model": DingModelIntensityFrequency(),
+    "pulse_intensity": pulse_intensity_values,
+    "stim_time": stim_time,
+}
 ivp_parameters = {"n_shooting": n_shooting, "final_time": final_time, "use_sx": True}
 ivp = IvpFes(
     fes_parameters,
@@ -50,7 +50,16 @@ ocp = DingModelPulseIntensityFrequencyForceParameterIdentification(
     data_path=[pickle_file_name],
     identification_method="full",
     double_step_identification=False,
-    key_parameter_to_identify=["a_rest", "km_rest", "tau1_rest", "tau2", "ar", "bs", "Is", "cr"],
+    key_parameter_to_identify=[
+        "a_rest",
+        "km_rest",
+        "tau1_rest",
+        "tau2",
+        "ar",
+        "bs",
+        "Is",
+        "cr",
+    ],
     additional_key_settings={},
     n_shooting=n_shooting,
     final_time=final_time,
@@ -58,20 +67,46 @@ ocp = DingModelPulseIntensityFrequencyForceParameterIdentification(
 )
 
 identified_parameters = ocp.force_model_identification()
-a_rest = identified_parameters["a_rest"] if "a_rest" in identified_parameters else DingModelIntensityFrequency().a_rest
+a_rest = (
+    identified_parameters["a_rest"]
+    if "a_rest" in identified_parameters
+    else DingModelIntensityFrequency().a_rest
+)
 km_rest = (
-    identified_parameters["km_rest"] if "km_rest" in identified_parameters else DingModelIntensityFrequency().km_rest
+    identified_parameters["km_rest"]
+    if "km_rest" in identified_parameters
+    else DingModelIntensityFrequency().km_rest
 )
 tau1_rest = (
     identified_parameters["tau1_rest"]
     if "tau1_rest" in identified_parameters
     else DingModelIntensityFrequency().tau1_rest
 )
-tau2 = identified_parameters["tau2"] if "tau2" in identified_parameters else DingModelIntensityFrequency().tau2
-ar = identified_parameters["ar"] if "ar" in identified_parameters else DingModelIntensityFrequency().ar
-bs = identified_parameters["bs"] if "bs" in identified_parameters else DingModelIntensityFrequency().bs
-Is = identified_parameters["Is"] if "Is" in identified_parameters else DingModelIntensityFrequency().Is
-cr = identified_parameters["cr"] if "cr" in identified_parameters else DingModelIntensityFrequency().cr
+tau2 = (
+    identified_parameters["tau2"]
+    if "tau2" in identified_parameters
+    else DingModelIntensityFrequency().tau2
+)
+ar = (
+    identified_parameters["ar"]
+    if "ar" in identified_parameters
+    else DingModelIntensityFrequency().ar
+)
+bs = (
+    identified_parameters["bs"]
+    if "bs" in identified_parameters
+    else DingModelIntensityFrequency().bs
+)
+Is = (
+    identified_parameters["Is"]
+    if "Is" in identified_parameters
+    else DingModelIntensityFrequency().Is
+)
+cr = (
+    identified_parameters["cr"]
+    if "cr" in identified_parameters
+    else DingModelIntensityFrequency().cr
+)
 print(
     "a_rest : ",
     a_rest,
@@ -104,7 +139,11 @@ identified_model.cr = cr
 identified_force_list = []
 identified_time_list = []
 
-fes_parameters = {"model": identified_model, "n_stim": n_stim, "pulse_intensity": pulse_intensity_values, "stim_time": stim_time}
+fes_parameters = {
+    "model": identified_model,
+    "pulse_intensity": pulse_intensity_values,
+    "stim_time": stim_time,
+}
 ivp_parameters = {"n_shooting": n_shooting, "final_time": final_time, "use_sx": True}
 ivp_from_identification = IvpFes(
     fes_parameters,
@@ -139,41 +178,77 @@ plt.annotate("bs : ", xy=(0.7, 0.15), xycoords="axes fraction", color="black")
 plt.annotate("Is : ", xy=(0.7, 0.1), xycoords="axes fraction", color="black")
 plt.annotate("cr : ", xy=(0.7, 0.05), xycoords="axes fraction", color="black")
 
-plt.annotate(str(round(a_rest, 5)), xy=(0.78, 0.4), xycoords="axes fraction", color="red")
-plt.annotate(str(round(km_rest, 5)), xy=(0.78, 0.35), xycoords="axes fraction", color="red")
-plt.annotate(str(round(tau1_rest, 5)), xy=(0.78, 0.3), xycoords="axes fraction", color="red")
-plt.annotate(str(round(tau2, 5)), xy=(0.78, 0.25), xycoords="axes fraction", color="red")
+plt.annotate(
+    str(round(a_rest, 5)), xy=(0.78, 0.4), xycoords="axes fraction", color="red"
+)
+plt.annotate(
+    str(round(km_rest, 5)), xy=(0.78, 0.35), xycoords="axes fraction", color="red"
+)
+plt.annotate(
+    str(round(tau1_rest, 5)), xy=(0.78, 0.3), xycoords="axes fraction", color="red"
+)
+plt.annotate(
+    str(round(tau2, 5)), xy=(0.78, 0.25), xycoords="axes fraction", color="red"
+)
 plt.annotate(str(round(ar, 5)), xy=(0.78, 0.2), xycoords="axes fraction", color="red")
 plt.annotate(str(round(bs, 5)), xy=(0.78, 0.15), xycoords="axes fraction", color="red")
 plt.annotate(str(round(Is, 5)), xy=(0.78, 0.1), xycoords="axes fraction", color="red")
 plt.annotate(str(round(cr, 5)), xy=(0.78, 0.05), xycoords="axes fraction", color="red")
 
-plt.annotate(str(DingModelIntensityFrequency().a_rest), xy=(0.85, 0.4), xycoords="axes fraction", color="blue")
-plt.annotate(str(DingModelIntensityFrequency().km_rest), xy=(0.85, 0.35), xycoords="axes fraction", color="blue")
-plt.annotate(str(DingModelIntensityFrequency().tau1_rest), xy=(0.85, 0.3), xycoords="axes fraction", color="blue")
-plt.annotate(str(DingModelIntensityFrequency().tau2), xy=(0.85, 0.25), xycoords="axes fraction", color="blue")
-plt.annotate(str(DingModelIntensityFrequency().ar), xy=(0.85, 0.2), xycoords="axes fraction", color="blue")
-plt.annotate(str(DingModelIntensityFrequency().bs), xy=(0.85, 0.15), xycoords="axes fraction", color="blue")
-plt.annotate(str(DingModelIntensityFrequency().Is), xy=(0.85, 0.1), xycoords="axes fraction", color="blue")
-plt.annotate(str(DingModelIntensityFrequency().cr), xy=(0.85, 0.05), xycoords="axes fraction", color="blue")
+plt.annotate(
+    str(DingModelIntensityFrequency().a_rest),
+    xy=(0.85, 0.4),
+    xycoords="axes fraction",
+    color="blue",
+)
+plt.annotate(
+    str(DingModelIntensityFrequency().km_rest),
+    xy=(0.85, 0.35),
+    xycoords="axes fraction",
+    color="blue",
+)
+plt.annotate(
+    str(DingModelIntensityFrequency().tau1_rest),
+    xy=(0.85, 0.3),
+    xycoords="axes fraction",
+    color="blue",
+)
+plt.annotate(
+    str(DingModelIntensityFrequency().tau2),
+    xy=(0.85, 0.25),
+    xycoords="axes fraction",
+    color="blue",
+)
+plt.annotate(
+    str(DingModelIntensityFrequency().ar),
+    xy=(0.85, 0.2),
+    xycoords="axes fraction",
+    color="blue",
+)
+plt.annotate(
+    str(DingModelIntensityFrequency().bs),
+    xy=(0.85, 0.15),
+    xycoords="axes fraction",
+    color="blue",
+)
+plt.annotate(
+    str(DingModelIntensityFrequency().Is),
+    xy=(0.85, 0.1),
+    xycoords="axes fraction",
+    color="blue",
+)
+plt.annotate(
+    str(DingModelIntensityFrequency().cr),
+    xy=(0.85, 0.05),
+    xycoords="axes fraction",
+    color="blue",
+)
 
 # --- Delete the temp file ---#
 os.remove(f"../data/temp_identification_simulation.pkl")
 
 plt.legend()
 plt.show()
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 # Example n°1 : Identification of the parameters of the Ding model with the frequency method for experimental data
@@ -484,5 +559,3 @@ print("alpha_a : ", alpha_a, "alpha_km : ", alpha_km, "alpha_tau1 : ", alpha_tau
 #
 # plt.legend()
 # plt.show()
-
-

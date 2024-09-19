@@ -13,7 +13,9 @@ from cocofest import (
 )
 
 
-@pytest.mark.parametrize("model", [DingModelFrequency(), DingModelFrequencyWithFatigue()])
+@pytest.mark.parametrize(
+    "model", [DingModelFrequency(), DingModelFrequencyWithFatigue()]
+)
 def test_ding2003_ivp(model):
     fes_parameters = {"model": model, "n_stim": 3}
     ivp_parameters = {"n_shooting": 10, "final_time": 0.3, "use_sx": True}
@@ -33,7 +35,10 @@ def test_ding2003_ivp(model):
         np.testing.assert_almost_equal(result["F"][0][-1], 130.3736693032713)
 
 
-@pytest.mark.parametrize("model", [DingModelPulseDurationFrequency(), DingModelPulseDurationFrequencyWithFatigue()])
+@pytest.mark.parametrize(
+    "model",
+    [DingModelPulseDurationFrequency(), DingModelPulseDurationFrequencyWithFatigue()],
+)
 @pytest.mark.parametrize("pulse_duration", [0.0003, [0.0003, 0.0004, 0.0005]])
 def test_ding2007_ivp(model, pulse_duration):
     fes_parameters = {"model": model, "n_stim": 3, "pulse_duration": pulse_duration}
@@ -62,7 +67,9 @@ def test_ding2007_ivp(model, pulse_duration):
         np.testing.assert_almost_equal(result["F"][0][-1], 34.6369350284091)
 
 
-@pytest.mark.parametrize("model", [DingModelIntensityFrequency(), DingModelIntensityFrequencyWithFatigue()])
+@pytest.mark.parametrize(
+    "model", [DingModelIntensityFrequency(), DingModelIntensityFrequencyWithFatigue()]
+)
 @pytest.mark.parametrize("pulse_intensity", [50, [50, 60, 70]])
 def test_hmed2018_ivp(model, pulse_intensity):
     fes_parameters = {"model": model, "n_stim": 3, "pulse_intensity": pulse_intensity}
@@ -94,7 +101,11 @@ def test_hmed2018_ivp(model, pulse_intensity):
 @pytest.mark.parametrize("pulse_mode", ["single", "doublet", "triplet"])
 def test_pulse_mode_ivp(pulse_mode):
     n_stim = 3 if pulse_mode == "single" else 6 if pulse_mode == "doublet" else 9
-    fes_parameters = {"model": DingModelFrequencyWithFatigue(), "n_stim": n_stim, "pulse_mode": pulse_mode}
+    fes_parameters = {
+        "model": DingModelFrequencyWithFatigue(),
+        "n_stim": n_stim,
+        "pulse_mode": pulse_mode,
+    }
     ivp_parameters = {"n_shooting": 10, "final_time": 0.3, "use_sx": True}
 
     ivp = IvpFes(fes_parameters, ivp_parameters)
@@ -118,7 +129,11 @@ def test_pulse_mode_ivp(pulse_mode):
 
 
 def test_ivp_methods():
-    fes_parameters = {"model": DingModelFrequency(), "frequency": 30, "round_down": True}
+    fes_parameters = {
+        "model": DingModelFrequency(),
+        "frequency": 30,
+        "round_down": True,
+    }
     ivp_parameters = {"n_shooting": 10, "final_time": 1.25, "use_sx": True}
     ivp = IvpFes.from_frequency_and_final_time(fes_parameters, ivp_parameters)
 
@@ -136,13 +151,21 @@ def test_all_ivp_errors():
         ),
     ):
         IvpFes.from_frequency_and_final_time(
-            fes_parameters={"model": DingModelFrequency(), "frequency": 30, "round_down": False},
+            fes_parameters={
+                "model": DingModelFrequency(),
+                "frequency": 30,
+                "round_down": False,
+            },
             ivp_parameters={"n_shooting": 1, "final_time": 1.25},
         )
 
     with pytest.raises(ValueError, match="Pulse mode not yet implemented"):
         IvpFes(
-            fes_parameters={"model": DingModelFrequency(), "n_stim": 3, "pulse_mode": "Quadruplet"},
+            fes_parameters={
+                "model": DingModelFrequency(),
+                "n_stim": 3,
+                "pulse_mode": "Quadruplet",
+            },
             ivp_parameters={"n_shooting": 10, "final_time": 0.3},
         )
 
@@ -152,11 +175,17 @@ def test_all_ivp_errors():
         match=re.escape("Pulse duration must be greater than minimum pulse duration"),
     ):
         IvpFes(
-            fes_parameters={"model": DingModelPulseDurationFrequency(), "n_stim": 3, "pulse_duration": pulse_duration},
+            fes_parameters={
+                "model": DingModelPulseDurationFrequency(),
+                "n_stim": 3,
+                "pulse_duration": pulse_duration,
+            },
             ivp_parameters={"n_shooting": 10, "final_time": 0.3},
         )
 
-    with pytest.raises(ValueError, match="pulse_duration list must have the same length as n_stim"):
+    with pytest.raises(
+        ValueError, match="pulse_duration list must have the same length as n_stim"
+    ):
         IvpFes(
             fes_parameters={
                 "model": DingModelPulseDurationFrequency(),
@@ -172,13 +201,23 @@ def test_all_ivp_errors():
         match=re.escape("Pulse duration must be greater than minimum pulse duration"),
     ):
         IvpFes(
-            fes_parameters={"model": DingModelPulseDurationFrequency(), "n_stim": 3, "pulse_duration": pulse_duration},
+            fes_parameters={
+                "model": DingModelPulseDurationFrequency(),
+                "n_stim": 3,
+                "pulse_duration": pulse_duration,
+            },
             ivp_parameters={"n_shooting": 10, "final_time": 0.3},
         )
 
-    with pytest.raises(TypeError, match="pulse_duration must be int, float or list type"):
+    with pytest.raises(
+        TypeError, match="pulse_duration must be int, float or list type"
+    ):
         IvpFes(
-            fes_parameters={"model": DingModelPulseDurationFrequency(), "n_stim": 3, "pulse_duration": True},
+            fes_parameters={
+                "model": DingModelPulseDurationFrequency(),
+                "n_stim": 3,
+                "pulse_duration": True,
+            },
             ivp_parameters={"n_shooting": 10, "final_time": 0.3},
         )
 
@@ -188,13 +227,23 @@ def test_all_ivp_errors():
         match=re.escape("Pulse intensity must be greater than minimum pulse intensity"),
     ):
         IvpFes(
-            fes_parameters={"model": DingModelIntensityFrequency(), "n_stim": 3, "pulse_intensity": pulse_intensity},
+            fes_parameters={
+                "model": DingModelIntensityFrequency(),
+                "n_stim": 3,
+                "pulse_intensity": pulse_intensity,
+            },
             ivp_parameters={"n_shooting": 10, "final_time": 0.3},
         )
 
-    with pytest.raises(ValueError, match="pulse_intensity list must have the same length as n_stim"):
+    with pytest.raises(
+        ValueError, match="pulse_intensity list must have the same length as n_stim"
+    ):
         IvpFes(
-            fes_parameters={"model": DingModelIntensityFrequency(), "n_stim": 3, "pulse_intensity": [20, 30]},
+            fes_parameters={
+                "model": DingModelIntensityFrequency(),
+                "n_stim": 3,
+                "pulse_intensity": [20, 30],
+            },
             ivp_parameters={"n_shooting": 10, "final_time": 0.3},
         )
 
@@ -204,13 +253,23 @@ def test_all_ivp_errors():
         match=re.escape("Pulse intensity must be greater than minimum pulse intensity"),
     ):
         IvpFes(
-            fes_parameters={"model": DingModelIntensityFrequency(), "n_stim": 3, "pulse_intensity": pulse_intensity},
+            fes_parameters={
+                "model": DingModelIntensityFrequency(),
+                "n_stim": 3,
+                "pulse_intensity": pulse_intensity,
+            },
             ivp_parameters={"n_shooting": 10, "final_time": 0.3},
         )
 
-    with pytest.raises(TypeError, match="pulse_intensity must be int, float or list type"):
+    with pytest.raises(
+        TypeError, match="pulse_intensity must be int, float or list type"
+    ):
         IvpFes(
-            fes_parameters={"model": DingModelIntensityFrequency(), "n_stim": 3, "pulse_intensity": True},
+            fes_parameters={
+                "model": DingModelIntensityFrequency(),
+                "n_stim": 3,
+                "pulse_intensity": True,
+            },
             ivp_parameters={"n_shooting": 10, "final_time": 0.3},
         )
 

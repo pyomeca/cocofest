@@ -29,7 +29,12 @@ pw_data_list = [data_minimize_force["parameters"], data_minimize_fatigue["parame
 
 pw_list = []
 for j in range(2):
-    pw_list.append([pw_data_list[j][pulse_duration_keys[i]] * 1000000 for i in range(len(pulse_duration_keys))])
+    pw_list.append(
+        [
+            pw_data_list[j][pulse_duration_keys[i]] * 1000000
+            for i in range(len(pulse_duration_keys))
+        ]
+    )
 
 plasma = cm = plt.get_cmap("plasma")
 cNorm = colors.Normalize(vmin=100, vmax=600)

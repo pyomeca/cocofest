@@ -3,15 +3,13 @@ This example is used to compare the effect of the muscle force-length and force-
 on the joint angle.
 """
 
-import matplotlib.pyplot as plt
 import numpy as np
 
-from bioptim import Solver, SolutionMerge
+import matplotlib.pyplot as plt
 
-from cocofest import (
-    DingModelPulseDurationFrequencyWithFatigue,
-    OcpFesMsk,
-)
+from bioptim import SolutionMerge
+
+from cocofest import DingModelPulseDurationFrequencyWithFatigue, OcpFesMsk, FesMskModel
 
 minimum_pulse_duration = DingModelPulseDurationFrequencyWithFatigue().pd0
 
@@ -20,24 +18,39 @@ sol_time = []
 activate_force_length_relationship = [False, True]
 
 for i in range(2):
-    ocp = OcpFesMsk.prepare_ocp(
-        biorbd_model_path="../msk_models/arm26_biceps_1dof.bioMod",
-        bound_type="start",
-        bound_data=[0],
-        fes_muscle_models=[DingModelPulseDurationFrequencyWithFatigue(muscle_name="BIClong")],
-        n_stim=10,
-        n_shooting=10,
-        final_time=1,
-        pulse_duration={"fixed": 0.00025},
-        with_residual_torque=False,
+
+    model = FesMskModel(
+        name=None,
+        biorbd_path="../msk_models/arm26_biceps_1dof.bioMod",
+        muscles_model=[
+            DingModelPulseDurationFrequencyWithFatigue(muscle_name="BIClong")
+        ],
         activate_force_length_relationship=activate_force_length_relationship[i],
         activate_force_velocity_relationship=activate_force_length_relationship[i],
+    )
+
+    ocp = OcpFesMsk.prepare_ocp(
+        model=model,
+        stim_time=np.linspace(0, 1, 11)[:-1],
+        n_shooting=100,
+        final_time=1,
+        pulse_duration={"fixed": 0.00025},
+        msk_info={
+            "bound_type": "start",
+            "bound_data": [0],
+            "with_residual_torque": False,
+        },
         use_sx=False,
     )
-    sol = ocp.solve(Solver.IPOPT(_max_iter=1000))
-    sol_list.append(sol.decision_states(to_merge=[SolutionMerge.NODES, SolutionMerge.PHASES]))
+    sol = ocp.solve()
+    sol_list.append(
+        sol.decision_states(to_merge=[SolutionMerge.NODES, SolutionMerge.PHASES])
+    )
     time = np.concatenate(
-        sol.stepwise_time(to_merge=[SolutionMerge.NODES, SolutionMerge.PHASES], duplicated_times=False), axis=0
+        sol.stepwise_time(
+            to_merge=[SolutionMerge.NODES, SolutionMerge.PHASES], duplicated_times=False
+        ),
+        axis=0,
     )
     index = 0
     for j in range(len(sol.ocp.nlp) - 1):
@@ -54,5 +67,7 @@ plt.ylabel("Angle (°)")
 plt.legend()
 plt.show()
 
-joint_overestimation = np.degrees(sol_list[0]["q"][0][-1]) - np.degrees(sol_list[1]["q"][0][-1])
+joint_overestimation = np.degrees(sol_list[0]["q"][0][-1]) - np.degrees(
+    sol_list[1]["q"][0][-1]
+)
 print(f"Joint overestimation: {joint_overestimation} degrees")

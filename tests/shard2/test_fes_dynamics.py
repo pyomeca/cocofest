@@ -26,7 +26,13 @@ def test_pulse_duration_multi_muscle_fes_dynamics():
     objective_functions = ObjectiveList()
     n_stim = 10
     for i in range(n_stim):
-        objective_functions.add(ObjectiveFcn.Lagrange.MINIMIZE_CONTROL, key="tau", weight=1, quadratic=True, phase=i)
+        objective_functions.add(
+            ObjectiveFcn.Lagrange.MINIMIZE_CONTROL,
+            key="tau",
+            weight=1,
+            quadratic=True,
+            phase=i,
+        )
 
     minimum_pulse_duration = DingModelPulseDurationFrequencyWithFatigue().pd0
     ocp = OcpFesMsk.prepare_ocp(
@@ -90,23 +96,34 @@ def test_pulse_duration_multi_muscle_fes_dynamics():
         ),
     )
 
-    sol_states = sol.decision_states(to_merge=[SolutionMerge.PHASES, SolutionMerge.NODES])
+    sol_states = sol.decision_states(
+        to_merge=[SolutionMerge.PHASES, SolutionMerge.NODES]
+    )
     np.testing.assert_almost_equal(sol_states["q"][0][0], 0)
     np.testing.assert_almost_equal(sol_states["q"][0][-1], 0)
     np.testing.assert_almost_equal(sol_states["q"][1][0], 0.08722222222222223)
     np.testing.assert_almost_equal(sol_states["q"][1][-1], 2.0933333333333333)
-    np.testing.assert_almost_equal(sol_states["F_BIClong"][0][-1], 25.871305635093197, decimal=4)
-    np.testing.assert_almost_equal(sol_states["F_TRIlong"][0][-1], 11.572282303524243, decimal=4)
+    np.testing.assert_almost_equal(
+        sol_states["F_BIClong"][0][-1], 25.871305635093197, decimal=4
+    )
+    np.testing.assert_almost_equal(
+        sol_states["F_TRIlong"][0][-1], 11.572282303524243, decimal=4
+    )
 
 
 def test_pulse_intensity_multi_muscle_fes_dynamics():
     n_stim = 10
-    minimum_pulse_intensity = DingModelIntensityFrequencyWithFatigue.min_pulse_intensity(
-        DingModelIntensityFrequencyWithFatigue()
+    minimum_pulse_intensity = (
+        DingModelIntensityFrequencyWithFatigue.min_pulse_intensity(
+            DingModelIntensityFrequencyWithFatigue()
+        )
     )
     track_forces = [
         np.array([0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1]),
-        [np.array([0, 10, 40, 90, 140, 80, 50, 10, 0, 0, 0]), np.array([0, 0, 0, 10, 40, 90, 140, 80, 50, 10, 0])],
+        [
+            np.array([0, 10, 40, 90, 140, 80, 50, 10, 0, 0, 0]),
+            np.array([0, 0, 0, 10, 40, 90, 140, 80, 50, 10, 0]),
+        ],
     ]
 
     ocp = OcpFesMsk.prepare_ocp(
@@ -170,7 +187,9 @@ def test_pulse_intensity_multi_muscle_fes_dynamics():
         ),
     )
 
-    sol_states = sol.decision_states(to_merge=[SolutionMerge.PHASES, SolutionMerge.NODES])
+    sol_states = sol.decision_states(
+        to_merge=[SolutionMerge.PHASES, SolutionMerge.NODES]
+    )
     np.testing.assert_almost_equal(sol_states["q"][0][0], 0)
     np.testing.assert_almost_equal(sol_states["q"][0][-1], -0.35378857156156907)
     np.testing.assert_almost_equal(sol_states["q"][1][0], 0.08722222222222223)
@@ -200,7 +219,9 @@ def test_fes_models_inputs_sanity_check_errors():
 
     with pytest.raises(
         ValueError,
-        match=re.escape("bound_type should be a string and should be equal to start, end or start_end"),
+        match=re.escape(
+            "bound_type should be a string and should be equal to start, end or start_end"
+        ),
     ):
         ocp = OcpFesMsk.prepare_ocp(
             biorbd_model_path=biorbd_model_path,
@@ -290,7 +311,9 @@ def test_fes_models_inputs_sanity_check_errors():
 
     with pytest.raises(
         TypeError,
-        match=re.escape(f"bound data index {1}: {5} and {'120'} should be an int or float"),
+        match=re.escape(
+            f"bound data index {1}: {5} and {'120'} should be an int or float"
+        ),
     ):
         ocp = OcpFesMsk.prepare_ocp(
             biorbd_model_path=biorbd_model_path,
@@ -454,12 +477,19 @@ def test_fes_models_inputs_sanity_check_errors():
             n_shooting=10,
             final_time=1,
             pulse_duration={"min": 0.0003, "max": 0.0006},
-            objective={"force_tracking": [np.array([1, 2, 3]), [[1, 2, 3], [1, 2, 3], [1, 2, 3]]]},
+            objective={
+                "force_tracking": [
+                    np.array([1, 2, 3]),
+                    [[1, 2, 3], [1, 2, 3], [1, 2, 3]],
+                ]
+            },
         )
 
     with pytest.raises(
         ValueError,
-        match=re.escape("force_tracking time and force argument must be the same length"),
+        match=re.escape(
+            "force_tracking time and force argument must be the same length"
+        ),
     ):
         ocp = OcpFesMsk.prepare_ocp(
             biorbd_model_path=biorbd_model_path,
@@ -497,7 +527,9 @@ def test_fes_models_inputs_sanity_check_errors():
 
     with pytest.raises(
         ValueError,
-        match=re.escape("end_node_tracking list must have the same size as the number of muscles in fes_muscle_models"),
+        match=re.escape(
+            "end_node_tracking list must have the same size as the number of muscles in fes_muscle_models"
+        ),
     ):
         ocp = OcpFesMsk.prepare_ocp(
             biorbd_model_path=biorbd_model_path,
@@ -516,7 +548,9 @@ def test_fes_models_inputs_sanity_check_errors():
 
     with pytest.raises(
         TypeError,
-        match=re.escape(f"end_node_tracking index {1}: {'hello'} must be int or float type"),
+        match=re.escape(
+            f"end_node_tracking index {1}: {'hello'} must be int or float type"
+        ),
     ):
         ocp = OcpFesMsk.prepare_ocp(
             biorbd_model_path=biorbd_model_path,
@@ -573,7 +607,9 @@ def test_fes_models_inputs_sanity_check_errors():
 
     with pytest.raises(
         ValueError,
-        match=re.escape("q_tracking[1] should have the same size as the number of generalized coordinates"),
+        match=re.escape(
+            "q_tracking[1] should have the same size as the number of generalized coordinates"
+        ),
     ):
         ocp = OcpFesMsk.prepare_ocp(
             biorbd_model_path=biorbd_model_path,
@@ -642,7 +678,9 @@ def test_fes_muscle_models_sanity_check_errors():
             biorbd_model_path=biorbd_model_path,
             bound_type="start",
             bound_data=[0, 5],
-            fes_muscle_models=[DingModelPulseDurationFrequencyWithFatigue(muscle_name="BIClong")],
+            fes_muscle_models=[
+                DingModelPulseDurationFrequencyWithFatigue(muscle_name="BIClong")
+            ],
             n_stim=1,
             n_shooting=10,
             final_time=1,

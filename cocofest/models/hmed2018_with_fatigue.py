@@ -27,10 +27,15 @@ class DingModelIntensityFrequencyWithFatigue(DingModelIntensityFrequency):
     """
 
     def __init__(
-        self, model_name: str = "hmed2018_with_fatigue", muscle_name: str = None, sum_stim_truncation: int = None
+        self,
+        model_name: str = "hmed2018_with_fatigue",
+        muscle_name: str = None,
+        sum_stim_truncation: int = None,
     ):
         super(DingModelIntensityFrequencyWithFatigue, self).__init__(
-            model_name=model_name, muscle_name=muscle_name, sum_stim_truncation=sum_stim_truncation
+            model_name=model_name,
+            muscle_name=muscle_name,
+            sum_stim_truncation=sum_stim_truncation,
         )
         self._with_fatigue = True
         # ---- Fatigue models ---- #
@@ -42,8 +47,16 @@ class DingModelIntensityFrequencyWithFatigue(DingModelIntensityFrequency):
     # ---- Absolutely needed methods ---- #
     @property
     def name_dof(self, with_muscle_name: bool = False) -> list[str]:
-        muscle_name = "_" + self.muscle_name if self.muscle_name and with_muscle_name else ""
-        return ["Cn" + muscle_name, "F" + muscle_name, "A" + muscle_name, "Tau1" + muscle_name, "Km" + muscle_name]
+        muscle_name = (
+            "_" + self.muscle_name if self.muscle_name and with_muscle_name else ""
+        )
+        return [
+            "Cn" + muscle_name,
+            "F" + muscle_name,
+            "A" + muscle_name,
+            "Tau1" + muscle_name,
+            "Km" + muscle_name,
+        ]
 
     @property
     def nb_state(self) -> int:
@@ -140,7 +153,9 @@ class DingModelIntensityFrequencyWithFatigue(DingModelIntensityFrequency):
         The value of the derivative of each state dx/dt at the current time t
         """
         r0 = km + self.r0_km_relationship  # Simplification
-        cn_dot = self.cn_dot_fun(cn, r0, t, t_stim_prev=t_stim_prev, intensity_stim=intensity_stim)  # Equation n°1
+        cn_dot = self.cn_dot_fun(
+            cn, r0, t, t_stim_prev=t_stim_prev, intensity_stim=intensity_stim
+        )  # Equation n°1
         f_dot = self.f_dot_fun(
             cn,
             f,
@@ -183,7 +198,9 @@ class DingModelIntensityFrequencyWithFatigue(DingModelIntensityFrequency):
         -------
         The value of the derivative time_state_force_no_cross_bridge (ms)
         """
-        return -(tau1 - self.tau1_rest) / self.tau_fat + self.alpha_tau1 * f  # Equation n°9
+        return (
+            -(tau1 - self.tau1_rest) / self.tau_fat + self.alpha_tau1 * f
+        )  # Equation n°9
 
     def km_dot_fun(self, km: MX, f: MX) -> MX | float:
         """
@@ -251,15 +268,21 @@ class DingModelIntensityFrequencyWithFatigue(DingModelIntensityFrequency):
         intensity_parameters = (
             nlp.model.get_intensity_parameters(nlp, parameters)
             if fes_model is None
-            else fes_model.get_intensity_parameters(nlp, parameters, muscle_name=fes_model.muscle_name)
+            else fes_model.get_intensity_parameters(
+                nlp, parameters, muscle_name=fes_model.muscle_name
+            )
         )
 
         dxdt_fun = fes_model.system_dynamics if fes_model else nlp.model.system_dynamics
         stim_apparition = (
             (
-                fes_model.get_stim_prev(nlp=nlp, parameters=parameters, idx=nlp.phase_idx)
+                fes_model.get_stim_prev(
+                    nlp=nlp, parameters=parameters, idx=nlp.phase_idx
+                )
                 if fes_model
-                else nlp.model.get_stim_prev(nlp=nlp, parameters=parameters, idx=nlp.phase_idx)
+                else nlp.model.get_stim_prev(
+                    nlp=nlp, parameters=parameters, idx=nlp.phase_idx
+                )
             )
             if stim_prev is None
             else stim_prev
@@ -287,7 +310,10 @@ class DingModelIntensityFrequencyWithFatigue(DingModelIntensityFrequency):
         )
 
     def declare_ding_variables(
-        self, ocp: OptimalControlProgram, nlp: NonLinearProgram, numerical_data_timeseries: dict[str, np.ndarray] = None
+        self,
+        ocp: OptimalControlProgram,
+        nlp: NonLinearProgram,
+        numerical_data_timeseries: dict[str, np.ndarray] = None,
     ):
         """
         Tell the program which variables are states and controls.
@@ -307,4 +333,6 @@ class DingModelIntensityFrequencyWithFatigue(DingModelIntensityFrequency):
             if "pulse_apparition_time" not in nlp.parameters.keys()
             else None
         )
-        ConfigureProblem.configure_dynamics_function(ocp, nlp, dyn_func=self.dynamics, stim_prev=stim_prev)
+        ConfigureProblem.configure_dynamics_function(
+            ocp, nlp, dyn_func=self.dynamics, stim_prev=stim_prev
+        )

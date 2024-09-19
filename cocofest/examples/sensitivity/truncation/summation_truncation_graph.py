@@ -106,7 +106,10 @@ for i in range(len(name_error_list)):
 
             counter += 1
         ground_truth_computation_time = computations_time_list[i][counter - 1]
-        time_diff = ground_truth_computation_time - computations_time_list[i][computation_time_beneath_1e_8_counter]
+        time_diff = (
+            ground_truth_computation_time
+            - computations_time_list[i][computation_time_beneath_1e_8_counter]
+        )
         time_diff = 0 if time_diff < 0 else time_diff
         computation_time_beneath_1e_8.append(time_diff)
 
@@ -157,7 +160,9 @@ cbar1 = fig.colorbar(
     ticks=[1e-12, 1e-10, 1e-8, 1e-6, 1e-4, 1e-2, 1, max_error],
     cmap=cmap,
 )
-cbar1.set_label(label="Muscle force absolute error (N)", size=25, fontname="Times New Roman")
+cbar1.set_label(
+    label="Muscle force absolute error (N)", size=25, fontname="Times New Roman"
+)
 
 cbar1.ax.set_yticklabels(
     [
@@ -175,7 +180,12 @@ cbar1.ax.set_yticklabels(
 )
 
 axs.plot(
-    np.arange(1, 101, 1).tolist(), np.arange(1, 101, 1).tolist(), color="red", ls="-", label="Ground truth", linewidth=4
+    np.arange(1, 101, 1).tolist(),
+    np.arange(1, 101, 1).tolist(),
+    color="red",
+    ls="-",
+    label="Ground truth",
+    linewidth=4,
 )
 
 x_beneath_1e_8 = np.arange(1, 101, 1).tolist()
@@ -183,15 +193,34 @@ for i in range(1):
     time_beneath_1e_8 = []
     y_beneath_1e_8 = []
     for j in range(len((all_mode_list_error_beneath_1e_8[i]))):
-        y_beneath_1e_8.append(parameter_list[i][all_mode_list_error_beneath_1e_8[i][j]][1])
-    axs.plot(x_beneath_1e_8, y_beneath_1e_8, color="darkred", label=r"Calcium absolute error < 1e⁻⁸", linewidth=3)
+        y_beneath_1e_8.append(
+            parameter_list[i][all_mode_list_error_beneath_1e_8[i][j]][1]
+        )
+    axs.plot(
+        x_beneath_1e_8,
+        y_beneath_1e_8,
+        color="darkred",
+        label=r"Calcium absolute error < 1e⁻⁸",
+        linewidth=3,
+    )
 
-axs.scatter(0, 0, color="white", label="Initialization (s) | 100 Integrations (s)", marker="+", s=0, lw=0)
+axs.scatter(
+    0,
+    0,
+    color="white",
+    label="Initialization (s) | 100 Integrations (s)",
+    marker="+",
+    s=0,
+    lw=0,
+)
 axs.scatter(
     1,
     1,
     color="blue",
-    label="      " + str(round(a_ocp_time, 3)) + "                   " + str(round(a_integration_time, 3)),
+    label="      "
+    + str(round(a_ocp_time, 3))
+    + "                   "
+    + str(round(a_integration_time, 3)),
     marker="^",
     s=200,
     lw=5,
@@ -200,7 +229,10 @@ axs.scatter(
     100,
     39,
     color="black",
-    label="      " + str(round(b_ocp_time, 3)) + "                   " + str(round(b_integration_time, 3)),
+    label="      "
+    + str(round(b_ocp_time, 3))
+    + "                   "
+    + str(round(b_integration_time, 3)),
     marker="+",
     s=500,
     lw=5,
@@ -209,7 +241,10 @@ axs.scatter(
     100,
     100,
     color="green",
-    label="      " + str(round(c_ocp_time, 3)) + "                   " + str(round(c_integration_time, 3)),
+    label="      "
+    + str(round(c_ocp_time, 3))
+    + "                   "
+    + str(round(c_integration_time, 3)),
     marker=",",
     s=200,
     lw=5,
@@ -217,12 +252,18 @@ axs.scatter(
 
 axs.set_xlabel("Frequency (Hz)", fontsize=25, fontname="Times New Roman")
 axs.xaxis.set_major_locator(MaxNLocator(integer=True))
-axs.set_ylabel("Past stimulations kept for computation (n)", fontsize=25, fontname="Times New Roman")
+axs.set_ylabel(
+    "Past stimulations kept for computation (n)",
+    fontsize=25,
+    fontname="Times New Roman",
+)
 axs.yaxis.set_major_locator(MaxNLocator(integer=True))
 
 ticks = np.arange(1, 101, 1).tolist()
 ticks_label = np.arange(1, 101, 1)
-ticks_label = np.where(np.logical_or((ticks_label % 10 == 0), (ticks_label == 1)), ticks_label, "").tolist()
+ticks_label = np.where(
+    np.logical_or((ticks_label % 10 == 0), (ticks_label == 1)), ticks_label, ""
+).tolist()
 axs.set_xticks(ticks)
 axs.set_xticklabels(ticks_label, fontname="Times New Roman")
 axs.xaxis.set_minor_locator(IndexLocator(base=1, offset=0))

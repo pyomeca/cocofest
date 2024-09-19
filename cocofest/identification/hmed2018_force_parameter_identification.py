@@ -3,7 +3,9 @@ import numpy as np
 
 from bioptim import Solver, Objective, OdeSolver
 from ..models.hmed2018 import DingModelIntensityFrequency
-from ..identification.ding2003_force_parameter_identification import DingModelFrequencyForceParameterIdentification
+from ..identification.ding2003_force_parameter_identification import (
+    DingModelFrequencyForceParameterIdentification,
+)
 from ..optimization.fes_identification_ocp import OcpFesId
 from .identification_method import (
     full_data_extraction,
@@ -14,7 +16,9 @@ from .identification_method import (
 )
 
 
-class DingModelPulseIntensityFrequencyForceParameterIdentification(DingModelFrequencyForceParameterIdentification):
+class DingModelPulseIntensityFrequencyForceParameterIdentification(
+    DingModelFrequencyForceParameterIdentification
+):
     """
     This class extends the DingModelFrequencyForceParameterIdentification class and is used to define an optimal control problem (OCP).
     It prepares the full program and provides all the necessary parameters to solve a functional electrical stimulation OCP.
@@ -67,7 +71,9 @@ class DingModelPulseIntensityFrequencyForceParameterIdentification(DingModelFreq
         **kwargs: dict
             Additional keyword arguments.
         """
-        super(DingModelPulseIntensityFrequencyForceParameterIdentification, self).__init__(
+        super(
+            DingModelPulseIntensityFrequencyForceParameterIdentification, self
+        ).__init__(
             model=model,
             data_path=data_path,
             identification_method=identification_method,
@@ -141,7 +147,13 @@ class DingModelPulseIntensityFrequencyForceParameterIdentification(DingModelFreq
                 "function": model.set_bs,
                 "scaling": 1,  # 1000
             },
-            "Is": {"initial_guess": 50, "min_bound": 1, "max_bound": 150, "function": model.set_Is, "scaling": 1},
+            "Is": {
+                "initial_guess": 50,
+                "min_bound": 1,
+                "max_bound": 150,
+                "function": model.set_Is,
+                "scaling": 1,
+            },
             "cr": {
                 "initial_guess": 1,
                 "min_bound": 0.01,
@@ -165,7 +177,16 @@ class DingModelPulseIntensityFrequencyForceParameterIdentification(DingModelFreq
             self.model.Is,
             self.model.cr,
         ]
-        self.key_parameters = ["a_rest", "km_rest", "tau1_rest", "tau2", "ar", "bs", "Is", "cr"]
+        self.key_parameters = [
+            "a_rest",
+            "km_rest",
+            "tau1_rest",
+            "tau2",
+            "ar",
+            "bs",
+            "Is",
+            "cr",
+        ]
 
     @staticmethod
     def _set_model_parameters(model, model_parameters_value):
@@ -243,7 +264,9 @@ class DingModelPulseIntensityFrequencyForceParameterIdentification(DingModelFreq
 
         time, stim, force, discontinuity = average_data_extraction(self.data_path)
         pulse_intensity = self.pulse_intensity_extraction(self.data_path)
-        force_at_node = force_at_node_in_ocp(time, force, self.n_shooting, self.final_time, None)
+        force_at_node = force_at_node_in_ocp(
+            time, force, self.n_shooting, self.final_time, None
+        )
 
         # --- Building force ocp --- #
         self.force_ocp = OcpFesId.prepare_ocp(
@@ -307,14 +330,26 @@ class DingModelPulseIntensityFrequencyForceParameterIdentification(DingModelFreq
 
         elif self.force_model_identification_method == "average":
             time, stim, force, discontinuity = average_data_extraction(self.data_path)
-            pulse_intensity = np.mean(np.array(self.pulse_intensity_extraction(self.data_path)))
+            pulse_intensity = np.mean(
+                np.array(self.pulse_intensity_extraction(self.data_path))
+            )
 
         elif self.force_model_identification_method == "sparse":
-            force_curve_number = self.kwargs["force_curve_number"] if "force_curve_number" in self.kwargs else 5
-            time, stim, force, discontinuity = sparse_data_extraction(self.data_path, force_curve_number)
-            pulse_intensity = self.pulse_intensity_extraction(self.data_path)  # TODO : adapt this for sparse data
+            force_curve_number = (
+                self.kwargs["force_curve_number"]
+                if "force_curve_number" in self.kwargs
+                else 5
+            )
+            time, stim, force, discontinuity = sparse_data_extraction(
+                self.data_path, force_curve_number
+            )
+            pulse_intensity = self.pulse_intensity_extraction(
+                self.data_path
+            )  # TODO : adapt this for sparse data
 
-        force_at_node = force_at_node_in_ocp(time, force, self.n_shooting, self.final_time, force_curve_number)
+        force_at_node = force_at_node_in_ocp(
+            time, force, self.n_shooting, self.final_time, force_curve_number
+        )
 
         if self.double_step_identification:
             initial_guess = self._force_model_identification_for_initial_guess()
@@ -329,12 +364,13 @@ class DingModelPulseIntensityFrequencyForceParameterIdentification(DingModelFreq
             n_shooting=self.n_shooting,
             final_time=self.final_time,
             stim_time=stim,
-            force_tracking=force_at_node,
+            objective={"force_tracking": force_at_node},
+            # force_tracking=force_at_node,
             key_parameter_to_identify=self.key_parameter_to_identify,
             additional_key_settings=self.additional_key_settings,
             custom_objective=self.custom_objective,
             discontinuity_in_ocp=discontinuity,
-            pulse_intensity=pulse_intensity,
+            pulse_intensity={"fixed": pulse_intensity},
             use_sx=self.use_sx,
             ode_solver=self.ode_solver,
             n_threads=self.n_threads,
@@ -342,9 +378,13 @@ class DingModelPulseIntensityFrequencyForceParameterIdentification(DingModelFreq
 
         print(f"OCP creation time : {time_package.time() - start_time} seconds")
 
-        self.force_identification_result = self.force_ocp.solve(Solver.IPOPT(_max_iter=100000))
+        self.force_identification_result = self.force_ocp.solve(
+            Solver.IPOPT(_max_iter=100000)
+        )
         identified_parameters = {}
         for key in self.key_parameter_to_identify:
-            identified_parameters[key] = self.force_identification_result.parameters[key][0]
+            identified_parameters[key] = self.force_identification_result.parameters[
+                key
+            ][0]
 
         return identified_parameters

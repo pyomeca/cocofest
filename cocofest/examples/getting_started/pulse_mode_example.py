@@ -12,16 +12,14 @@ from cocofest import DingModelFrequencyWithFatigue, IvpFes
 # This example shows how to create a problem with single pulses.
 # The stimulation won't be optimized.
 ns = 200
-n_stim = 10
 final_time = 1
 
-fes_parameters = {"model": DingModelFrequencyWithFatigue(),
-                  "n_stim": n_stim,
-                  "pulse_mode": "single",
-                  "stim_time": [0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]}
-ivp_parameters = {"n_shooting": ns,
-                  "final_time": final_time,
-                  "use_sx": True}
+fes_parameters = {
+    "model": DingModelFrequencyWithFatigue(),
+    "pulse_mode": "single",
+    "stim_time": [0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9],
+}
+ivp_parameters = {"n_shooting": ns, "final_time": final_time, "use_sx": True}
 
 ivp = IvpFes(
     fes_parameters,

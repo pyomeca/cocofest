@@ -14,10 +14,8 @@ from bioptim import (
     Solver,
 )
 
-from cocofest import DingModelPulseDurationFrequencyWithFatigue, OcpFesMsk
+from cocofest import DingModelPulseDurationFrequencyWithFatigue, OcpFesMsk, FesMskModel
 
-n_stim = 10
-n_shooting = 10
 objective_functions = ObjectiveList()
 objective_functions.add(
     ObjectiveFcn.Mayer.MINIMIZE_STATE,
@@ -27,32 +25,38 @@ objective_functions.add(
     target=np.array([[0, 0]]).T,
     weight=100,
     quadratic=True,
-    phase=n_stim - 1,
+    phase=0,
 )
 
 minimum_pulse_duration = DingModelPulseDurationFrequencyWithFatigue().pd0
-
-ocp = OcpFesMsk.prepare_ocp(
-    biorbd_model_path="../../msk_models/arm26_biceps_triceps.bioMod",
-    bound_type="start_end",
-    bound_data=[[0, 5], [0, 90]],
-    fes_muscle_models=[
+model = FesMskModel(
+    name=None,
+    biorbd_path="../../msk_models/arm26_biceps_triceps.bioMod",
+    muscles_model=[
         DingModelPulseDurationFrequencyWithFatigue(muscle_name="BIClong"),
         DingModelPulseDurationFrequencyWithFatigue(muscle_name="TRIlong"),
     ],
-    n_stim=n_stim,
-    n_shooting=10,
+    activate_force_length_relationship=True,
+    activate_force_velocity_relationship=True,
+)
+
+ocp = OcpFesMsk.prepare_ocp(
+    model=model,
+    stim_time=list(np.linspace(0, 1, 11))[:-1],
+    n_shooting=100,
     final_time=1,
     pulse_duration={
         "min": minimum_pulse_duration,
         "max": 0.0006,
         "bimapping": False,
     },
-    with_residual_torque=False,
-    objective={"custom": objective_functions},
-    activate_force_length_relationship=True,
-    activate_force_velocity_relationship=False,
-    minimize_muscle_fatigue=True,
+    objective={"custom": objective_functions, "minimize_fatigue": True},
+    msk_info={
+        "bound_type": "start_end",
+        "bound_data": [[0, 5], [0, 90]],
+        "with_residual_torque": False,
+    },
+    n_threads=5,
 )
 
 sol = ocp.solve(Solver.IPOPT(_max_iter=3000))

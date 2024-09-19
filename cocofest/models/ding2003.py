@@ -90,7 +90,9 @@ class DingModelFrequency(FesModel):
     # ---- Needed for the example ---- #
     @property
     def name_dof(self, with_muscle_name: bool = False) -> list[str]:
-        muscle_name = "_" + self.muscle_name if self.muscle_name and with_muscle_name else ""
+        muscle_name = (
+            "_" + self.muscle_name if self.muscle_name and with_muscle_name else ""
+        )
         return ["Cn" + muscle_name, "F" + muscle_name]
 
     @property
@@ -111,7 +113,12 @@ class DingModelFrequency(FesModel):
 
     @property
     def identifiable_parameters(self):
-        return {"a_rest": self.a_rest, "tau1_rest": self.tau1_rest, "km_rest": self.km_rest, "tau2": self.tau2}
+        return {
+            "a_rest": self.a_rest,
+            "tau1_rest": self.tau1_rest,
+            "km_rest": self.km_rest,
+            "tau2": self.tau2,
+        }
 
     # ---- Model's dynamics ---- #
     def system_dynamics(
@@ -219,7 +226,9 @@ class DingModelFrequency(FesModel):
             sum_multiplier += ri * exp_time * coefficient
         return sum_multiplier
 
-    def cn_dot_fun(self, cn: MX, r0: MX | float, t: MX, t_stim_prev: list[MX]) -> MX | float:
+    def cn_dot_fun(
+        self, cn: MX, r0: MX | float, t: MX, t_stim_prev: list[MX]
+    ) -> MX | float:
         """
         Parameters
         ----------
@@ -236,7 +245,9 @@ class DingModelFrequency(FesModel):
         -------
         The value of the derivative ca_troponin_complex (unitless)
         """
-        sum_multiplier = self.cn_sum_fun(r0, t, t_stim_prev=t_stim_prev)  # Part of Eq n°1
+        sum_multiplier = self.cn_sum_fun(
+            r0, t, t_stim_prev=t_stim_prev
+        )  # Part of Eq n°1
 
         return (1 / self.tauc) * sum_multiplier - (cn / self.tauc)  # Equation n°1
 
@@ -327,9 +338,13 @@ class DingModelFrequency(FesModel):
         dxdt_fun = fes_model.system_dynamics if fes_model else nlp.model.system_dynamics
         stim_apparition = (
             (
-                fes_model.get_stim_prev(nlp=nlp, parameters=parameters, idx=nlp.phase_idx)
+                fes_model.get_stim_prev(
+                    nlp=nlp, parameters=parameters, idx=nlp.phase_idx
+                )
                 if fes_model
-                else nlp.model.get_stim_prev(nlp=nlp, parameters=parameters, idx=nlp.phase_idx)
+                else nlp.model.get_stim_prev(
+                    nlp=nlp, parameters=parameters, idx=nlp.phase_idx
+                )
             )
             if stim_prev is None
             else stim_prev
@@ -349,7 +364,10 @@ class DingModelFrequency(FesModel):
         )
 
     def declare_ding_variables(
-        self, ocp: OptimalControlProgram, nlp: NonLinearProgram, numerical_data_timeseries: dict[str, np.ndarray] = None
+        self,
+        ocp: OptimalControlProgram,
+        nlp: NonLinearProgram,
+        numerical_data_timeseries: dict[str, np.ndarray] = None,
     ):
         """
         Tell the program which variables are states and controls.
@@ -369,7 +387,9 @@ class DingModelFrequency(FesModel):
             if "pulse_apparition_time" not in nlp.parameters.keys()
             else None
         )
-        ConfigureProblem.configure_dynamics_function(ocp, nlp, dyn_func=self.dynamics, stim_prev=stim_prev)
+        ConfigureProblem.configure_dynamics_function(
+            ocp, nlp, dyn_func=self.dynamics, stim_prev=stim_prev
+        )
 
     @staticmethod
     def get_stim_prev(nlp: NonLinearProgram, parameters: MX, idx: int) -> list[float]:

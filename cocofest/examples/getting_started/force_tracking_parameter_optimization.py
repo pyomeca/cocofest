@@ -50,7 +50,9 @@ sol_merged = sol.decision_states(to_merge=[SolutionMerge.PHASES, SolutionMerge.N
 
 fourier_fun = FourierSeries()
 fourier_coef = fourier_fun.compute_real_fourier_coeffs(time, force, 50)
-y_approx = FourierSeries().fit_func_by_fourier_series_with_real_coeffs(time, fourier_coef)
+y_approx = FourierSeries().fit_func_by_fourier_series_with_real_coeffs(
+    time, fourier_coef
+)
 plt.title("Comparison between given and simulated force after parameter optimization")
 plt.plot(time, force, color="red", label="force from file")
 plt.plot(time, y_approx, color="orange", label="force after fourier transform")
@@ -58,7 +60,12 @@ plt.plot(time, y_approx, color="orange", label="force after fourier transform")
 solution_time = sol.decision_time(to_merge=SolutionMerge.KEYS, continuous=True)
 solution_time = [float(j) for j in solution_time]
 
-plt.plot(solution_time, sol_merged["F"].squeeze(), color="blue", label="force from optimized stimulation")
+plt.plot(
+    solution_time,
+    sol_merged["F"].squeeze(),
+    color="blue",
+    label="force from optimized stimulation",
+)
 plt.xlabel("Time (s)")
 plt.ylabel("Force (N)")
 plt.legend()

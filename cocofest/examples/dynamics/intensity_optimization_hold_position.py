@@ -11,49 +11,48 @@ from bioptim import (
     Node,
     ObjectiveFcn,
     ObjectiveList,
-    Solver,
 )
 
-from cocofest import DingModelIntensityFrequencyWithFatigue, OcpFesMsk
+from cocofest import DingModelIntensityFrequencyWithFatigue, OcpFesMsk, FesMskModel
 
-
+n_shooting = 100
 objective_functions = ObjectiveList()
-n_stim = 10
-n_shooting = 10
-for i in range(n_stim):
-    objective_functions.add(ObjectiveFcn.Lagrange.MINIMIZE_CONTROL, key="tau", weight=10, quadratic=True, phase=i)
-    objective_functions.add(
-        ObjectiveFcn.Mayer.MINIMIZE_STATE,
-        key="q",
-        index=[0],
-        node=Node.ALL,
-        target=np.array([[1.57]] * (n_shooting + 1)).T,
-        weight=10,
-        quadratic=True,
-        phase=i,
-    )
-    objective_functions.add(
-        ObjectiveFcn.Mayer.MINIMIZE_STATE,
-        key="qdot",
-        index=[0],
-        node=Node.ALL,
-        target=np.array([[0]] * (n_shooting + 1)).T,
-        weight=10,
-        quadratic=True,
-        phase=i,
-    )
+objective_functions.add(
+    ObjectiveFcn.Mayer.MINIMIZE_STATE,
+    key="q",
+    index=[0],
+    node=Node.ALL,
+    target=np.array([[1.57]] * (n_shooting + 1)).T,
+    weight=10,
+    quadratic=True,
+    phase=0,
+)
+objective_functions.add(
+    ObjectiveFcn.Mayer.MINIMIZE_STATE,
+    key="qdot",
+    index=[0],
+    node=Node.ALL,
+    target=np.array([[0]] * (n_shooting + 1)).T,
+    weight=10,
+    quadratic=True,
+    phase=0,
+)
 
 minimum_pulse_intensity = DingModelIntensityFrequencyWithFatigue.min_pulse_intensity(
     DingModelIntensityFrequencyWithFatigue()
 )
+model = FesMskModel(
+    name=None,
+    biorbd_path="../msk_models/arm26_biceps_1dof.bioMod",
+    muscles_model=[DingModelIntensityFrequencyWithFatigue(muscle_name="BIClong")],
+    activate_force_length_relationship=True,
+    activate_force_velocity_relationship=True,
+)
 
 ocp = OcpFesMsk.prepare_ocp(
-    biorbd_model_path="../msk_models/arm26_biceps_1dof.bioMod",
-    bound_type="start",
-    bound_data=[90],
-    fes_muscle_models=[DingModelIntensityFrequencyWithFatigue(muscle_name="BIClong")],
-    n_stim=n_stim,
-    n_shooting=10,
+    model=model,
+    stim_time=np.linspace(0, 1, 11)[:-1],
+    n_shooting=n_shooting,
     final_time=1,
     pulse_event={"min": 0.1, "max": 1, "bimapping": True},
     pulse_intensity={
@@ -61,10 +60,12 @@ ocp = OcpFesMsk.prepare_ocp(
         "max": 130,
         "bimapping": False,
     },
-    with_residual_torque=False,
+    msk_info={"with_residual_torque": False, "bound_type": "start", "bound_data": [90]},
     objective={"custom": objective_functions},
+    use_sx=False,
+    n_threads=5,
 )
 
-sol = ocp.solve(Solver.IPOPT(_max_iter=1000))
+sol = ocp.solve()
 sol.animate()
 sol.graphs(show_bounds=False)

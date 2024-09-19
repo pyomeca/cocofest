@@ -128,8 +128,15 @@ plt.ylabel("force (N)")
 y_pos = 0.85
 for key, value in result_dict.items():
     plt.annotate(f"{key} : ", xy=(0.7, y_pos), xycoords="axes fraction", color="black")
-    plt.annotate(str(round(value[0], 5)), xy=(0.78, y_pos), xycoords="axes fraction", color="red")
-    plt.annotate(str(round(value[1], 5)), xy=(0.85, y_pos), xycoords="axes fraction", color="blue")
+    plt.annotate(
+        str(round(value[0], 5)), xy=(0.78, y_pos), xycoords="axes fraction", color="red"
+    )
+    plt.annotate(
+        str(round(value[1], 5)),
+        xy=(0.85, y_pos),
+        xycoords="axes fraction",
+        color="blue",
+    )
     y_pos -= 0.05
 
 # --- Delete the temp file ---#

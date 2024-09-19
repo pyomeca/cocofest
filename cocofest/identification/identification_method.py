@@ -37,7 +37,9 @@ def full_data_extraction(model_data_path):
         model_time_data = (
             data["time"]
             if data["stim_time"][0] == 0
-            else [[(time - data["stim_time"][0]) for time in row] for row in data["time"]]
+            else [
+                [(time - data["stim_time"][0]) for time in row] for row in data["time"]
+            ]
         )
 
         # model_data = [item for sublist in model_data for item in sublist]
@@ -48,16 +50,21 @@ def full_data_extraction(model_data_path):
             discontinuity_phase_list.append(
                 len(global_model_stim_apparition_time[-1])
                 if discontinuity_phase_list == []
-                else discontinuity_phase_list[-1] + len(global_model_stim_apparition_time[-1])
+                else discontinuity_phase_list[-1]
+                + len(global_model_stim_apparition_time[-1])
             )
 
             model_stim_apparition_time = [
-                stim_time + global_model_time_data[i - 1][-1] for stim_time in model_stim_apparition_time
+                stim_time + global_model_time_data[i - 1][-1]
+                for stim_time in model_stim_apparition_time
             ]
 
-            model_time_data = [(time + global_model_time_data[i - 1][-1]) for time in model_time_data]
+            model_time_data = [
+                (time + global_model_time_data[i - 1][-1]) for time in model_time_data
+            ]
             model_stim_apparition_time = [
-                (time + global_model_time_data[i - 1][-1]) for time in model_stim_apparition_time
+                (time + global_model_time_data[i - 1][-1])
+                for time in model_stim_apparition_time
             ]
 
         # Storing data into global lists
@@ -65,9 +72,15 @@ def full_data_extraction(model_data_path):
         global_model_stim_apparition_time.append(model_stim_apparition_time)
         global_model_time_data.append(model_time_data)
     # Expending global lists
-    global_model_muscle_data = [item for sublist in global_model_muscle_data for item in sublist]
-    global_model_stim_apparition_time = [item for sublist in global_model_stim_apparition_time for item in sublist]
-    global_model_time_data = [item for sublist in global_model_time_data for item in sublist]
+    global_model_muscle_data = [
+        item for sublist in global_model_muscle_data for item in sublist
+    ]
+    global_model_stim_apparition_time = [
+        item for sublist in global_model_stim_apparition_time for item in sublist
+    ]
+    global_model_time_data = [
+        item for sublist in global_model_time_data for item in sublist
+    ]
     return (
         global_model_time_data,
         global_model_stim_apparition_time,
@@ -106,13 +119,17 @@ def average_data_extraction(model_data_path):
         for j in range(1, len(data["stim_time"])):
             stim_interval = data["stim_time"][j] - data["stim_time"][j - 1]
             if stim_interval < stim_threshold * 1.5:
-                temp_stimulation_instant.append(data["stim_time"][j] - data["stim_time"][j - 1])
+                temp_stimulation_instant.append(
+                    data["stim_time"][j] - data["stim_time"][j - 1]
+                )
         stimulation_temp_frequency = round(1 / np.mean(temp_stimulation_instant), 0)
 
         model_time_data = (
             data["time"]
             if data["stim_time"][0] == 0
-            else [[(time - data["stim_time"][0]) for time in row] for row in data["time"]]
+            else [
+                [(time - data["stim_time"][0]) for time in row] for row in data["time"]
+            ]
         )
 
         # Average on each force curve
@@ -123,29 +140,39 @@ def average_data_extraction(model_data_path):
             if len(model_data[j]) < smallest_list:
                 smallest_list = len(model_data[j])
 
-        model_data = np.mean([row[:smallest_list] for row in model_data], axis=0).tolist()
+        model_data = np.mean(
+            [row[:smallest_list] for row in model_data], axis=0
+        ).tolist()
         model_time_data = [item for sublist in model_time_data for item in sublist]
 
         model_time_data = model_time_data[:smallest_list]
         train_duration = 1
 
-        average_stim_apparition = np.linspace(0, train_duration, int(stimulation_temp_frequency * train_duration) + 1)[
-            :-1
-        ]
+        average_stim_apparition = np.linspace(
+            0, train_duration, int(stimulation_temp_frequency * train_duration) + 1
+        )[:-1]
         average_stim_apparition = [time for time in average_stim_apparition]
         if i == len(model_data_path) - 1:
-            average_stim_apparition = np.append(average_stim_apparition, model_time_data[-1]).tolist()
+            average_stim_apparition = np.append(
+                average_stim_apparition, model_time_data[-1]
+            ).tolist()
 
         # Indexing the current data time on the previous one to ensure time continuity
         if i != 0:
             discontinuity_phase_list.append(
                 len(global_model_stim_apparition_time[-1])
                 if discontinuity_phase_list == []
-                else discontinuity_phase_list[-1] + len(global_model_stim_apparition_time[-1])
+                else discontinuity_phase_list[-1]
+                + len(global_model_stim_apparition_time[-1])
             )
 
-            model_time_data = [(time + global_model_time_data[i - 1][-1]) for time in model_time_data]
-            average_stim_apparition = [(time + global_model_time_data[i - 1][-1]) for time in average_stim_apparition]
+            model_time_data = [
+                (time + global_model_time_data[i - 1][-1]) for time in model_time_data
+            ]
+            average_stim_apparition = [
+                (time + global_model_time_data[i - 1][-1])
+                for time in average_stim_apparition
+            ]
 
         # Storing data into global lists
         global_model_muscle_data.append(model_data)
@@ -153,9 +180,15 @@ def average_data_extraction(model_data_path):
         global_model_time_data.append(model_time_data)
 
     # Expending global lists
-    global_model_muscle_data = [item for sublist in global_model_muscle_data for item in sublist]
-    global_model_stim_apparition_time = [item for sublist in global_model_stim_apparition_time for item in sublist]
-    global_model_time_data = [item for sublist in global_model_time_data for item in sublist]
+    global_model_muscle_data = [
+        item for sublist in global_model_muscle_data for item in sublist
+    ]
+    global_model_stim_apparition_time = [
+        item for sublist in global_model_stim_apparition_time for item in sublist
+    ]
+    global_model_time_data = [
+        item for sublist in global_model_time_data for item in sublist
+    ]
     return (
         global_model_time_data,
         global_model_stim_apparition_time,
@@ -305,15 +338,24 @@ def node_shooting_list_creation(stim, stimulated_n_shooting):
     threshold_stimulation_interval = np.mean(final_time_phase)
     stimulation_interval_average_without_rest_time = np.delete(
         np.array(final_time_phase),
-        np.where(np.logical_or(final_time_phase > threshold_stimulation_interval, np.array(final_time_phase) == 0)),
+        np.where(
+            np.logical_or(
+                final_time_phase > threshold_stimulation_interval,
+                np.array(final_time_phase) == 0,
+            )
+        ),
     )
-    stimulation_interval_average = np.mean(stimulation_interval_average_without_rest_time)
+    stimulation_interval_average = np.mean(
+        stimulation_interval_average_without_rest_time
+    )
     n_shooting = []
 
     for i in range(len(final_time_phase)):
         if final_time_phase[i] > threshold_stimulation_interval:
             temp_final_time = final_time_phase[i]
-            rest_n_shooting = int((temp_final_time / stimulation_interval_average) * stimulated_n_shooting)
+            rest_n_shooting = int(
+                (temp_final_time / stimulation_interval_average) * stimulated_n_shooting
+            )
             n_shooting.append(rest_n_shooting)
         else:
             n_shooting.append(stimulated_n_shooting)

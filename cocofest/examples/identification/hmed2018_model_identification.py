@@ -67,7 +67,16 @@ ocp = DingModelPulseIntensityFrequencyForceParameterIdentification(
     data_path=[pickle_file_name],
     identification_method="full",
     double_step_identification=False,
-    key_parameter_to_identify=["a_rest", "km_rest", "tau1_rest", "tau2", "ar", "bs", "Is", "cr"],
+    key_parameter_to_identify=[
+        "a_rest",
+        "km_rest",
+        "tau1_rest",
+        "tau2",
+        "ar",
+        "bs",
+        "Is",
+        "cr",
+    ],
     additional_key_settings={},
     n_shooting=n_shooting,
     use_sx=True,
@@ -91,7 +100,11 @@ identified_force_list = []
 identified_time_list = []
 
 # Building the Initial Value Problem
-fes_parameters = {"model": identified_model, "n_stim": n_stim, "pulse_intensity": pulse_intensity}
+fes_parameters = {
+    "model": identified_model,
+    "n_stim": n_stim,
+    "pulse_intensity": pulse_intensity,
+}
 ivp_parameters = {
     "n_shooting": n_shooting,
     "final_time": final_time,
@@ -137,8 +150,15 @@ plt.ylabel("force (N)")
 y_pos = 0.85
 for key, value in result_dict.items():
     plt.annotate(f"{key} : ", xy=(0.7, y_pos), xycoords="axes fraction", color="black")
-    plt.annotate(str(round(value[0], 5)), xy=(0.78, y_pos), xycoords="axes fraction", color="red")
-    plt.annotate(str(round(value[1], 5)), xy=(0.85, y_pos), xycoords="axes fraction", color="blue")
+    plt.annotate(
+        str(round(value[0], 5)), xy=(0.78, y_pos), xycoords="axes fraction", color="red"
+    )
+    plt.annotate(
+        str(round(value[1], 5)),
+        xy=(0.85, y_pos),
+        xycoords="axes fraction",
+        color="blue",
+    )
     y_pos -= 0.05
 
 # --- Delete the temp file ---#

@@ -227,7 +227,9 @@ class StateConfigure:
                         as_controls=False,
                         muscle_name=muscle_dynamics_model.muscle_name,
                     )
-                    state_name_list.append(state_key + "_" + muscle_dynamics_model.muscle_name)
+                    state_name_list.append(
+                        state_key + "_" + muscle_dynamics_model.muscle_name
+                    )
 
         return state_name_list
 
@@ -235,5 +237,9 @@ class StateConfigure:
         for state_key in fes_model.name_dof:
             if state_key in self.state_dictionary.keys():
                 self.state_dictionary[state_key](
-                    ocp=ocp, nlp=nlp, as_states=True, as_controls=False, muscle_name=fes_model.muscle_name
+                    ocp=ocp,
+                    nlp=nlp,
+                    as_states=True,
+                    as_controls=False,
+                    muscle_name=fes_model.muscle_name,
                 )

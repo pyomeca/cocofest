@@ -12,8 +12,12 @@ class FourierSeries:
     def compute_real_fourier_coeffs(self, x, y, n):
         result = []
         for i in range(n + 1):
-            an = (2.0 / self.p) * spi.trapezoid(y * np.cos(2 * np.pi * i * x / self.p), x)
-            bn = (2.0 / self.p) * spi.trapezoid(y * np.sin(2 * np.pi * i * x / self.p), x)
+            an = (2.0 / self.p) * spi.trapezoid(
+                y * np.cos(2 * np.pi * i * x / self.p), x
+            )
+            bn = (2.0 / self.p) * spi.trapezoid(
+                y * np.sin(2 * np.pi * i * x / self.p), x
+            )
             result.append((an, bn))
         return np.array(result)
 
@@ -25,14 +29,18 @@ class FourierSeries:
         if mode == "numpy":
             for n in range(0, len(ab)):
                 if n > 0:
-                    result += a[n] * np.cos(2.0 * np.pi * n * x / self.p) + b[n] * np.sin(2.0 * np.pi * n * x / self.p)
+                    result += a[n] * np.cos(2.0 * np.pi * n * x / self.p) + b[
+                        n
+                    ] * np.sin(2.0 * np.pi * n * x / self.p)
                 else:
                     result += a[0] / 2.0
             return result
         elif mode == "casadi":
             for n in range(0, len(ab)):
                 if n > 0:
-                    result += a[n] * cos(2.0 * np.pi * n * x / self.p) + b[n] * sin(2.0 * np.pi * n * x / self.p)
+                    result += a[n] * cos(2.0 * np.pi * n * x / self.p) + b[n] * sin(
+                        2.0 * np.pi * n * x / self.p
+                    )
                 else:
                     result += a[0] / 2.0
             return result

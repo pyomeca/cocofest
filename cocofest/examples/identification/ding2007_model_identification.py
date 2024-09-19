@@ -90,7 +90,11 @@ identified_model.pdt = identified_parameters["pdt"]
 identified_force_list = []
 identified_time_list = []
 
-fes_parameters = {"model": identified_model, "n_stim": n_stim, "pulse_duration": pulse_duration}
+fes_parameters = {
+    "model": identified_model,
+    "n_stim": n_stim,
+    "pulse_duration": pulse_duration,
+}
 ivp_parameters = {
     "n_shooting": n_shooting,
     "final_time": final_time,
@@ -115,7 +119,10 @@ identified_force = identified_result["F"][0]
 ) = full_data_extraction([pickle_file_name])
 
 result_dict = {
-    "tau1_rest": [identified_model.tau1_rest, DingModelPulseDurationFrequency().tau1_rest],
+    "tau1_rest": [
+        identified_model.tau1_rest,
+        DingModelPulseDurationFrequency().tau1_rest,
+    ],
     "tau2": [identified_model.tau2, DingModelPulseDurationFrequency().tau2],
     "km_rest": [identified_model.km_rest, DingModelPulseDurationFrequency().km_rest],
     "a_scale": [identified_model.a_scale, DingModelPulseDurationFrequency().a_scale],
@@ -126,7 +133,13 @@ result_dict = {
 # Plotting the identification result
 plt.title("Force state result")
 plt.plot(pickle_time_data, force_n, color="black", label="no noise")
-plt.plot(pickle_time_data, pickle_muscle_data, "-.", color="blue", label="simulated (with noise)")
+plt.plot(
+    pickle_time_data,
+    pickle_muscle_data,
+    "-.",
+    color="blue",
+    label="simulated (with noise)",
+)
 plt.plot(identified_time, identified_force, color="red", label="identified")
 plt.xlabel("time (s)")
 plt.ylabel("force (N)")
@@ -134,8 +147,15 @@ plt.ylabel("force (N)")
 y_pos = 0.85
 for key, value in result_dict.items():
     plt.annotate(f"{key} : ", xy=(0.7, y_pos), xycoords="axes fraction", color="black")
-    plt.annotate(str(round(value[0], 5)), xy=(0.78, y_pos), xycoords="axes fraction", color="red")
-    plt.annotate(str(round(value[1], 5)), xy=(0.85, y_pos), xycoords="axes fraction", color="blue")
+    plt.annotate(
+        str(round(value[0], 5)), xy=(0.78, y_pos), xycoords="axes fraction", color="red"
+    )
+    plt.annotate(
+        str(round(value[1], 5)),
+        xy=(0.85, y_pos),
+        xycoords="axes fraction",
+        color="blue",
+    )
     y_pos -= 0.05
 
 # --- Delete the temp file ---#

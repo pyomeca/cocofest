@@ -5,7 +5,8 @@ from bioptim import (
     OdeSolver,
     CyclicNonlinearModelPredictiveControl,
     ControlType,
-    Solution,)
+    Solution,
+)
 
 from .fes_ocp import OcpFes
 from ..models.fes_model import FesModel
@@ -31,12 +32,18 @@ class NmpcFes:
 
         stimulation_time = sol.decision_parameters()["pulse_apparition_time"]
         stim_prev = np.array(stimulation_time) - sol.ocp.phase_time[0]
-        current_stim = np.array(sol.ocp.parameter_bounds["pulse_apparition_time"].min).reshape(sol.ocp.parameter_bounds["pulse_apparition_time"].min.shape[0])
+        current_stim = np.array(
+            sol.ocp.parameter_bounds["pulse_apparition_time"].min
+        ).reshape(sol.ocp.parameter_bounds["pulse_apparition_time"].min.shape[0])
         updated_stim = np.append(stim_prev[:-1], current_stim)
 
         previous_pulse_duration = list(sol.parameters["pulse_duration"][:-1])
-        pulse_duration_bound_min = previous_pulse_duration + [sol.ocp.parameter_bounds["pulse_duration"].min[0][0]] * len(sol.decision_parameters()["pulse_apparition_time"])
-        pulse_duration_bound_max = previous_pulse_duration + [sol.ocp.parameter_bounds["pulse_duration"].min[0][0]] * len(sol.decision_parameters()["pulse_apparition_time"])
+        pulse_duration_bound_min = previous_pulse_duration + [
+            sol.ocp.parameter_bounds["pulse_duration"].min[0][0]
+        ] * len(sol.decision_parameters()["pulse_apparition_time"])
+        pulse_duration_bound_max = previous_pulse_duration + [
+            sol.ocp.parameter_bounds["pulse_duration"].min[0][0]
+        ] * len(sol.decision_parameters()["pulse_apparition_time"])
 
         parameters, parameters_bounds, parameters_init = self._build_parameters(
             model=self.nlp[0].model,
@@ -51,29 +58,32 @@ class NmpcFes:
 
     @staticmethod
     def prepare_nmpc(
-            model: FesModel = None,
-            stim_time: list = None,
-            cycle_len: int = None,
-            cycle_duration: int | float = None,
-            pulse_event: dict = None,
-            pulse_duration: dict = None,
-            pulse_intensity: dict = None,
-            objective: dict = None,
-            use_sx: bool = True,
-            ode_solver: OdeSolver = OdeSolver.RK4(n_integration_steps=1),
-            n_threads: int = 1, ):
+        model: FesModel = None,
+        stim_time: list = None,
+        cycle_len: int = None,
+        cycle_duration: int | float = None,
+        pulse_event: dict = None,
+        pulse_duration: dict = None,
+        pulse_intensity: dict = None,
+        objective: dict = None,
+        use_sx: bool = True,
+        ode_solver: OdeSolver = OdeSolver.RK4(n_integration_steps=1),
+        n_threads: int = 1,
+    ):
 
-        input_dict = {"model": model,
-                      "stim_time": stim_time,
-                      "n_shooting": cycle_len,
-                      "final_time": cycle_duration,
-                      "pulse_event": pulse_event,
-                      "pulse_duration": pulse_duration,
-                      "pulse_intensity": pulse_intensity,
-                      "objective": objective,
-                      "use_sx": use_sx,
-                      "ode_solver": ode_solver,
-                      "n_threads": n_threads}
+        input_dict = {
+            "model": model,
+            "stim_time": stim_time,
+            "n_shooting": cycle_len,
+            "final_time": cycle_duration,
+            "pulse_event": pulse_event,
+            "pulse_duration": pulse_duration,
+            "pulse_intensity": pulse_intensity,
+            "objective": objective,
+            "use_sx": use_sx,
+            "ode_solver": ode_solver,
+            "n_threads": n_threads,
+        }
 
         optimization_dict = OcpFes._prepare_optimization_problem(input_dict)
 
@@ -96,5 +106,12 @@ class NmpcFes:
             n_threads=optimization_dict["n_threads"],
         )
 
-    def update_functions(self, _nmpc: CyclicNonlinearModelPredictiveControl, cycle_idx: int, _sol: Solution):
-        return cycle_idx < self.n_cycles  # True if there are still some cycle to perform
+    def update_functions(
+        self,
+        _nmpc: CyclicNonlinearModelPredictiveControl,
+        cycle_idx: int,
+        _sol: Solution,
+    ):
+        return (
+            cycle_idx < self.n_cycles
+        )  # True if there are still some cycle to perform

@@ -32,17 +32,24 @@ from ..fourier_approx import FourierSeries
 
 
 class OcpFesMsk:
-
     @staticmethod
     def _prepare_optimization_problem(input_dict: dict) -> dict:
 
         (pulse_event, pulse_duration, pulse_intensity, objective) = OcpFes._fill_dict(
-            input_dict["pulse_event"], input_dict["pulse_duration"], input_dict["pulse_intensity"],
-            input_dict["objective"]
+            input_dict["pulse_event"],
+            input_dict["pulse_duration"],
+            input_dict["pulse_intensity"],
+            input_dict["objective"],
         )
 
-        (pulse_duration, pulse_intensity, objective, msk_info) = OcpFesMsk._fill_msk_dict(
-            pulse_duration, pulse_intensity, objective, input_dict["msk_info"])
+        (
+            pulse_duration,
+            pulse_intensity,
+            objective,
+            msk_info,
+        ) = OcpFesMsk._fill_msk_dict(
+            pulse_duration, pulse_intensity, objective, input_dict["msk_info"]
+        )
 
         OcpFes._sanity_check(
             model=input_dict["model"],
@@ -78,11 +85,21 @@ class OcpFesMsk:
             use_sx=input_dict["use_sx"],
         )
 
-        constraints = OcpFesMsk._set_constraints(constraints, msk_info["custom_constraint"])
+        constraints = OcpFesMsk._set_constraints(
+            constraints, msk_info["custom_constraint"]
+        )
 
         dynamics = OcpFesMsk._declare_dynamics(input_dict["model"])
         initial_state = (
-            get_initial_guess(input_dict["model"].path, input_dict["final_time"], input_dict["n_shooting"], objective, n_threads=input_dict["n_threads"]) if input_dict["warm_start"] else None
+            get_initial_guess(
+                input_dict["model"].path,
+                input_dict["final_time"],
+                input_dict["n_shooting"],
+                objective,
+                n_threads=input_dict["n_threads"],
+            )
+            if input_dict["warm_start"]
+            else None
         )
 
         x_bounds, x_init = OcpFesMsk._set_bounds(
@@ -90,32 +107,38 @@ class OcpFesMsk:
             msk_info,
             initial_state,
         )
-        u_bounds, u_init = OcpFesMsk._set_controls(input_dict["model"], msk_info["with_residual_torque"])
-        muscle_force_key = ["F_" + input_dict["model"].muscles_dynamics_model[i].muscle_name for i in
-                            range(len(input_dict["model"].muscles_dynamics_model))]
+        u_bounds, u_init = OcpFesMsk._set_controls(
+            input_dict["model"], msk_info["with_residual_torque"]
+        )
+        muscle_force_key = [
+            "F_" + input_dict["model"].muscles_dynamics_model[i].muscle_name
+            for i in range(len(input_dict["model"].muscles_dynamics_model))
+        ]
         objective_functions = OcpFesMsk._set_objective(
             input_dict["n_shooting"],
             muscle_force_key,
             objective,
         )
 
-        optimization_dict = {"model": input_dict["model"],
-                             "dynamics": dynamics,
-                             "n_shooting": input_dict["n_shooting"],
-                             "final_time": input_dict["final_time"],
-                             "objective_functions": objective_functions,
-                             "x_init": x_init,
-                             "x_bounds": x_bounds,
-                             "u_init": u_init,
-                             "u_bounds": u_bounds,
-                             "constraints": constraints,
-                             "parameters": parameters,
-                             "parameters_bounds": parameters_bounds,
-                             "parameters_init": parameters_init,
-                             "parameter_objectives": parameter_objectives,
-                             "use_sx": input_dict["use_sx"],
-                             "ode_solver": input_dict["ode_solver"],
-                             "n_threads": input_dict["n_threads"]}
+        optimization_dict = {
+            "model": input_dict["model"],
+            "dynamics": dynamics,
+            "n_shooting": input_dict["n_shooting"],
+            "final_time": input_dict["final_time"],
+            "objective_functions": objective_functions,
+            "x_init": x_init,
+            "x_bounds": x_bounds,
+            "u_init": u_init,
+            "u_bounds": u_bounds,
+            "constraints": constraints,
+            "parameters": parameters,
+            "parameters_bounds": parameters_bounds,
+            "parameters_init": parameters_init,
+            "parameter_objectives": parameter_objectives,
+            "use_sx": input_dict["use_sx"],
+            "ode_solver": input_dict["ode_solver"],
+            "n_threads": input_dict["n_threads"],
+        }
 
         return optimization_dict
 
@@ -181,19 +204,21 @@ class OcpFesMsk:
             The prepared Optimal Control Program.
         """
 
-        input_dict = {"model": model,
-                      "stim_time": stim_time,
-                      "n_shooting": n_shooting,
-                      "final_time": final_time,
-                      "pulse_event": pulse_event,
-                      "pulse_duration": pulse_duration,
-                      "pulse_intensity": pulse_intensity,
-                      "objective": objective,
-                      "msk_info": msk_info,
-                      "warm_start": warm_start,
-                      "use_sx": use_sx,
-                      "ode_solver": ode_solver,
-                      "n_threads": n_threads}
+        input_dict = {
+            "model": model,
+            "stim_time": stim_time,
+            "n_shooting": n_shooting,
+            "final_time": final_time,
+            "pulse_event": pulse_event,
+            "pulse_duration": pulse_duration,
+            "pulse_intensity": pulse_intensity,
+            "objective": objective,
+            "msk_info": msk_info,
+            "warm_start": warm_start,
+            "use_sx": use_sx,
+            "ode_solver": ode_solver,
+            "n_threads": n_threads,
+        }
 
         optimization_dict = OcpFesMsk._prepare_optimization_problem(input_dict)
 
@@ -312,15 +337,21 @@ class OcpFesMsk:
         parameters_init["pulse_apparition_time"] = np.array(stim_time)
 
         for i in range(len(model.muscles_dynamics_model)):
-            if isinstance(model.muscles_dynamics_model[i], DingModelPulseDurationFrequency):
+            if isinstance(
+                model.muscles_dynamics_model[i], DingModelPulseDurationFrequency
+            ):
                 if pulse_duration["bimapping"]:
                     n_stim = 1
                 parameter_name = (
                     "pulse_duration"
                     if pulse_duration["same_for_all_muscles"]
-                    else "pulse_duration" + "_" + model.muscles_dynamics_model[i].muscle_name
+                    else "pulse_duration"
+                    + "_"
+                    + model.muscles_dynamics_model[i].muscle_name
                 )
-                if pulse_duration["fixed"]:  # TODO : ADD SEVERAL INDIVIDUAL FIXED PULSE DURATION FOR EACH MUSCLE
+                if pulse_duration[
+                    "fixed"
+                ]:  # TODO : ADD SEVERAL INDIVIDUAL FIXED PULSE DURATION FOR EACH MUSCLE
                     if (
                         pulse_duration["same_for_all_muscles"] and i == 0
                     ) or not pulse_duration["same_for_all_muscles"]:
@@ -337,7 +368,10 @@ class OcpFesMsk:
                                 max_bound=np.array(pulse_duration["fixed"]),
                                 interpolation=InterpolationType.CONSTANT,
                             )
-                            parameters_init.add(key=parameter_name, initial_guess=np.array(pulse_duration["fixed"]))
+                            parameters_init.add(
+                                key=parameter_name,
+                                initial_guess=np.array(pulse_duration["fixed"]),
+                            )
                         else:
                             parameters_bounds.add(
                                 parameter_name,
@@ -345,7 +379,9 @@ class OcpFesMsk:
                                 max_bound=np.array([pulse_duration["fixed"]] * n_stim),
                                 interpolation=InterpolationType.CONSTANT,
                             )
-                            parameters_init[parameter_name] = np.array([pulse_duration["fixed"]] * n_stim)
+                            parameters_init[parameter_name] = np.array(
+                                [pulse_duration["fixed"]] * n_stim
+                            )
 
                 elif (
                     pulse_duration["min"] and pulse_duration["max"]
@@ -359,8 +395,12 @@ class OcpFesMsk:
                             max_bound=[pulse_duration["max"]],
                             interpolation=InterpolationType.CONSTANT,
                         )
-                        pulse_duration_avg = (pulse_duration["max"] + pulse_duration["min"]) / 2
-                        parameters_init[parameter_name] = np.array([pulse_duration_avg] * n_stim)
+                        pulse_duration_avg = (
+                            pulse_duration["max"] + pulse_duration["min"]
+                        ) / 2
+                        parameters_init[parameter_name] = np.array(
+                            [pulse_duration_avg] * n_stim
+                        )
                         parameters.add(
                             name=parameter_name,
                             function=DingModelPulseDurationFrequency.set_impulse_duration,
@@ -374,9 +414,13 @@ class OcpFesMsk:
                 parameter_name = (
                     "pulse_intensity"
                     if pulse_intensity["same_for_all_muscles"]
-                    else "pulse_intensity" + "_" + model.muscles_dynamics_model[i].muscle_name
+                    else "pulse_intensity"
+                    + "_"
+                    + model.muscles_dynamics_model[i].muscle_name
                 )
-                if pulse_intensity["fixed"]:  # TODO : ADD SEVERAL INDIVIDUAL FIXED PULSE INTENSITY FOR EACH MUSCLE
+                if pulse_intensity[
+                    "fixed"
+                ]:  # TODO : ADD SEVERAL INDIVIDUAL FIXED PULSE INTENSITY FOR EACH MUSCLE
                     if (
                         pulse_intensity["same_for_all_muscles"] and i == 0
                     ) or not pulse_intensity["same_for_all_muscles"]:
@@ -393,7 +437,10 @@ class OcpFesMsk:
                                 max_bound=np.array(pulse_intensity["fixed"]),
                                 interpolation=InterpolationType.CONSTANT,
                             )
-                            parameters_init.add(key=parameter_name, initial_guess=np.array(pulse_intensity["fixed"]))
+                            parameters_init.add(
+                                key=parameter_name,
+                                initial_guess=np.array(pulse_intensity["fixed"]),
+                            )
                         else:
                             parameters_bounds.add(
                                 parameter_name,
@@ -401,7 +448,9 @@ class OcpFesMsk:
                                 max_bound=np.array([pulse_intensity["fixed"]] * n_stim),
                                 interpolation=InterpolationType.CONSTANT,
                             )
-                            parameters_init[parameter_name] = np.array([pulse_intensity["fixed"]] * n_stim)
+                            parameters_init[parameter_name] = np.array(
+                                [pulse_intensity["fixed"]] * n_stim
+                            )
 
                 elif (
                     pulse_intensity["min"] and pulse_intensity["max"]
@@ -415,8 +464,12 @@ class OcpFesMsk:
                             max_bound=[pulse_intensity["max"]],
                             interpolation=InterpolationType.CONSTANT,
                         )
-                        intensity_avg = (pulse_intensity["min"] + pulse_intensity["max"]) / 2
-                        parameters_init[parameter_name] = np.array([intensity_avg] * n_stim)
+                        intensity_avg = (
+                            pulse_intensity["min"] + pulse_intensity["max"]
+                        ) / 2
+                        parameters_init[parameter_name] = np.array(
+                            [intensity_avg] * n_stim
+                        )
                         parameters.add(
                             name=parameter_name,
                             function=DingModelIntensityFrequency.set_impulse_intensity,
@@ -424,7 +477,13 @@ class OcpFesMsk:
                             scaling=VariableScaling(parameter_name, [1] * n_stim),
                         )
 
-        return parameters, parameters_bounds, parameters_init, parameter_objectives, constraints
+        return (
+            parameters,
+            parameters_bounds,
+            parameters_init,
+            parameter_objectives,
+            constraints,
+        )
 
     @staticmethod
     def _set_constraints(constraints, custom_constraint):
@@ -453,7 +512,10 @@ class OcpFesMsk:
         x_init = InitialGuessList()
         for model in bio_models.muscles_dynamics_model:
             muscle_name = model.muscle_name
-            variable_bound_list = [model.name_dof[i] + "_" + muscle_name for i in range(len(model.name_dof))]
+            variable_bound_list = [
+                model.name_dof[i] + "_" + muscle_name
+                for i in range(len(model.name_dof))
+            ]
 
             starting_bounds, min_bounds, max_bounds = (
                 model.standard_rest_values(),
@@ -466,13 +528,20 @@ class OcpFesMsk:
                     max_bounds[i] = 10
                 elif variable_bound_list[i] == "F_" + muscle_name:
                     max_bounds[i] = 1000
-                elif variable_bound_list[i] == "Tau1_" + muscle_name or variable_bound_list[i] == "Km_" + muscle_name:
+                elif (
+                    variable_bound_list[i] == "Tau1_" + muscle_name
+                    or variable_bound_list[i] == "Km_" + muscle_name
+                ):
                     max_bounds[i] = 1
                 elif variable_bound_list[i] == "A_" + muscle_name:
                     min_bounds[i] = 0
 
-            starting_bounds_min = np.concatenate((starting_bounds, min_bounds, min_bounds), axis=1)
-            starting_bounds_max = np.concatenate((starting_bounds, max_bounds, max_bounds), axis=1)
+            starting_bounds_min = np.concatenate(
+                (starting_bounds, min_bounds, min_bounds), axis=1
+            )
+            starting_bounds_max = np.concatenate(
+                (starting_bounds, max_bounds, max_bounds), axis=1
+            )
 
             for j in range(len(variable_bound_list)):
                 x_bounds.add(
@@ -484,24 +553,42 @@ class OcpFesMsk:
                 )
 
             for j in range(len(variable_bound_list)):
-                x_init.add(variable_bound_list[j], model.standard_rest_values()[j], phase=0)
+                x_init.add(
+                    variable_bound_list[j], model.standard_rest_values()[j], phase=0
+                )
 
         if msk_info["bound_type"] == "start_end":
             start_bounds = []
             end_bounds = []
             for i in range(bio_models.nb_q):
-                start_bounds.append(3.14 / (180 / msk_info["bound_data"][0][i]) if msk_info["bound_data"][0][i] != 0 else 0)
-                end_bounds.append(3.14 / (180 / msk_info["bound_data"][1][i]) if msk_info["bound_data"][1][i] != 0 else 0)
+                start_bounds.append(
+                    3.14 / (180 / msk_info["bound_data"][0][i])
+                    if msk_info["bound_data"][0][i] != 0
+                    else 0
+                )
+                end_bounds.append(
+                    3.14 / (180 / msk_info["bound_data"][1][i])
+                    if msk_info["bound_data"][1][i] != 0
+                    else 0
+                )
 
         elif msk_info["bound_type"] == "start":
             start_bounds = []
             for i in range(bio_models.nb_q):
-                start_bounds.append(3.14 / (180 / msk_info["bound_data"][i]) if msk_info["bound_data"][i] != 0 else 0)
+                start_bounds.append(
+                    3.14 / (180 / msk_info["bound_data"][i])
+                    if msk_info["bound_data"][i] != 0
+                    else 0
+                )
 
         elif msk_info["bound_type"] == "end":
             end_bounds = []
             for i in range(bio_models.nb_q):
-                end_bounds.append(3.14 / (180 / msk_info["bound_data"][i]) if msk_info["bound_data"][i] != 0 else 0)
+                end_bounds.append(
+                    3.14 / (180 / msk_info["bound_data"][i])
+                    if msk_info["bound_data"][i] != 0
+                    else 0
+                )
 
         q_x_bounds = bio_models.bounds_from_ranges("q")
         qdot_x_bounds = bio_models.bounds_from_ranges("qdot")
@@ -525,7 +612,10 @@ class OcpFesMsk:
         if initial_state:
             muscle_names = bio_models.muscle_names
             x_init.add(
-                key="q", initial_guess=initial_state["q"], interpolation=InterpolationType.EACH_FRAME, phase=0
+                key="q",
+                initial_guess=initial_state["q"],
+                interpolation=InterpolationType.EACH_FRAME,
+                phase=0,
             )
             x_init.add(
                 key="qdot",
@@ -541,8 +631,7 @@ class OcpFesMsk:
                     phase=0,
                 )
         else:
-            x_init.add(key="q", initial_guess=[0] * bio_models
-                       .nb_q, phase=0)
+            x_init.add(key="q", initial_guess=[0] * bio_models.nb_q, phase=0)
 
         return x_bounds, x_init
 
@@ -550,7 +639,9 @@ class OcpFesMsk:
     def _set_controls(bio_models, with_residual_torque):
         # Controls bounds
         nb_tau = bio_models.nb_tau
-        if with_residual_torque:  # TODO : ADD SEVERAL INDIVIDUAL FIXED RESIDUAL TORQUE FOR EACH JOINT
+        if (
+            with_residual_torque
+        ):  # TODO : ADD SEVERAL INDIVIDUAL FIXED RESIDUAL TORQUE FOR EACH JOINT
             tau_min, tau_max, tau_init = [-50] * nb_tau, [50] * nb_tau, [0] * nb_tau
         else:
             tau_min, tau_max, tau_init = [0] * nb_tau, [0] * nb_tau, [0] * nb_tau
@@ -582,18 +673,32 @@ class OcpFesMsk:
             force_fourier_coef = []
             for i in range(len(objective["force_tracking"][1])):
                 force_fourier_coef.append(
-                    OcpFes._build_fourier_coefficient([objective["force_tracking"][0], objective["force_tracking"][1][i]]))
+                    OcpFes._build_fourier_coefficient(
+                        [
+                            objective["force_tracking"][0],
+                            objective["force_tracking"][1][i],
+                        ]
+                    )
+                )
 
             force_to_track = []
             for i in range(len(force_fourier_coef)):
-                force_to_track.append(FourierSeries().fit_func_by_fourier_series_with_real_coeffs(
-                    np.linspace(0, 1, n_shooting + 1),
-                    force_fourier_coef[i],
-                )[np.newaxis, :])
+                force_to_track.append(
+                    FourierSeries().fit_func_by_fourier_series_with_real_coeffs(
+                        np.linspace(0, 1, n_shooting + 1),
+                        force_fourier_coef[i],
+                    )[np.newaxis, :]
+                )
 
             for j in range(len(muscle_force_key)):
-                objective_functions.add(ObjectiveFcn.Lagrange.TRACK_STATE, key=muscle_force_key[j], weight=100, target=force_to_track[j],
-                                        node=Node.ALL, quadratic=True)
+                objective_functions.add(
+                    ObjectiveFcn.Lagrange.TRACK_STATE,
+                    key=muscle_force_key[j],
+                    weight=100,
+                    target=force_to_track[j],
+                    node=Node.ALL,
+                    quadratic=True,
+                )
 
         if objective["end_node_tracking"] is not None:
             for j in range(len(muscle_force_key)):
@@ -629,22 +734,32 @@ class OcpFesMsk:
             )
 
         if objective["q_tracking"]:
-
             q_fourier_coef = []
             for i in range(len(objective["q_tracking"][1])):
-                q_fourier_coef.append(OcpFes._build_fourier_coefficient([objective["q_tracking"][0], objective["q_tracking"][1][i]]))
+                q_fourier_coef.append(
+                    OcpFes._build_fourier_coefficient(
+                        [objective["q_tracking"][0], objective["q_tracking"][1][i]]
+                    )
+                )
 
             q_to_track = []
             for i in range(len(q_fourier_coef)):
-                q_to_track.append(FourierSeries().fit_func_by_fourier_series_with_real_coeffs(
-                    np.linspace(0, 1, n_shooting + 1),
-                    q_fourier_coef[i],
-                )[np.newaxis, :])
+                q_to_track.append(
+                    FourierSeries().fit_func_by_fourier_series_with_real_coeffs(
+                        np.linspace(0, 1, n_shooting + 1),
+                        q_fourier_coef[i],
+                    )[np.newaxis, :]
+                )
 
             for j in range(len(q_to_track)):
-                objective_functions.add(ObjectiveFcn.Lagrange.TRACK_STATE, key="q", weight=100,
-                                        target=q_to_track[j],
-                                        node=Node.ALL, quadratic=True)
+                objective_functions.add(
+                    ObjectiveFcn.Lagrange.TRACK_STATE,
+                    key="q",
+                    weight=100,
+                    target=q_to_track[j],
+                    node=Node.ALL,
+                    quadratic=True,
+                )
 
         if objective["minimize_muscle_fatigue"]:
             objective_functions.add(
@@ -652,7 +767,7 @@ class OcpFesMsk:
                 custom_type=ObjectiveFcn.Mayer,
                 node=Node.END,
                 quadratic=True,
-                weight=-1,
+                weight=1,
                 phase=0,
             )
 
@@ -667,8 +782,13 @@ class OcpFesMsk:
             )
 
         if objective["minimize_residual_torque"]:
-            objective_functions.add(ObjectiveFcn.Lagrange.MINIMIZE_CONTROL, key="tau", weight=10000, quadratic=True,
-                                    phase=0)
+            objective_functions.add(
+                ObjectiveFcn.Lagrange.MINIMIZE_CONTROL,
+                key="tau",
+                weight=10000,
+                quadratic=True,
+                phase=0,
+            )
 
         return objective_functions
 
@@ -679,68 +799,117 @@ class OcpFesMsk:
         objective,
     ):
         if msk_info["bound_type"]:
-            if not isinstance(msk_info["bound_type"], str) or msk_info["bound_type"] not in ["start", "end", "start_end"]:
-                raise ValueError("bound_type should be a string and should be equal to start, end or start_end")
+            if not isinstance(msk_info["bound_type"], str) or msk_info[
+                "bound_type"
+            ] not in ["start", "end", "start_end"]:
+                raise ValueError(
+                    "bound_type should be a string and should be equal to start, end or start_end"
+                )
             if not isinstance(msk_info["bound_data"], list):
                 raise TypeError("bound_data should be a list")
             if msk_info["bound_type"] == "start_end":
-                if len(msk_info["bound_data"]) != 2 or not isinstance(msk_info["bound_data"][0], list) or not isinstance(msk_info["bound_data"][1], list):
+                if (
+                    len(msk_info["bound_data"]) != 2
+                    or not isinstance(msk_info["bound_data"][0], list)
+                    or not isinstance(msk_info["bound_data"][1], list)
+                ):
                     raise TypeError("bound_data should be a list of two list")
-                if len(msk_info["bound_data"][0]) != model.nb_q or len(msk_info["bound_data"][1]) != model.nb_q:
-                    raise ValueError(f"bound_data should be a list of {model.nb_q} elements")
+                if (
+                    len(msk_info["bound_data"][0]) != model.nb_q
+                    or len(msk_info["bound_data"][1]) != model.nb_q
+                ):
+                    raise ValueError(
+                        f"bound_data should be a list of {model.nb_q} elements"
+                    )
                 for i in range(len(msk_info["bound_data"][0])):
-                    if not isinstance(msk_info["bound_data"][0][i], int | float) or not isinstance(msk_info["bound_data"][1][i], int | float):
+                    if not isinstance(
+                        msk_info["bound_data"][0][i], int | float
+                    ) or not isinstance(msk_info["bound_data"][1][i], int | float):
                         raise TypeError(
                             f"bound data index {i}: {msk_info['bound_data'][0][i]} and {msk_info['bound_data'][1][i]} should be an int or float"
                         )
             if msk_info["bound_type"] == "start" or msk_info["bound_type"] == "end":
                 if len(msk_info["bound_data"]) != model.nb_q:
-                    raise ValueError(f"bound_data should be a list of {model.nb_q} element")
+                    raise ValueError(
+                        f"bound_data should be a list of {model.nb_q} element"
+                    )
                 for i in range(len(msk_info["bound_data"])):
                     if not isinstance(msk_info["bound_data"][i], int | float):
-                        raise TypeError(f"bound data index {i}: {msk_info['bound_data'][i]} should be an int or float")
+                        raise TypeError(
+                            f"bound data index {i}: {msk_info['bound_data'][i]} should be an int or float"
+                        )
 
         if objective["force_tracking"]:
             if isinstance(objective["force_tracking"], list):
                 if len(objective["force_tracking"]) != 2:
                     raise ValueError("force_tracking must of size 2")
                 if not isinstance(objective["force_tracking"][0], np.ndarray):
-                    raise TypeError(f"force_tracking index 0: {objective['force_tracking'][0]} must be np.ndarray type")
+                    raise TypeError(
+                        f"force_tracking index 0: {objective['force_tracking'][0]} must be np.ndarray type"
+                    )
                 if not isinstance(objective["force_tracking"][1], list):
-                    raise TypeError(f"force_tracking index 1: {objective['force_tracking'][1]} must be list type")
-                if len(objective["force_tracking"][1]) != len(model.muscles_dynamics_model):
+                    raise TypeError(
+                        f"force_tracking index 1: {objective['force_tracking'][1]} must be list type"
+                    )
+                if len(objective["force_tracking"][1]) != len(
+                    model.muscles_dynamics_model
+                ):
                     raise ValueError(
                         "force_tracking index 1 list must have the same size as the number of muscles in model.muscles_dynamics_model"
                     )
                 for i in range(len(objective["force_tracking"][1])):
-                    if len(objective["force_tracking"][0]) != len(objective["force_tracking"][1][i]):
-                        raise ValueError("force_tracking time and force argument must be the same length")
+                    if len(objective["force_tracking"][0]) != len(
+                        objective["force_tracking"][1][i]
+                    ):
+                        raise ValueError(
+                            "force_tracking time and force argument must be the same length"
+                        )
             else:
-                raise TypeError(f"force_tracking: {objective['force_tracking']} must be list type")
+                raise TypeError(
+                    f"force_tracking: {objective['force_tracking']} must be list type"
+                )
 
         if objective["end_node_tracking"]:
             if not isinstance(objective["end_node_tracking"], list):
-                raise TypeError(f"force_tracking: {objective['end_node_tracking']} must be list type")
+                raise TypeError(
+                    f"force_tracking: {objective['end_node_tracking']} must be list type"
+                )
             if len(objective["end_node_tracking"]) != len(model.muscles_dynamics_model):
                 raise ValueError(
                     "end_node_tracking list must have the same size as the number of muscles in fes_muscle_models"
                 )
             for i in range(len(objective["end_node_tracking"])):
                 if not isinstance(objective["end_node_tracking"][i], int | float):
-                    raise TypeError(f"end_node_tracking index {i}: {objective['end_node_tracking'][i]} must be int or float type")
+                    raise TypeError(
+                        f"end_node_tracking index {i}: {objective['end_node_tracking'][i]} must be int or float type"
+                    )
 
         if objective["cycling"]:
             if not isinstance(objective["cycling"], dict):
-                raise TypeError(f"cycling_objective: {objective['cycling']} must be dictionary type")
+                raise TypeError(
+                    f"cycling_objective: {objective['cycling']} must be dictionary type"
+                )
 
             cycling_objective_keys = ["x_center", "y_center", "radius", "target"]
-            if not all([cycling_objective_keys[i] in objective["cycling"] for i in range(len(cycling_objective_keys))]):
+            if not all(
+                [
+                    cycling_objective_keys[i] in objective["cycling"]
+                    for i in range(len(cycling_objective_keys))
+                ]
+            ):
                 raise ValueError(
                     f"cycling_objective dictionary must contain the following keys: {cycling_objective_keys}"
                 )
 
-            if not all([isinstance(objective["cycling"][key], int | float) for key in cycling_objective_keys[:3]]):
-                raise TypeError(f"cycling_objective x_center, y_center and radius inputs must be int or float")
+            if not all(
+                [
+                    isinstance(objective["cycling"][key], int | float)
+                    for key in cycling_objective_keys[:3]
+                ]
+            ):
+                raise TypeError(
+                    f"cycling_objective x_center, y_center and radius inputs must be int or float"
+                )
 
             if isinstance(objective["cycling"][cycling_objective_keys[-1]], str):
                 if (
@@ -754,15 +923,24 @@ class OcpFesMsk:
                 raise TypeError(f"cycling_objective target must be string type")
 
         if objective["q_tracking"]:
-            if not isinstance(objective["q_tracking"], list) and len(objective["q_tracking"]) != 2:
+            if (
+                not isinstance(objective["q_tracking"], list)
+                and len(objective["q_tracking"]) != 2
+            ):
                 raise TypeError("q_tracking should be a list of size 2")
             if not isinstance(objective["q_tracking"][0], list | np.ndarray):
                 raise ValueError("q_tracking[0] should be a list or array type")
             if len(objective["q_tracking"][1]) != model.nb_q:
-                raise ValueError("q_tracking[1] should have the same size as the number of generalized coordinates")
+                raise ValueError(
+                    "q_tracking[1] should have the same size as the number of generalized coordinates"
+                )
             for i in range(model.nb_q):
-                if len(objective["q_tracking"][0]) != len(objective["q_tracking"][1][i]):
-                    raise ValueError("q_tracking[0] and q_tracking[1] should have the same size")
+                if len(objective["q_tracking"][0]) != len(
+                    objective["q_tracking"][1][i]
+                ):
+                    raise ValueError(
+                        "q_tracking[0] and q_tracking[1] should have the same size"
+                    )
 
         list_to_check = [
             msk_info["with_residual_torque"],

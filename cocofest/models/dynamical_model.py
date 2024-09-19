@@ -14,7 +14,10 @@ from bioptim import (
 from ..models.fes_model import FesModel
 from ..models.ding2003 import DingModelFrequency
 from .state_configue import StateConfigure
-from .hill_coefficients import muscle_force_length_coefficient, muscle_force_velocity_coefficient
+from .hill_coefficients import (
+    muscle_force_length_coefficient,
+    muscle_force_velocity_coefficient,
+)
 
 
 class FesMskModel(BiorbdModel):
@@ -47,7 +50,11 @@ class FesMskModel(BiorbdModel):
         self._name = name
         self.bio_model = BiorbdModel(biorbd_path)
 
-        self._model_sanity(muscles_model, activate_force_length_relationship, activate_force_velocity_relationship)
+        self._model_sanity(
+            muscles_model,
+            activate_force_length_relationship,
+            activate_force_velocity_relationship,
+        )
         self.muscles_dynamics_model = muscles_model
         self.bio_stim_model = [self.bio_model] + self.muscles_dynamics_model
 
@@ -179,15 +186,23 @@ class FesMskModel(BiorbdModel):
 
         updatedModel = nlp.model.bio_model.model.UpdateKinematicsCustom(q, qdot)
         nlp.model.bio_model.model.updateMuscles(updatedModel, q, qdot)
-        updated_muscle_length_jacobian = nlp.model.bio_model.model.musclesLengthJacobian(updatedModel, q, False).to_mx()
+        updated_muscle_length_jacobian = (
+            nlp.model.bio_model.model.musclesLengthJacobian(
+                updatedModel, q, False
+            ).to_mx()
+        )
 
         bio_muscle_names_at_index = []
         for i in range(len(nlp.model.bio_model.model.muscles())):
-            bio_muscle_names_at_index.append(nlp.model.bio_model.model.muscle(i).name().to_string())
+            bio_muscle_names_at_index.append(
+                nlp.model.bio_model.model.muscle(i).name().to_string()
+            )
 
         for muscle_model in muscle_models:
             muscle_states_idxs = [
-                i for i in range(len(state_name_list)) if muscle_model.muscle_name in state_name_list[i]
+                i
+                for i in range(len(state_name_list))
+                if muscle_model.muscle_name in state_name_list[i]
             ]
             muscle_states = vertcat()
             for i in range(len(muscle_states_idxs)):
@@ -197,7 +212,9 @@ class FesMskModel(BiorbdModel):
 
             muscle_force_length_coeff = (
                 muscle_force_length_coefficient(
-                    model=updatedModel, muscle=nlp.model.bio_model.model.muscle(muscle_idx), q=q
+                    model=updatedModel,
+                    muscle=nlp.model.bio_model.model.muscle(muscle_idx),
+                    q=q,
                 )
                 if nlp.model.activate_force_velocity_relationship
                 else 1
@@ -205,7 +222,10 @@ class FesMskModel(BiorbdModel):
 
             muscle_force_velocity_coeff = (
                 muscle_force_velocity_coefficient(
-                    model=updatedModel, muscle=nlp.model.bio_model.model.muscle(muscle_idx), q=q, qdot=qdot
+                    model=updatedModel,
+                    muscle=nlp.model.bio_model.model.muscle(muscle_idx),
+                    q=q,
+                    qdot=qdot,
                 )
                 if nlp.model.activate_force_velocity_relationship
                 else 1
@@ -229,7 +249,10 @@ class FesMskModel(BiorbdModel):
             muscle_idx_list.append(muscle_idx)
 
             muscle_forces = vertcat(
-                muscle_forces, DynamicsFunctions.get(nlp.states["F_" + muscle_model.muscle_name], states)
+                muscle_forces,
+                DynamicsFunctions.get(
+                    nlp.states["F_" + muscle_model.muscle_name], states
+                ),
             )
 
         muscle_moment_arm_matrix = updated_muscle_length_jacobian[
@@ -240,7 +263,10 @@ class FesMskModel(BiorbdModel):
         return muscle_joint_torques, dxdt_muscle_list
 
     def declare_model_variables(
-        self, ocp: OptimalControlProgram, nlp: NonLinearProgram, numerical_data_timeseries: dict[str, np.ndarray] = None
+        self,
+        ocp: OptimalControlProgram,
+        nlp: NonLinearProgram,
+        numerical_data_timeseries: dict[str, np.ndarray] = None,
     ):
         """
         Tell the program which variables are states and controls.
@@ -255,7 +281,9 @@ class FesMskModel(BiorbdModel):
             A list of values to pass to the dynamics at each node. Experimental external forces should be included here.
 
         """
-        state_name_list = StateConfigure().configure_all_muscle_states(self.muscles_dynamics_model, ocp, nlp)
+        state_name_list = StateConfigure().configure_all_muscle_states(
+            self.muscles_dynamics_model, ocp, nlp
+        )
         ConfigureProblem.configure_q(ocp, nlp, as_states=True, as_controls=False)
         state_name_list.append("q")
         ConfigureProblem.configure_qdot(ocp, nlp, as_states=True, as_controls=False)
@@ -276,7 +304,11 @@ class FesMskModel(BiorbdModel):
         )
 
     @staticmethod
-    def _model_sanity(muscles_model, activate_force_length_relationship, activate_force_velocity_relationship):
+    def _model_sanity(
+        muscles_model,
+        activate_force_length_relationship,
+        activate_force_velocity_relationship,
+    ):
         if not isinstance(muscles_model, list):
             for muscle_model in muscles_model:
                 if not isinstance(muscle_model, FesModel):
@@ -293,4 +325,6 @@ class FesMskModel(BiorbdModel):
             raise TypeError("The activate_force_length_relationship must be a boolean")
 
         if not isinstance(activate_force_velocity_relationship, bool):
-            raise TypeError("The activate_force_velocity_relationship must be a boolean")
+            raise TypeError(
+                "The activate_force_velocity_relationship must be a boolean"
+            )

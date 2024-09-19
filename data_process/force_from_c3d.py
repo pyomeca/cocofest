@@ -28,9 +28,15 @@ class ExtractAnalogForceFromC3D:
         **kwargs,
     ):
         c3d_path_list = [c3d_path] if isinstance(c3d_path, str) else c3d_path
-        saving_pickle_path_list = [saving_pickle_path] if isinstance(saving_pickle_path, str) else saving_pickle_path
+        saving_pickle_path_list = (
+            [saving_pickle_path]
+            if isinstance(saving_pickle_path, str)
+            else saving_pickle_path
+        )
         if saving_pickle_path_list:
-            if len(saving_pickle_path_list) != 1 and len(saving_pickle_path_list) != len(c3d_path_list):
+            if len(saving_pickle_path_list) != 1 and len(
+                saving_pickle_path_list
+            ) != len(c3d_path_list):
                 raise ValueError(
                     "The number of saving_pickle_path must be the same as the number of c3d_path."
                     "If you entered only one path, the file name will be iterated."
@@ -45,22 +51,32 @@ class ExtractAnalogForceFromC3D:
             order = kwargs["order"] if "order" in kwargs else 1
             cutoff = kwargs["cutoff"] if "cutoff" in kwargs else 2
             if not isinstance(order, int | None) or not isinstance(cutoff, int | None):
-                raise TypeError("window_length and order must be either None or int type")
+                raise TypeError(
+                    "window_length and order must be either None or int type"
+                )
             if type(order) != type(cutoff):
                 raise TypeError("window_length and order must be both None or int type")
 
             time = raw_data.time.values.tolist()
             filtered_data = (
-                np.array(raw_data.meca.low_pass(order=order, cutoff=cutoff, freq=raw_data.rate))
+                np.array(
+                    raw_data.meca.low_pass(
+                        order=order, cutoff=cutoff, freq=raw_data.rate
+                    )
+                )
                 if order and cutoff
                 else raw_data
             )
 
             if "input_channel" in kwargs:
-                filtered_data = self.reindex_2d_list(filtered_data, kwargs["input_channel"])
+                filtered_data = self.reindex_2d_list(
+                    filtered_data, kwargs["input_channel"]
+                )
 
             if calibration_matrix_path:
-                self.calibration_matrix = self.read_text_file_to_matrix(calibration_matrix_path)
+                self.calibration_matrix = self.read_text_file_to_matrix(
+                    calibration_matrix_path
+                )
                 filtered_6d_force = self.calibration_matrix @ filtered_data[:6]
 
             else:
@@ -68,18 +84,29 @@ class ExtractAnalogForceFromC3D:
                     if kwargs["already_calibrated"] is True:
                         filtered_6d_force = filtered_data[:6]
                     else:
-                        raise ValueError("already_calibrated must be either True or False")
+                        raise ValueError(
+                            "already_calibrated must be either True or False"
+                        )
                 else:
                     raise ValueError(
                         "Please specify if the data is already calibrated or not with already_calibrated input."
                         "If not, please provide a calibration matrix path"
                     )
 
-            filtered_6d_force = self.set_zero_level(filtered_6d_force, average_on=[1000, 3000])
+            filtered_6d_force = self.set_zero_level(
+                filtered_6d_force, average_on=[1000, 3000]
+            )
             if for_identification:
-                check_stimulation = kwargs["check_stimulation"] if "check_stimulation" in kwargs else None
+                check_stimulation = (
+                    kwargs["check_stimulation"]
+                    if "check_stimulation" in kwargs
+                    else None
+                )
 
-                if "average_time_difference" in kwargs and "frequency_acquisition" in kwargs:
+                if (
+                    "average_time_difference" in kwargs
+                    and "frequency_acquisition" in kwargs
+                ):
                     stimulation_time, peaks = self.stimulation_detection(
                         time,
                         raw_data[6].data,
@@ -128,7 +155,9 @@ class ExtractAnalogForceFromC3D:
                         for k in range(len(sliced_time)):
                             plt.plot(sliced_time[k], sliced_data[0][k])
                         for k in range(len(peaks)):
-                            plt.plot(time[peaks[k]], filtered_6d_force[0][peaks[k]], "x")
+                            plt.plot(
+                                time[peaks[k]], filtered_6d_force[0][peaks[k]], "x"
+                            )
                         if down_sample:
                             for k in range(len(sliced_time)):
                                 plt.plot(temp_time[k], temp_data[0][k])
@@ -137,9 +166,13 @@ class ExtractAnalogForceFromC3D:
                 if saving_pickle_path_list:
                     if len(saving_pickle_path_list) == 1:
                         if saving_pickle_path_list[:-4] == ".pkl":
-                            save_pickle_path = saving_pickle_path_list[:-4] + "_" + str(i) + ".pkl"
+                            save_pickle_path = (
+                                saving_pickle_path_list[:-4] + "_" + str(i) + ".pkl"
+                            )
                         else:
-                            save_pickle_path = saving_pickle_path_list[0] + "_" + str(i) + ".pkl"
+                            save_pickle_path = (
+                                saving_pickle_path_list[0] + "_" + str(i) + ".pkl"
+                            )
                     else:
                         save_pickle_path = saving_pickle_path_list[i]
 
@@ -157,9 +190,13 @@ class ExtractAnalogForceFromC3D:
                         pickle.dump(dictionary, file)
             else:
                 if saving_pickle_path_list[:-4] == ".pkl":
-                    save_pickle_path = saving_pickle_path_list[:-4] + "_" + str(i) + ".pkl"
+                    save_pickle_path = (
+                        saving_pickle_path_list[:-4] + "_" + str(i) + ".pkl"
+                    )
                 else:
-                    save_pickle_path = saving_pickle_path_list[0] + "_" + str(i) + ".pkl"
+                    save_pickle_path = (
+                        saving_pickle_path_list[0] + "_" + str(i) + ".pkl"
+                    )
 
                 if down_sample:
                     for j in range(len(filtered_6d_force[0])):
@@ -231,7 +268,9 @@ class ExtractAnalogForceFromC3D:
             return None
 
     @staticmethod
-    def set_zero_level(data: np.array, average_length: int = 1000, average_on: list[int, int] = None):
+    def set_zero_level(
+        data: np.array, average_length: int = 1000, average_on: list[int, int] = None
+    ):
         """
         Set the zero level of the data by averaging the first 1000 points
         :param data: The data to set the zero level
@@ -266,10 +305,15 @@ class ExtractAnalogForceFromC3D:
         while len(temp_stimulation_peaks) != 0:
             substact_to_zero = data[:, temp_stimulation_peaks[0]]
             for i in range(len(data[:, temp_stimulation_peaks[0]])):
-                data[:, temp_stimulation_peaks[0] :][i] = data[:, temp_stimulation_peaks[0] :][i] - substact_to_zero[i]
+                data[:, temp_stimulation_peaks[0] :][i] = (
+                    data[:, temp_stimulation_peaks[0] :][i] - substact_to_zero[i]
+                )
 
             first = temp_stimulation_peaks[0]
-            last = next(x for x, val in enumerate(-data[main_axis, first:]) if val < 0) + first
+            last = (
+                next(x for x, val in enumerate(-data[main_axis, first:]) if val < 0)
+                + first
+            )
 
             x.append(data[0, first:last].tolist())
             y.append(data[1, first:last].tolist())
@@ -280,7 +324,9 @@ class ExtractAnalogForceFromC3D:
 
             sliced_time.append(time[first:last])
 
-            temp_stimulation_peaks = [peaks for peaks in temp_stimulation_peaks if peaks > last]
+            temp_stimulation_peaks = [
+                peaks for peaks in temp_stimulation_peaks if peaks > last
+            ]
         sliced_data = [x, y, z, mx, my, mz]
         return sliced_time, sliced_data
 
@@ -327,7 +373,9 @@ class ExtractAnalogForceFromC3D:
             if not isinstance(average_time_difference, float):
                 raise TypeError("average_time_difference must be a float.")
             if not frequency_acquisition:
-                raise ValueError("Please specify the acquisition frequency when average_time_difference is entered.")
+                raise ValueError(
+                    "Please specify the acquisition frequency when average_time_difference is entered."
+                )
             if not isinstance(frequency_acquisition, int):
                 raise TypeError("frequency_acquisition must be an integer.")
             if abs(average_time_difference) < 1 / frequency_acquisition:
@@ -341,7 +389,9 @@ class ExtractAnalogForceFromC3D:
         negative = np.where(stimulation_signal < threshold_negative)
 
         if negative[0][0] < positive[0][0]:
-            stimulation_signal = -stimulation_signal  # invert the signal if the first peak is negative
+            stimulation_signal = (
+                -stimulation_signal
+            )  # invert the signal if the first peak is negative
             threshold = -threshold_negative
         else:
             threshold = threshold_positive
@@ -358,7 +408,9 @@ class ExtractAnalogForceFromC3D:
 
         if average_time_difference:
             time_peaks = np.array(time_peaks) + average_time_difference
-            peaks = np.array(peaks) + int(average_time_difference * frequency_acquisition)
+            peaks = np.array(peaks) + int(
+                average_time_difference * frequency_acquisition
+            )
 
         if isinstance(time_peaks, np.ndarray):
             time_peaks = time_peaks.tolist()

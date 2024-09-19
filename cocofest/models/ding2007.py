@@ -46,7 +46,9 @@ class DingModelPulseDurationFrequency(DingModelFrequency):
         tau_fat: float = None,
     ):
         super(DingModelPulseDurationFrequency, self).__init__(
-            model_name=model_name, muscle_name=muscle_name, sum_stim_truncation=sum_stim_truncation
+            model_name=model_name,
+            muscle_name=muscle_name,
+            sum_stim_truncation=sum_stim_truncation,
         )
         self._with_fatigue = False
         self.impulse_time = None
@@ -133,8 +135,15 @@ class DingModelPulseDurationFrequency(DingModelFrequency):
         The value of the derivative of each state dx/dt at the current time t
         """
         r0 = self.km_rest + self.r0_km_relationship  # Simplification
-        cn_dot = self.cn_dot_fun(cn, r0, t, t_stim_prev=t_stim_prev)  # Equation n°1 from Ding's 2003 article
-        a = self.a_calculation(a_scale=self.a_scale, impulse_time=impulse_time, t=t, t_stim_prev=t_stim_prev)  # Equation n°3 from Ding's 2007 article
+        cn_dot = self.cn_dot_fun(
+            cn, r0, t, t_stim_prev=t_stim_prev
+        )  # Equation n°1 from Ding's 2003 article
+        a = self.a_calculation(
+            a_scale=self.a_scale,
+            impulse_time=impulse_time,
+            t=t,
+            t_stim_prev=t_stim_prev,
+        )  # Equation n°3 from Ding's 2007 article
         f_dot = self.f_dot_fun(
             cn,
             f,
@@ -146,7 +155,13 @@ class DingModelPulseDurationFrequency(DingModelFrequency):
         )  # Equation n°2 from Ding's 2003 article
         return vertcat(cn_dot, f_dot)
 
-    def a_calculation(self, a_scale: float | MX, impulse_time: MX, t, t_stim_prev: list[float] | list[MX]) -> MX:
+    def a_calculation(
+        self,
+        a_scale: float | MX,
+        impulse_time: MX,
+        t,
+        t_stim_prev: list[float] | list[MX],
+    ) -> MX:
         """
         Parameters
         ----------
@@ -170,7 +185,9 @@ class DingModelPulseDurationFrequency(DingModelFrequency):
             else:
                 coefficient = if_else(t_stim_prev[i] <= t, 1, 0)
                 temp_impulse_time = impulse_time_list[i] * coefficient
-                impulse_time = if_else(temp_impulse_time != 0, temp_impulse_time, impulse_time)
+                impulse_time = if_else(
+                    temp_impulse_time != 0, temp_impulse_time, impulse_time
+                )
         return a_scale * (1 - exp(-(impulse_time - self.pd0) / self.pdt))
 
     def set_impulse_duration(self, value: list[MX]):
@@ -185,7 +202,9 @@ class DingModelPulseDurationFrequency(DingModelFrequency):
         self.impulse_time = value
 
     @staticmethod
-    def get_pulse_duration_parameters(nlp, parameters: ParameterList, muscle_name: str = None) -> list[MX]:
+    def get_pulse_duration_parameters(
+        nlp, parameters: ParameterList, muscle_name: str = None
+    ) -> list[MX]:
         """
         Get the nlp list of pulse_duration parameters
 
@@ -260,15 +279,21 @@ class DingModelPulseDurationFrequency(DingModelFrequency):
         impulse_time = (
             nlp.model.get_pulse_duration_parameters(nlp, parameters)
             if fes_model is None
-            else fes_model.get_pulse_duration_parameters(nlp, parameters, muscle_name=fes_model.muscle_name)
+            else fes_model.get_pulse_duration_parameters(
+                nlp, parameters, muscle_name=fes_model.muscle_name
+            )
         )
 
         dxdt_fun = fes_model.system_dynamics if fes_model else nlp.model.system_dynamics
         stim_apparition = (
             (
-                fes_model.get_stim_prev(nlp=nlp, parameters=parameters, idx=nlp.phase_idx)
+                fes_model.get_stim_prev(
+                    nlp=nlp, parameters=parameters, idx=nlp.phase_idx
+                )
                 if fes_model
-                else nlp.model.get_stim_prev(nlp=nlp, parameters=parameters, idx=nlp.phase_idx)
+                else nlp.model.get_stim_prev(
+                    nlp=nlp, parameters=parameters, idx=nlp.phase_idx
+                )
             )
             if stim_prev is None
             else stim_prev
@@ -293,7 +318,10 @@ class DingModelPulseDurationFrequency(DingModelFrequency):
         )
 
     def declare_ding_variables(
-        self, ocp: OptimalControlProgram, nlp: NonLinearProgram, numerical_data_timeseries: dict[str, np.ndarray] = None
+        self,
+        ocp: OptimalControlProgram,
+        nlp: NonLinearProgram,
+        numerical_data_timeseries: dict[str, np.ndarray] = None,
     ):
         """
         Tell the program which variables are states and controls.
@@ -313,4 +341,6 @@ class DingModelPulseDurationFrequency(DingModelFrequency):
             if "pulse_apparition_time" not in nlp.parameters.keys()
             else None
         )
-        ConfigureProblem.configure_dynamics_function(ocp, nlp, dyn_func=self.dynamics, stim_prev=stim_prev)
+        ConfigureProblem.configure_dynamics_function(
+            ocp, nlp, dyn_func=self.dynamics, stim_prev=stim_prev
+        )
