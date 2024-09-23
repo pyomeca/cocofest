@@ -19,16 +19,14 @@ from cocofest.identification.identification_method import full_data_extraction
 
 
 # --- Setting simulation parameters --- #
-n_stim = 10
-n_shooting = 10
-final_time = 1
-extra_phase_time = 1
+n_shooting = 200
+final_time = 2
+stim_time = np.round(np.linspace(0, 1, 11)[:-1], 2)
 model = DingModelFrequency()
-fes_parameters = {"model": model, "n_stim": n_stim}
+fes_parameters = {"model": model, "stim_time": stim_time}
 ivp_parameters = {
     "n_shooting": n_shooting,
     "final_time": final_time,
-    "extend_last_phase_time": extra_phase_time,
     "use_sx": True,
 }
 
@@ -47,13 +45,11 @@ result, time = ivp.integrate()
 noise = np.random.normal(0, 5, len(result["F"][0]))
 force = result["F"][0] + noise
 
-stim = [final_time / n_stim * i for i in range(n_stim)]
-
 # Saving the data in a pickle file
 dictionary = {
     "time": time,
     "force": force,
-    "stim_time": stim,
+    "stim_time": stim_time,
 }
 
 pickle_file_name = "../data/temp_identification_simulation.pkl"
@@ -64,13 +60,15 @@ with open(pickle_file_name, "wb") as file:
 # --- Identifying the model parameters --- #
 ocp = DingModelFrequencyForceParameterIdentification(
     model=model,
+    n_shooting=n_shooting,
+    final_time=final_time,
     data_path=[pickle_file_name],
     identification_method="full",
     double_step_identification=False,
     key_parameter_to_identify=["a_rest", "km_rest", "tau1_rest", "tau2"],
     additional_key_settings={},
-    n_shooting=n_shooting,
     use_sx=True,
+    n_threads=6,
 )
 
 identified_parameters = ocp.force_model_identification()
@@ -87,11 +85,10 @@ identified_force_list = []
 identified_time_list = []
 
 # Building the Initial Value Problem
-fes_parameters = {"model": identified_model, "n_stim": n_stim}
+fes_parameters = {"model": identified_model, "stim_time": stim_time}
 ivp_parameters = {
     "n_shooting": n_shooting,
     "final_time": final_time,
-    "extend_last_phase_time": extra_phase_time,
     "use_sx": True,
 }
 ivp_from_identification = IvpFes(
@@ -122,6 +119,7 @@ result_dict = {
 plt.title("Force state result")
 plt.plot(pickle_time_data, pickle_muscle_data, color="blue", label="simulated")
 plt.plot(identified_time, identified_force, color="red", label="identified")
+
 plt.xlabel("time (s)")
 plt.ylabel("force (N)")
 

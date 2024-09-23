@@ -18,18 +18,16 @@ from cocofest.identification.identification_method import full_data_extraction
 
 
 # --- Setting simulation parameters --- #
-n_stim = 10
-pulse_duration = [0.003] * n_stim
-# pulse_duration = np.random.uniform(0.002, 0.006, 10).tolist()
-n_shooting = 10
-final_time = 1
-extra_phase_time = 1
+stim_time = np.round(np.linspace(0, 1, 11)[:-1], 2)
+pulse_duration = np.random.uniform(0.0002, 0.0006, 10).tolist()
+
+n_shooting = 200
+final_time = 2
 model = DingModelPulseDurationFrequency()
-fes_parameters = {"model": model, "n_stim": n_stim, "pulse_duration": pulse_duration}
+fes_parameters = {"model": model, "stim_time": stim_time, "pulse_duration": pulse_duration}
 ivp_parameters = {
     "n_shooting": n_shooting,
     "final_time": final_time,
-    "extend_last_phase_time": extra_phase_time,
     "use_sx": True,
 }
 
@@ -48,13 +46,11 @@ noise = np.random.normal(0, 5, len(result["F"][0]))
 force_n = result["F"][0]
 force = result["F"][0] + noise
 
-stim = [final_time / n_stim * i for i in range(n_stim)]
-
 # Saving the data in a pickle file
 dictionary = {
     "time": time,
     "force": force,
-    "stim_time": stim,
+    "stim_time": stim_time,
     "pulse_duration": pulse_duration,
 }
 
@@ -72,7 +68,9 @@ ocp = DingModelPulseDurationFrequencyForceParameterIdentification(
     key_parameter_to_identify=["tau1_rest", "tau2", "km_rest", "a_scale", "pd0", "pdt"],
     additional_key_settings={},
     n_shooting=n_shooting,
+    final_time=final_time,
     use_sx=True,
+    n_threads=6,
 )
 
 identified_parameters = ocp.force_model_identification()
@@ -92,13 +90,12 @@ identified_time_list = []
 
 fes_parameters = {
     "model": identified_model,
-    "n_stim": n_stim,
     "pulse_duration": pulse_duration,
+    "stim_time": stim_time,
 }
 ivp_parameters = {
     "n_shooting": n_shooting,
     "final_time": final_time,
-    "extend_last_phase_time": extra_phase_time,
     "use_sx": True,
 }
 ivp_from_identification = IvpFes(
@@ -141,6 +138,7 @@ plt.plot(
     label="simulated (with noise)",
 )
 plt.plot(identified_time, identified_force, color="red", label="identified")
+
 plt.xlabel("time (s)")
 plt.ylabel("force (N)")
 

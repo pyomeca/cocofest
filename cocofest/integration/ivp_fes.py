@@ -105,8 +105,8 @@ class IvpFes:
                 )
                 parameters_bounds.add(
                     "pulse_duration",
-                    min_bound=np.array([self.pulse_duration] * (self.n_stim + 1)),
-                    max_bound=np.array([self.pulse_duration] * (self.n_stim + 1)),
+                    min_bound=np.array([self.pulse_duration]),
+                    max_bound=np.array([self.pulse_duration]),
                     interpolation=InterpolationType.CONSTANT,
                 )
             else:
@@ -175,7 +175,7 @@ class IvpFes:
     def _fill_fes_dict(self, fes_parameters):
         default_fes_dict = {
             "model": FesModel,
-            "n_stim": 1,
+            "stim_time": None,
             "pulse_duration": 0.0003,
             "pulse_intensity": 50,
             "pulse_mode": "single",
@@ -218,9 +218,6 @@ class IvpFes:
 
         if not isinstance(self.fes_parameters["model"], FesModel):
             raise ValueError("model must be a FesModel type")
-
-        if not isinstance(self.fes_parameters["n_stim"], int):
-            raise ValueError("n_stim must be an int type")
 
         if isinstance(
             self.fes_parameters["model"],

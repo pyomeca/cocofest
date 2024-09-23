@@ -11,7 +11,7 @@ from cocofest import DingModelFrequencyWithFatigue, IvpFes
 # --- Build ocp --- #
 # This example shows how to create a problem with single pulses.
 # The stimulation won't be optimized.
-ns = 200
+ns = 100
 final_time = 1
 
 fes_parameters = {

@@ -18,19 +18,18 @@ from cocofest.identification.identification_method import full_data_extraction
 
 
 # --- Setting simulation parameters --- #
-n_stim = 10
-pulse_intensity = [50] * n_stim
-# pulse_intensity = np.random.uniform(20, 130, 10).tolist()
-n_shooting = 10
-final_time = 1
-extra_phase_time = 1
+# n_stim = 10
+# pulse_intensity = [50] * n_stim
+stim_time = np.round(np.linspace(0, 1, 11)[:-1], 2)
+pulse_intensity = np.random.uniform(20, 130, 10).tolist()
+n_shooting = 200
+final_time = 2
 model = DingModelIntensityFrequency()
-fes_parameters = {"model": model, "n_stim": n_stim, "pulse_intensity": pulse_intensity}
+fes_parameters = {"model": model, "stim_time": stim_time, "pulse_intensity": pulse_intensity}
 ivp_parameters = {
     "n_shooting": n_shooting,
     "final_time": final_time,
     "use_sx": True,
-    "extend_last_phase_time": extra_phase_time,
 }
 
 # --- Creating the simulated data to identify on --- #
@@ -45,15 +44,14 @@ result, time = ivp.integrate()
 
 # Adding noise to the force
 noise = np.random.normal(0, 0.5, len(result["F"][0]))
+force_n = result["F"][0]
 force = result["F"][0] + noise
-
-stim = [final_time / n_stim * i for i in range(n_stim)]
 
 # Saving the data in a pickle file
 dictionary = {
     "time": time,
     "force": force,
-    "stim_time": stim,
+    "stim_time": stim_time,
     "pulse_intensity": pulse_intensity,
 }
 
@@ -79,7 +77,9 @@ ocp = DingModelPulseIntensityFrequencyForceParameterIdentification(
     ],
     additional_key_settings={},
     n_shooting=n_shooting,
+    final_time=final_time,
     use_sx=True,
+    n_threads=6,
 )
 
 identified_parameters = ocp.force_model_identification()
@@ -102,14 +102,13 @@ identified_time_list = []
 # Building the Initial Value Problem
 fes_parameters = {
     "model": identified_model,
-    "n_stim": n_stim,
+    "stim_time": stim_time,
     "pulse_intensity": pulse_intensity,
 }
 ivp_parameters = {
     "n_shooting": n_shooting,
     "final_time": final_time,
     "use_sx": True,
-    "extend_last_phase_time": extra_phase_time,
 }
 
 ivp_from_identification = IvpFes(
@@ -144,6 +143,7 @@ result_dict = {
 plt.title("Force state result")
 plt.plot(pickle_time_data, pickle_muscle_data, color="blue", label="simulated")
 plt.plot(identified_time, identified_force, color="red", label="identified")
+plt.plot(pickle_time_data, force_n, color="black", label="no noise")
 plt.xlabel("time (s)")
 plt.ylabel("force (N)")
 

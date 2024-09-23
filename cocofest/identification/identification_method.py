@@ -306,58 +306,8 @@ def force_at_node_in_ocp(time, force, n_shooting, final_time, sparse=None):
         List of force at each node in the OCP.
     """
 
-    temp_time = np.linspace(0, final_time, int((n_shooting / final_time) + 1))
+    temp_time = np.linspace(0, final_time, n_shooting + 1)
     force_at_node = list(np.interp(temp_time, time, force))
     # if sparse:  # TODO check this part
     #     force_at_node = force_at_node[0:sparse] + force_at_node[:-sparse]
     return force_at_node
-
-
-def node_shooting_list_creation(stim, stimulated_n_shooting):
-    """
-    Creates a list of node shooting points.
-
-    Parameters
-    ----------
-    stim : list
-        List of stimulation times.
-    stimulated_n_shooting : int
-        Number of shooting points for stimulated phase.
-
-    Returns
-    -------
-    tuple
-        A tuple containing the list of number of shooting points for each phase and the final time for each phase.
-    """
-
-    first_final_time = stim[1] if stim[0] == 0 else stim[0]
-    final_time_phase = (first_final_time,)
-    for i in range(1, len(stim)):
-        final_time_phase = final_time_phase + (stim[i] - stim[i - 1],)
-
-    threshold_stimulation_interval = np.mean(final_time_phase)
-    stimulation_interval_average_without_rest_time = np.delete(
-        np.array(final_time_phase),
-        np.where(
-            np.logical_or(
-                final_time_phase > threshold_stimulation_interval,
-                np.array(final_time_phase) == 0,
-            )
-        ),
-    )
-    stimulation_interval_average = np.mean(
-        stimulation_interval_average_without_rest_time
-    )
-    n_shooting = []
-
-    for i in range(len(final_time_phase)):
-        if final_time_phase[i] > threshold_stimulation_interval:
-            temp_final_time = final_time_phase[i]
-            rest_n_shooting = int(
-                (temp_final_time / stimulation_interval_average) * stimulated_n_shooting
-            )
-            n_shooting.append(rest_n_shooting)
-        else:
-            n_shooting.append(stimulated_n_shooting)
-
-    return n_shooting, final_time_phase

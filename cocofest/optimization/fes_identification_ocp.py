@@ -18,14 +18,10 @@ from bioptim import (
     Node,
 )
 
-from ..custom_objectives import CustomObjective
 from ..models.fes_model import FesModel
 from ..models.ding2007 import DingModelPulseDurationFrequency
-from ..models.ding2007_with_fatigue import DingModelPulseDurationFrequencyWithFatigue
 from ..models.ding2003 import DingModelFrequency
-from ..models.ding2003_with_fatigue import DingModelFrequencyWithFatigue
 from ..models.hmed2018 import DingModelIntensityFrequency
-from ..models.hmed2018_with_fatigue import DingModelIntensityFrequencyWithFatigue
 from ..optimization.fes_ocp import OcpFes
 
 
@@ -35,21 +31,21 @@ class OcpFesId(OcpFes):
 
     @staticmethod
     def prepare_ocp(
-        model: FesModel = None,
-        n_shooting: int = None,
-        final_time: float | int = None,
-        stim_time: list = None,
-        pulse_duration: int | float | list = None,
-        pulse_intensity: int | float | list = None,
-        objective: dict = None,
-        key_parameter_to_identify: list = None,
-        additional_key_settings: dict = None,
-        custom_objective: list[Objective] = None,
-        discontinuity_in_ocp: list = None,
-        use_sx: bool = True,
-        ode_solver: OdeSolver = OdeSolver.RK4(n_integration_steps=1),
-        n_threads: int = 1,
-        **kwargs,
+            model: FesModel = None,
+            n_shooting: int = None,
+            final_time: float | int = None,
+            stim_time: list = None,
+            pulse_duration: dict = None,
+            pulse_intensity: dict = None,
+            objective: dict = None,
+            key_parameter_to_identify: list = None,
+            additional_key_settings: dict = None,
+            custom_objective: list[Objective] = None,
+            discontinuity_in_ocp: list = None,
+            use_sx: bool = True,
+            ode_solver: OdeSolver = OdeSolver.RK4(n_integration_steps=1),
+            n_threads: int = 1,
+            **kwargs,
     ):
         """
         The main class to define an ocp. This class prepares the full program and gives all
@@ -63,9 +59,9 @@ class OcpFesId(OcpFes):
             The final time of each phase, it corresponds to the stimulation apparition time
         n_shooting: list[int],
             The number of shooting points for each phase
-        pulse_duration: int | float | list[int] | list[float],
+        pulse_duration: dict,
             The duration of the stimulation
-        pulse_intensity: int | float | list[int] | list[float],
+        pulse_intensity: dict,
             The intensity of the stimulation
         objective: dict,
             The objective to minimize
@@ -115,24 +111,19 @@ class OcpFesId(OcpFes):
             stim_apparition_time=stim_time,
             parameter_to_identify=key_parameter_to_identify,
             parameter_setting=additional_key_settings,
-            pulse_duration=pulse_duration["fixed"],
-            pulse_intensity=pulse_intensity["fixed"],
+            pulse_duration=pulse_duration,
+            pulse_intensity=pulse_intensity,
             use_sx=use_sx,
         )
         dynamics = OcpFesId._declare_dynamics(model=model)
         x_bounds, x_init = OcpFesId._set_bounds(
             model=model,
-            n_stim=n_stim,
-            n_shooting=n_shooting,
             force_tracking=objective["force_tracking"],
             discontinuity_in_ocp=discontinuity_in_ocp,
         )
         objective_functions = OcpFesId._set_objective(
             model=model,
-            n_stim=n_stim,
-            n_shooting=n_shooting,
-            force_tracking=objective["force_tracking"],
-            custom_objective=custom_objective,
+            objective=objective
         )
         # phase_transitions = OcpFesId._set_phase_transition(discontinuity_in_ocp)
 
@@ -157,12 +148,12 @@ class OcpFesId(OcpFes):
 
     @staticmethod
     def _sanity_check_id(
-        model=None,
-        n_shooting=None,
-        final_time=None,
-        objective=None,
-        pulse_duration=None,
-        pulse_intensity=None,
+            model=None,
+            n_shooting=None,
+            final_time=None,
+            objective=None,
+            pulse_duration=None,
+            pulse_intensity=None,
     ):
         if not isinstance(n_shooting, int):
             raise TypeError(
@@ -180,14 +171,14 @@ class OcpFesId(OcpFes):
             )
         else:
             if not all(
-                isinstance(val, int | float) for val in objective["force_tracking"]
+                    isinstance(val, int | float) for val in objective["force_tracking"]
             ):
                 raise TypeError(f"force_tracking must be list of int or float type.")
 
         if isinstance(model, DingModelPulseDurationFrequency):
-            if not isinstance(pulse_duration, list):
+            if not isinstance(pulse_duration, dict):
                 raise TypeError(
-                    f"pulse_duration must be list type,"
+                    f"pulse_duration must be dict type,"
                     f" currently pulse_duration is {type(pulse_duration)}) type."
                 )
 
@@ -206,11 +197,9 @@ class OcpFesId(OcpFes):
 
     @staticmethod
     def _set_bounds(
-        model=None,
-        n_stim=None,
-        n_shooting=None,
-        force_tracking=None,
-        discontinuity_in_ocp=None,
+            model: FesModel = None,
+            force_tracking=None,
+            discontinuity_in_ocp=None,
     ):
         # ---- STATE BOUNDS REPRESENTATION ---- #
         #
@@ -277,37 +266,35 @@ class OcpFesId(OcpFes):
         return x_bounds, x_init
 
     @staticmethod
-    def _set_objective(
-        model, n_stim, n_shooting, force_tracking, custom_objective, **kwargs
-    ):
+    def _set_objective(model, objective):
         # Creates the objective for our problem (in this case, match a force curve)
         objective_functions = ObjectiveList()
 
-        if force_tracking:
+        if objective["force_tracking"]:
             objective_functions.add(
                 ObjectiveFcn.Lagrange.TRACK_STATE,
                 key="F",
                 weight=1,
-                target=np.array(force_tracking)[np.newaxis, :],
+                target=np.array(objective["force_tracking"])[np.newaxis, :],
                 node=Node.ALL,
                 quadratic=True,
             )
 
-        if custom_objective:
-            for i in range(len(custom_objective)):
-                objective_functions.add(custom_objective[i])
+        if "custom" in objective and objective["custom"] is not None:
+            for i in range(len(objective["custom"])):
+                objective_functions.add(objective["custom"][i])
 
         return objective_functions
 
     @staticmethod
     def _set_parameters(
-        n_stim,
-        stim_apparition_time,
-        parameter_to_identify,
-        parameter_setting,
-        use_sx,
-        pulse_duration=None,
-        pulse_intensity=None,
+            n_stim,
+            stim_apparition_time,
+            parameter_to_identify,
+            parameter_setting,
+            use_sx,
+            pulse_duration: dict = None,
+            pulse_intensity: dict = None,
     ):
         parameters = ParameterList(use_sx=use_sx)
         parameters_bounds = BoundsList()
@@ -356,28 +343,28 @@ class OcpFesId(OcpFes):
                 ),
             )
 
-        if pulse_duration:
+        if pulse_duration["fixed"]:
             parameters.add(
                 name="pulse_duration",
                 function=DingModelPulseDurationFrequency.set_impulse_duration,
                 size=n_stim,
                 scaling=VariableScaling("pulse_duration", [1] * n_stim),
             )
-            if isinstance(pulse_duration, list):
+            if isinstance(pulse_duration["fixed"], list):
                 parameters_bounds.add(
                     "pulse_duration",
-                    min_bound=np.array(pulse_duration),
-                    max_bound=np.array(pulse_duration),
+                    min_bound=np.array(pulse_duration["fixed"]),
+                    max_bound=np.array(pulse_duration["fixed"]),
                     interpolation=InterpolationType.CONSTANT,
                 )
                 parameters_init.add(
-                    key="pulse_duration", initial_guess=np.array(pulse_duration)
+                    key="pulse_duration", initial_guess=np.array(pulse_duration["fixed"])
                 )
             else:
                 parameters_bounds.add(
                     "pulse_duration",
-                    min_bound=np.array([pulse_duration] * n_stim),
-                    max_bound=np.array([pulse_duration] * n_stim),
+                    min_bound=np.array([pulse_duration["fixed"]] * n_stim),
+                    max_bound=np.array([pulse_duration["fixed"]] * n_stim),
                     interpolation=InterpolationType.CONSTANT,
                 )
                 parameters_init.add(
@@ -385,33 +372,33 @@ class OcpFesId(OcpFes):
                     initial_guess=np.array([pulse_duration] * n_stim),
                 )
 
-        if pulse_intensity:
+        if pulse_intensity["fixed"]:
             parameters.add(
                 name="pulse_intensity",
                 function=DingModelIntensityFrequency.set_impulse_intensity,
                 size=n_stim,
                 scaling=VariableScaling("pulse_intensity", [1] * n_stim),
             )
-            if isinstance(pulse_intensity, list):
+            if isinstance(pulse_intensity["fixed"], list):
                 parameters_bounds.add(
                     "pulse_intensity",
-                    min_bound=np.array(pulse_intensity),
-                    max_bound=np.array(pulse_intensity),
+                    min_bound=np.array(pulse_intensity["fixed"]),
+                    max_bound=np.array(pulse_intensity["fixed"]),
                     interpolation=InterpolationType.CONSTANT,
                 )
                 parameters_init.add(
-                    key="pulse_intensity", initial_guess=np.array(pulse_intensity)
+                    key="pulse_intensity", initial_guess=np.array(pulse_intensity["fixed"])
                 )
             else:
                 parameters_bounds.add(
                     "pulse_intensity",
-                    min_bound=np.array([pulse_intensity] * n_stim),
-                    max_bound=np.array([pulse_intensity] * n_stim),
+                    min_bound=np.array([pulse_intensity["fixed"]] * n_stim),
+                    max_bound=np.array([pulse_intensity["fixed"]] * n_stim),
                     interpolation=InterpolationType.CONSTANT,
                 )
                 parameters_init.add(
                     key="pulse_intensity",
-                    initial_guess=np.array([pulse_intensity] * n_stim),
+                    initial_guess=np.array([pulse_intensity["fixed"]] * n_stim),
                 )
 
         return parameters, parameters_bounds, parameters_init

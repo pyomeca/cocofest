@@ -16,7 +16,7 @@ ocp = OcpFes().prepare_ocp(
     model=DingModelPulseDurationFrequencyWithFatigue(),
     stim_time=[0, 0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 0.45],
     n_shooting=100,
-    final_time=5,
+    final_time=0.5,
     pulse_duration={
         "min": minimum_pulse_duration,
         "max": 0.0006,
