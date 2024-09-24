@@ -27,6 +27,7 @@ from ..models.ding2007 import DingModelPulseDurationFrequency
 from ..models.ding2007_with_fatigue import DingModelPulseDurationFrequencyWithFatigue
 from ..models.hmed2018 import DingModelIntensityFrequency
 from ..models.hmed2018_with_fatigue import DingModelIntensityFrequencyWithFatigue
+from ..custom_constraints import CustomConstraint
 
 
 class OcpFes:
@@ -62,8 +63,7 @@ class OcpFes:
             parameters,
             parameters_bounds,
             parameters_init,
-            parameter_objectives,
-            constraints,
+            parameter_objectives
         ) = OcpFes._build_parameters(
             model=input_dict["model"],
             stim_time=input_dict["stim_time"],
@@ -73,8 +73,13 @@ class OcpFes:
             use_sx=input_dict["use_sx"],
         )
 
+        constraints = OcpFes._build_constraints(input_dict["model"], input_dict["n_shooting"], input_dict["final_time"], input_dict["stim_time"])
+
         dynamics = OcpFes._declare_dynamics(input_dict["model"])
         x_bounds, x_init = OcpFes._set_bounds(input_dict["model"])
+
+        u_bounds, u_init = OcpFes._set_u_bounds(input_dict["model"])
+
         objective_functions = OcpFes._set_objective(input_dict["n_shooting"], objective)
 
         optimization_dict = {
@@ -85,6 +90,8 @@ class OcpFes:
             "objective_functions": objective_functions,
             "x_init": x_init,
             "x_bounds": x_bounds,
+            "u_bounds": u_bounds,
+            "u_init": u_init,
             "constraints": constraints,
             "parameters": parameters,
             "parameters_bounds": parameters_bounds,
@@ -171,6 +178,8 @@ class OcpFes:
             objective_functions=optimization_dict["objective_functions"],
             x_init=optimization_dict["x_init"],
             x_bounds=optimization_dict["x_bounds"],
+            u_bounds=optimization_dict["u_bounds"],
+            u_init=optimization_dict["u_init"],
             constraints=optimization_dict["constraints"],
             parameters=optimization_dict["parameters"],
             parameter_bounds=optimization_dict["parameters_bounds"],
@@ -509,7 +518,6 @@ class OcpFes:
         parameters_bounds = BoundsList()
         parameters_init = InitialGuessList()
         parameter_objectives = ParameterObjectiveList()
-        constraints = ConstraintList()
 
         n_stim = len(stim_time)
         parameters.add(
@@ -652,9 +660,38 @@ class OcpFes:
             parameters,
             parameters_bounds,
             parameters_init,
-            parameter_objectives,
-            constraints,
+            parameter_objectives
         )
+
+    @staticmethod
+    def _build_constraints(model, n_shooting, final_time, stim_time):
+        constraints = ConstraintList()
+
+        time_vector = np.linspace(0, final_time, n_shooting + 1)
+        stim_at_node = [np.where(stim_time[i] <= time_vector)[0][0] for i in range(len(stim_time))]
+
+        index = 0
+        for i in range(n_shooting):
+            if i in stim_at_node:
+                index += 1
+            constraints.add(
+                CustomConstraint.cn_sum,
+                node=i,
+                stim_time=stim_time[:index],
+            )
+
+        if isinstance(model, DingModelPulseDurationFrequency):
+            index = 0
+            for i in range(n_shooting):
+                if i in stim_at_node and i != 0:
+                    index += 1
+                constraints.add(
+                    CustomConstraint.a_calculation,
+                    node=i,
+                    last_stim_index=index,
+                )
+
+        return constraints
 
     @staticmethod
     def _declare_dynamics(model):
@@ -717,6 +754,19 @@ class OcpFes:
             x_init.add(variable_bound_list[j], model.standard_rest_values()[j])
 
         return x_bounds, x_init
+
+    @staticmethod
+    def _set_u_bounds(model):
+        # Controls bounds
+        u_bounds = BoundsList()
+
+        # Controls initial guess
+        u_init = InitialGuessList()
+        u_init.add(key="Cn_sum", initial_guess=[0], phase=0)
+        if isinstance(model, DingModelPulseDurationFrequency):
+            u_init.add(key="A_calculation", initial_guess=[0], phase=0)
+
+        return u_bounds, u_init
 
     @staticmethod
     def _set_objective(n_shooting, objective):

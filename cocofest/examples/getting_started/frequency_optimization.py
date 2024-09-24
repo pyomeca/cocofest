@@ -15,7 +15,7 @@ ocp = OcpFes().prepare_ocp(
     final_time=1,
     objective={"end_node_tracking": 270},
     use_sx=True,
-    stim_time=[0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1],
+    stim_time=[0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9],
 )
 
 # --- Solve the program --- #

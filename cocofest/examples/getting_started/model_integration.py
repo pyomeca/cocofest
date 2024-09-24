@@ -1,6 +1,6 @@
 import matplotlib.pyplot as plt
 from cocofest import (
-    DingModelFrequencyWithFatigue,
+    DingModelFrequencyWithFatigueIntegrate,
     IvpFes,
 )
 
@@ -8,7 +8,7 @@ from cocofest import (
 # This problem was build to be integrated and has no objectives nor parameter to optimize.
 
 fes_parameters = {
-    "model": DingModelFrequencyWithFatigue(),
+    "model": DingModelFrequencyWithFatigueIntegrate(),
     "stim_time": [0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9],
 }
 ivp_parameters = {"n_shooting": 100, "final_time": 1, "use_sx": True}

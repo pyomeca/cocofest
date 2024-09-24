@@ -110,8 +110,7 @@ class FesModel(ABC):
         self,
         cn: MX,
         f: MX,
-        t: MX,
-        t_stim_prev: list[MX] | list[float],
+        cn_sum: MX,
         force_length_relationship: MX | float,
         force_velocity_relationship: MX | float,
     ):
@@ -141,7 +140,7 @@ class FesModel(ABC):
         """
 
     @abstractmethod
-    def cn_sum_fun(self, r0: MX | float, t: MX, t_stim_prev: list[MX]):
+    def cn_sum_fun(self, r0: MX | float, t: MX, t_stim_prev: list[MX], lambda_i: list[MX]):
         """
         Returns
         -------
@@ -149,7 +148,7 @@ class FesModel(ABC):
         """
 
     @abstractmethod
-    def cn_dot_fun(self, cn: MX, r0: MX | float, t: MX, t_stim_prev: list[MX]):
+    def cn_dot_fun(self, cn: MX, cn_sum: MX):
         """
 
         Returns
@@ -185,7 +184,6 @@ class FesModel(ABC):
         algebraic_states: MX,
         numerical_data_timeseries: MX,
         nlp: NonLinearProgram,
-        stim_prev: list[float],
         fes_model,
         force_length_relationship: MX | float,
         force_velocity_relationship: MX | float,
@@ -204,26 +202,6 @@ class FesModel(ABC):
         nlp: NonLinearProgram,
         numerical_data_timeseries: dict[str, np.ndarray] = None,
     ):
-        """
-
-        Returns
-        -------
-
-        """
-
-    @staticmethod
-    @abstractmethod
-    def get_stim_prev(nlp: NonLinearProgram, parameters: MX, idx: int):
-        """
-
-        Returns
-        -------
-
-        """
-
-    @staticmethod
-    @abstractmethod
-    def _build_t_stim_prev(ocp: OptimalControlProgram, idx: int):
         """
 
         Returns

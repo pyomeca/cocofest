@@ -17,11 +17,11 @@ from bioptim import (
 )
 
 from ..models.fes_model import FesModel
-from ..models.ding2003 import DingModelFrequency
-from ..models.ding2007 import DingModelPulseDurationFrequency
-from ..models.ding2007_with_fatigue import DingModelPulseDurationFrequencyWithFatigue
-from ..models.hmed2018 import DingModelIntensityFrequency
-from ..models.hmed2018_with_fatigue import DingModelIntensityFrequencyWithFatigue
+from ..models.ding2003_integrate import DingModelFrequencyIntegrate
+from ..models.ding2007_integrate import DingModelPulseDurationFrequencyIntegrate
+from ..models.ding2007_with_fatigue_integrate import DingModelPulseDurationFrequencyWithFatigueIntegrate
+from ..models.hmed2018_integrate import DingModelIntensityFrequencyIntegrate
+from ..models.hmed2018_with_fatigue_integrate import DingModelIntensityFrequencyWithFatigueIntegrate
 
 
 class IvpFes:
@@ -81,7 +81,7 @@ class IvpFes:
 
         parameters.add(
             name="pulse_apparition_time",
-            function=DingModelFrequency.set_pulse_apparition_time,
+            function=DingModelFrequencyIntegrate.set_pulse_apparition_time,
             size=self.n_stim,
             scaling=VariableScaling("pulse_apparition_time", [1] * self.n_stim),
         )
@@ -96,8 +96,8 @@ class IvpFes:
 
         if isinstance(
             self.model,
-            DingModelPulseDurationFrequency
-            | DingModelPulseDurationFrequencyWithFatigue,
+            DingModelPulseDurationFrequencyIntegrate
+            | DingModelPulseDurationFrequencyWithFatigueIntegrate,
         ):
             if isinstance(self.pulse_duration, int | float):
                 parameters_init["pulse_duration"] = np.array(
@@ -120,7 +120,7 @@ class IvpFes:
 
             parameters.add(
                 name="pulse_duration",
-                function=DingModelPulseDurationFrequency.set_impulse_duration,
+                function=DingModelPulseDurationFrequencyIntegrate.set_impulse_duration,
                 size=self.n_stim,
                 scaling=VariableScaling("pulse_duration", [1] * self.n_stim),
             )
@@ -132,7 +132,7 @@ class IvpFes:
 
         if isinstance(
             self.model,
-            DingModelIntensityFrequency | DingModelIntensityFrequencyWithFatigue,
+            DingModelIntensityFrequencyIntegrate | DingModelIntensityFrequencyWithFatigueIntegrate,
         ):
             if isinstance(self.pulse_intensity, int | float):
                 parameters_init["pulse_intensity"] = np.array(
@@ -144,7 +144,7 @@ class IvpFes:
 
             parameters.add(
                 name="pulse_intensity",
-                function=DingModelIntensityFrequency.set_impulse_intensity,
+                function=DingModelIntensityFrequencyIntegrate.set_impulse_intensity,
                 size=self.n_stim,
                 scaling=VariableScaling("pulse_intensity", [1] * self.n_stim),
             )
@@ -221,8 +221,8 @@ class IvpFes:
 
         if isinstance(
             self.fes_parameters["model"],
-            DingModelPulseDurationFrequency
-            | DingModelPulseDurationFrequencyWithFatigue,
+            DingModelPulseDurationFrequencyIntegrate
+            | DingModelPulseDurationFrequencyWithFatigueIntegrate,
         ):
             pulse_duration_format = (
                 isinstance(self.fes_parameters["pulse_duration"], int | float | list)
@@ -262,7 +262,7 @@ class IvpFes:
 
         if isinstance(
             self.fes_parameters["model"],
-            DingModelIntensityFrequency | DingModelIntensityFrequencyWithFatigue,
+            DingModelIntensityFrequencyIntegrate | DingModelIntensityFrequencyWithFatigueIntegrate,
         ):
             pulse_intensity_format = (
                 isinstance(self.fes_parameters["pulse_intensity"], int | float | list)

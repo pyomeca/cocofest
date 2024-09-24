@@ -23,6 +23,7 @@ from ..models.ding2007 import DingModelPulseDurationFrequency
 from ..models.ding2003 import DingModelFrequency
 from ..models.hmed2018 import DingModelIntensityFrequency
 from ..optimization.fes_ocp import OcpFes
+from ..custom_constraints import CustomConstraint
 
 
 class OcpFesId(OcpFes):
@@ -105,7 +106,6 @@ class OcpFesId(OcpFes):
 
         n_stim = len(stim_time)
 
-        constraints = ConstraintList()
         parameters, parameters_bounds, parameters_init = OcpFesId._set_parameters(
             n_stim=n_stim,
             stim_apparition_time=stim_time,
@@ -125,6 +125,10 @@ class OcpFesId(OcpFes):
             model=model,
             objective=objective
         )
+
+        constraints = OcpFesId._build_constraints(model=model, n_shooting=n_shooting, final_time=final_time, stim_time=stim_time)
+        u_bounds, u_init = OcpFesId._set_u_bounds(model=model)
+
         # phase_transitions = OcpFesId._set_phase_transition(discontinuity_in_ocp)
 
         return OptimalControlProgram(
@@ -134,6 +138,8 @@ class OcpFesId(OcpFes):
             phase_time=final_time,
             x_init=x_init,
             x_bounds=x_bounds,
+            u_init=u_init,
+            u_bounds=u_bounds,
             objective_functions=objective_functions,
             constraints=constraints,
             ode_solver=ode_solver,

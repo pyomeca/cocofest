@@ -131,8 +131,7 @@ class DingModelFrequencyWithFatigue(DingModelFrequency):
         a: MX = None,
         tau1: MX = None,
         km: MX = None,
-        t: MX = None,
-        t_stim_prev: list[MX] | list[float] = None,
+        cn_sum: MX | float = None,
         force_length_relationship: MX | float = 1,
         force_velocity_relationship: MX | float = 1,
     ) -> MX:
@@ -151,10 +150,6 @@ class DingModelFrequencyWithFatigue(DingModelFrequency):
             The value of the time_state_force_no_cross_bridge (ms)
         km: MX
             The value of the cross_bridges (unitless)
-        t: MX
-            The current time at which the dynamics is evaluated (ms)
-        t_stim_prev: list[MX]
-            The time list of the previous stimulations (ms)
         force_length_relationship: MX | float
             The force length relationship value (unitless)
         force_velocity_relationship: MX | float
@@ -164,8 +159,7 @@ class DingModelFrequencyWithFatigue(DingModelFrequency):
         -------
         The value of the derivative of each state dx/dt at the current time t
         """
-        r0 = km + self.r0_km_relationship  # Simplification
-        cn_dot = self.cn_dot_fun(cn, r0, t, t_stim_prev=t_stim_prev)  # Equation n°1
+        cn_dot = self.cn_dot_fun(cn=cn, cn_sum=cn_sum)  # Equation n°1
         f_dot = self.f_dot_fun(
             cn,
             f,
@@ -236,7 +230,6 @@ class DingModelFrequencyWithFatigue(DingModelFrequency):
         algebraic_states: MX,
         numerical_timeseries: MX,
         nlp: NonLinearProgram,
-        stim_prev: list[float] = None,
         fes_model=None,
         force_length_relationship: MX | float = 1,
         force_velocity_relationship: MX | float = 1,
@@ -260,8 +253,6 @@ class DingModelFrequencyWithFatigue(DingModelFrequency):
             The numerical timeseries of the system
         nlp: NonLinearProgram
             A reference to the phase
-        stim_prev: list[float]
-            The previous stimulation time
         fes_model: DingModelFrequencyWithFatigue
             The current phase fes model
         force_length_relationship: MX | float
@@ -274,21 +265,6 @@ class DingModelFrequencyWithFatigue(DingModelFrequency):
         """
 
         dxdt_fun = fes_model.system_dynamics if fes_model else nlp.model.system_dynamics
-        stim_apparition = (
-            (
-                fes_model.get_stim_prev(
-                    nlp=nlp, parameters=parameters, idx=nlp.phase_idx
-                )
-                if fes_model
-                else nlp.model.get_stim_prev(
-                    nlp=nlp, parameters=parameters, idx=nlp.phase_idx
-                )
-            )
-            if stim_prev is None
-            else stim_prev
-        )  # Get the previous stimulation apparition time from the parameters
-        # if not provided from stim_prev, this way of getting the list is not optimal, but it is the only way to get it.
-        # Otherwise, it will create issues with free variables or wrong mx or sx type while calculating the dynamics
 
         return DynamicsEvaluation(
             dxdt=dxdt_fun(
@@ -297,8 +273,7 @@ class DingModelFrequencyWithFatigue(DingModelFrequency):
                 a=states[2],
                 tau1=states[3],
                 km=states[4],
-                t=time,
-                t_stim_prev=stim_apparition,
+                cn_sum=controls[0],
                 force_length_relationship=force_length_relationship,
                 force_velocity_relationship=force_velocity_relationship,
             ),
@@ -324,11 +299,5 @@ class DingModelFrequencyWithFatigue(DingModelFrequency):
             A list of values to pass to the dynamics at each node. Experimental external forces should be included here.
         """
         StateConfigure().configure_all_fes_model_states(ocp, nlp, fes_model=self)
-        stim_prev = (
-            self._build_t_stim_prev(ocp, nlp.phase_idx)
-            if "pulse_apparition_time" not in nlp.parameters.keys()
-            else None
-        )
-        ConfigureProblem.configure_dynamics_function(
-            ocp, nlp, dyn_func=self.dynamics, stim_prev=stim_prev
-        )
+        StateConfigure().configure_cn_sum(ocp, nlp)
+        ConfigureProblem.configure_dynamics_function(ocp, nlp, dyn_func=self.dynamics)

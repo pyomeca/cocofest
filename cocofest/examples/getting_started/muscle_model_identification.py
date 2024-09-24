@@ -2,6 +2,7 @@ import pickle
 import os
 from cocofest import (
     DingModelIntensityFrequency,
+    DingModelIntensityFrequencyIntegrate,
     DingModelPulseIntensityFrequencyForceParameterIdentification,
     IvpFes,
 )
@@ -17,7 +18,7 @@ final_time = 1
 stim_time = [0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]
 pulse_intensity_values = [20, 20, 30, 40, 50, 60, 70, 80, 90, 100]
 fes_parameters = {
-    "model": DingModelIntensityFrequency(),
+    "model": DingModelIntensityFrequencyIntegrate(),
     "pulse_intensity": pulse_intensity_values,
     "stim_time": stim_time,
 }
@@ -126,7 +127,7 @@ print(
     cr,
 )
 
-identified_model = DingModelIntensityFrequency()
+identified_model = DingModelIntensityFrequencyIntegrate()
 identified_model.a_rest = a_rest
 identified_model.km_rest = km_rest
 identified_model.tau1_rest = tau1_rest

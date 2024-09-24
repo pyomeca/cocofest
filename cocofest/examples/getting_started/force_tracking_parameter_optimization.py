@@ -36,7 +36,7 @@ ocp = OcpFes().prepare_ocp(
     },
     objective={"force_tracking": force_tracking},
     use_sx=True,
-    stim_time=[0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9],
+    stim_time=np.linspace(0, 1, 31)[:-1],
 )
 
 # --- Solve the program --- #
