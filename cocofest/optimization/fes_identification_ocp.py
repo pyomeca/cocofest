@@ -410,6 +410,36 @@ class OcpFesId(OcpFes):
         return parameters, parameters_bounds, parameters_init
 
     @staticmethod
+    def _build_constraints(model, n_shooting, final_time, stim_time):
+        constraints = ConstraintList()
+
+        time_vector = np.linspace(0, final_time, n_shooting + 1)
+        stim_at_node = [np.where(stim_time[i] <= time_vector)[0][0] for i in range(len(stim_time))]
+
+        index = 0
+        for i in range(n_shooting):
+            if i in stim_at_node:
+                index += 1
+            constraints.add(
+                CustomConstraint.cn_sum_identification,
+                node=i,
+                stim_time=stim_time[:index],
+            )
+
+        if isinstance(model, DingModelPulseDurationFrequency):
+            index = 0
+            for i in range(n_shooting):
+                if i in stim_at_node and i != 0:
+                    index += 1
+                constraints.add(
+                    CustomConstraint.a_calculation_identification,
+                    node=i,
+                    last_stim_index=index,
+                )
+
+        return constraints
+
+    @staticmethod
     def _set_phase_transition(discontinuity_in_ocp):
         phase_transitions = PhaseTransitionList()
         if discontinuity_in_ocp:

@@ -11,6 +11,7 @@ import numpy as np
 
 from cocofest import (
     DingModelIntensityFrequency,
+    DingModelIntensityFrequencyIntegrate,
     DingModelPulseIntensityFrequencyForceParameterIdentification,
     IvpFes,
 )
@@ -21,11 +22,11 @@ from cocofest.identification.identification_method import full_data_extraction
 # n_stim = 10
 # pulse_intensity = [50] * n_stim
 stim_time = np.round(np.linspace(0, 1, 11)[:-1], 2)
-pulse_intensity = np.random.uniform(20, 130, 10).tolist()
+pulse_intensity = np.random.randint(20, 130, 10).tolist()
 n_shooting = 200
 final_time = 2
-model = DingModelIntensityFrequency()
-fes_parameters = {"model": model, "stim_time": stim_time, "pulse_intensity": pulse_intensity}
+ivp_model = DingModelIntensityFrequencyIntegrate()
+fes_parameters = {"model": ivp_model, "stim_time": stim_time, "pulse_intensity": pulse_intensity}
 ivp_parameters = {
     "n_shooting": n_shooting,
     "final_time": final_time,
@@ -45,7 +46,7 @@ result, time = ivp.integrate()
 # Adding noise to the force
 noise = np.random.normal(0, 0.5, len(result["F"][0]))
 force_n = result["F"][0]
-force = result["F"][0] + noise
+force = result["F"][0] #+ noise
 
 # Saving the data in a pickle file
 dictionary = {
@@ -60,8 +61,9 @@ with open(pickle_file_name, "wb") as file:
     pickle.dump(dictionary, file)
 
 # --- Identifying the model parameters --- #
+ocp_model = DingModelIntensityFrequency()
 ocp = DingModelPulseIntensityFrequencyForceParameterIdentification(
-    model=model,
+    model=ocp_model,
     data_path=[pickle_file_name],
     identification_method="full",
     double_step_identification=False,
@@ -86,7 +88,7 @@ identified_parameters = ocp.force_model_identification()
 print(identified_parameters)
 
 # --- Plotting noisy simulated data and simulation from model with the identified parameter --- #
-identified_model = model
+identified_model = ivp_model
 identified_model.a_rest = identified_parameters["a_rest"]
 identified_model.km_rest = identified_parameters["km_rest"]
 identified_model.tau1_rest = identified_parameters["tau1_rest"]

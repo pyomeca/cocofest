@@ -136,14 +136,33 @@ class DingModelIntensityFrequency(DingModelFrequency):
         ----------
         intensity_stim: MX
             The pulsation intensity of the current stimulation (mA)
-
         Returns
         -------
         The lambda factor, part of the n°1 equation
         """
-        lambda_i = self.ar * (
-            tanh(self.bs * (intensity_stim - self.Is)) + self.cr
-        )  # equation include intensity
+        lambda_i = self.ar * (tanh(self.bs * (intensity_stim - self.Is)) + self.cr)  # equation include intensity
+        return lambda_i
+
+    @staticmethod
+    def lambda_i_calculation_identification(intensity_stim: MX, ar: MX | float, bs: MX | float, Is: MX | float, cr: MX | float):
+        """
+        Parameters
+        ----------
+        intensity_stim: MX
+            The pulsation intensity of the current stimulation (mA)
+        ar: MX | float
+            Translation of axis coordinates (-)
+        bs: MX | float
+            Fiber muscle recruitment constant identification.
+        Is: MX | float
+            Muscle saturation intensity (mA)
+        cr: MX | float
+            Translation of axis coordinates (-)
+        Returns
+        -------
+        The lambda factor, part of the n°1 equation
+        """
+        lambda_i = ar * (tanh(bs * (intensity_stim - Is)) + cr)  # equation include intensity
         return lambda_i
 
     def set_impulse_intensity(self, value: MX):

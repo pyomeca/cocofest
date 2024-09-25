@@ -12,6 +12,7 @@ import numpy as np
 
 from cocofest import (
     DingModelFrequency,
+    DingModelFrequencyIntegrate,
     DingModelFrequencyForceParameterIdentification,
     IvpFes,
 )
@@ -22,8 +23,8 @@ from cocofest.identification.identification_method import full_data_extraction
 n_shooting = 200
 final_time = 2
 stim_time = np.round(np.linspace(0, 1, 11)[:-1], 2)
-model = DingModelFrequency()
-fes_parameters = {"model": model, "stim_time": stim_time}
+ivp_model = DingModelFrequencyIntegrate()
+fes_parameters = {"model": ivp_model, "stim_time": stim_time}
 ivp_parameters = {
     "n_shooting": n_shooting,
     "final_time": final_time,
@@ -43,7 +44,7 @@ result, time = ivp.integrate()
 
 # Adding noise to the force
 noise = np.random.normal(0, 5, len(result["F"][0]))
-force = result["F"][0] + noise
+force = result["F"][0] #+ noise
 
 # Saving the data in a pickle file
 dictionary = {
@@ -58,8 +59,9 @@ with open(pickle_file_name, "wb") as file:
 
 
 # --- Identifying the model parameters --- #
+ocp_model = DingModelFrequency()
 ocp = DingModelFrequencyForceParameterIdentification(
-    model=model,
+    model=ocp_model,
     n_shooting=n_shooting,
     final_time=final_time,
     data_path=[pickle_file_name],
@@ -75,7 +77,7 @@ identified_parameters = ocp.force_model_identification()
 print(identified_parameters)
 
 # --- Plotting noisy simulated data and simulation from model with the identified parameter --- #
-identified_model = model
+identified_model = ivp_model
 identified_model.a_rest = identified_parameters["a_rest"]
 identified_model.km_rest = identified_parameters["km_rest"]
 identified_model.tau1_rest = identified_parameters["tau1_rest"]

@@ -11,6 +11,7 @@ import numpy as np
 
 from cocofest import (
     DingModelPulseDurationFrequency,
+    DingModelPulseDurationFrequencyIntegrate,
     DingModelPulseDurationFrequencyForceParameterIdentification,
     IvpFes,
 )
@@ -23,8 +24,8 @@ pulse_duration = np.random.uniform(0.0002, 0.0006, 10).tolist()
 
 n_shooting = 200
 final_time = 2
-model = DingModelPulseDurationFrequency()
-fes_parameters = {"model": model, "stim_time": stim_time, "pulse_duration": pulse_duration}
+ivp_model = DingModelPulseDurationFrequencyIntegrate()
+fes_parameters = {"model": ivp_model, "stim_time": stim_time, "pulse_duration": pulse_duration}
 ivp_parameters = {
     "n_shooting": n_shooting,
     "final_time": final_time,
@@ -60,8 +61,9 @@ with open(pickle_file_name, "wb") as file:
 
 
 # --- Identifying the model parameters --- #
+ocp_model = DingModelPulseDurationFrequency()
 ocp = DingModelPulseDurationFrequencyForceParameterIdentification(
-    model=model,
+    model=ocp_model,
     data_path=[pickle_file_name],
     identification_method="full",
     double_step_identification=False,
@@ -77,7 +79,7 @@ identified_parameters = ocp.force_model_identification()
 print(identified_parameters)
 
 # --- Plotting noisy simulated data and simulation from model with the identified parameter --- #
-identified_model = model
+identified_model = ivp_model
 identified_model.tau1_rest = identified_parameters["tau1_rest"]
 identified_model.tau2 = identified_parameters["tau2"]
 identified_model.km_rest = identified_parameters["km_rest"]

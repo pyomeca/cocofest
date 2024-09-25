@@ -157,6 +157,31 @@ class DingModelPulseDurationFrequency(DingModelFrequency):
         """
         return a_scale * (1 - exp(-(impulse_time - self.pd0) / self.pdt))
 
+    def a_calculation_identification(
+        self,
+        a_scale: float | MX,
+        impulse_time: MX,
+        pd0: float | MX,
+        pdt: float | MX,
+    ) -> MX:
+        """
+        Parameters
+        ----------
+        a_scale: float | MX
+            The scaling factor of the current stimulation (unitless)
+        impulse_time: MX
+            The pulsation duration of the current stimulation (s)
+        pd0: float | MX
+            The pd0 value (s)
+        pdt: float | MX
+            The pdt value (s)
+
+        Returns
+        -------
+        The value of scaling factor (unitless)
+        """
+        return a_scale * (1 - exp(-(impulse_time - pd0) / pdt))
+
     def set_impulse_duration(self, value: list[MX]):
         """
         Sets the impulse time for each pulse (phases) according to the ocp parameter "impulse_time"

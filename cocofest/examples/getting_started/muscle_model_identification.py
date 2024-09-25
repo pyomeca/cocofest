@@ -1,5 +1,8 @@
 import pickle
 import os
+
+import numpy as np
+
 from cocofest import (
     DingModelIntensityFrequency,
     DingModelIntensityFrequencyIntegrate,
@@ -15,8 +18,10 @@ import matplotlib.pyplot as plt
 # This problem was build to be integrated and has no objectives nor parameter to optimize.
 n_shooting = 100
 final_time = 1
+
 stim_time = [0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]
 pulse_intensity_values = [20, 20, 30, 40, 50, 60, 70, 80, 90, 100]
+
 fes_parameters = {
     "model": DingModelIntensityFrequencyIntegrate(),
     "pulse_intensity": pulse_intensity_values,
