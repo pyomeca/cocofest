@@ -72,7 +72,7 @@ nmpc = NmpcFesMsk.prepare_nmpc(
 
 sol = nmpc.solve(
     nmpc_fes_msk.update_functions,
-    solver=Solver.IPOPT(_hessian_approximation="limited-memory", max_iter=100000),
+    solver=Solver.IPOPT(),
     cyclic_options={"states": {}},
     get_all_iterations=True,
 )

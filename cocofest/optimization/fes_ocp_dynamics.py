@@ -29,6 +29,7 @@ from ..models.dynamical_model import FesMskModel
 from ..models.hmed2018 import DingModelIntensityFrequency
 from ..optimization.fes_ocp import OcpFes
 from ..fourier_approx import FourierSeries
+from ..custom_constraints import CustomConstraint
 
 
 class OcpFesMsk:
@@ -70,12 +71,10 @@ class OcpFesMsk:
             objective=objective,
         )
 
-        (
-            parameters,
+        (   parameters,
             parameters_bounds,
             parameters_init,
             parameter_objectives,
-            constraints,
         ) = OcpFesMsk._build_parameters(
             model=input_dict["model"],
             stim_time=input_dict["stim_time"],
@@ -85,9 +84,11 @@ class OcpFesMsk:
             use_sx=input_dict["use_sx"],
         )
 
-        constraints = OcpFesMsk._set_constraints(
-            constraints, msk_info["custom_constraint"]
-        )
+        constraints = OcpFesMsk._build_constraints(input_dict["model"],
+                                                   input_dict["n_shooting"],
+                                                   input_dict["final_time"],
+                                                   input_dict["stim_time"],
+                                                   msk_info["custom_constraint"])
 
         dynamics = OcpFesMsk._declare_dynamics(input_dict["model"])
         initial_state = (
@@ -107,9 +108,7 @@ class OcpFesMsk:
             msk_info,
             initial_state,
         )
-        u_bounds, u_init = OcpFesMsk._set_controls(
-            input_dict["model"], msk_info["with_residual_torque"]
-        )
+        u_bounds, u_init = OcpFesMsk._set_u_bounds(input_dict["model"], msk_info["with_residual_torque"])
         muscle_force_key = [
             "F_" + input_dict["model"].muscles_dynamics_model[i].muscle_name
             for i in range(len(input_dict["model"].muscles_dynamics_model))
@@ -317,7 +316,6 @@ class OcpFesMsk:
         parameters_bounds = BoundsList()
         parameters_init = InitialGuessList()
         parameter_objectives = ParameterObjectiveList()
-        constraints = ConstraintList()
 
         n_stim = len(stim_time)
         parameters.add(
@@ -482,16 +480,57 @@ class OcpFesMsk:
             parameters_bounds,
             parameters_init,
             parameter_objectives,
-            constraints,
         )
 
     @staticmethod
-    def _set_constraints(constraints, custom_constraint):
+    def _build_constraints(model, n_shooting, final_time, stim_time, custom_constraint=None):
+        constraints = ConstraintList()
+
+        time_vector = np.linspace(0, final_time, n_shooting + 1)
+        stim_at_node = [np.where(stim_time[i] <= time_vector)[0][0] for i in range(len(stim_time))]
+
+        for i in range(len(model.muscles_dynamics_model)):
+            if model.muscles_dynamics_model[i]._sum_stim_truncation:
+                max_stim_to_keep = model.muscles_dynamics_model[i]._sum_stim_truncation
+            else:
+                max_stim_to_keep = 10000000
+
+            index_sup = 0
+            index_inf = 0
+            stim_index = []
+            for j in range(n_shooting):
+                if j in stim_at_node:
+                    index_sup += 1
+                    if index_sup >= max_stim_to_keep:
+                        index_inf = index_sup - max_stim_to_keep
+                    stim_index = [i for i in range(index_inf, index_sup)]
+
+                constraints.add(
+                    CustomConstraint.cn_sum_msk,
+                    node=j,
+                    stim_time=stim_time[index_inf:index_sup],
+                    stim_index=stim_index,
+                    model_idx=i,
+                )
+
+            if isinstance(model.muscles_dynamics_model[i], DingModelPulseDurationFrequency):
+                index = 0
+                for j in range(n_shooting):
+                    if j in stim_at_node and j != 0:
+                        index += 1
+                    constraints.add(
+                        CustomConstraint.a_calculation_msk,
+                        node=j,
+                        last_stim_index=index,
+                        model_idx=i,
+                    )
+
         if custom_constraint:
             for i in range(len(custom_constraint)):
                 if custom_constraint[i]:
                     for j in range(len(custom_constraint[i])):
                         constraints.add(custom_constraint[i][j])
+
         return constraints
 
     @staticmethod
@@ -636,7 +675,7 @@ class OcpFesMsk:
         return x_bounds, x_init
 
     @staticmethod
-    def _set_controls(bio_models, with_residual_torque):
+    def _set_u_bounds(bio_models, with_residual_torque):
         # Controls bounds
         nb_tau = bio_models.nb_tau
         if (
@@ -652,6 +691,12 @@ class OcpFesMsk:
         # Controls initial guess
         u_init = InitialGuessList()
         u_init.add(key="tau", initial_guess=tau_init, phase=0)
+        for i in range(len(bio_models.muscles_dynamics_model)):
+            u_init.add(key="Cn_sum_" + bio_models.muscles_dynamics_model[i].muscle_name, initial_guess=[0], phase=0)
+
+        for i in range(len(bio_models.muscles_dynamics_model)):
+            if isinstance(bio_models.muscles_dynamics_model[i], DingModelPulseDurationFrequency):
+                u_init.add(key="A_calculation_" + bio_models.muscles_dynamics_model[i].muscle_name, initial_guess=[0], phase=0)
 
         return u_bounds, u_init
 

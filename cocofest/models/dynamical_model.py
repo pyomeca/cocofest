@@ -105,7 +105,6 @@ class FesMskModel(BiorbdModel):
         nlp: NonLinearProgram,
         muscle_models: list[FesModel],
         state_name_list=None,
-        stim_prev: list[float] = None,
     ) -> DynamicsEvaluation:
         """
         The custom dynamics function that provides the derivative of the states: dxdt = f(t, x, u, p, s)
@@ -130,8 +129,6 @@ class FesMskModel(BiorbdModel):
             The list of the muscle models
         state_name_list: list[str]
             The states names list
-        stim_prev: list[float]
-            The previous stimulation values
         Returns
         -------
         The derivative of the states in the tuple[MX | SX] format
@@ -151,7 +148,6 @@ class FesMskModel(BiorbdModel):
             nlp,
             muscle_models,
             state_name_list,
-            stim_prev,
             q,
             qdot,
         )
@@ -175,7 +171,6 @@ class FesMskModel(BiorbdModel):
         nlp: NonLinearProgram,
         muscle_models: list[FesModel],
         state_name_list=None,
-        stim_prev: list[float] = None,
         q: MX | SX = None,
         qdot: MX | SX = None,
     ):
@@ -239,7 +234,6 @@ class FesMskModel(BiorbdModel):
                 algebraic_states,
                 numerical_data_timeseries,
                 nlp,
-                stim_prev=stim_prev,
                 fes_model=muscle_model,
                 force_length_relationship=muscle_force_length_coeff,
                 force_velocity_relationship=muscle_force_velocity_coeff,
@@ -281,26 +275,22 @@ class FesMskModel(BiorbdModel):
             A list of values to pass to the dynamics at each node. Experimental external forces should be included here.
 
         """
-        state_name_list = StateConfigure().configure_all_muscle_states(
-            self.muscles_dynamics_model, ocp, nlp
-        )
+        state_name_list = StateConfigure().configure_all_muscle_states(self.muscles_dynamics_model, ocp, nlp)
         ConfigureProblem.configure_q(ocp, nlp, as_states=True, as_controls=False)
         state_name_list.append("q")
         ConfigureProblem.configure_qdot(ocp, nlp, as_states=True, as_controls=False)
         state_name_list.append("qdot")
+        for muscle_model in self.muscles_dynamics_model:
+            StateConfigure().configure_cn_sum(ocp, nlp, muscle_name=str(muscle_model.muscle_name))
+            StateConfigure().configure_a_calculation(ocp, nlp, muscle_name=str(muscle_model.muscle_name))
         ConfigureProblem.configure_tau(ocp, nlp, as_states=False, as_controls=True)
-        stim_prev = (
-            DingModelFrequency._build_t_stim_prev(ocp, nlp.phase_idx)
-            if "pulse_apparition_time" not in nlp.parameters.keys()
-            else None
-        )
+
         ConfigureProblem.configure_dynamics_function(
             ocp,
             nlp,
             dyn_func=self.muscle_dynamic,
             muscle_models=self.muscles_dynamics_model,
             state_name_list=state_name_list,
-            stim_prev=stim_prev,
         )
 
     @staticmethod
