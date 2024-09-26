@@ -39,6 +39,7 @@ class DingModelFrequencyIntegrate(DingModelFrequency):
         self._muscle_name = muscle_name
         self._sum_stim_truncation = sum_stim_truncation
         self._with_fatigue = False
+        self._is_integrate = True
         self.pulse_apparition_time = None
         # ---- Custom values for the example ---- #
         self.tauc = 0.020  # Value from Ding's experimentation [1] (s)
@@ -49,6 +50,28 @@ class DingModelFrequencyIntegrate(DingModelFrequency):
         self.tau1_rest = 0.050957  # Value from Ding's experimentation [1] (s)
         self.tau2 = 0.060  # Close value from Ding's experimentation [2] (s)
         self.km_rest = 0.103  # Value from Ding's experimentation [1] (unitless)
+
+    def set_a_rest(self, model, a_rest: MX | float):
+        # models is required for bioptim compatibility
+        self.a_rest = a_rest
+
+    def set_km_rest(self, model, km_rest: MX | float):
+        self.km_rest = km_rest
+
+    def set_tau1_rest(self, model, tau1_rest: MX | float):
+        self.tau1_rest = tau1_rest
+
+    def set_tau2(self, model, tau2: MX | float):
+        self.tau2 = tau2
+
+    @property
+    def identifiable_parameters(self):
+        return {
+            "a_rest": self.a_rest,
+            "tau1_rest": self.tau1_rest,
+            "km_rest": self.km_rest,
+            "tau2": self.tau2,
+        }
 
     # ---- Model's dynamics ---- #
     def system_dynamics(

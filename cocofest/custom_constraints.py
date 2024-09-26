@@ -49,16 +49,15 @@ class CustomConstraint:
         )
 
     @staticmethod
-    def cn_sum(controller: PenaltyController, stim_time: list) -> MX | SX:
+    def cn_sum(controller: PenaltyController, stim_time: list, stim_index: list) -> MX | SX:
         intensity_in_model = True if isinstance(controller.model, DingModelIntensityFrequency) else False
-        lambda_i = [controller.model.lambda_i_calculation(controller.parameters["pulse_intensity"].cx[i]
-                                                          ) for i in range(len(stim_time))] if intensity_in_model else [1 for _ in range(len(stim_time))]
+        lambda_i = [controller.model.lambda_i_calculation(controller.parameters["pulse_intensity"].cx[i]) for i in stim_index] if intensity_in_model else [1 for _ in range(len(stim_time))]
         km = controller.states["Km"].cx if controller.model._with_fatigue else controller.model.km_rest
         r0 = km + controller.model.r0_km_relationship
         return controller.controls["Cn_sum"].cx - controller.model.cn_sum_fun(r0=r0, t=controller.time.cx, t_stim_prev=stim_time, lambda_i=lambda_i)
 
     @staticmethod
-    def cn_sum_identification(controller: PenaltyController, stim_time: list) -> MX | SX:
+    def cn_sum_identification(controller: PenaltyController, stim_time: list, stim_index: list) -> MX | SX:
         intensity_in_model = True if isinstance(controller.model, DingModelIntensityFrequency) else False
         ar, bs, Is, cr = None, None, None, None
         if intensity_in_model:
@@ -66,7 +65,7 @@ class CustomConstraint:
             bs = controller.parameters["bs"].cx if "bs" in controller.parameters.keys() else controller.model.bs
             Is = controller.parameters["Is"].cx if "Is" in controller.parameters.keys() else controller.model.Is
             cr = controller.parameters["cr"].cx if "cr" in controller.parameters.keys() else controller.model.cr
-        lambda_i = [controller.model.lambda_i_calculation_identification(controller.parameters["pulse_intensity"].cx[i], ar, bs, Is, cr) for i in range(len(stim_time))] if intensity_in_model else [1 for _ in range(len(stim_time))]
+        lambda_i = [controller.model.lambda_i_calculation_identification(controller.parameters["pulse_intensity"].cx[i], ar, bs, Is, cr) for i in stim_index] if intensity_in_model else [1 for _ in range(len(stim_time))]
         km = controller.parameters["km_rest"].cx if "km_rest" in controller.parameters.keys() else controller.model.km_rest
         r0 = km + controller.model.r0_km_relationship
         return controller.controls["Cn_sum"].cx - controller.model.cn_sum_fun(r0=r0, t=controller.time.cx, t_stim_prev=stim_time, lambda_i=lambda_i)

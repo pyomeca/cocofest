@@ -40,6 +40,7 @@ class DingModelFrequency(FesModel):
         self._muscle_name = muscle_name
         self._sum_stim_truncation = sum_stim_truncation
         self._with_fatigue = False
+        self._is_integrate = False
         self.pulse_apparition_time = None
         # ---- Custom values for the example ---- #
         self.tauc = 0.020  # Value from Ding's experimentation [1] (s)

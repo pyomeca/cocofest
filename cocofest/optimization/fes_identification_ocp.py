@@ -19,8 +19,9 @@ from bioptim import (
 )
 
 from ..models.fes_model import FesModel
-from ..models.ding2007 import DingModelPulseDurationFrequency
+
 from ..models.ding2003 import DingModelFrequency
+from ..models.ding2007 import DingModelPulseDurationFrequency
 from ..models.hmed2018 import DingModelIntensityFrequency
 from ..optimization.fes_ocp import OcpFes
 from ..custom_constraints import CustomConstraint
@@ -44,7 +45,8 @@ class OcpFesId(OcpFes):
             custom_objective: list[Objective] = None,
             discontinuity_in_ocp: list = None,
             use_sx: bool = True,
-            ode_solver: OdeSolver = OdeSolver.RK4(n_integration_steps=1),
+            # ode_solver: OdeSolver = OdeSolver.RK4(n_integration_steps=1),
+            ode_solver: OdeSolver = OdeSolver.COLLOCATION,
             n_threads: int = 1,
             **kwargs,
     ):
@@ -126,8 +128,12 @@ class OcpFesId(OcpFes):
             objective=objective
         )
 
-        constraints = OcpFesId._build_constraints(model=model, n_shooting=n_shooting, final_time=final_time, stim_time=stim_time)
-        u_bounds, u_init = OcpFesId._set_u_bounds(model=model)
+        if not model._is_integrate:
+            constraints = OcpFesId._build_constraints(model=model, n_shooting=n_shooting, final_time=final_time, stim_time=stim_time)
+            u_bounds, u_init = OcpFesId._set_u_bounds(model=model)
+        else:
+            constraints = ConstraintList()
+            u_bounds, u_init = None, None
 
         # phase_transitions = OcpFesId._set_phase_transition(discontinuity_in_ocp)
 
@@ -416,25 +422,37 @@ class OcpFesId(OcpFes):
         time_vector = np.linspace(0, final_time, n_shooting + 1)
         stim_at_node = [np.where(stim_time[i] <= time_vector)[0][0] for i in range(len(stim_time))]
 
-        index = 0
+        if model._sum_stim_truncation:
+            max_stim_to_keep = model._sum_stim_truncation
+        else:
+            max_stim_to_keep = 10000000
+
+        index_sup = 0
+        index_inf = 0
+        stim_index = []
         for i in range(n_shooting):
             if i in stim_at_node:
-                index += 1
+                index_sup += 1
+                if index_sup >= max_stim_to_keep:
+                    index_inf = index_sup - max_stim_to_keep
+                stim_index = [i for i in range(index_inf, index_sup)]
+
             constraints.add(
                 CustomConstraint.cn_sum_identification,
                 node=i,
-                stim_time=stim_time[:index],
+                stim_time=stim_time[index_inf:index_sup],
+                stim_index=stim_index,
             )
 
         if isinstance(model, DingModelPulseDurationFrequency):
-            index = 0
+            index_sup = 0
             for i in range(n_shooting):
                 if i in stim_at_node and i != 0:
-                    index += 1
+                    index_sup += 1
                 constraints.add(
                     CustomConstraint.a_calculation_identification,
                     node=i,
-                    last_stim_index=index,
+                    last_stim_index=index_sup,
                 )
 
         return constraints

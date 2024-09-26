@@ -116,6 +116,7 @@ class OcpFes:
         objective: dict = None,
         use_sx: bool = True,
         ode_solver: OdeSolver = OdeSolver.RK4(n_integration_steps=1),
+        control_type: ControlType = ControlType.CONSTANT,
         n_threads: int = 1,
     ):
         """
@@ -185,7 +186,7 @@ class OcpFes:
             parameter_bounds=optimization_dict["parameters_bounds"],
             parameter_init=optimization_dict["parameters_init"],
             parameter_objectives=optimization_dict["parameter_objectives"],
-            control_type=ControlType.CONSTANT,
+            control_type=control_type,
             use_sx=optimization_dict["use_sx"],
             ode_solver=optimization_dict["ode_solver"],
             n_threads=optimization_dict["n_threads"],
@@ -670,14 +671,26 @@ class OcpFes:
         time_vector = np.linspace(0, final_time, n_shooting + 1)
         stim_at_node = [np.where(stim_time[i] <= time_vector)[0][0] for i in range(len(stim_time))]
 
-        index = 0
+        if model._sum_stim_truncation:
+            max_stim_to_keep = model._sum_stim_truncation
+        else:
+            max_stim_to_keep = 10000000
+
+        index_sup = 0
+        index_inf = 0
+        stim_index = []
         for i in range(n_shooting):
             if i in stim_at_node:
-                index += 1
+                index_sup += 1
+                if index_sup >= max_stim_to_keep:
+                    index_inf = index_sup - max_stim_to_keep
+                stim_index = [i for i in range(index_inf, index_sup)]
+
             constraints.add(
                 CustomConstraint.cn_sum,
                 node=i,
-                stim_time=stim_time[:index],
+                stim_time=stim_time[index_inf:index_sup],
+                stim_index=stim_index,
             )
 
         if isinstance(model, DingModelPulseDurationFrequency):

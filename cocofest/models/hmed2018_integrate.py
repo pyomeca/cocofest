@@ -47,6 +47,32 @@ class DingModelIntensityFrequencyIntegrate(DingModelFrequencyIntegrate):
         self.cr = 0.833  # (-) Translation of axis coordinates.
         self.impulse_intensity = None
 
+    def set_ar(self, model, ar: MX | float):
+        # models is required for bioptim compatibility
+        self.ar = ar
+
+    def set_bs(self, model, bs: MX | float):
+        self.bs = bs
+
+    def set_Is(self, model, Is: MX | float):
+        self.Is = Is
+
+    def set_cr(self, model, cr: MX | float):
+        self.cr = cr
+
+    @property
+    def identifiable_parameters(self):
+        return {
+            "a_rest": self.a_rest,
+            "tau1_rest": self.tau1_rest,
+            "km_rest": self.km_rest,
+            "tau2": self.tau2,
+            "ar": self.ar,
+            "bs": self.bs,
+            "Is": self.Is,
+            "cr": self.cr,
+        }
+
     def system_dynamics(
         self,
         cn: MX,

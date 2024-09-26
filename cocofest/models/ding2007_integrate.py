@@ -62,6 +62,27 @@ class DingModelPulseDurationFrequencyIntegrate(DingModelFrequencyIntegrate):
         self.km_rest = 0.137  # Value from Ding's 2007 article (unitless)
         self.tauc = 0.011  # Value from Ding's 2007 article (s)
 
+    @property
+    def identifiable_parameters(self):
+        return {
+            "a_scale": self.a_scale,
+            "tau1_rest": self.tau1_rest,
+            "km_rest": self.km_rest,
+            "tau2": self.tau2,
+            "pd0": self.pd0,
+            "pdt": self.pdt,
+        }
+
+    def set_a_scale(self, model, a_scale: MX | float):
+        # models is required for bioptim compatibility
+        self.a_scale = a_scale
+
+    def set_pd0(self, model, pd0: MX | float):
+        self.pd0 = pd0
+
+    def set_pdt(self, model, pdt: MX | float):
+        self.pdt = pdt
+
     def system_dynamics(
         self,
         cn: MX,

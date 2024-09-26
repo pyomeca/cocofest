@@ -89,8 +89,8 @@ class IvpFes:
         parameters_init["pulse_apparition_time"] = np.array(self.stim_time)
         parameters_bounds.add(
             "pulse_apparition_time",
-            min_bound=self.stim_time,
-            max_bound=self.stim_time,
+            min_bound=np.array(self.stim_time),
+            max_bound=np.array(self.stim_time),
             interpolation=InterpolationType.CONSTANT,
         )
 
