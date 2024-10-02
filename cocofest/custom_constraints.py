@@ -2,7 +2,7 @@
 This class regroups all the custom constraints that are used in the optimization problem.
 """
 
-from casadi import MX, SX
+from casadi import MX, SX, vertcat
 
 from bioptim import PenaltyController
 
@@ -57,12 +57,19 @@ class CustomConstraint:
         return controller.controls["Cn_sum"].cx - controller.model.cn_sum_fun(r0=r0, t=controller.time.cx, t_stim_prev=stim_time, lambda_i=lambda_i)
 
     @staticmethod
-    def cn_sum_msk(controller: PenaltyController, stim_time: list, stim_index: list, model_idx: int) -> MX | SX:
+    def cn_sum_msk(controller: PenaltyController, stim_time: list, model_idx: int, sum_truncation: int) -> MX | SX:
         model = controller.model.muscles_dynamics_model[model_idx]
         muscle_name = model.muscle_name
-        intensity_in_model = True if isinstance(model, DingModelIntensityFrequency) else False
-        lambda_i = [model.lambda_i_calculation(controller.parameters["pulse_intensity_" + muscle_name].cx[i]) for i in
-                    stim_index] if intensity_in_model else [1 for _ in range(len(stim_time))]
+        stim_time = model.stim_prev + stim_time
+        stim_time = stim_time[-sum_truncation:]
+
+        if isinstance(model, DingModelIntensityFrequency):
+            intensity_list = vertcat(model.stim_pulse_intensity_prev, controller.parameters["pulse_intensity_" + muscle_name].cx)
+            sum_truncation = sum_truncation if sum_truncation < intensity_list.shape[0] else intensity_list.shape[0]
+            intensity_list = intensity_list[-sum_truncation:]
+            lambda_i = [model.lambda_i_calculation(intensity_list[i]) for i in range(intensity_list.shape[0])]
+        else:
+            lambda_i = [1 for _ in range(len(stim_time))]
         km = controller.states["Km_" + muscle_name].cx if model.with_fatigue else model.km_rest
         r0 = km + model.r0_km_relationship
         return controller.controls["Cn_sum_" + muscle_name].cx - model.cn_sum_fun(r0=r0, t=controller.time.cx,

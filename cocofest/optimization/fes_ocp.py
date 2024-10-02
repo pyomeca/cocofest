@@ -23,9 +23,12 @@ from ..fourier_approx import FourierSeries
 from ..models.fes_model import FesModel
 from ..models.dynamical_model import FesMskModel
 from ..models.ding2003 import DingModelFrequency
+from ..models.ding2003_integrate import DingModelFrequencyIntegrate
 from ..models.ding2007 import DingModelPulseDurationFrequency
+from ..models.ding2007_integrate import DingModelPulseDurationFrequencyIntegrate
 from ..models.ding2007_with_fatigue import DingModelPulseDurationFrequencyWithFatigue
 from ..models.hmed2018 import DingModelIntensityFrequency
+from ..models.hmed2018_integrate import DingModelIntensityFrequencyIntegrate
 from ..models.hmed2018_with_fatigue import DingModelIntensityFrequencyWithFatigue
 from ..custom_constraints import CustomConstraint
 
@@ -73,12 +76,15 @@ class OcpFes:
             use_sx=input_dict["use_sx"],
         )
 
-        constraints = OcpFes._build_constraints(input_dict["model"], input_dict["n_shooting"], input_dict["final_time"], input_dict["stim_time"])
-
         dynamics = OcpFes._declare_dynamics(input_dict["model"])
         x_bounds, x_init = OcpFes._set_bounds(input_dict["model"])
 
-        u_bounds, u_init = OcpFes._set_u_bounds(input_dict["model"])
+        if not isinstance(input_dict["model"], DingModelFrequencyIntegrate):
+            constraints = OcpFes._build_constraints(input_dict["model"], input_dict["n_shooting"], input_dict["final_time"], input_dict["stim_time"], input_dict["control_type"])
+            u_bounds, u_init = OcpFes._set_u_bounds(input_dict["model"])
+        else:
+            constraints = ConstraintList()
+            u_bounds, u_init = BoundsList(), InitialGuessList()
 
         objective_functions = OcpFes._set_objective(input_dict["n_shooting"], objective)
 
@@ -100,6 +106,7 @@ class OcpFes:
             "use_sx": input_dict["use_sx"],
             "ode_solver": input_dict["ode_solver"],
             "n_threads": input_dict["n_threads"],
+            "control_type": input_dict["control_type"],
         }
 
         return optimization_dict
@@ -148,6 +155,8 @@ class OcpFes:
             The ODE solver to use.
         n_threads : int
             The number of threads to use while solving (multi-threading if > 1).
+        control_type : ControlType
+            The type of control to use.
 
         Returns
         -------
@@ -167,6 +176,7 @@ class OcpFes:
             "use_sx": use_sx,
             "ode_solver": ode_solver,
             "n_threads": n_threads,
+            "control_type": control_type,
         }
 
         optimization_dict = OcpFes._prepare_optimization_problem(input_dict)
@@ -186,7 +196,7 @@ class OcpFes:
             parameter_bounds=optimization_dict["parameters_bounds"],
             parameter_init=optimization_dict["parameters_init"],
             parameter_objectives=optimization_dict["parameter_objectives"],
-            control_type=control_type,
+            control_type=optimization_dict["control_type"],
             use_sx=optimization_dict["use_sx"],
             ode_solver=optimization_dict["ode_solver"],
             n_threads=optimization_dict["n_threads"],
@@ -555,7 +565,7 @@ class OcpFes:
                 "Bimapping is not yet implemented for pulse event"
             )
 
-        if isinstance(model, DingModelPulseDurationFrequency):
+        if isinstance(model, DingModelPulseDurationFrequency | DingModelPulseDurationFrequencyIntegrate):
             if pulse_duration["bimapping"]:
                 n_stim = 1
 
@@ -608,7 +618,7 @@ class OcpFes:
                     scaling=VariableScaling("pulse_duration", [1] * n_stim),
                 )
 
-        if isinstance(model, DingModelIntensityFrequency):
+        if isinstance(model, DingModelIntensityFrequency | DingModelIntensityFrequencyIntegrate):
             if pulse_intensity["bimapping"]:
                 n_stim = 1
 
@@ -665,12 +675,12 @@ class OcpFes:
         )
 
     @staticmethod
-    def _build_constraints(model, n_shooting, final_time, stim_time):
+    def _build_constraints(model, n_shooting, final_time, stim_time, control_type):
         constraints = ConstraintList()
 
         time_vector = np.linspace(0, final_time, n_shooting + 1)
         stim_at_node = [np.where(stim_time[i] <= time_vector)[0][0] for i in range(len(stim_time))]
-
+        additional_nodes = 1 if control_type == ControlType.LINEAR_CONTINUOUS else 0
         if model._sum_stim_truncation:
             max_stim_to_keep = model._sum_stim_truncation
         else:
@@ -679,7 +689,8 @@ class OcpFes:
         index_sup = 0
         index_inf = 0
         stim_index = []
-        for i in range(n_shooting):
+
+        for i in range(n_shooting+additional_nodes):
             if i in stim_at_node:
                 index_sup += 1
                 if index_sup >= max_stim_to_keep:
@@ -695,7 +706,7 @@ class OcpFes:
 
         if isinstance(model, DingModelPulseDurationFrequency):
             index = 0
-            for i in range(n_shooting):
+            for i in range(n_shooting+additional_nodes):
                 if i in stim_at_node and i != 0:
                     index += 1
                 constraints.add(

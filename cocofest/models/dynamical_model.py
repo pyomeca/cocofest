@@ -13,6 +13,7 @@ from bioptim import (
 
 from ..models.fes_model import FesModel
 from ..models.ding2003 import DingModelFrequency
+from ..models.ding2003_integrate import DingModelFrequencyIntegrate
 from .state_configue import StateConfigure
 from .hill_coefficients import (
     muscle_force_length_coefficient,
@@ -28,6 +29,7 @@ class FesMskModel(BiorbdModel):
         muscles_model: list[FesModel] = None,
         activate_force_length_relationship: bool = False,
         activate_force_velocity_relationship: bool = False,
+        activate_residual_torque: bool = False,
     ):
         """
         The custom model that will be used in the optimal control program for the FES-MSK models
@@ -44,6 +46,8 @@ class FesMskModel(BiorbdModel):
             If the force-length relationship should be activated
         activate_force_velocity_relationship: bool
             If the force-velocity relationship should be activated
+        activate_residual_torque: bool
+            If the residual torque should be activated
         """
 
         super().__init__(biorbd_path)
@@ -60,6 +64,7 @@ class FesMskModel(BiorbdModel):
 
         self.activate_force_length_relationship = activate_force_length_relationship
         self.activate_force_velocity_relationship = activate_force_velocity_relationship
+        self.activate_residual_torque = activate_residual_torque
 
     # ---- Absolutely needed methods ---- #
     def serialize(self) -> tuple[Callable, dict]:
@@ -136,7 +141,7 @@ class FesMskModel(BiorbdModel):
 
         q = DynamicsFunctions.get(nlp.states["q"], states)
         qdot = DynamicsFunctions.get(nlp.states["qdot"], states)
-        tau = DynamicsFunctions.get(nlp.controls["tau"], controls)
+        tau = DynamicsFunctions.get(nlp.controls["tau"], controls) if "tau" in nlp.controls.keys() else 0
 
         muscles_tau, dxdt_muscle_list = self.muscles_joint_torque(
             time,
@@ -154,7 +159,8 @@ class FesMskModel(BiorbdModel):
 
         # You can directly call biorbd function (as for ddq) or call bioptim accessor (as for dq)
         dq = DynamicsFunctions.compute_qdot(nlp, q, qdot)
-        ddq = nlp.model.forward_dynamics(q, qdot, muscles_tau + tau)
+        total_torque = muscles_tau + tau if self.activate_residual_torque else muscles_tau
+        ddq = nlp.model.forward_dynamics(q, qdot, total_torque)
 
         dxdt = vertcat(dxdt_muscle_list, dq, ddq)
 
@@ -281,9 +287,11 @@ class FesMskModel(BiorbdModel):
         ConfigureProblem.configure_qdot(ocp, nlp, as_states=True, as_controls=False)
         state_name_list.append("qdot")
         for muscle_model in self.muscles_dynamics_model:
-            StateConfigure().configure_cn_sum(ocp, nlp, muscle_name=str(muscle_model.muscle_name))
-            StateConfigure().configure_a_calculation(ocp, nlp, muscle_name=str(muscle_model.muscle_name))
-        ConfigureProblem.configure_tau(ocp, nlp, as_states=False, as_controls=True)
+            if not isinstance(muscle_model, DingModelFrequencyIntegrate):
+                StateConfigure().configure_cn_sum(ocp, nlp, muscle_name=str(muscle_model.muscle_name))
+                StateConfigure().configure_a_calculation(ocp, nlp, muscle_name=str(muscle_model.muscle_name))
+        if self.activate_residual_torque:
+            ConfigureProblem.configure_tau(ocp, nlp, as_states=False, as_controls=True)
 
         ConfigureProblem.configure_dynamics_function(
             ocp,

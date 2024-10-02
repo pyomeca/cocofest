@@ -38,6 +38,7 @@ class DingModelIntensityFrequency(DingModelFrequency):
             sum_stim_truncation=sum_stim_truncation,
         )
         self._with_fatigue = False
+        self.stim_pulse_intensity_prev = []
         # ---- Custom values for the example ---- #
         # ---- Force models ---- #
         self.ar = 0.586  # (-) Translation of axis coordinates.

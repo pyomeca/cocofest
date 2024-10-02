@@ -430,7 +430,7 @@ class OcpFesId(OcpFes):
         index_sup = 0
         index_inf = 0
         stim_index = []
-        for i in range(n_shooting):
+        for i in range(n_shooting+1):
             if i in stim_at_node:
                 index_sup += 1
                 if index_sup >= max_stim_to_keep:
@@ -446,7 +446,7 @@ class OcpFesId(OcpFes):
 
         if isinstance(model, DingModelPulseDurationFrequency):
             index_sup = 0
-            for i in range(n_shooting):
+            for i in range(n_shooting+1):
                 if i in stim_at_node and i != 0:
                     index_sup += 1
                 constraints.add(

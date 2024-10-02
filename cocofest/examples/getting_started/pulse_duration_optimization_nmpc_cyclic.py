@@ -22,14 +22,12 @@ cycle_duration = 1
 n_cycles = 8
 
 minimum_pulse_duration = DingModelPulseDurationFrequencyWithFatigue().pd0
-fes_model = DingModelPulseDurationFrequencyWithFatigue()
+fes_model = DingModelPulseDurationFrequencyWithFatigue(sum_stim_truncation=10)
 fes_model.alpha_a = (
     -4.0 * 10e-1
 )  # Increasing the fatigue rate to make the fatigue more visible
 
-nmpc_fes_msk = NmpcFes()
-nmpc_fes_msk.n_cycles = n_cycles
-nmpc = nmpc_fes_msk.prepare_nmpc(
+nmpc = NmpcFes.prepare_nmpc(
     model=fes_model,
     stim_time=list(np.round(np.linspace(0, 1, 31), 3))[:-1],
     cycle_len=cycles_len,
@@ -44,8 +42,15 @@ nmpc = nmpc_fes_msk.prepare_nmpc(
     n_threads=5,
 )
 
+n_cycles_total = 8
+
+
+def update_functions(_nmpc, cycle_idx, _sol):
+    return cycle_idx < n_cycles_total  # True if there are still some cycle to perform
+
+
 sol = nmpc.solve(
-    nmpc_fes_msk.update_functions,
+    update_functions,
     solver=Solver.IPOPT(),
     cyclic_options={"states": {}},
     get_all_iterations=True,

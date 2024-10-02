@@ -42,6 +42,7 @@ class DingModelFrequency(FesModel):
         self._with_fatigue = False
         self._is_integrate = False
         self.pulse_apparition_time = None
+        self.stim_prev = []
         # ---- Custom values for the example ---- #
         self.tauc = 0.020  # Value from Ding's experimentation [1] (s)
         self.r0_km_relationship = 1.04  # (unitless)

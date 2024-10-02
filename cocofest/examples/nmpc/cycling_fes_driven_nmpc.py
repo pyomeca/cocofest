@@ -46,13 +46,12 @@ model = FesMskModel(
     ],
     activate_force_length_relationship=True,
     activate_force_velocity_relationship=True,
+    activate_residual_torque=True,
 )
 
-nmpc_fes_msk = NmpcFesMsk()
-nmpc_fes_msk.n_cycles = 8
 nmpc = NmpcFesMsk.prepare_nmpc(
     model=model,
-    stim_time=list(np.round(np.linspace(0, 1, 31), 3))[:-1],
+    stim_time=list(np.round(np.linspace(0, 1, 11), 2))[:-1],
     cycle_len=100,
     cycle_duration=1,
     pulse_duration={
@@ -70,8 +69,15 @@ nmpc = NmpcFesMsk.prepare_nmpc(
     n_threads=8,
 )
 
+n_cycles_total = 8
+
+
+def update_functions(_nmpc, cycle_idx, _sol):
+    return cycle_idx < n_cycles_total  # True if there are still some cycle to perform
+
+
 sol = nmpc.solve(
-    nmpc_fes_msk.update_functions,
+    update_functions,
     solver=Solver.IPOPT(),
     cyclic_options={"states": {}},
     get_all_iterations=True,

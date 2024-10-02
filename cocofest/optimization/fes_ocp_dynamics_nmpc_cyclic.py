@@ -1,55 +1,28 @@
 import numpy as np
-from casadi import SX
 
 from bioptim import (
     OdeSolver,
     CyclicNonlinearModelPredictiveControl,
     ControlType,
-    Solution,
 )
 
 from .fes_ocp_dynamics import OcpFesMsk
 from ..models.dynamical_model import FesMskModel
 
 
-class NmpcFesMsk:
-    def __init__(self):
-        self.n_cycles = 1
-
+class NmpcFesMsk(CyclicNonlinearModelPredictiveControl):
     def advance_window_bounds_states(self, sol, **extra):
-        # Reimplementation of the advance_window method so the rotation of the wheel restart at -pi
-        CyclicNonlinearModelPredictiveControl.advance_window_bounds_states(sol, **extra)
-        # TODO
-
-        return True
+        super(NmpcFesMsk, self).advance_window_bounds_states(sol)
+        self.update_stim(sol)
 
     def update_stim(self, sol):
-
         stimulation_time = sol.decision_parameters()["pulse_apparition_time"]
-        stim_prev = np.array(stimulation_time) - sol.ocp.phase_time[0]
-        current_stim = np.array(
-            sol.ocp.parameter_bounds["pulse_apparition_time"].min
-        ).reshape(sol.ocp.parameter_bounds["pulse_apparition_time"].min.shape[0])
-        updated_stim = np.append(stim_prev[:-1], current_stim)
+        stim_prev = list(np.round(np.array(stimulation_time) - sol.ocp.phase_time[0], 3))
 
-        previous_pulse_duration = list(sol.parameters["pulse_duration"][:-1])
-        pulse_duration_bound_min = previous_pulse_duration + [
-            sol.ocp.parameter_bounds["pulse_duration"].min[0][0]
-        ] * len(sol.decision_parameters()["pulse_apparition_time"])
-        pulse_duration_bound_max = previous_pulse_duration + [
-            sol.ocp.parameter_bounds["pulse_duration"].min[0][0]
-        ] * len(sol.decision_parameters()["pulse_apparition_time"])
-
-        parameters, parameters_bounds, parameters_init = self._build_parameters(
-            model=self.nlp[0].model,
-            n_stim=len(updated_stim),
-            use_sx=self.cx == SX,
-            stim_time=updated_stim,
-            pulse_duration_min=pulse_duration_bound_min,
-            pulse_duration_max=pulse_duration_bound_max,
-        )
-
-        return parameters, parameters_bounds, parameters_init
+        for model in self.nlp[0].model.muscles_dynamics_model:
+            self.nlp[0].model.muscles_dynamics_model[0].stim_prev = stim_prev
+            if "pulse_intensity_" + model.muscle_name in sol.parameters.keys():
+                self.nlp[0].model.muscles_dynamics_model[0].stim_pulse_intensity_prev = list(sol.parameters["pulse_intensity_"+model.muscle_name])
 
     @staticmethod
     def prepare_nmpc(
@@ -66,6 +39,7 @@ class NmpcFesMsk:
         use_sx: bool = True,
         ode_solver: OdeSolver = OdeSolver.RK4(n_integration_steps=1),
         n_threads: int = 1,
+        control_type: ControlType = ControlType.CONSTANT,
     ):
 
         input_dict = {
@@ -82,11 +56,12 @@ class NmpcFesMsk:
             "use_sx": use_sx,
             "ode_solver": ode_solver,
             "n_threads": n_threads,
+            "control_type": control_type,
         }
 
         optimization_dict = OcpFesMsk._prepare_optimization_problem(input_dict)
 
-        return CyclicNonlinearModelPredictiveControl(
+        return NmpcFesMsk(
             bio_model=[optimization_dict["model"]],
             dynamics=optimization_dict["dynamics"],
             cycle_len=cycle_len,
@@ -99,19 +74,8 @@ class NmpcFesMsk:
             parameter_bounds=optimization_dict["parameters_bounds"],
             parameter_init=optimization_dict["parameters_init"],
             parameter_objectives=optimization_dict["parameter_objectives"],
-            control_type=ControlType.CONSTANT,
             use_sx=optimization_dict["use_sx"],
             ode_solver=optimization_dict["ode_solver"],
             n_threads=optimization_dict["n_threads"],
+            control_type=optimization_dict["control_type"],
         )
-
-    # @staticmethod
-    def update_functions(
-        self,
-        _nmpc: CyclicNonlinearModelPredictiveControl,
-        cycle_idx: int,
-        _sol: Solution,
-    ):
-        return (
-            cycle_idx < self.n_cycles
-        )  # True if there are still some cycle to perform
