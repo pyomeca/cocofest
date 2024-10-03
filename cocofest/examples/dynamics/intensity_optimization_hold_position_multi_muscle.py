@@ -7,11 +7,7 @@ sensitivity threshold and 130mA to satisfy the maintained elbow. No residual tor
 
 import numpy as np
 
-from bioptim import (
-    Node,
-    ObjectiveFcn,
-    ObjectiveList,
-)
+from bioptim import Node, ObjectiveFcn, ObjectiveList
 
 from cocofest import DingModelIntensityFrequencyWithFatigue, OcpFesMsk, FesMskModel
 
@@ -55,6 +51,7 @@ model = FesMskModel(
     ],
     activate_force_length_relationship=True,
     activate_force_velocity_relationship=True,
+    activate_residual_torque=False,
 )
 
 ocp = OcpFesMsk.prepare_ocp(

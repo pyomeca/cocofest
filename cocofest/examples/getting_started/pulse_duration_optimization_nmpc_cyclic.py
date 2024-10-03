@@ -17,7 +17,7 @@ target_force = abs(np.sin(target_time * np.pi)) * 200
 force_tracking = [target_time, target_force]
 
 # --- Build nmpc cyclic --- #
-cycles_len = 100
+cycles_len = 1000
 cycle_duration = 1
 n_cycles = 8
 

@@ -1,8 +1,5 @@
 import matplotlib.pyplot as plt
-from cocofest import (
-    DingModelFrequencyWithFatigueIntegrate,
-    IvpFes,
-)
+from cocofest import DingModelFrequencyWithFatigueIntegrate, IvpFes
 
 # --- Build ocp --- #
 # This problem was build to be integrated and has no objectives nor parameter to optimize.

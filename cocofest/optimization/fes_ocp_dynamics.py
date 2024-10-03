@@ -499,13 +499,9 @@ class OcpFesMsk:
 
                 index_sup = 0
                 index_inf = 0
-                # stim_index = []
                 for j in range(n_shooting + additional_node):
                     if j in stim_at_node:
                         index_sup += 1
-                        # if index_sup >= max_stim_to_keep:
-                        #     index_inf = index_sup - max_stim_to_keep
-                        # stim_index = [i for i in range(index_inf, index_sup)]
 
                     constraints.add(
                         CustomConstraint.cn_sum_msk,

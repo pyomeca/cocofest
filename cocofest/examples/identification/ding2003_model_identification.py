@@ -10,7 +10,7 @@ import os
 import matplotlib.pyplot as plt
 import numpy as np
 
-from bioptim import SolutionMerge
+from bioptim import SolutionMerge, ControlType
 
 from cocofest import (
     DingModelFrequency,
@@ -60,6 +60,7 @@ ocp = DingModelFrequencyForceParameterIdentification(
     additional_key_settings={},
     use_sx=True,
     n_threads=6,
+    control_type=ControlType.LINEAR_CONTINUOUS,
 )
 
 identified_parameters = ocp.force_model_identification()

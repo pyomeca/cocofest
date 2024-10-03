@@ -1,7 +1,7 @@
 import time as time_package
 import numpy as np
 
-from bioptim import Solver, OdeSolver
+from bioptim import Solver, OdeSolver, ControlType
 from ..models.ding2007 import DingModelPulseDurationFrequency
 from ..identification.ding2003_force_parameter_identification import (
     DingModelFrequencyForceParameterIdentification,
@@ -35,6 +35,7 @@ class DingModelPulseDurationFrequencyForceParameterIdentification(DingModelFrequ
         use_sx: bool = True,
         ode_solver: OdeSolver = OdeSolver.RK4(n_integration_steps=1),
         n_threads: int = 1,
+        control_type: ControlType = ControlType.CONSTANT,
         **kwargs,
     ):
         """
@@ -67,6 +68,8 @@ class DingModelPulseDurationFrequencyForceParameterIdentification(DingModelFrequ
             The ODE solver to use.
         n_threads: int
             The number of threads to use while solving (multi-threading if > 1).
+        control_type: ControlType,
+            The type of control to use for the identification
         **kwargs: dict
             Additional keyword arguments.
         """
@@ -83,6 +86,7 @@ class DingModelPulseDurationFrequencyForceParameterIdentification(DingModelFrequ
             use_sx=use_sx,
             ode_solver=ode_solver,
             n_threads=n_threads,
+            control_type=control_type,
             **kwargs,
         )
 
@@ -253,6 +257,7 @@ class DingModelPulseDurationFrequencyForceParameterIdentification(DingModelFrequ
             use_sx=self.use_sx,
             ode_solver=self.ode_solver,
             n_threads=self.n_threads,
+            control_type=self.control_type,
         )
 
         self.force_identification_result = self.force_ocp.solve(
@@ -334,6 +339,7 @@ class DingModelPulseDurationFrequencyForceParameterIdentification(DingModelFrequ
             use_sx=self.use_sx,
             ode_solver=self.ode_solver,
             n_threads=self.n_threads,
+            control_type=self.control_type,
         )
 
         print(f"OCP creation time : {time_package.time() - start_time} seconds")

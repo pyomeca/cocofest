@@ -17,6 +17,7 @@ model = FesMskModel(
     muscles_model=[DingModelIntensityFrequencyWithFatigue(muscle_name="BIClong")],
     activate_force_length_relationship=True,
     activate_force_velocity_relationship=True,
+    activate_residual_torque=True,
 )
 
 ocp = OcpFesMsk.prepare_ocp(

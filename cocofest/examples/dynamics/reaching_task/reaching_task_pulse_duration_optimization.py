@@ -73,6 +73,7 @@ model = FesMskModel(
     muscles_model=fes_muscle_models,
     activate_force_length_relationship=True,
     activate_force_velocity_relationship=True,
+    activate_residual_torque=False,
 )
 
 minimum_pulse_duration = DingModelPulseDurationFrequencyWithFatigue().pd0

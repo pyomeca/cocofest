@@ -45,9 +45,9 @@ class OcpFesId(OcpFes):
         custom_objective: list[Objective] = None,
         discontinuity_in_ocp: list = None,
         use_sx: bool = True,
-        # ode_solver: OdeSolver = OdeSolver.RK4(n_integration_steps=1),
-        ode_solver: OdeSolver = OdeSolver.COLLOCATION,
+        ode_solver: OdeSolver = OdeSolver.RK4(n_integration_steps=1),
         n_threads: int = 1,
+        control_type: ControlType = ControlType.CONSTANT,
         **kwargs,
     ):
         """
@@ -127,7 +127,7 @@ class OcpFesId(OcpFes):
 
         if not model._is_integrate:
             constraints = OcpFesId._build_constraints(
-                model=model, n_shooting=n_shooting, final_time=final_time, stim_time=stim_time
+                model=model, n_shooting=n_shooting, final_time=final_time, stim_time=stim_time, control_type=control_type
             )
             u_bounds, u_init = OcpFesId._set_u_bounds(model=model)
         else:
@@ -148,7 +148,7 @@ class OcpFesId(OcpFes):
             objective_functions=objective_functions,
             constraints=constraints,
             ode_solver=ode_solver,
-            control_type=ControlType.CONSTANT,
+            control_type=control_type,
             use_sx=use_sx,
             parameters=parameters,
             parameter_bounds=parameters_bounds,
@@ -393,12 +393,12 @@ class OcpFesId(OcpFes):
         return parameters, parameters_bounds, parameters_init
 
     @staticmethod
-    def _build_constraints(model, n_shooting, final_time, stim_time):
+    def _build_constraints(model, n_shooting, final_time, stim_time, control_type):
         constraints = ConstraintList()
 
         time_vector = np.linspace(0, final_time, n_shooting + 1)
         stim_at_node = [np.where(stim_time[i] <= time_vector)[0][0] for i in range(len(stim_time))]
-
+        additional_nodes = 1 if control_type == ControlType.LINEAR_CONTINUOUS else 0
         if model._sum_stim_truncation:
             max_stim_to_keep = model._sum_stim_truncation
         else:
@@ -407,7 +407,7 @@ class OcpFesId(OcpFes):
         index_sup = 0
         index_inf = 0
         stim_index = []
-        for i in range(n_shooting + 1):
+        for i in range(n_shooting + additional_nodes):
             if i in stim_at_node:
                 index_sup += 1
                 if index_sup >= max_stim_to_keep:
@@ -423,7 +423,7 @@ class OcpFesId(OcpFes):
 
         if isinstance(model, DingModelPulseDurationFrequency):
             index_sup = 0
-            for i in range(n_shooting + 1):
+            for i in range(n_shooting + additional_nodes):
                 if i in stim_at_node and i != 0:
                     index_sup += 1
                 constraints.add(

@@ -14,7 +14,7 @@ from cocofest import (
 )
 
 # --- Building force to track ---#
-time = np.linspace(0, 1, 101)
+time = np.linspace(0, 1, 1001)
 force = abs(np.sin(time * 5) + np.random.normal(scale=0.1, size=len(time))) * 100
 force_tracking = [time, force]
 
@@ -27,7 +27,8 @@ minimum_pulse_intensity = model.min_pulse_intensity()
 
 ocp = OcpFes().prepare_ocp(
     model=model,
-    n_shooting=200,
+    stim_time=list(np.round(np.linspace(0, 1, 31)[:-1], 3)),
+    n_shooting=1000,
     final_time=1,
     pulse_intensity={
         "min": minimum_pulse_intensity,
@@ -36,7 +37,7 @@ ocp = OcpFes().prepare_ocp(
     },
     objective={"force_tracking": force_tracking},
     use_sx=True,
-    stim_time=np.linspace(0, 1, 31)[:-1],
+    n_threads=8,
 )
 
 # --- Solve the program --- #

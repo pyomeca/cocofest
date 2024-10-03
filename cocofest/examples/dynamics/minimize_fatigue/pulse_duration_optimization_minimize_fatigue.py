@@ -7,12 +7,7 @@ Intensity can be optimized from sensitivity threshold to 600us. No residual torq
 
 import numpy as np
 
-from bioptim import (
-    Node,
-    ObjectiveFcn,
-    ObjectiveList,
-    Solver,
-)
+from bioptim import Node, ObjectiveFcn, ObjectiveList, Solver
 
 from cocofest import DingModelPulseDurationFrequencyWithFatigue, OcpFesMsk, FesMskModel
 
@@ -38,6 +33,7 @@ model = FesMskModel(
     ],
     activate_force_length_relationship=True,
     activate_force_velocity_relationship=True,
+    activate_residual_torque=False,
 )
 
 ocp = OcpFesMsk.prepare_ocp(

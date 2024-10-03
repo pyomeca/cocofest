@@ -49,7 +49,7 @@ class IvpFes:
         ----------
         fes_parameters: dict
             The parameters for the fes configuration including :
-            model (FesModel type), n_stim (int type), pulse_duration (float type), pulse_intensity (int | float type), pulse_mode (str type), frequency (int | float type), round_down (bool type)
+            model (FesModel type), stim_time (list), pulse_duration (float type), pulse_intensity (int | float type), pulse_mode (str type), frequency (int | float type), round_down (bool type)
         ivp_parameters: dict
             The parameters for the ivp problem including :
             n_shooting (int type), final_time (int | float type), extend_last_phase_time (int | float type), ode_solver (OdeSolver type), use_sx (bool type), n_threads (int type)
@@ -428,6 +428,7 @@ class IvpFes:
                 "The number of stimulation needs to be integer within the final time t, set round down "
                 "to True or set final_time * frequency to make the result an integer."
             )
+        fes_parameters["stim_time"] = list(np.round([i * 1 / fes_parameters["frequency"] for i in range(fes_parameters["n_stim"])], 3))
         return cls(
             fes_parameters,
             ivp_parameters,
@@ -461,6 +462,10 @@ class IvpFes:
             raise ValueError("Frequency must be an int")
 
         ivp_parameters["final_time"] = n_stim / frequency
+
+        fes_parameters["stim_time"] = list(
+            np.round([i * 1 / fes_parameters["frequency"] for i in range(fes_parameters["n_stim"])], 3))
+
         return cls(
             fes_parameters,
             ivp_parameters,

@@ -8,20 +8,11 @@ defined in the bioMod file. At the end of the simulation 2 files will be created
 The files will contain the time, states, controls and parameters of the ocp.
 """
 
-import pickle
-
 import numpy as np
 
-from bioptim import (
-    Axis,
-    ConstraintFcn,
-    ConstraintList,
-    Node,
-    Solver,
-    SolutionMerge,
-)
+from bioptim import Axis, ConstraintFcn, ConstraintList, Node, Solver
 
-from cocofest import DingModelFrequencyWithFatigue, OcpFesMsk, FesMskModel
+from cocofest import DingModelFrequencyWithFatigue, OcpFesMsk, FesMskModel, SolutionToPickle
 
 # Fiber type proportion from [1]
 biceps_fiber_type_2_proportion = 0.607
@@ -72,6 +63,7 @@ model = FesMskModel(
     muscles_model=fes_muscle_models,
     activate_force_length_relationship=True,
     activate_force_velocity_relationship=True,
+    activate_residual_torque=False,
 )
 
 pickle_file_list = ["minimize_muscle_fatigue.pkl", "minimize_muscle_force.pkl"]
@@ -114,21 +106,7 @@ for i in range(len(pickle_file_list)):
     )
 
     sol = ocp.solve(Solver.IPOPT(_max_iter=10000))
-
-    time = sol.decision_time(to_merge=[SolutionMerge.PHASES, SolutionMerge.NODES])
-    states = sol.decision_states(to_merge=[SolutionMerge.PHASES, SolutionMerge.NODES])
-    controls = sol.decision_controls(to_merge=[SolutionMerge.PHASES, SolutionMerge.NODES])
-    parameters = sol.decision_parameters()
-
-    dictionary = {
-        "time": time,
-        "states": states,
-        "controls": controls,
-        "parameters": parameters,
-    }
-
-    with open("/result_file/pulse_apparition_" + pickle_file_list[i], "wb") as file:
-        pickle.dump(dictionary, file)
+    SolutionToPickle(sol, "pulse_intensity_" + pickle_file_list[i], "result_file/").pickle()
 
 
 # [1] Dahmane, R., Djordjevič, S., Šimunič, B., & Valenčič, V. (2005).

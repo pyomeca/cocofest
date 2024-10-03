@@ -10,13 +10,7 @@ Stimulations can occur between 0.01 to 1 second. Residual torque added to help c
 
 import numpy as np
 
-from bioptim import (
-    Node,
-    ObjectiveFcn,
-    ObjectiveList,
-    Solver,
-)
-
+from bioptim import Node, ObjectiveFcn, ObjectiveList, Solver
 from cocofest import DingModelFrequencyWithFatigue, OcpFesMsk, FesMskModel
 
 objective_functions = ObjectiveList()
@@ -40,6 +34,7 @@ model = FesMskModel(
     ],
     activate_force_length_relationship=True,
     activate_force_velocity_relationship=True,
+    activate_residual_torque=True,
 )
 
 ocp = OcpFesMsk.prepare_ocp(

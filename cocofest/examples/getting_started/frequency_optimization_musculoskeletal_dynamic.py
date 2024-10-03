@@ -16,11 +16,12 @@ model = FesMskModel(
     muscles_model=[DingModelFrequencyWithFatigue(muscle_name="BIClong")],
     activate_force_length_relationship=True,
     activate_force_velocity_relationship=True,
+    activate_residual_torque=True,
 )
 
 ocp = OcpFesMsk.prepare_ocp(
     model=model,
-    stim_time=np.linspace(0, 1, 11)[:-1],
+    stim_time=list(np.round(np.linspace(0, 1, 11)[:-1], 2)),
     n_shooting=100,
     final_time=1,
     pulse_event={"min": 0.01, "max": 0.1, "bimapping": True},

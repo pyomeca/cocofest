@@ -1,7 +1,7 @@
 import time as time_package
 import numpy as np
 
-from bioptim import Solver, OdeSolver
+from bioptim import Solver, OdeSolver, ControlType
 
 from ..models.fes_model import FesModel
 from ..models.ding2003 import DingModelFrequency
@@ -35,6 +35,7 @@ class DingModelFrequencyForceParameterIdentification(ParameterIdentification):
         use_sx: bool = True,
         ode_solver: OdeSolver = OdeSolver.RK4(n_integration_steps=1),
         n_threads: int = 1,
+        control_type: ControlType = ControlType.CONSTANT,
         **kwargs,
     ):
         """
@@ -66,6 +67,8 @@ class DingModelFrequencyForceParameterIdentification(ParameterIdentification):
             The ode solver to use for the identification
         n_threads: int,
             The number of threads to use for the identification
+        control_type: ControlType,
+            The type of control to use for the identification
         """
 
         self.default_values = self._set_default_values(model=model)
@@ -102,6 +105,7 @@ class DingModelFrequencyForceParameterIdentification(ParameterIdentification):
         self.use_sx = use_sx
         self.ode_solver = ode_solver
         self.n_threads = n_threads
+        self.control_type = control_type
         self.kwargs = kwargs
 
     def _set_default_values(self, model):
@@ -359,6 +363,7 @@ class DingModelFrequencyForceParameterIdentification(ParameterIdentification):
             use_sx=self.use_sx,
             ode_solver=self.ode_solver,
             n_threads=self.n_threads,
+            control_type=self.control_type,
         )
 
         self.force_identification_result = self.force_ocp.solve(
@@ -421,6 +426,7 @@ class DingModelFrequencyForceParameterIdentification(ParameterIdentification):
             use_sx=self.use_sx,
             ode_solver=self.ode_solver,
             n_threads=self.n_threads,
+            control_type=self.control_type,
         )
 
         print(f"OCP creation time : {time_package.time() - start_time} seconds")

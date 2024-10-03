@@ -1,7 +1,7 @@
 """
-This example will do an optimal control program of a 40 stimulation example with Ding's 2007 pulse duration model.
+This example will do an optimal control program of a 10 stimulation example with Ding's 2007 pulse duration model.
 Those ocp were build to produce a cycling motion.
-The stimulation frequency will be set to 40Hz and pulse duration will be optimized to satisfy the motion meanwhile
+The stimulation frequency will be set to 10Hz and pulse duration will be optimized to satisfy the motion meanwhile
 reducing residual torque.
 """
 
@@ -36,6 +36,7 @@ def main():
         ],
         activate_force_length_relationship=True,
         activate_force_velocity_relationship=True,
+        activate_residual_torque=True,
     )
 
     ocp = OcpFesMsk.prepare_ocp(
@@ -49,15 +50,8 @@ def main():
             "bimapping": False,
         },
         msk_info={"with_residual_torque": True},
-        objective={
-            "cycling": {
-                "x_center": 0.35,
-                "y_center": 0,
-                "radius": 0.1,
-                "target": "marker",
-            },
-            "minimize_residual_torque": True,
-        },
+        objective={"cycling": {"x_center": 0.35, "y_center": 0, "radius": 0.1, "target": "marker"},
+                   "minimize_residual_torque": True},
         warm_start=False,
         n_threads=5,
     )

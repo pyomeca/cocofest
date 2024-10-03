@@ -13,6 +13,7 @@ model = FesMskModel(
     muscles_model=[DingModelPulseDurationFrequencyWithFatigue(muscle_name="BIClong")],
     activate_force_length_relationship=True,
     activate_force_velocity_relationship=True,
+    activate_residual_torque=True,
 )
 
 minimum_pulse_duration = DingModelPulseDurationFrequencyWithFatigue().pd0

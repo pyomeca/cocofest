@@ -3,19 +3,18 @@ This example will do a 10 stimulation example using doublets and triplets.
 The example model is the Ding2003 frequency model.
 """
 
-import numpy as np
 import matplotlib.pyplot as plt
-from cocofest import DingModelFrequencyWithFatigue, IvpFes
+from cocofest import DingModelFrequencyWithFatigueIntegrate, IvpFes
 
 # --- Example n°1 : Single --- #
 # --- Build ocp --- #
 # This example shows how to create a problem with single pulses.
 # The stimulation won't be optimized.
-ns = 100
+ns = 1000
 final_time = 1
 
 fes_parameters = {
-    "model": DingModelFrequencyWithFatigue(),
+    "model": DingModelFrequencyWithFatigueIntegrate(),
     "pulse_mode": "single",
     "stim_time": [0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9],
 }

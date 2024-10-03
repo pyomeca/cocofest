@@ -141,6 +141,7 @@ class DingModelFrequencyIntegrate(DingModelFrequency):
             exp_time = self.exp_time_fun(t, t_stim_prev[i])  # Part of Eq n°1
             coefficient = if_else(t_stim_prev[i] <= t, 1, 0)
             sum_multiplier += ri * exp_time * coefficient
+
         return sum_multiplier
 
     def cn_dot_fun(self, cn: MX, r0: MX | float, t: MX, t_stim_prev: list[MX]) -> MX | float:

@@ -63,7 +63,7 @@ nmpc = NmpcFesMsk.prepare_nmpc(
     },
     warm_start=True,
     n_threads=8,
-    control_type=ControlType.CONSTANT,
+    control_type=ControlType.CONSTANT,  # ControlType.LINEAR_CONTINUOUS don't work for nmpc in bioptim
 )
 
 n_cycles_total = 8
@@ -86,7 +86,7 @@ SolutionToPickle(sol[0], "results/cycling_fes_driven_nmpc_full_fatigue.pkl", "")
     for i in range(len(sol[1]))
 ]
 
-# biorbd_model = biorbd.Model("../msk_models/simplified_UL_Seth_full_mesh.bioMod")
-# PickleAnimate("results/cycling_fes_driven_nmpc_full_fatigue.pkl").animate(
-#     model=biorbd_model
-# )
+biorbd_model = biorbd.Model("../msk_models/simplified_UL_Seth_full_mesh.bioMod")
+PickleAnimate("results/cycling_fes_driven_nmpc_full_fatigue.pkl").animate(
+    model=biorbd_model
+)

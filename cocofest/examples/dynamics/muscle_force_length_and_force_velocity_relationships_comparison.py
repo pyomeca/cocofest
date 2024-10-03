@@ -25,6 +25,7 @@ for i in range(2):
         muscles_model=[DingModelPulseDurationFrequencyWithFatigue(muscle_name="BIClong")],
         activate_force_length_relationship=activate_force_length_relationship[i],
         activate_force_velocity_relationship=activate_force_length_relationship[i],
+        activate_residual_torque=False,
     )
 
     ocp = OcpFesMsk.prepare_ocp(
