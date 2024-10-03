@@ -1,4 +1,3 @@
-
 import numpy as np
 from casadi import MX, vertcat, if_else
 
@@ -144,9 +143,7 @@ class DingModelFrequencyIntegrate(DingModelFrequency):
             sum_multiplier += ri * exp_time * coefficient
         return sum_multiplier
 
-    def cn_dot_fun(
-        self, cn: MX, r0: MX | float, t: MX, t_stim_prev: list[MX]
-    ) -> MX | float:
+    def cn_dot_fun(self, cn: MX, r0: MX | float, t: MX, t_stim_prev: list[MX]) -> MX | float:
         """
         Parameters
         ----------
@@ -163,9 +160,7 @@ class DingModelFrequencyIntegrate(DingModelFrequency):
         -------
         The value of the derivative ca_troponin_complex (unitless)
         """
-        sum_multiplier = self.cn_sum_fun(
-            r0, t, t_stim_prev=t_stim_prev
-        )  # Part of Eq n°1
+        sum_multiplier = self.cn_sum_fun(r0, t, t_stim_prev=t_stim_prev)  # Part of Eq n°1
 
         return (1 / self.tauc) * sum_multiplier - (cn / self.tauc)  # Equation n°1
 
@@ -218,13 +213,9 @@ class DingModelFrequencyIntegrate(DingModelFrequency):
         dxdt_fun = fes_model.system_dynamics if fes_model else nlp.model.system_dynamics
         stim_apparition = (
             (
-                fes_model.get_stim_prev(
-                    nlp=nlp, parameters=parameters, idx=nlp.phase_idx
-                )
+                fes_model.get_stim_prev(nlp=nlp, parameters=parameters, idx=nlp.phase_idx)
                 if fes_model
-                else nlp.model.get_stim_prev(
-                    nlp=nlp, parameters=parameters, idx=nlp.phase_idx
-                )
+                else nlp.model.get_stim_prev(nlp=nlp, parameters=parameters, idx=nlp.phase_idx)
             )
             if stim_prev is None
             else stim_prev
@@ -267,9 +258,7 @@ class DingModelFrequencyIntegrate(DingModelFrequency):
             if "pulse_apparition_time" not in nlp.parameters.keys()
             else None
         )
-        ConfigureProblem.configure_dynamics_function(
-            ocp, nlp, dyn_func=self.dynamics, stim_prev=stim_prev
-        )
+        ConfigureProblem.configure_dynamics_function(ocp, nlp, dyn_func=self.dynamics, stim_prev=stim_prev)
 
     @staticmethod
     def get_stim_prev(nlp: NonLinearProgram, parameters: MX, idx: int) -> list[float]:

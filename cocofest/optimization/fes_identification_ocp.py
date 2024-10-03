@@ -33,22 +33,22 @@ class OcpFesId(OcpFes):
 
     @staticmethod
     def prepare_ocp(
-            model: FesModel = None,
-            n_shooting: int = None,
-            final_time: float | int = None,
-            stim_time: list = None,
-            pulse_duration: dict = None,
-            pulse_intensity: dict = None,
-            objective: dict = None,
-            key_parameter_to_identify: list = None,
-            additional_key_settings: dict = None,
-            custom_objective: list[Objective] = None,
-            discontinuity_in_ocp: list = None,
-            use_sx: bool = True,
-            # ode_solver: OdeSolver = OdeSolver.RK4(n_integration_steps=1),
-            ode_solver: OdeSolver = OdeSolver.COLLOCATION,
-            n_threads: int = 1,
-            **kwargs,
+        model: FesModel = None,
+        n_shooting: int = None,
+        final_time: float | int = None,
+        stim_time: list = None,
+        pulse_duration: dict = None,
+        pulse_intensity: dict = None,
+        objective: dict = None,
+        key_parameter_to_identify: list = None,
+        additional_key_settings: dict = None,
+        custom_objective: list[Objective] = None,
+        discontinuity_in_ocp: list = None,
+        use_sx: bool = True,
+        # ode_solver: OdeSolver = OdeSolver.RK4(n_integration_steps=1),
+        ode_solver: OdeSolver = OdeSolver.COLLOCATION,
+        n_threads: int = 1,
+        **kwargs,
     ):
         """
         The main class to define an ocp. This class prepares the full program and gives all
@@ -123,13 +123,12 @@ class OcpFesId(OcpFes):
             force_tracking=objective["force_tracking"],
             discontinuity_in_ocp=discontinuity_in_ocp,
         )
-        objective_functions = OcpFesId._set_objective(
-            model=model,
-            objective=objective
-        )
+        objective_functions = OcpFesId._set_objective(model=model, objective=objective)
 
         if not model._is_integrate:
-            constraints = OcpFesId._build_constraints(model=model, n_shooting=n_shooting, final_time=final_time, stim_time=stim_time)
+            constraints = OcpFesId._build_constraints(
+                model=model, n_shooting=n_shooting, final_time=final_time, stim_time=stim_time
+            )
             u_bounds, u_init = OcpFesId._set_u_bounds(model=model)
         else:
             constraints = ConstraintList()
@@ -160,18 +159,15 @@ class OcpFesId(OcpFes):
 
     @staticmethod
     def _sanity_check_id(
-            model=None,
-            n_shooting=None,
-            final_time=None,
-            objective=None,
-            pulse_duration=None,
-            pulse_intensity=None,
+        model=None,
+        n_shooting=None,
+        final_time=None,
+        objective=None,
+        pulse_duration=None,
+        pulse_intensity=None,
     ):
         if not isinstance(n_shooting, int):
-            raise TypeError(
-                f"n_shooting must be list type,"
-                f" currently n_shooting is {type(n_shooting)}) type."
-            )
+            raise TypeError(f"n_shooting must be list type," f" currently n_shooting is {type(n_shooting)}) type.")
 
         if not isinstance(final_time, int | float):
             raise TypeError(f"final_time must be int or float type.")
@@ -182,24 +178,19 @@ class OcpFesId(OcpFes):
                 f" currently force_tracking is {type(objective['force_tracking'])}) type."
             )
         else:
-            if not all(
-                    isinstance(val, int | float) for val in objective["force_tracking"]
-            ):
+            if not all(isinstance(val, int | float) for val in objective["force_tracking"]):
                 raise TypeError(f"force_tracking must be list of int or float type.")
 
         if isinstance(model, DingModelPulseDurationFrequency):
             if not isinstance(pulse_duration, dict):
                 raise TypeError(
-                    f"pulse_duration must be dict type,"
-                    f" currently pulse_duration is {type(pulse_duration)}) type."
+                    f"pulse_duration must be dict type," f" currently pulse_duration is {type(pulse_duration)}) type."
                 )
 
         if isinstance(model, DingModelIntensityFrequency):
             if isinstance(pulse_intensity, dict):
                 if not isinstance(pulse_intensity["fixed"], int | float | list):
-                    raise ValueError(
-                        f"fixed pulse_intensity must be a int, float or list type."
-                    )
+                    raise ValueError(f"fixed pulse_intensity must be a int, float or list type.")
 
             else:
                 raise TypeError(
@@ -209,9 +200,9 @@ class OcpFesId(OcpFes):
 
     @staticmethod
     def _set_bounds(
-            model: FesModel = None,
-            force_tracking=None,
-            discontinuity_in_ocp=None,
+        model: FesModel = None,
+        force_tracking=None,
+        discontinuity_in_ocp=None,
     ):
         # ---- STATE BOUNDS REPRESENTATION ---- #
         #
@@ -243,12 +234,8 @@ class OcpFesId(OcpFes):
             elif variable_bound_list[i] == "A":
                 min_bounds[i] = 0
 
-        starting_bounds_min = np.concatenate(
-            (starting_bounds, min_bounds, min_bounds), axis=1
-        )
-        starting_bounds_max = np.concatenate(
-            (starting_bounds, max_bounds, max_bounds), axis=1
-        )
+        starting_bounds_min = np.concatenate((starting_bounds, min_bounds, min_bounds), axis=1)
+        starting_bounds_max = np.concatenate((starting_bounds, max_bounds, max_bounds), axis=1)
 
         for j in range(len(variable_bound_list)):
             x_bounds.add(
@@ -300,13 +287,13 @@ class OcpFesId(OcpFes):
 
     @staticmethod
     def _set_parameters(
-            n_stim,
-            stim_apparition_time,
-            parameter_to_identify,
-            parameter_setting,
-            use_sx,
-            pulse_duration: dict = None,
-            pulse_intensity: dict = None,
+        n_stim,
+        stim_apparition_time,
+        parameter_to_identify,
+        parameter_setting,
+        use_sx,
+        pulse_duration: dict = None,
+        pulse_intensity: dict = None,
     ):
         parameters = ParameterList(use_sx=use_sx)
         parameters_bounds = BoundsList()
@@ -340,19 +327,13 @@ class OcpFesId(OcpFes):
             )
             parameters_bounds.add(
                 parameter_to_identify[i],
-                min_bound=np.array(
-                    [parameter_setting[parameter_to_identify[i]]["min_bound"]]
-                ),
-                max_bound=np.array(
-                    [parameter_setting[parameter_to_identify[i]]["max_bound"]]
-                ),
+                min_bound=np.array([parameter_setting[parameter_to_identify[i]]["min_bound"]]),
+                max_bound=np.array([parameter_setting[parameter_to_identify[i]]["max_bound"]]),
                 interpolation=InterpolationType.CONSTANT,
             )
             parameters_init.add(
                 key=parameter_to_identify[i],
-                initial_guess=np.array(
-                    [parameter_setting[parameter_to_identify[i]]["initial_guess"]]
-                ),
+                initial_guess=np.array([parameter_setting[parameter_to_identify[i]]["initial_guess"]]),
             )
 
         if pulse_duration["fixed"]:
@@ -369,9 +350,7 @@ class OcpFesId(OcpFes):
                     max_bound=np.array(pulse_duration["fixed"]),
                     interpolation=InterpolationType.CONSTANT,
                 )
-                parameters_init.add(
-                    key="pulse_duration", initial_guess=np.array(pulse_duration["fixed"])
-                )
+                parameters_init.add(key="pulse_duration", initial_guess=np.array(pulse_duration["fixed"]))
             else:
                 parameters_bounds.add(
                     "pulse_duration",
@@ -398,9 +377,7 @@ class OcpFesId(OcpFes):
                     max_bound=np.array(pulse_intensity["fixed"]),
                     interpolation=InterpolationType.CONSTANT,
                 )
-                parameters_init.add(
-                    key="pulse_intensity", initial_guess=np.array(pulse_intensity["fixed"])
-                )
+                parameters_init.add(key="pulse_intensity", initial_guess=np.array(pulse_intensity["fixed"]))
             else:
                 parameters_bounds.add(
                     "pulse_intensity",
@@ -430,7 +407,7 @@ class OcpFesId(OcpFes):
         index_sup = 0
         index_inf = 0
         stim_index = []
-        for i in range(n_shooting+1):
+        for i in range(n_shooting + 1):
             if i in stim_at_node:
                 index_sup += 1
                 if index_sup >= max_stim_to_keep:
@@ -446,7 +423,7 @@ class OcpFesId(OcpFes):
 
         if isinstance(model, DingModelPulseDurationFrequency):
             index_sup = 0
-            for i in range(n_shooting+1):
+            for i in range(n_shooting + 1):
                 if i in stim_at_node and i != 0:
                     index_sup += 1
                 constraints.add(

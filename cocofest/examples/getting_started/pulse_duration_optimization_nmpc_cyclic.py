@@ -23,9 +23,7 @@ n_cycles = 8
 
 minimum_pulse_duration = DingModelPulseDurationFrequencyWithFatigue().pd0
 fes_model = DingModelPulseDurationFrequencyWithFatigue(sum_stim_truncation=10)
-fes_model.alpha_a = (
-    -4.0 * 10e-1
-)  # Increasing the fatigue rate to make the fatigue more visible
+fes_model.alpha_a = -4.0 * 10e-1  # Increasing the fatigue rate to make the fatigue more visible
 
 nmpc = NmpcFes.prepare_nmpc(
     model=fes_model,
@@ -55,9 +53,7 @@ sol = nmpc.solve(
     cyclic_options={"states": {}},
     get_all_iterations=True,
 )
-sol_merged = sol[0].decision_states(
-    to_merge=[SolutionMerge.PHASES, SolutionMerge.NODES]
-)
+sol_merged = sol[0].decision_states(to_merge=[SolutionMerge.PHASES, SolutionMerge.NODES])
 
 time = sol[0].decision_time(to_merge=SolutionMerge.KEYS, continuous=True)
 time = [float(j) for j in time]
@@ -84,9 +80,7 @@ ax2.set_ylabel("Force (N)")
 plt.legend()
 
 barWidth = 0.25  # set width of bar
-cycles = [
-    sol[1][i].parameters["pulse_duration"] for i in range(len(sol[1]))
-]  # set height of bar
+cycles = [sol[1][i].parameters["pulse_duration"] for i in range(len(sol[1]))]  # set height of bar
 bar = []  # Set position of bar on X axis
 for i in range(n_cycles):
     if i == 0:

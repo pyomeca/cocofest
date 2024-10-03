@@ -14,9 +14,7 @@ duration_path = [
     r"../result_file/pulse_duration_minimize_muscle_fatigue.pkl",
 ]
 
-chosen_graph_to_plot_path = (
-    duration_path if chosen_graph_to_plot == "duration" else None
-)
+chosen_graph_to_plot_path = duration_path if chosen_graph_to_plot == "duration" else None
 
 
 if chosen_graph_to_plot_path is None:
@@ -205,9 +203,7 @@ for i in range(len(data_minimize_force["time"])):
     a_fatigue_diff_list.append((a_fatigue_sum_list[i] - a_fatigue_sum_list[0]) * 1000)
 
     fatigue_minimization_percentage_gain_list.append(
-        (a_fatigue_sum_list[i] - a_force_sum_list[i])
-        / (a_force_sum_list[0] - a_force_sum_list[-1])
-        * 100
+        (a_fatigue_sum_list[i] - a_force_sum_list[i]) / (a_force_sum_list[0] - a_force_sum_list[-1]) * 100
     )
 
 axs[2][2].plot(

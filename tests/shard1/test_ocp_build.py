@@ -541,14 +541,10 @@ def test_all_ocp_fes_errors():
         OcpFes.prepare_ocp(model=DingModelFrequency(), n_stim=3, n_shooting=-3)
 
     with pytest.raises(TypeError, match="final_time must be int or float type"):
-        OcpFes.prepare_ocp(
-            model=DingModelFrequency(), n_stim=3, n_shooting=10, final_time="0.3"
-        )
+        OcpFes.prepare_ocp(model=DingModelFrequency(), n_stim=3, n_shooting=10, final_time="0.3")
 
     with pytest.raises(ValueError, match="final_time must be positive"):
-        OcpFes.prepare_ocp(
-            model=DingModelFrequency(), n_stim=3, n_shooting=10, final_time=-0.3
-        )
+        OcpFes.prepare_ocp(model=DingModelFrequency(), n_stim=3, n_shooting=10, final_time=-0.3)
 
     pulse_mode = "doublet"
     with pytest.raises(
@@ -640,9 +636,7 @@ def test_all_ocp_fes_errors():
             pulse_duration={"fixed": fixed_pulse_duration},
         )
 
-    with pytest.raises(
-        TypeError, match="Wrong pulse_duration type, only int or float accepted"
-    ):
+    with pytest.raises(TypeError, match="Wrong pulse_duration type, only int or float accepted"):
         OcpFes.prepare_ocp(
             model=DingModelPulseDurationFrequency(),
             n_stim=3,
@@ -696,9 +690,7 @@ def test_all_ocp_fes_errors():
         ValueError,
         match="Pulse intensity or pulse intensity min max bounds need to be set for this model",
     ):
-        OcpFes.prepare_ocp(
-            model=DingModelIntensityFrequency(), n_stim=3, n_shooting=10, final_time=0.3
-        )
+        OcpFes.prepare_ocp(model=DingModelIntensityFrequency(), n_stim=3, n_shooting=10, final_time=0.3)
 
     with pytest.raises(
         ValueError,
@@ -794,8 +786,7 @@ def test_all_ocp_fes_errors():
 
     with pytest.raises(
         ValueError,
-        match="force_tracking time and force argument must be same length and force_tracking "
-        "list size 2",
+        match="force_tracking time and force argument must be same length and force_tracking " "list size 2",
     ):
         OcpFes.prepare_ocp(
             model=DingModelFrequency(),
@@ -805,9 +796,7 @@ def test_all_ocp_fes_errors():
             objective={"force_tracking": [np.array([0, 1]), np.array([0, 1, 2])]},
         )
 
-    with pytest.raises(
-        TypeError, match="force_tracking argument must be np.ndarray type"
-    ):
+    with pytest.raises(TypeError, match="force_tracking argument must be np.ndarray type"):
         OcpFes.prepare_ocp(
             model=DingModelFrequency(),
             n_stim=3,
@@ -822,9 +811,7 @@ def test_all_ocp_fes_errors():
             n_stim=3,
             n_shooting=10,
             final_time=0.3,
-            objective={
-                "force_tracking": np.array([np.array([0, 1, 2]), np.array([0, 1, 2])])
-            },
+            objective={"force_tracking": np.array([np.array([0, 1, 2]), np.array([0, 1, 2])])},
         )
 
     with pytest.raises(TypeError, match="end_node_tracking must be int or float type"):
@@ -837,16 +824,10 @@ def test_all_ocp_fes_errors():
         )
 
     objective_functions = ObjectiveList()
-    objective_functions.add(
-        ObjectiveFcn.Lagrange.MINIMIZE_STATE, key="q", weight=10, multi_thread=False
-    )
-    objective_functions.add(
-        ObjectiveFcn.Lagrange.MINIMIZE_STATE, key="qdot", weight=10, multi_thread=False
-    )
+    objective_functions.add(ObjectiveFcn.Lagrange.MINIMIZE_STATE, key="q", weight=10, multi_thread=False)
+    objective_functions.add(ObjectiveFcn.Lagrange.MINIMIZE_STATE, key="qdot", weight=10, multi_thread=False)
     objective_functions[0].append("objective_function")
-    with pytest.raises(
-        TypeError, match="custom_objective must be a ObjectiveList type"
-    ):
+    with pytest.raises(TypeError, match="custom_objective must be a ObjectiveList type"):
         OcpFes.prepare_ocp(
             model=DingModelFrequency(),
             n_stim=3,
@@ -855,9 +836,7 @@ def test_all_ocp_fes_errors():
             objective={"custom": "objective_functions"},
         )
 
-    with pytest.raises(
-        TypeError, match="All elements in ObjectiveList must be an Objective type"
-    ):
+    with pytest.raises(TypeError, match="All elements in ObjectiveList must be an Objective type"):
         OcpFes.prepare_ocp(
             model=DingModelFrequency(),
             n_stim=3,

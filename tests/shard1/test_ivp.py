@@ -13,9 +13,7 @@ from cocofest import (
 )
 
 
-@pytest.mark.parametrize(
-    "model", [DingModelFrequency(), DingModelFrequencyWithFatigue()]
-)
+@pytest.mark.parametrize("model", [DingModelFrequency(), DingModelFrequencyWithFatigue()])
 def test_ding2003_ivp(model):
     fes_parameters = {"model": model, "n_stim": 3}
     ivp_parameters = {"n_shooting": 10, "final_time": 0.3, "use_sx": True}
@@ -67,9 +65,7 @@ def test_ding2007_ivp(model, pulse_duration):
         np.testing.assert_almost_equal(result["F"][0][-1], 34.6369350284091)
 
 
-@pytest.mark.parametrize(
-    "model", [DingModelIntensityFrequency(), DingModelIntensityFrequencyWithFatigue()]
-)
+@pytest.mark.parametrize("model", [DingModelIntensityFrequency(), DingModelIntensityFrequencyWithFatigue()])
 @pytest.mark.parametrize("pulse_intensity", [50, [50, 60, 70]])
 def test_hmed2018_ivp(model, pulse_intensity):
     fes_parameters = {"model": model, "n_stim": 3, "pulse_intensity": pulse_intensity}
@@ -183,9 +179,7 @@ def test_all_ivp_errors():
             ivp_parameters={"n_shooting": 10, "final_time": 0.3},
         )
 
-    with pytest.raises(
-        ValueError, match="pulse_duration list must have the same length as n_stim"
-    ):
+    with pytest.raises(ValueError, match="pulse_duration list must have the same length as n_stim"):
         IvpFes(
             fes_parameters={
                 "model": DingModelPulseDurationFrequency(),
@@ -209,9 +203,7 @@ def test_all_ivp_errors():
             ivp_parameters={"n_shooting": 10, "final_time": 0.3},
         )
 
-    with pytest.raises(
-        TypeError, match="pulse_duration must be int, float or list type"
-    ):
+    with pytest.raises(TypeError, match="pulse_duration must be int, float or list type"):
         IvpFes(
             fes_parameters={
                 "model": DingModelPulseDurationFrequency(),
@@ -235,9 +227,7 @@ def test_all_ivp_errors():
             ivp_parameters={"n_shooting": 10, "final_time": 0.3},
         )
 
-    with pytest.raises(
-        ValueError, match="pulse_intensity list must have the same length as n_stim"
-    ):
+    with pytest.raises(ValueError, match="pulse_intensity list must have the same length as n_stim"):
         IvpFes(
             fes_parameters={
                 "model": DingModelIntensityFrequency(),
@@ -261,9 +251,7 @@ def test_all_ivp_errors():
             ivp_parameters={"n_shooting": 10, "final_time": 0.3},
         )
 
-    with pytest.raises(
-        TypeError, match="pulse_intensity must be int, float or list type"
-    ):
+    with pytest.raises(TypeError, match="pulse_intensity must be int, float or list type"):
         IvpFes(
             fes_parameters={
                 "model": DingModelIntensityFrequency(),

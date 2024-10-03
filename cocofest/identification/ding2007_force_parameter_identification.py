@@ -15,9 +15,7 @@ from .identification_method import (
 )
 
 
-class DingModelPulseDurationFrequencyForceParameterIdentification(
-    DingModelFrequencyForceParameterIdentification
-):
+class DingModelPulseDurationFrequencyForceParameterIdentification(DingModelFrequencyForceParameterIdentification):
     """
     This class extends the DingModelFrequencyForceParameterIdentification class and is used to define an optimal control problem (OCP).
     It prepares the full program and provides all the necessary parameters to solve a functional electrical stimulation OCP.
@@ -72,9 +70,7 @@ class DingModelPulseDurationFrequencyForceParameterIdentification(
         **kwargs: dict
             Additional keyword arguments.
         """
-        super(
-            DingModelPulseDurationFrequencyForceParameterIdentification, self
-        ).__init__(
+        super(DingModelPulseDurationFrequencyForceParameterIdentification, self).__init__(
             model=model,
             data_path=data_path,
             identification_method=identification_method,
@@ -240,9 +236,7 @@ class DingModelPulseDurationFrequencyForceParameterIdentification(
         time, stim, force, discontinuity = average_data_extraction(self.data_path)
         pulse_duration = {"fixed": self.pulse_duration_extraction(self.data_path)}
 
-        force_at_node = force_at_node_in_ocp(
-            time, force, self.n_shooting, self.final_time, force_curve_number
-        )
+        force_at_node = force_at_node_in_ocp(time, force, self.n_shooting, self.final_time, force_curve_number)
 
         # --- Building force ocp --- #
         self.force_ocp = OcpFesId.prepare_ocp(
@@ -308,26 +302,16 @@ class DingModelPulseDurationFrequencyForceParameterIdentification(
 
         elif self.force_model_identification_method == "average":
             time, stim, force, discontinuity = average_data_extraction(self.data_path)
-            pulse_duration["fixed"] = np.mean(
-                np.array(self.pulse_duration_extraction(self.data_path))
-            )
+            pulse_duration["fixed"] = np.mean(np.array(self.pulse_duration_extraction(self.data_path)))
 
         elif self.force_model_identification_method == "sparse":
-            force_curve_number = (
-                self.kwargs["force_curve_number"]
-                if "force_curve_number" in self.kwargs
-                else 5
-            )
-            time, stim, force, discontinuity = sparse_data_extraction(
-                self.data_path, force_curve_number
-            )
+            force_curve_number = self.kwargs["force_curve_number"] if "force_curve_number" in self.kwargs else 5
+            time, stim, force, discontinuity = sparse_data_extraction(self.data_path, force_curve_number)
             pulse_duration["fixed"] = self.pulse_duration_extraction(
                 self.data_path
             )  # TODO : adapt this for sparse data
 
-        force_at_node = force_at_node_in_ocp(
-            time, force, self.n_shooting, self.final_time, force_curve_number
-        )
+        force_at_node = force_at_node_in_ocp(time, force, self.n_shooting, self.final_time, force_curve_number)
 
         if self.double_step_identification:
             initial_guess = self._force_model_identification_for_initial_guess()
@@ -358,8 +342,6 @@ class DingModelPulseDurationFrequencyForceParameterIdentification(
 
         identified_parameters = {}
         for key in self.key_parameter_to_identify:
-            identified_parameters[key] = self.force_identification_result.parameters[
-                key
-            ][0]
+            identified_parameters[key] = self.force_identification_result.parameters[key][0]
 
         return identified_parameters

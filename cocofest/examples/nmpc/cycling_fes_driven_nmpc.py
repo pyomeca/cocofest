@@ -7,7 +7,7 @@ torque control.
 
 import numpy as np
 import biorbd
-from bioptim import Solver
+from bioptim import Solver, ControlType
 from cocofest import (
     DingModelPulseDurationFrequencyWithFatigue,
     NmpcFesMsk,
@@ -18,12 +18,8 @@ from cocofest import (
 
 
 minimum_pulse_duration = DingModelPulseDurationFrequencyWithFatigue().pd0
-DeltoideusClavicle_A_model = DingModelPulseDurationFrequencyWithFatigue(
-    muscle_name="DeltoideusClavicle_A"
-)
-DeltoideusScapula_P_model = DingModelPulseDurationFrequencyWithFatigue(
-    muscle_name="DeltoideusScapula_P"
-)
+DeltoideusClavicle_A_model = DingModelPulseDurationFrequencyWithFatigue(muscle_name="DeltoideusClavicle_A")
+DeltoideusScapula_P_model = DingModelPulseDurationFrequencyWithFatigue(muscle_name="DeltoideusScapula_P")
 TRIlong_model = DingModelPulseDurationFrequencyWithFatigue(muscle_name="TRIlong")
 BIC_long_model = DingModelPulseDurationFrequencyWithFatigue(muscle_name="BIC_long")
 BIC_brevis_model = DingModelPulseDurationFrequencyWithFatigue(muscle_name="BIC_brevis")
@@ -67,6 +63,7 @@ nmpc = NmpcFesMsk.prepare_nmpc(
     },
     warm_start=True,
     n_threads=8,
+    control_type=ControlType.CONSTANT,
 )
 
 n_cycles_total = 8
@@ -83,17 +80,13 @@ sol = nmpc.solve(
     get_all_iterations=True,
 )
 
-SolutionToPickle(
-    sol[0], "results/cycling_fes_driven_nmpc_full_fatigue.pkl", ""
-).pickle()
+SolutionToPickle(sol[0], "results/cycling_fes_driven_nmpc_full_fatigue.pkl", "").pickle()
 [
-    SolutionToPickle(
-        sol[1][i], "cycling_fes_driven_nmpc_" + str(i) + "_fatigue.pkl", ""
-    ).pickle()
+    SolutionToPickle(sol[1][i], "results/cycling_fes_driven_nmpc_" + str(i) + "_fatigue.pkl", "").pickle()
     for i in range(len(sol[1]))
 ]
 
 # biorbd_model = biorbd.Model("../msk_models/simplified_UL_Seth_full_mesh.bioMod")
-# PickleAnimate("cycling_fes_driven_nmpc_full_force.pkl").animate(
+# PickleAnimate("results/cycling_fes_driven_nmpc_full_fatigue.pkl").animate(
 #     model=biorbd_model
 # )

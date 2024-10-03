@@ -28,12 +28,8 @@ def main():
         name=None,
         biorbd_path="../../msk_models/simplified_UL_Seth.bioMod",
         muscles_model=[
-            DingModelPulseDurationFrequencyWithFatigue(
-                muscle_name="DeltoideusClavicle_A"
-            ),
-            DingModelPulseDurationFrequencyWithFatigue(
-                muscle_name="DeltoideusScapula_P"
-            ),
+            DingModelPulseDurationFrequencyWithFatigue(muscle_name="DeltoideusClavicle_A"),
+            DingModelPulseDurationFrequencyWithFatigue(muscle_name="DeltoideusScapula_P"),
             DingModelPulseDurationFrequencyWithFatigue(muscle_name="TRIlong"),
             DingModelPulseDurationFrequencyWithFatigue(muscle_name="BIC_long"),
             DingModelPulseDurationFrequencyWithFatigue(muscle_name="BIC_brevis"),
@@ -70,9 +66,7 @@ def main():
     SolutionToPickle(sol, "cycling_fes_driven_min_residual_torque.pkl", "").pickle()
 
     biorbd_model = biorbd.Model("../../msk_models/simplified_UL_Seth_full_mesh.bioMod")
-    PickleAnimate("cycling_fes_driven_min_residual_torque.pkl").animate(
-        model=biorbd_model
-    )
+    PickleAnimate("cycling_fes_driven_min_residual_torque.pkl").animate(model=biorbd_model)
 
     sol.graphs(show_bounds=False)
     PlotCyclingResult(sol).plot(starting_location="E")

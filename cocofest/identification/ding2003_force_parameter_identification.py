@@ -72,11 +72,7 @@ class DingModelFrequencyForceParameterIdentification(ParameterIdentification):
 
         dict_parameter_to_configure = model.identifiable_parameters
         model_parameters_value = [
-            (
-                None
-                if key in key_parameter_to_identify
-                else dict_parameter_to_configure[key]
-            )
+            (None if key in key_parameter_to_identify else dict_parameter_to_configure[key])
             for key in dict_parameter_to_configure
         ]
         self.model = self._set_model_parameters(model, model_parameters_value)
@@ -92,9 +88,7 @@ class DingModelFrequencyForceParameterIdentification(ParameterIdentification):
         )
 
         self.key_parameter_to_identify = key_parameter_to_identify
-        self.additional_key_settings = self.key_setting_to_dictionary(
-            key_settings=additional_key_settings
-        )
+        self.additional_key_settings = self.key_setting_to_dictionary(key_settings=additional_key_settings)
 
         self.data_path = data_path
         self.force_model_identification_method = identification_method
@@ -266,18 +260,11 @@ class DingModelFrequencyForceParameterIdentification(ParameterIdentification):
             )
 
         if not isinstance(n_shooting, int):
-            raise TypeError(
-                f"The given n_shooting must be int type,"
-                f" the given value is {type(n_shooting)} type"
-            )
+            raise TypeError(f"The given n_shooting must be int type," f" the given value is {type(n_shooting)} type")
 
         self._set_default_parameters_list()
-        if not all(
-            isinstance(param, None | int | float) for param in self.numeric_parameters
-        ):
-            raise ValueError(
-                f"The given model parameters are not valid, only None, int and float are accepted"
-            )
+        if not all(isinstance(param, None | int | float) for param in self.numeric_parameters):
+            raise ValueError(f"The given model parameters are not valid, only None, int and float are accepted")
 
     def key_setting_to_dictionary(self, key_settings):
         """
@@ -312,8 +299,7 @@ class DingModelFrequencyForceParameterIdentification(ParameterIdentification):
             for i in range(len(data_path)):
                 if not isinstance(data_path[i], str):
                     raise TypeError(
-                        f"In the given list, all model_data_path must be str type,"
-                        f" path index n°{i} is not str type"
+                        f"In the given list, all model_data_path must be str type," f" path index n°{i} is not str type"
                     )
                 if not data_path[i].endswith(".pkl"):
                     raise TypeError(
@@ -357,9 +343,7 @@ class DingModelFrequencyForceParameterIdentification(ParameterIdentification):
 
         time, stim, force, discontinuity = average_data_extraction(self.data_path)
 
-        force_at_node = force_at_node_in_ocp(
-            time, force, self.n_shooting, self.final_time, force_curve_number
-        )
+        force_at_node = force_at_node_in_ocp(time, force, self.n_shooting, self.final_time, force_curve_number)
 
         # --- Building force ocp --- #
         self.force_ocp = OcpFesId.prepare_ocp(
@@ -412,18 +396,10 @@ class DingModelFrequencyForceParameterIdentification(ParameterIdentification):
             time, stim, force, discontinuity = average_data_extraction(self.data_path)
 
         elif self.force_model_identification_method == "sparse":
-            force_curve_number = (
-                self.kwargs["force_curve_number"]
-                if "force_curve_number" in self.kwargs
-                else 5
-            )
-            time, stim, force, discontinuity = sparse_data_extraction(
-                self.data_path, force_curve_number
-            )
+            force_curve_number = self.kwargs["force_curve_number"] if "force_curve_number" in self.kwargs else 5
+            time, stim, force, discontinuity = sparse_data_extraction(self.data_path, force_curve_number)
 
-        force_at_node = force_at_node_in_ocp(
-            time, force, self.n_shooting, self.final_time, force_curve_number
-        )
+        force_at_node = force_at_node_in_ocp(time, force, self.n_shooting, self.final_time, force_curve_number)
 
         if self.double_step_identification:
             initial_guess = self._force_model_identification_for_initial_guess()
@@ -449,14 +425,10 @@ class DingModelFrequencyForceParameterIdentification(ParameterIdentification):
 
         print(f"OCP creation time : {time_package.time() - start_time} seconds")
 
-        self.force_identification_result = self.force_ocp.solve(
-            Solver.IPOPT(_max_iter=1000)
-        )
+        self.force_identification_result = self.force_ocp.solve(Solver.IPOPT(_max_iter=1000))
 
         identified_parameters = {}
         for key in self.key_parameter_to_identify:
-            identified_parameters[key] = self.force_identification_result.parameters[
-                key
-            ][0]
+            identified_parameters[key] = self.force_identification_result.parameters[key][0]
 
         return identified_parameters

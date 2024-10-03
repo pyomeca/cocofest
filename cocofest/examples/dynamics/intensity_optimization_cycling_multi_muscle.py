@@ -13,18 +13,12 @@ from cocofest import DingModelIntensityFrequency, OcpFesMsk, FesMskModel
 track_q = [
     np.array([0, 0.125, 0.25, 0.375, 0.5, 0.625, 0.75, 0.875, 1]),
     [
-        np.array(
-            [1.1339, 0.9943, 0.7676, 0.5757, 0.4536, 0.6280, 1.0292, 1.0990, 1.1339]
-        ),
-        np.array(
-            [0.6629, 0.7676, 1.0641, 1.3781, 1.4653, 1.3781, 0.9594, 0.8373, 0.6629]
-        ),
+        np.array([1.1339, 0.9943, 0.7676, 0.5757, 0.4536, 0.6280, 1.0292, 1.0990, 1.1339]),
+        np.array([0.6629, 0.7676, 1.0641, 1.3781, 1.4653, 1.3781, 0.9594, 0.8373, 0.6629]),
     ],
 ]
 
-minimum_pulse_intensity = DingModelIntensityFrequency.min_pulse_intensity(
-    DingModelIntensityFrequency()
-)
+minimum_pulse_intensity = DingModelIntensityFrequency.min_pulse_intensity(DingModelIntensityFrequency())
 
 model = FesMskModel(
     name=None,

@@ -265,9 +265,7 @@ class StateConfigure:
                         as_controls=False,
                         muscle_name=muscle_dynamics_model.muscle_name,
                     )
-                    state_name_list.append(
-                        state_key + "_" + muscle_dynamics_model.muscle_name
-                    )
+                    state_name_list.append(state_key + "_" + muscle_dynamics_model.muscle_name)
 
         return state_name_list
 

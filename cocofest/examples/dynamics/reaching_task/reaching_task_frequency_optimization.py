@@ -63,12 +63,8 @@ fes_muscle_models = [
 ]
 
 for i in range(len(fes_muscle_models)):
-    fes_muscle_models[i].alpha_a = (
-        fes_muscle_models[i].alpha_a * alpha_a_proportion_list[i]
-    )
-    fes_muscle_models[i].a_rest = (
-        fes_muscle_models[i].a_rest * a_rest_proportion_list[i]
-    )
+    fes_muscle_models[i].alpha_a = fes_muscle_models[i].alpha_a * alpha_a_proportion_list[i]
+    fes_muscle_models[i].a_rest = fes_muscle_models[i].a_rest * a_rest_proportion_list[i]
 
 model = FesMskModel(
     name=None,
@@ -104,12 +100,8 @@ for i in range(len(pickle_file_list)):
         final_time=1,
         pulse_event={"min": 0.01, "max": 0.1, "bimapping": False},
         objective={
-            "minimize_fatigue": (
-                True if pickle_file_list[i] == "minimize_muscle_fatigue.pkl" else False
-            ),
-            "minimize_force": (
-                True if pickle_file_list[i] == "minimize_muscle_force.pkl" else False
-            ),
+            "minimize_fatigue": (True if pickle_file_list[i] == "minimize_muscle_fatigue.pkl" else False),
+            "minimize_force": (True if pickle_file_list[i] == "minimize_muscle_force.pkl" else False),
         },
         msk_info={
             "with_residual_torque": False,
@@ -125,9 +117,7 @@ for i in range(len(pickle_file_list)):
 
     time = sol.decision_time(to_merge=[SolutionMerge.PHASES, SolutionMerge.NODES])
     states = sol.decision_states(to_merge=[SolutionMerge.PHASES, SolutionMerge.NODES])
-    controls = sol.decision_controls(
-        to_merge=[SolutionMerge.PHASES, SolutionMerge.NODES]
-    )
+    controls = sol.decision_controls(to_merge=[SolutionMerge.PHASES, SolutionMerge.NODES])
     parameters = sol.decision_parameters()
 
     dictionary = {

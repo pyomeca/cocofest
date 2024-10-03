@@ -18,9 +18,7 @@ n_stim = 10
 for i in range(10):
     start_time = time.time()
     fes_parameters = {
-        "model": DingModelFrequencyWithFatigue(
-            sum_stim_truncation=i if i != 0 else None
-        ),
+        "model": DingModelFrequencyWithFatigue(sum_stim_truncation=i if i != 0 else None),
         "n_stim": n_stim,
     }
     ivp_parameters = {

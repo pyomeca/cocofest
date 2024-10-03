@@ -54,9 +54,7 @@ class DingModelFrequencyWithFatigueIntegrate(DingModelFrequencyIntegrate):
     # ---- Needed for the example ---- #
     @property
     def name_dof(self, with_muscle_name: bool = False) -> list[str]:
-        muscle_name = (
-            "_" + self.muscle_name if self.muscle_name and with_muscle_name else ""
-        )
+        muscle_name = "_" + self.muscle_name if self.muscle_name and with_muscle_name else ""
         return [
             "Cn" + muscle_name,
             "F" + muscle_name,
@@ -154,9 +152,7 @@ class DingModelFrequencyWithFatigueIntegrate(DingModelFrequencyIntegrate):
         -------
         The value of the derivative time_state_force_no_cross_bridge (ms)
         """
-        return (
-            -(tau1 - self.tau1_rest) / self.tau_fat + self.alpha_tau1 * f
-        )  # Equation n°9
+        return -(tau1 - self.tau1_rest) / self.tau_fat + self.alpha_tau1 * f  # Equation n°9
 
     def km_dot_fun(self, km: MX, f: MX) -> MX | float:
         """
@@ -222,13 +218,9 @@ class DingModelFrequencyWithFatigueIntegrate(DingModelFrequencyIntegrate):
         dxdt_fun = fes_model.system_dynamics if fes_model else nlp.model.system_dynamics
         stim_apparition = (
             (
-                fes_model.get_stim_prev(
-                    nlp=nlp, parameters=parameters, idx=nlp.phase_idx
-                )
+                fes_model.get_stim_prev(nlp=nlp, parameters=parameters, idx=nlp.phase_idx)
                 if fes_model
-                else nlp.model.get_stim_prev(
-                    nlp=nlp, parameters=parameters, idx=nlp.phase_idx
-                )
+                else nlp.model.get_stim_prev(nlp=nlp, parameters=parameters, idx=nlp.phase_idx)
             )
             if stim_prev is None
             else stim_prev
@@ -275,6 +267,4 @@ class DingModelFrequencyWithFatigueIntegrate(DingModelFrequencyIntegrate):
             if "pulse_apparition_time" not in nlp.parameters.keys()
             else None
         )
-        ConfigureProblem.configure_dynamics_function(
-            ocp, nlp, dyn_func=self.dynamics, stim_prev=stim_prev
-        )
+        ConfigureProblem.configure_dynamics_function(ocp, nlp, dyn_func=self.dynamics, stim_prev=stim_prev)

@@ -18,9 +18,7 @@ class SolutionToPickle:
                 self.sol.ocp.parameter_bounds[key].max[0][0],
             )
 
-        time = self.sol.decision_time(
-            to_merge=[SolutionMerge.PHASES, SolutionMerge.NODES]
-        )
+        time = self.sol.decision_time(to_merge=[SolutionMerge.PHASES, SolutionMerge.NODES])
         time = time.reshape(time.shape[0])
 
         time, states = self.remove_duplicates(time)
@@ -28,30 +26,22 @@ class SolutionToPickle:
         dictionary = {
             "time": time,
             "states": states,
-            "control": self.sol.decision_controls(
-                to_merge=[SolutionMerge.PHASES, SolutionMerge.NODES]
-            ),
+            "control": self.sol.decision_controls(to_merge=[SolutionMerge.PHASES, SolutionMerge.NODES]),
             "parameters": self.sol.decision_parameters(),
             "parameters_bounds": bounds,
             "time_to_optimize": self.sol.real_time_to_optimize,
             "bio_model_path": (
-                self.sol.ocp.nlp[0].model.bio_model.path
-                if hasattr(self.sol.ocp.nlp[0].model, "bio_model")
-                else None
+                self.sol.ocp.nlp[0].model.bio_model.path if hasattr(self.sol.ocp.nlp[0].model, "bio_model") else None
             ),
         }
 
         with open(self.path + self.file_name, "wb") as file:
             pickle.dump(dictionary, file)
 
-        return print(
-            f"Solution values has been exported in pickle format in {self.path + self.file_name}"
-        )
+        return print(f"Solution values has been exported in pickle format in {self.path + self.file_name}")
 
     def remove_duplicates(self, time):
-        states = self.sol.decision_states(
-            to_merge=[SolutionMerge.PHASES, SolutionMerge.NODES]
-        )
+        states = self.sol.decision_states(to_merge=[SolutionMerge.PHASES, SolutionMerge.NODES])
         vals, idx_start, count = np.unique(time, return_counts=True, return_index=True)
         time = time[idx_start]
         state_keys = states.keys()

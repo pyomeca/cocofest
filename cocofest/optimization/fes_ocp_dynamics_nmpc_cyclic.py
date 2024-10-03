@@ -22,7 +22,9 @@ class NmpcFesMsk(CyclicNonlinearModelPredictiveControl):
         for model in self.nlp[0].model.muscles_dynamics_model:
             self.nlp[0].model.muscles_dynamics_model[0].stim_prev = stim_prev
             if "pulse_intensity_" + model.muscle_name in sol.parameters.keys():
-                self.nlp[0].model.muscles_dynamics_model[0].stim_pulse_intensity_prev = list(sol.parameters["pulse_intensity_"+model.muscle_name])
+                self.nlp[0].model.muscles_dynamics_model[0].stim_pulse_intensity_prev = list(
+                    sol.parameters["pulse_intensity_" + model.muscle_name]
+                )
 
     @staticmethod
     def prepare_nmpc(

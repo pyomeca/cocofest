@@ -118,9 +118,7 @@ class DingModelPulseDurationFrequencyIntegrate(DingModelFrequencyIntegrate):
         The value of the derivative of each state dx/dt at the current time t
         """
         r0 = self.km_rest + self.r0_km_relationship  # Simplification
-        cn_dot = self.cn_dot_fun(
-            cn, r0, t, t_stim_prev=t_stim_prev
-        )  # Equation n°1 from Ding's 2003 article
+        cn_dot = self.cn_dot_fun(cn, r0, t, t_stim_prev=t_stim_prev)  # Equation n°1 from Ding's 2003 article
         a = self.a_calculation(
             a_scale=self.a_scale,
             impulse_time=impulse_time,
@@ -168,9 +166,7 @@ class DingModelPulseDurationFrequencyIntegrate(DingModelFrequencyIntegrate):
             else:
                 coefficient = if_else(t_stim_prev[i] <= t, 1, 0)
                 temp_impulse_time = impulse_time_list[i] * coefficient
-                impulse_time = if_else(
-                    temp_impulse_time != 0, temp_impulse_time, impulse_time
-                )
+                impulse_time = if_else(temp_impulse_time != 0, temp_impulse_time, impulse_time)
         return a_scale * (1 - exp(-(impulse_time - self.pd0) / self.pdt))
 
     def set_impulse_duration(self, value: list[MX]):
@@ -185,9 +181,7 @@ class DingModelPulseDurationFrequencyIntegrate(DingModelFrequencyIntegrate):
         self.impulse_time = value
 
     @staticmethod
-    def get_pulse_duration_parameters(
-        nlp, parameters: ParameterList, muscle_name: str = None
-    ) -> list[MX]:
+    def get_pulse_duration_parameters(nlp, parameters: ParameterList, muscle_name: str = None) -> list[MX]:
         """
         Get the nlp list of pulse_duration parameters
 
@@ -262,21 +256,15 @@ class DingModelPulseDurationFrequencyIntegrate(DingModelFrequencyIntegrate):
         impulse_time = (
             nlp.model.get_pulse_duration_parameters(nlp, parameters)
             if fes_model is None
-            else fes_model.get_pulse_duration_parameters(
-                nlp, parameters, muscle_name=fes_model.muscle_name
-            )
+            else fes_model.get_pulse_duration_parameters(nlp, parameters, muscle_name=fes_model.muscle_name)
         )
 
         dxdt_fun = fes_model.system_dynamics if fes_model else nlp.model.system_dynamics
         stim_apparition = (
             (
-                fes_model.get_stim_prev(
-                    nlp=nlp, parameters=parameters, idx=nlp.phase_idx
-                )
+                fes_model.get_stim_prev(nlp=nlp, parameters=parameters, idx=nlp.phase_idx)
                 if fes_model
-                else nlp.model.get_stim_prev(
-                    nlp=nlp, parameters=parameters, idx=nlp.phase_idx
-                )
+                else nlp.model.get_stim_prev(nlp=nlp, parameters=parameters, idx=nlp.phase_idx)
             )
             if stim_prev is None
             else stim_prev
@@ -324,6 +312,4 @@ class DingModelPulseDurationFrequencyIntegrate(DingModelFrequencyIntegrate):
             if "pulse_apparition_time" not in nlp.parameters.keys()
             else None
         )
-        ConfigureProblem.configure_dynamics_function(
-            ocp, nlp, dyn_func=self.dynamics, stim_prev=stim_prev
-        )
+        ConfigureProblem.configure_dynamics_function(ocp, nlp, dyn_func=self.dynamics, stim_prev=stim_prev)

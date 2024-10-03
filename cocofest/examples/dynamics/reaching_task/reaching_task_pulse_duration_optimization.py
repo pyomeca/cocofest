@@ -64,12 +64,8 @@ fes_muscle_models = [
 
 # Applying the scaling
 for i in range(len(fes_muscle_models)):
-    fes_muscle_models[i].alpha_a = (
-        fes_muscle_models[i].alpha_a * alpha_a_proportion_list[i]
-    )
-    fes_muscle_models[i].a_scale = (
-        fes_muscle_models[i].a_scale * a_scale_proportion_list[i]
-    )
+    fes_muscle_models[i].alpha_a = fes_muscle_models[i].alpha_a * alpha_a_proportion_list[i]
+    fes_muscle_models[i].a_scale = fes_muscle_models[i].a_scale * a_scale_proportion_list[i]
 
 model = FesMskModel(
     name=None,
@@ -106,12 +102,8 @@ for i in range(len(pickle_file_list)):
             "bimapping": False,
         },
         objective={
-            "minimize_fatigue": (
-                True if pickle_file_list[i] == "minimize_muscle_fatigue.pkl" else False
-            ),
-            "minimize_force": (
-                True if pickle_file_list[i] == "minimize_muscle_force.pkl" else False
-            ),
+            "minimize_fatigue": (True if pickle_file_list[i] == "minimize_muscle_fatigue.pkl" else False),
+            "minimize_force": (True if pickle_file_list[i] == "minimize_muscle_force.pkl" else False),
         },
         msk_info={
             "with_residual_torque": False,
@@ -123,9 +115,7 @@ for i in range(len(pickle_file_list)):
     )
 
     sol = ocp.solve(Solver.IPOPT(_max_iter=10000))
-    SolutionToPickle(
-        sol, "pulse_duration_" + pickle_file_list[i], "result_file/"
-    ).pickle()
+    SolutionToPickle(sol, "pulse_duration_" + pickle_file_list[i], "result_file/").pickle()
 
 # [1] Dahmane, R., Djordjevič, S., Šimunič, B., & Valenčič, V. (2005).
 # Spatial fiber type distribution in normal human muscle: histochemical and tensiomyographical evaluation.

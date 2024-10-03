@@ -22,8 +22,8 @@ n_shooting = 500
 n_stim = 50
 final_time = 5
 
-stim_time = list(np.round(np.linspace(0, final_time, n_stim+1), 2))[:-1]
-pulse_intensity_values = [20, 20, 30, 40, 50, 60, 70, 80, 90, 100] * int((n_stim/10))
+stim_time = list(np.round(np.linspace(0, final_time, n_stim + 1), 2))[:-1]
+pulse_intensity_values = [20, 20, 30, 40, 50, 60, 70, 80, 90, 100] * int((n_stim / 10))
 
 fes_parameters = {
     "model": DingModelIntensityFrequencyIntegrate(),
@@ -69,46 +69,20 @@ ocp = DingModelPulseIntensityFrequencyForceParameterIdentification(
 
 identified_parameters = ocp.force_model_identification()
 force_ocp = ocp.force_identification_result.decision_states(to_merge=SolutionMerge.NODES)["F"][0]
-a_rest = (
-    identified_parameters["a_rest"]
-    if "a_rest" in identified_parameters
-    else DingModelIntensityFrequency().a_rest
-)
+a_rest = identified_parameters["a_rest"] if "a_rest" in identified_parameters else DingModelIntensityFrequency().a_rest
 km_rest = (
-    identified_parameters["km_rest"]
-    if "km_rest" in identified_parameters
-    else DingModelIntensityFrequency().km_rest
+    identified_parameters["km_rest"] if "km_rest" in identified_parameters else DingModelIntensityFrequency().km_rest
 )
 tau1_rest = (
     identified_parameters["tau1_rest"]
     if "tau1_rest" in identified_parameters
     else DingModelIntensityFrequency().tau1_rest
 )
-tau2 = (
-    identified_parameters["tau2"]
-    if "tau2" in identified_parameters
-    else DingModelIntensityFrequency().tau2
-)
-ar = (
-    identified_parameters["ar"]
-    if "ar" in identified_parameters
-    else DingModelIntensityFrequency().ar
-)
-bs = (
-    identified_parameters["bs"]
-    if "bs" in identified_parameters
-    else DingModelIntensityFrequency().bs
-)
-Is = (
-    identified_parameters["Is"]
-    if "Is" in identified_parameters
-    else DingModelIntensityFrequency().Is
-)
-cr = (
-    identified_parameters["cr"]
-    if "cr" in identified_parameters
-    else DingModelIntensityFrequency().cr
-)
+tau2 = identified_parameters["tau2"] if "tau2" in identified_parameters else DingModelIntensityFrequency().tau2
+ar = identified_parameters["ar"] if "ar" in identified_parameters else DingModelIntensityFrequency().ar
+bs = identified_parameters["bs"] if "bs" in identified_parameters else DingModelIntensityFrequency().bs
+Is = identified_parameters["Is"] if "Is" in identified_parameters else DingModelIntensityFrequency().Is
+cr = identified_parameters["cr"] if "cr" in identified_parameters else DingModelIntensityFrequency().cr
 print(
     "a_rest : ",
     a_rest,

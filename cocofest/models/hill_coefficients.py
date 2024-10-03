@@ -84,9 +84,6 @@ def muscle_force_velocity_coefficient(model, muscle, q, qdot):
     d3 = -0.374
     d4 = 0.886
 
-    m_FvCE = (
-        d1 * log((d2 * norm_v + d3) + sqrt((d2 * norm_v + d3) * (d2 * norm_v + d3) + 1))
-        + d4
-    )
+    m_FvCE = d1 * log((d2 * norm_v + d3) + sqrt((d2 * norm_v + d3) * (d2 * norm_v + d3) + 1)) + d4
 
     return m_FvCE

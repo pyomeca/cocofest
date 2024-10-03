@@ -26,17 +26,9 @@ class PlotCyclingResult:
 
         """
 
-        extracted_data = (
-            self.extract_data_from_sol(self.sol)
-            if isinstance(self.sol, Solution)
-            else None
-        )
-        is_pickle = (
-            True if isinstance(self.sol, str) and self.sol.endswith(".pkl") else False
-        )
-        extracted_data = (
-            self.extract_data_from_pickle(self.sol) if is_pickle else extracted_data
-        )
+        extracted_data = self.extract_data_from_sol(self.sol) if isinstance(self.sol, Solution) else None
+        is_pickle = True if isinstance(self.sol, str) and self.sol.endswith(".pkl") else False
+        extracted_data = self.extract_data_from_pickle(self.sol) if is_pickle else extracted_data
 
         if extracted_data is None:
             raise ValueError("The solution must be a Solution object or a pickle file")
@@ -163,42 +155,21 @@ class PlotCyclingResult:
         if "pulse_apparition_time" in solution.ocp.parameters.keys():
             final_time = sum(solution.ocp.phase_time)
             pulse_apparition_time = solution.parameters["pulse_apparition_time"]
-            theta = np.array(
-                [
-                    (pulse_apparition_time[i] / final_time) * 2 * np.pi + width / 2
-                    for i in range(n_phase)
-                ]
-            )
+            theta = np.array([(pulse_apparition_time[i] / final_time) * 2 * np.pi + width / 2 for i in range(n_phase)])
         else:
             theta = np.linspace(0, 2 * np.pi, n_phase + 1)[:-1] + width / 2
 
         intensity = (
             True
-            if sum(
-                [
-                    "pulse_intensity" in parameter_key
-                    for parameter_key in solution.ocp.parameters.keys()
-                ]
-            )
-            > 0
+            if sum(["pulse_intensity" in parameter_key for parameter_key in solution.ocp.parameters.keys()]) > 0
             else False
         )
         pulse_duration = (
             True
-            if sum(
-                [
-                    "pulse_duration" in parameter_key
-                    for parameter_key in solution.ocp.parameters.keys()
-                ]
-            )
-            > 0
+            if sum(["pulse_duration" in parameter_key for parameter_key in solution.ocp.parameters.keys()]) > 0
             else False
         )
-        parameter = (
-            "pulse_intensity"
-            if intensity
-            else "pulse_duration" if pulse_duration else None
-        )
+        parameter = "pulse_intensity" if intensity else "pulse_duration" if pulse_duration else None
         if parameter is None:
             raise ValueError(
                 "The solution must contain either a pulse intensity or a pulse duration parameter to be plotted with the PlotCyclingResult class"
@@ -215,9 +186,7 @@ class PlotCyclingResult:
                 value = solution.parameters[parameter_key][i] - min
                 opacity_percentage = value / parameter_range
                 opacity_percentage = (
-                    1
-                    if opacity_percentage > 1
-                    else 0 if opacity_percentage < 0 else opacity_percentage
+                    1 if opacity_percentage > 1 else 0 if opacity_percentage < 0 else opacity_percentage
                 )
                 opacity.append(opacity_percentage)
 
@@ -240,57 +209,30 @@ class PlotCyclingResult:
             pickle_data = pickle.load(f)
         data = {}
 
-        n_phase = pickle_data["parameters"][
-            next(iter(pickle_data["parameters"]))
-        ].shape[0]
+        n_phase = pickle_data["parameters"][next(iter(pickle_data["parameters"]))].shape[0]
         width = 2 * np.pi / n_phase
-        pulse_apparition_time_as_parameter = (
-            1 if "pulse_apparition_time" in pickle_data["parameters"] else 0
-        )
-        nb_muscle = (
-            len(pickle_data["parameters"].keys()) - pulse_apparition_time_as_parameter
-        )
+        pulse_apparition_time_as_parameter = 1 if "pulse_apparition_time" in pickle_data["parameters"] else 0
+        nb_muscle = len(pickle_data["parameters"].keys()) - pulse_apparition_time_as_parameter
         radii = 1 / (nb_muscle + 1)
 
         if pulse_apparition_time_as_parameter:
             final_time = pickle_data["time"][-1]
             pulse_apparition_time = pickle_data["parameters"]["pulse_apparition_time"]
-            theta = np.array(
-                [
-                    (pulse_apparition_time[i] / final_time) * 2 * np.pi + width / 2
-                    for i in range(n_phase)
-                ]
-            )
+            theta = np.array([(pulse_apparition_time[i] / final_time) * 2 * np.pi + width / 2 for i in range(n_phase)])
         else:
             theta = np.linspace(0, 2 * np.pi, n_phase + 1)[:-1] + width / 2
 
         intensity = (
             True
-            if sum(
-                [
-                    "pulse_intensity" in parameter_key
-                    for parameter_key in pickle_data["parameters"]
-                ]
-            )
-            > 0
+            if sum(["pulse_intensity" in parameter_key for parameter_key in pickle_data["parameters"]]) > 0
             else False
         )
         pulse_duration = (
             True
-            if sum(
-                [
-                    "pulse_duration" in parameter_key
-                    for parameter_key in pickle_data["parameters"]
-                ]
-            )
-            > 0
+            if sum(["pulse_duration" in parameter_key for parameter_key in pickle_data["parameters"]]) > 0
             else False
         )
-        parameter = (
-            "pulse_intensity"
-            if intensity
-            else "pulse_duration" if pulse_duration else None
-        )
+        parameter = "pulse_intensity" if intensity else "pulse_duration" if pulse_duration else None
         if parameter is None:
             raise ValueError(
                 "The solution must contain either a pulse intensity or a pulse duration parameter to be plotted with the PlotCyclingResult class"
@@ -298,11 +240,7 @@ class PlotCyclingResult:
 
         counter = 0
         muscle_name_list = list(pickle_data["parameters"].keys())
-        (
-            muscle_name_list.remove("pulse_apparition_time")
-            if pulse_apparition_time_as_parameter
-            else None
-        )
+        (muscle_name_list.remove("pulse_apparition_time") if pulse_apparition_time_as_parameter else None)
         muscle_name_list = [s.replace(parameter + "_", "", 1) for s in muscle_name_list]
 
         for muscle in muscle_name_list:
@@ -315,9 +253,7 @@ class PlotCyclingResult:
                 value = pickle_data["parameters"][parameter_key][i] - min
                 opacity_percentage = value / parameter_range
                 opacity_percentage = (
-                    1
-                    if opacity_percentage > 1
-                    else 0 if opacity_percentage < 0 else opacity_percentage
+                    1 if opacity_percentage > 1 else 0 if opacity_percentage < 0 else opacity_percentage
                 )
                 opacity.append(opacity_percentage)
 

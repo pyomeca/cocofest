@@ -108,9 +108,7 @@ class DingModelIntensityFrequencyIntegrate(DingModelFrequencyIntegrate):
         The value of the derivative of each state dx/dt at the current time t
         """
         r0 = self.km_rest + self.r0_km_relationship  # Simplification
-        cn_dot = self.cn_dot_fun(
-            cn, r0, t, t_stim_prev=t_stim_prev, intensity_stim=intensity_stim
-        )  # Equation n°1
+        cn_dot = self.cn_dot_fun(cn, r0, t, t_stim_prev=t_stim_prev, intensity_stim=intensity_stim)  # Equation n°1
         f_dot = self.f_dot_fun(
             cn,
             f,
@@ -147,9 +145,7 @@ class DingModelIntensityFrequencyIntegrate(DingModelFrequencyIntegrate):
         -------
         The value of the derivative ca_troponin_complex (unitless)
         """
-        sum_multiplier = self.cn_sum_fun(
-            r0, t, t_stim_prev=t_stim_prev, intensity_stim=intensity_stim
-        )
+        sum_multiplier = self.cn_sum_fun(r0, t, t_stim_prev=t_stim_prev, intensity_stim=intensity_stim)
 
         return (1 / self.tauc) * sum_multiplier - (cn / self.tauc)  # Eq(1)
 
@@ -202,9 +198,7 @@ class DingModelIntensityFrequencyIntegrate(DingModelFrequencyIntegrate):
         -------
         The lambda factor, part of the n°1 equation
         """
-        lambda_i = self.ar * (
-            tanh(self.bs * (intensity_stim - self.Is)) + self.cr
-        )  # equation include intensity
+        lambda_i = self.ar * (tanh(self.bs * (intensity_stim - self.Is)) + self.cr)  # equation include intensity
         return lambda_i
 
     def set_impulse_intensity(self, value: MX):
@@ -221,9 +215,7 @@ class DingModelIntensityFrequencyIntegrate(DingModelFrequencyIntegrate):
             self.impulse_intensity.append(value[i])
 
     @staticmethod
-    def get_intensity_parameters(
-        nlp, parameters: ParameterList, muscle_name: str = None
-    ) -> list[MX]:
+    def get_intensity_parameters(nlp, parameters: ParameterList, muscle_name: str = None) -> list[MX]:
         """
         Get the nlp list of intensity parameters
 
@@ -243,10 +235,7 @@ class DingModelIntensityFrequencyIntegrate(DingModelFrequencyIntegrate):
         intensity_parameters = []
         for j in range(parameters.shape[0]):
             if muscle_name:
-                if (
-                    "pulse_intensity_" + muscle_name
-                    in nlp.parameters.scaled.cx[j].str()
-                ):
+                if "pulse_intensity_" + muscle_name in nlp.parameters.scaled.cx[j].str():
                     intensity_parameters.append(parameters[j])
             elif "pulse_intensity" in nlp.parameters.scaled.cx[j].str():
                 intensity_parameters.append(parameters[j])
@@ -304,21 +293,15 @@ class DingModelIntensityFrequencyIntegrate(DingModelFrequencyIntegrate):
         intensity_parameters = (
             nlp.model.get_intensity_parameters(nlp, parameters)
             if fes_model is None
-            else fes_model.get_intensity_parameters(
-                nlp, parameters, muscle_name=fes_model.muscle_name
-            )
+            else fes_model.get_intensity_parameters(nlp, parameters, muscle_name=fes_model.muscle_name)
         )
 
         dxdt_fun = fes_model.system_dynamics if fes_model else nlp.model.system_dynamics
         stim_apparition = (
             (
-                fes_model.get_stim_prev(
-                    nlp=nlp, parameters=parameters, idx=nlp.phase_idx
-                )
+                fes_model.get_stim_prev(nlp=nlp, parameters=parameters, idx=nlp.phase_idx)
                 if fes_model
-                else nlp.model.get_stim_prev(
-                    nlp=nlp, parameters=parameters, idx=nlp.phase_idx
-                )
+                else nlp.model.get_stim_prev(nlp=nlp, parameters=parameters, idx=nlp.phase_idx)
             )
             if stim_prev is None
             else stim_prev
@@ -366,9 +349,7 @@ class DingModelIntensityFrequencyIntegrate(DingModelFrequencyIntegrate):
             if "pulse_apparition_time" not in nlp.parameters.keys()
             else None
         )
-        ConfigureProblem.configure_dynamics_function(
-            ocp, nlp, dyn_func=self.dynamics, stim_prev=stim_prev
-        )
+        ConfigureProblem.configure_dynamics_function(ocp, nlp, dyn_func=self.dynamics, stim_prev=stim_prev)
 
     def min_pulse_intensity(self):
         """

@@ -74,12 +74,14 @@ print(identified_parameters)
     pickle_discontinuity_phase_list,
 ) = full_data_extraction([pickle_file_name])
 
-result_dict = {"tau1_rest": [identified_parameters["tau1_rest"],DingModelPulseDurationFrequency().tau1_rest],
-               "tau2": [identified_parameters["tau2"], DingModelPulseDurationFrequency().tau2],
-               "km_rest": [identified_parameters["km_rest"], DingModelPulseDurationFrequency().km_rest],
-               "a_scale": [identified_parameters["a_scale"], DingModelPulseDurationFrequency().a_scale],
-               "pd0": [identified_parameters["pd0"], DingModelPulseDurationFrequency().pd0],
-               "pdt": [identified_parameters["pdt"], DingModelPulseDurationFrequency().pdt]}
+result_dict = {
+    "tau1_rest": [identified_parameters["tau1_rest"], DingModelPulseDurationFrequency().tau1_rest],
+    "tau2": [identified_parameters["tau2"], DingModelPulseDurationFrequency().tau2],
+    "km_rest": [identified_parameters["km_rest"], DingModelPulseDurationFrequency().km_rest],
+    "a_scale": [identified_parameters["a_scale"], DingModelPulseDurationFrequency().a_scale],
+    "pd0": [identified_parameters["pd0"], DingModelPulseDurationFrequency().pd0],
+    "pdt": [identified_parameters["pdt"], DingModelPulseDurationFrequency().pdt],
+}
 
 # Plotting the identification result
 plt.title("Force state result")

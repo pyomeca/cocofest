@@ -92,9 +92,7 @@ class DingModelFrequency(FesModel):
     # ---- Needed for the example ---- #
     @property
     def name_dof(self, with_muscle_name: bool = False) -> list[str]:
-        muscle_name = (
-            "_" + self.muscle_name if self.muscle_name and with_muscle_name else ""
-        )
+        muscle_name = "_" + self.muscle_name if self.muscle_name and with_muscle_name else ""
         return ["Cn" + muscle_name, "F" + muscle_name]
 
     @property
@@ -130,7 +128,6 @@ class DingModelFrequency(FesModel):
         cn_sum: MX | float = None,
         force_length_relationship: MX | float = 1,
         force_velocity_relationship: MX | float = 1,
-
     ) -> MX:
         """
         The system dynamics is the function that describes the models.

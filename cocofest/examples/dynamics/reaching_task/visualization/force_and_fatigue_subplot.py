@@ -222,9 +222,7 @@ for i in range(len(data_minimize_force["time"])):
     a_fatigue_diff_list.append((a_fatigue_sum_list[i] - a_fatigue_sum_list[0]) * 1000)
 
     fatigue_minimization_percentage_gain_list.append(
-        (a_fatigue_sum_list[i] - a_force_sum_list[i])
-        / (a_force_sum_list[0] - a_force_sum_list[-1])
-        * 100
+        (a_fatigue_sum_list[i] - a_force_sum_list[i]) / (a_force_sum_list[0] - a_force_sum_list[-1]) * 100
     )
 
 fig, axs = plt.subplots(1, 1, figsize=(3, (1 / 3) * 7))

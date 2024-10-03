@@ -19,9 +19,7 @@ def test_nmpc_cyclic():
 
     minimum_pulse_duration = DingModelPulseDurationFrequencyWithFatigue().pd0
     fes_model = DingModelPulseDurationFrequencyWithFatigue(sum_stim_truncation=10)
-    fes_model.alpha_a = (
-        -4.0 * 10e-1
-    )  # Increasing the fatigue rate to make the fatigue more visible
+    fes_model.alpha_a = -4.0 * 10e-1  # Increasing the fatigue rate to make the fatigue more visible
 
     nmpc = OcpFesNmpcCyclic(
         model=fes_model,
@@ -144,9 +142,7 @@ def test_all_nmpc_errors():
 
     with pytest.raises(
         ValueError,
-        match=re.escape(
-            "The number of n_simultaneous_cycles must be higher than the number of n_cycle_to_advance"
-        ),
+        match=re.escape("The number of n_simultaneous_cycles must be higher than the number of n_cycle_to_advance"),
     ):
         OcpFesNmpcCyclic(
             model=DingModelPulseDurationFrequencyWithFatigue(sum_stim_truncation=10),
@@ -166,9 +162,7 @@ def test_all_nmpc_errors():
 
     with pytest.raises(
         ValueError,
-        match=re.escape(
-            "The number of n_total_cycles must be a multiple of the number n_cycle_to_advance"
-        ),
+        match=re.escape("The number of n_total_cycles must be a multiple of the number n_cycle_to_advance"),
     ):
         OcpFesNmpcCyclic(
             model=DingModelPulseDurationFrequencyWithFatigue(sum_stim_truncation=10),
@@ -228,9 +222,7 @@ def test_all_nmpc_errors():
 
     with pytest.raises(
         NotImplementedError,
-        match=re.escape(
-            "Only 3 simultaneous cycles are implemented yet work in progress"
-        ),
+        match=re.escape("Only 3 simultaneous cycles are implemented yet work in progress"),
     ):
         OcpFesNmpcCyclic(
             model=DingModelPulseDurationFrequencyWithFatigue(sum_stim_truncation=10),

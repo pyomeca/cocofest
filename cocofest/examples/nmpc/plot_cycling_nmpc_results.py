@@ -19,9 +19,7 @@ for i in range(8):
     with open("results/cycling_fes_driven_nmpc_" + str(i) + "_force.pkl", "rb") as file:
         temp_nmpc_result_force_optim = pickle.load(file)
 
-    with open(
-        "results/cycling_fes_driven_nmpc_" + str(i) + "_fatigue.pkl", "rb"
-    ) as file:
+    with open("results/cycling_fes_driven_nmpc_" + str(i) + "_fatigue.pkl", "rb") as file:
         temp_nmpc_result_fatigue_optim = pickle.load(file)
 
     all_pulse_duration_force.append(temp_nmpc_result_force_optim["parameters"])
@@ -47,26 +45,18 @@ pulse_duration_fatigue_optim_dict = {
 
 for i in range(8):
     [
-        pulse_duration_force_optim_dict[f].append(
-            all_pulse_duration_force[i]["pulse_duration_" + f]
-        )
+        pulse_duration_force_optim_dict[f].append(all_pulse_duration_force[i]["pulse_duration_" + f])
         for f in pulse_duration_force_optim_dict.keys()
     ]
     [
-        pulse_duration_fatigue_optim_dict[f].append(
-            all_pulse_duration_fatigue[i]["pulse_duration_" + f]
-        )
+        pulse_duration_fatigue_optim_dict[f].append(all_pulse_duration_fatigue[i]["pulse_duration_" + f])
         for f in pulse_duration_fatigue_optim_dict.keys()
     ]
 
 
 for key in pulse_duration_force_optim_dict.keys():
-    pulse_duration_force_optim_dict[key] = np.array(
-        [x for xs in pulse_duration_force_optim_dict[key] for x in xs]
-    )
-    pulse_duration_fatigue_optim_dict[key] = np.array(
-        [x for xs in pulse_duration_fatigue_optim_dict[key] for x in xs]
-    )
+    pulse_duration_force_optim_dict[key] = np.array([x for xs in pulse_duration_force_optim_dict[key] for x in xs])
+    pulse_duration_fatigue_optim_dict[key] = np.array([x for xs in pulse_duration_fatigue_optim_dict[key] for x in xs])
 
 bar = np.array([barWidth * (x + 0.5) for x in range(80)])
 
@@ -112,7 +102,7 @@ axs[1, 0].plot(
     label="force optim",
 )
 axs[1, 0].plot(
-    full_nmpc_result_force_optim["time"][:-1],
+    full_nmpc_result_fatigue_optim["time"][:-1],
     full_nmpc_result_fatigue_optim["control"]["tau"][0],
     label="fatigue optim",
 )
@@ -123,7 +113,7 @@ axs[1, 1].plot(
     label="force optim",
 )
 axs[1, 1].plot(
-    full_nmpc_result_force_optim["time"][:-1],
+    full_nmpc_result_fatigue_optim["time"][:-1],
     full_nmpc_result_fatigue_optim["control"]["tau"][1],
     label="fatigue optim",
 )
@@ -150,12 +140,10 @@ axs00 = axs[0, 0].twinx()
 axs00.set_ylim(top=0.003)
 axs00.set_yticks([0, 0.0003, 0.0006], [0, 300, 600])
 mask1 = ma.where(
-    pulse_duration_force_optim_dict["DeltoideusClavicle_A"]
-    >= pulse_duration_fatigue_optim_dict["DeltoideusClavicle_A"]
+    pulse_duration_force_optim_dict["DeltoideusClavicle_A"] >= pulse_duration_fatigue_optim_dict["DeltoideusClavicle_A"]
 )
 mask2 = ma.where(
-    pulse_duration_fatigue_optim_dict["DeltoideusClavicle_A"]
-    >= pulse_duration_force_optim_dict["DeltoideusClavicle_A"]
+    pulse_duration_fatigue_optim_dict["DeltoideusClavicle_A"] >= pulse_duration_force_optim_dict["DeltoideusClavicle_A"]
 )
 axs00.bar(
     bar[mask1],
@@ -199,12 +187,10 @@ axs01.set_ylim(top=0.003)
 axs01.set_yticks([0, 0.0003, 0.0006], [0, 300, 600])
 axs01.set_ylabel("Pulse duration (us)")
 mask1 = ma.where(
-    pulse_duration_force_optim_dict["DeltoideusScapula_P"]
-    >= pulse_duration_fatigue_optim_dict["DeltoideusScapula_P"]
+    pulse_duration_force_optim_dict["DeltoideusScapula_P"] >= pulse_duration_fatigue_optim_dict["DeltoideusScapula_P"]
 )
 mask2 = ma.where(
-    pulse_duration_fatigue_optim_dict["DeltoideusScapula_P"]
-    >= pulse_duration_force_optim_dict["DeltoideusScapula_P"]
+    pulse_duration_fatigue_optim_dict["DeltoideusScapula_P"] >= pulse_duration_force_optim_dict["DeltoideusScapula_P"]
 )
 axs01.bar(
     bar[mask1],
@@ -261,14 +247,8 @@ axs10.bar(
     edgecolor="grey",
     label=f"force optim pw",
 )
-mask1 = ma.where(
-    pulse_duration_force_optim_dict["TRIlong"]
-    >= pulse_duration_fatigue_optim_dict["TRIlong"]
-)
-mask2 = ma.where(
-    pulse_duration_fatigue_optim_dict["TRIlong"]
-    >= pulse_duration_force_optim_dict["TRIlong"]
-)
+mask1 = ma.where(pulse_duration_force_optim_dict["TRIlong"] >= pulse_duration_fatigue_optim_dict["TRIlong"])
+mask2 = ma.where(pulse_duration_fatigue_optim_dict["TRIlong"] >= pulse_duration_force_optim_dict["TRIlong"])
 axs10.bar(
     bar[mask1],
     pulse_duration_force_optim_dict["TRIlong"][mask1],
@@ -310,14 +290,8 @@ axs11 = axs[1, 1].twinx()
 axs11.set_ylim(top=0.003)
 axs11.set_yticks([0, 0.0003, 0.0006], [0, 300, 600])
 axs11.set_ylabel("Pulse duration (us)")
-mask1 = ma.where(
-    pulse_duration_force_optim_dict["BIC_long"]
-    >= pulse_duration_fatigue_optim_dict["BIC_long"]
-)
-mask2 = ma.where(
-    pulse_duration_fatigue_optim_dict["BIC_long"]
-    >= pulse_duration_force_optim_dict["BIC_long"]
-)
+mask1 = ma.where(pulse_duration_force_optim_dict["BIC_long"] >= pulse_duration_fatigue_optim_dict["BIC_long"])
+mask2 = ma.where(pulse_duration_fatigue_optim_dict["BIC_long"] >= pulse_duration_force_optim_dict["BIC_long"])
 axs11.bar(
     bar[mask1],
     pulse_duration_force_optim_dict["BIC_long"][mask1],
@@ -360,14 +334,8 @@ axs[2, 0].set_ylim(bottom=-20)
 axs20 = axs[2, 0].twinx()
 axs20.set_ylim(top=0.003)
 axs20.set_yticks([0, 0.0003, 0.0006], [0, 300, 600])
-mask1 = ma.where(
-    pulse_duration_force_optim_dict["BIC_brevis"]
-    >= pulse_duration_fatigue_optim_dict["BIC_brevis"]
-)
-mask2 = ma.where(
-    pulse_duration_fatigue_optim_dict["BIC_brevis"]
-    >= pulse_duration_force_optim_dict["BIC_brevis"]
-)
+mask1 = ma.where(pulse_duration_force_optim_dict["BIC_brevis"] >= pulse_duration_fatigue_optim_dict["BIC_brevis"])
+mask2 = ma.where(pulse_duration_fatigue_optim_dict["BIC_brevis"] >= pulse_duration_force_optim_dict["BIC_brevis"])
 axs20.bar(
     bar[mask1],
     pulse_duration_force_optim_dict["BIC_brevis"][mask1],
@@ -395,19 +363,11 @@ axs20.bar(
 
 axs[2, 1].set_title("General muscle fatigue")
 full_nmpc_result_force_optim_fatigue = np.sum(
-    [
-        full_nmpc_result_force_optim["states"][f]
-        for f in full_nmpc_result_force_optim["states"]
-        if "A_" in f
-    ],
+    [full_nmpc_result_force_optim["states"][f] for f in full_nmpc_result_force_optim["states"] if "A_" in f],
     axis=0,
 )
 full_nmpc_result_fatigue_optim_fatigue = np.sum(
-    [
-        full_nmpc_result_fatigue_optim["states"][f]
-        for f in full_nmpc_result_fatigue_optim["states"]
-        if "A_" in f
-    ],
+    [full_nmpc_result_fatigue_optim["states"][f] for f in full_nmpc_result_fatigue_optim["states"] if "A_" in f],
     axis=0,
 )
 axs[2, 1].plot(
@@ -432,11 +392,7 @@ plt.show()
 
 # --- Pyorerun animation --- #
 biorbd_model = biorbd.Model("../msk_models/simplified_UL_Seth_full_mesh.bioMod")
-PickleAnimate("results/cycling_fes_driven_nmpc_full_force.pkl").animate(
-    model=biorbd_model
-)
+PickleAnimate("results/cycling_fes_driven_nmpc_full_force.pkl").animate(model=biorbd_model)
 
 biorbd_model = biorbd.Model("../msk_models/simplified_UL_Seth_full_mesh.bioMod")
-PickleAnimate("results/cycling_fes_driven_nmpc_full_fatigue.pkl").animate(
-    model=biorbd_model
-)
+PickleAnimate("results/cycling_fes_driven_nmpc_full_fatigue.pkl").animate(model=biorbd_model)

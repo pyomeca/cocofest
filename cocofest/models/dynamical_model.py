@@ -187,23 +187,15 @@ class FesMskModel(BiorbdModel):
 
         updatedModel = nlp.model.bio_model.model.UpdateKinematicsCustom(q, qdot)
         nlp.model.bio_model.model.updateMuscles(updatedModel, q, qdot)
-        updated_muscle_length_jacobian = (
-            nlp.model.bio_model.model.musclesLengthJacobian(
-                updatedModel, q, False
-            ).to_mx()
-        )
+        updated_muscle_length_jacobian = nlp.model.bio_model.model.musclesLengthJacobian(updatedModel, q, False).to_mx()
 
         bio_muscle_names_at_index = []
         for i in range(len(nlp.model.bio_model.model.muscles())):
-            bio_muscle_names_at_index.append(
-                nlp.model.bio_model.model.muscle(i).name().to_string()
-            )
+            bio_muscle_names_at_index.append(nlp.model.bio_model.model.muscle(i).name().to_string())
 
         for muscle_model in muscle_models:
             muscle_states_idxs = [
-                i
-                for i in range(len(state_name_list))
-                if muscle_model.muscle_name in state_name_list[i]
+                i for i in range(len(state_name_list)) if muscle_model.muscle_name in state_name_list[i]
             ]
             muscle_states = vertcat()
             for i in range(len(muscle_states_idxs)):
@@ -250,9 +242,7 @@ class FesMskModel(BiorbdModel):
 
             muscle_forces = vertcat(
                 muscle_forces,
-                DynamicsFunctions.get(
-                    nlp.states["F_" + muscle_model.muscle_name], states
-                ),
+                DynamicsFunctions.get(nlp.states["F_" + muscle_model.muscle_name], states),
             )
 
         muscle_moment_arm_matrix = updated_muscle_length_jacobian[
@@ -323,6 +313,4 @@ class FesMskModel(BiorbdModel):
             raise TypeError("The activate_force_length_relationship must be a boolean")
 
         if not isinstance(activate_force_velocity_relationship, bool):
-            raise TypeError(
-                "The activate_force_velocity_relationship must be a boolean"
-            )
+            raise TypeError("The activate_force_velocity_relationship must be a boolean")

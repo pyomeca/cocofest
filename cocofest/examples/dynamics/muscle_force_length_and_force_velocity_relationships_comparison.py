@@ -22,9 +22,7 @@ for i in range(2):
     model = FesMskModel(
         name=None,
         biorbd_path="../msk_models/arm26_biceps_1dof.bioMod",
-        muscles_model=[
-            DingModelPulseDurationFrequencyWithFatigue(muscle_name="BIClong")
-        ],
+        muscles_model=[DingModelPulseDurationFrequencyWithFatigue(muscle_name="BIClong")],
         activate_force_length_relationship=activate_force_length_relationship[i],
         activate_force_velocity_relationship=activate_force_length_relationship[i],
     )
@@ -43,13 +41,9 @@ for i in range(2):
         use_sx=False,
     )
     sol = ocp.solve()
-    sol_list.append(
-        sol.decision_states(to_merge=[SolutionMerge.NODES, SolutionMerge.PHASES])
-    )
+    sol_list.append(sol.decision_states(to_merge=[SolutionMerge.NODES, SolutionMerge.PHASES]))
     time = np.concatenate(
-        sol.stepwise_time(
-            to_merge=[SolutionMerge.NODES, SolutionMerge.PHASES], duplicated_times=False
-        ),
+        sol.stepwise_time(to_merge=[SolutionMerge.NODES, SolutionMerge.PHASES], duplicated_times=False),
         axis=0,
     )
     index = 0
@@ -67,7 +61,5 @@ plt.ylabel("Angle (°)")
 plt.legend()
 plt.show()
 
-joint_overestimation = np.degrees(sol_list[0]["q"][0][-1]) - np.degrees(
-    sol_list[1]["q"][0][-1]
-)
+joint_overestimation = np.degrees(sol_list[0]["q"][0][-1]) - np.degrees(sol_list[1]["q"][0][-1])
 print(f"Joint overestimation: {joint_overestimation} degrees")

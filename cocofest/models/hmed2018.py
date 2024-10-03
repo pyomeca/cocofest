@@ -99,7 +99,6 @@ class DingModelIntensityFrequency(DingModelFrequency):
         cn_sum: MX = None,
         force_length_relationship: MX | float = 1,
         force_velocity_relationship: MX | float = 1,
-
     ) -> MX:
         """
         The system dynamics is the function that describes the models.
@@ -145,7 +144,9 @@ class DingModelIntensityFrequency(DingModelFrequency):
         return lambda_i
 
     @staticmethod
-    def lambda_i_calculation_identification(intensity_stim: MX, ar: MX | float, bs: MX | float, Is: MX | float, cr: MX | float):
+    def lambda_i_calculation_identification(
+        intensity_stim: MX, ar: MX | float, bs: MX | float, Is: MX | float, cr: MX | float
+    ):
         """
         Parameters
         ----------

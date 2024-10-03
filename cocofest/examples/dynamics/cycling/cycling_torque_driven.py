@@ -47,10 +47,7 @@ def prepare_ocp(
     y_center = objective["cycling"]["y_center"]
     radius = objective["cycling"]["radius"]
     circle_coord_list = np.array(
-        [
-            get_circle_coord(theta, x_center, y_center, radius)[:-1]
-            for theta in np.linspace(0, -2 * np.pi, n_shooting)
-        ]
+        [get_circle_coord(theta, x_center, y_center, radius)[:-1] for theta in np.linspace(0, -2 * np.pi, n_shooting)]
     ).T
     objective_functions = ObjectiveList()
     objective_functions.add(
@@ -81,9 +78,7 @@ def prepare_ocp(
 
     # Define control path constraint
     u_bounds = BoundsList()
-    u_bounds.add(
-        key="tau", min_bound=np.array([-50, -50]), max_bound=np.array([50, 50]), phase=0
-    )
+    u_bounds.add(key="tau", min_bound=np.array([-50, -50]), max_bound=np.array([50, 50]), phase=0)
 
     # Initial q guess
     x_init = InitialGuessList()
@@ -95,9 +90,7 @@ def prepare_ocp(
         )
         x_init.add("q", q_guess, interpolation=InterpolationType.EACH_FRAME)
         x_init.add("qdot", qdot_guess, interpolation=InterpolationType.EACH_FRAME)
-        u_guess = inverse_dynamics_cycling(
-            biorbd_model_path, q_guess, qdot_guess, qddotguess
-        )
+        u_guess = inverse_dynamics_cycling(biorbd_model_path, q_guess, qdot_guess, qddotguess)
         u_init.add("tau", u_guess, interpolation=InterpolationType.EACH_FRAME)
 
     return OptimalControlProgram(

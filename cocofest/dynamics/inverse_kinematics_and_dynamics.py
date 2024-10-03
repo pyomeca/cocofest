@@ -89,9 +89,7 @@ def inverse_kinematics_cycling(
 
     model = biorbd.Model(model_path)
     if 0 <= model.nbMarkers() > 1:
-        raise ValueError(
-            "The model must have only one markers to perform the inverse kinematics"
-        )
+        raise ValueError("The model must have only one markers to perform the inverse kinematics")
 
     z = model.markers(np.array([0, 0]))[0].to_array()[2]
     if z != model.markers(np.array([np.pi / 2, np.pi / 2]))[0].to_array()[2]:
@@ -100,20 +98,14 @@ def inverse_kinematics_cycling(
     x_y_z_coord = np.array(
         [
             get_circle_coord(theta, x_center, y_center, radius, z=z)
-            for theta in np.linspace(
-                0, -2 * np.pi + (-2 * np.pi / n_shooting), n_shooting + 1
-            )
+            for theta in np.linspace(0, -2 * np.pi + (-2 * np.pi / n_shooting), n_shooting + 1)
         ]
     ).T
     target_q = x_y_z_coord.reshape((3, 1, n_shooting + 1))
     ik = biorbd.InverseKinematics(model, target_q)
     ik_q = ik.solve(method=ik_method)
-    ik_qdot = np.array(
-        [np.gradient(ik_q[i], (1 / n_shooting)) for i in range(ik_q.shape[0])]
-    )
-    ik_qddot = np.array(
-        [np.gradient(ik_qdot[i], (1 / n_shooting)) for i in range(ik_qdot.shape[0])]
-    )
+    ik_qdot = np.array([np.gradient(ik_q[i], (1 / n_shooting)) for i in range(ik_q.shape[0])])
+    ik_qddot = np.array([np.gradient(ik_qdot[i], (1 / n_shooting)) for i in range(ik_qdot.shape[0])])
     return ik_q, ik_qdot, ik_qddot
 
 

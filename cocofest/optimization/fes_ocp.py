@@ -62,12 +62,7 @@ class OcpFes:
             n_threads=input_dict["n_threads"],
         )
 
-        (
-            parameters,
-            parameters_bounds,
-            parameters_init,
-            parameter_objectives
-        ) = OcpFes._build_parameters(
+        (parameters, parameters_bounds, parameters_init, parameter_objectives) = OcpFes._build_parameters(
             model=input_dict["model"],
             stim_time=input_dict["stim_time"],
             pulse_event=pulse_event,
@@ -80,7 +75,13 @@ class OcpFes:
         x_bounds, x_init = OcpFes._set_bounds(input_dict["model"])
 
         if not isinstance(input_dict["model"], DingModelFrequencyIntegrate):
-            constraints = OcpFes._build_constraints(input_dict["model"], input_dict["n_shooting"], input_dict["final_time"], input_dict["stim_time"], input_dict["control_type"])
+            constraints = OcpFes._build_constraints(
+                input_dict["model"],
+                input_dict["n_shooting"],
+                input_dict["final_time"],
+                input_dict["stim_time"],
+                input_dict["control_type"],
+            )
             u_bounds, u_init = OcpFes._set_u_bounds(input_dict["model"])
         else:
             constraints = ConstraintList()
@@ -302,9 +303,7 @@ class OcpFes:
             raise TypeError("final_time must be a positive int or float type")
 
         if pulse_event["pulse_mode"] != "single":
-            raise NotImplementedError(
-                f"Pulse mode '{pulse_event['pulse_mode']}' is not yet implemented"
-            )
+            raise NotImplementedError(f"Pulse mode '{pulse_event['pulse_mode']}' is not yet implemented")
 
         if pulse_event["frequency"]:
             if isinstance(pulse_event["frequency"], int | float):
@@ -314,9 +313,7 @@ class OcpFes:
                 raise TypeError("frequency must be int or float type")
 
         if [pulse_event["min"], pulse_event["max"]].count(None) == 1:
-            raise ValueError(
-                "min and max time event must be both entered or none of them in order to work"
-            )
+            raise ValueError("min and max time event must be both entered or none of them in order to work")
 
         if pulse_event["bimapping"]:
             if not isinstance(pulse_event["bimapping"], bool):
@@ -324,22 +321,12 @@ class OcpFes:
 
         if isinstance(
             model,
-            DingModelPulseDurationFrequency
-            | DingModelPulseDurationFrequencyWithFatigue,
+            DingModelPulseDurationFrequency | DingModelPulseDurationFrequencyWithFatigue,
         ):
-            if (
-                pulse_duration["fixed"] is None
-                and [pulse_duration["min"], pulse_duration["max"]].count(None) != 0
-            ):
-                raise ValueError(
-                    "pulse duration or pulse duration min max bounds need to be set for this model"
-                )
-            if all(
-                [pulse_duration["fixed"], pulse_duration["min"], pulse_duration["max"]]
-            ):
-                raise ValueError(
-                    "Either pulse duration or pulse duration min max bounds need to be set for this model"
-                )
+            if pulse_duration["fixed"] is None and [pulse_duration["min"], pulse_duration["max"]].count(None) != 0:
+                raise ValueError("pulse duration or pulse duration min max bounds need to be set for this model")
+            if all([pulse_duration["fixed"], pulse_duration["min"], pulse_duration["max"]]):
+                raise ValueError("Either pulse duration or pulse duration min max bounds need to be set for this model")
 
             minimum_pulse_duration = (
                 0 if model.pd0 is None else model.pd0
@@ -354,34 +341,24 @@ class OcpFes:
                             f" Set a value above {minimum_pulse_duration} seconds "
                         )
                 elif isinstance(pulse_duration["fixed"], list):
-                    if not all(
-                        isinstance(x, int | float) for x in pulse_duration["fixed"]
-                    ):
+                    if not all(isinstance(x, int | float) for x in pulse_duration["fixed"]):
                         raise TypeError("pulse_duration must be int or float type")
-                    if not all(
-                        x >= minimum_pulse_duration for x in pulse_duration["fixed"]
-                    ):
+                    if not all(x >= minimum_pulse_duration for x in pulse_duration["fixed"]):
                         raise ValueError(
                             f"The pulse duration set ({pulse_duration['fixed']})"
                             f" is lower than minimum duration required."
                             f" Set a value above {minimum_pulse_duration} seconds "
                         )
                 else:
-                    raise TypeError(
-                        "Wrong pulse_duration type, only int or float accepted"
-                    )
+                    raise TypeError("Wrong pulse_duration type, only int or float accepted")
 
             elif pulse_duration["min"] and pulse_duration["max"]:
                 if not isinstance(pulse_duration["min"], int | float) or not isinstance(
                     pulse_duration["max"], int | float
                 ):
-                    raise TypeError(
-                        "min and max pulse duration must be int or float type"
-                    )
+                    raise TypeError("min and max pulse duration must be int or float type")
                 if pulse_duration["max"] < pulse_duration["min"]:
-                    raise ValueError(
-                        "The set minimum pulse duration is higher than maximum pulse duration."
-                    )
+                    raise ValueError("The set minimum pulse duration is higher than maximum pulse duration.")
                 if pulse_duration["min"] < minimum_pulse_duration:
                     raise ValueError(
                         f"The pulse duration set ({pulse_duration['min']})"
@@ -390,20 +367,11 @@ class OcpFes:
                     )
 
             if not isinstance(pulse_duration["bimapping"], None | bool):
-                raise NotImplementedError(
-                    "If added, pulse duration parameter mapping must be a bool type"
-                )
+                raise NotImplementedError("If added, pulse duration parameter mapping must be a bool type")
 
-        if isinstance(
-            model, DingModelIntensityFrequency | DingModelIntensityFrequencyWithFatigue
-        ):
-            if (
-                pulse_intensity["fixed"] is None
-                and [pulse_intensity["min"], pulse_intensity["max"]].count(None) != 0
-            ):
-                raise ValueError(
-                    "Pulse intensity or pulse intensity min max bounds need to be set for this model"
-                )
+        if isinstance(model, DingModelIntensityFrequency | DingModelIntensityFrequencyWithFatigue):
+            if pulse_intensity["fixed"] is None and [pulse_intensity["min"], pulse_intensity["max"]].count(None) != 0:
+                raise ValueError("Pulse intensity or pulse intensity min max bounds need to be set for this model")
             if all(
                 [
                     pulse_intensity["fixed"],
@@ -429,13 +397,9 @@ class OcpFes:
                             f" Set a value above {minimum_pulse_intensity} mA "
                         )
                 elif isinstance(pulse_intensity["fixed"], list):
-                    if not all(
-                        isinstance(x, int | float) for x in pulse_intensity["fixed"]
-                    ):
+                    if not all(isinstance(x, int | float) for x in pulse_intensity["fixed"]):
                         raise TypeError("pulse_intensity must be int or float type")
-                    if not all(
-                        x >= minimum_pulse_intensity for x in pulse_intensity["fixed"]
-                    ):
+                    if not all(x >= minimum_pulse_intensity for x in pulse_intensity["fixed"]):
                         raise ValueError(
                             f"The pulse intensity set ({pulse_intensity['fixed']})"
                             f" is lower than minimum intensity required."
@@ -445,16 +409,12 @@ class OcpFes:
                     raise TypeError("pulse_intensity must be int or float type")
 
             elif pulse_intensity["min"] and pulse_intensity["max"]:
-                if not isinstance(
-                    pulse_intensity["min"], int | float
-                ) or not isinstance(pulse_intensity["max"], int | float):
-                    raise TypeError(
-                        "pulse_intensity_min and pulse_intensity_max must be int or float type"
-                    )
+                if not isinstance(pulse_intensity["min"], int | float) or not isinstance(
+                    pulse_intensity["max"], int | float
+                ):
+                    raise TypeError("pulse_intensity_min and pulse_intensity_max must be int or float type")
                 if pulse_intensity["max"] < pulse_intensity["min"]:
-                    raise ValueError(
-                        "The set minimum pulse intensity is higher than maximum pulse intensity."
-                    )
+                    raise ValueError("The set minimum pulse intensity is higher than maximum pulse intensity.")
                 if pulse_intensity["min"] < minimum_pulse_intensity:
                     raise ValueError(
                         f"The pulse intensity set ({pulse_intensity['min']})"
@@ -463,18 +423,15 @@ class OcpFes:
                     )
 
             if not isinstance(pulse_intensity["bimapping"], None | bool):
-                raise NotImplementedError(
-                    "If added, pulse intensity parameter mapping must be a bool type"
-                )
+                raise NotImplementedError("If added, pulse intensity parameter mapping must be a bool type")
 
         if objective["force_tracking"]:
             if isinstance(objective["force_tracking"], list):
-                if isinstance(
-                    objective["force_tracking"][0], np.ndarray
-                ) and isinstance(objective["force_tracking"][1], np.ndarray):
+                if isinstance(objective["force_tracking"][0], np.ndarray) and isinstance(
+                    objective["force_tracking"][1], np.ndarray
+                ):
                     if (
-                        len(objective["force_tracking"][0])
-                        != len(objective["force_tracking"][1])
+                        len(objective["force_tracking"][0]) != len(objective["force_tracking"][1])
                         or len(objective["force_tracking"]) != 2
                     ):
                         raise ValueError(
@@ -494,9 +451,7 @@ class OcpFes:
             if not isinstance(objective["custom"], ObjectiveList):
                 raise TypeError("custom_objective must be a ObjectiveList type")
             if not all(isinstance(x, Objective) for x in objective["custom"][0]):
-                raise TypeError(
-                    "All elements in ObjectiveList must be an Objective type"
-                )
+                raise TypeError("All elements in ObjectiveList must be an Objective type")
 
         if not isinstance(
             ode_solver,
@@ -512,9 +467,7 @@ class OcpFes:
 
     @staticmethod
     def _build_fourier_coefficient(force_tracking):
-        return FourierSeries().compute_real_fourier_coeffs(
-            force_tracking[0], force_tracking[1], 50
-        )
+        return FourierSeries().compute_real_fourier_coeffs(force_tracking[0], force_tracking[1], 50)
 
     @staticmethod
     def _build_parameters(
@@ -539,12 +492,8 @@ class OcpFes:
         )
 
         if pulse_event["min"] and pulse_event["max"]:
-            time_min_list = np.array(
-                [0] + list(np.cumsum([pulse_event["min"]] * (n_stim - 1)))
-            )
-            time_max_list = np.array(
-                [0] + list(np.cumsum([pulse_event["max"]] * (n_stim - 1)))
-            )
+            time_min_list = np.array([0] + list(np.cumsum([pulse_event["min"]] * (n_stim - 1))))
+            time_max_list = np.array([0] + list(np.cumsum([pulse_event["max"]] * (n_stim - 1))))
             parameters_init["pulse_apparition_time"] = np.array(
                 [(time_max_list[i] + time_min_list[i]) / 2 for i in range(n_stim)]
             )
@@ -561,9 +510,7 @@ class OcpFes:
         )
 
         if pulse_event["bimapping"] and pulse_event["min"] and pulse_event["max"]:
-            raise NotImplementedError(
-                "Bimapping is not yet implemented for pulse event"
-            )
+            raise NotImplementedError("Bimapping is not yet implemented for pulse event")
 
         if isinstance(model, DingModelPulseDurationFrequency | DingModelPulseDurationFrequencyIntegrate):
             if pulse_duration["bimapping"]:
@@ -594,9 +541,7 @@ class OcpFes:
                         max_bound=np.array([pulse_duration["fixed"]] * n_stim),
                         interpolation=InterpolationType.CONSTANT,
                     )
-                    parameters_init["pulse_duration"] = np.array(
-                        [pulse_duration["fixed"]] * n_stim
-                    )
+                    parameters_init["pulse_duration"] = np.array([pulse_duration["fixed"]] * n_stim)
 
             elif pulse_duration["min"] and pulse_duration["max"]:
                 parameters_bounds.add(
@@ -606,10 +551,7 @@ class OcpFes:
                     interpolation=InterpolationType.CONSTANT,
                 )
                 parameters_init["pulse_duration"] = np.array(
-                    [
-                        (pulse_duration["min"] + pulse_duration["max"]) / 2
-                        for _ in range(n_stim)
-                    ]
+                    [(pulse_duration["min"] + pulse_duration["max"]) / 2 for _ in range(n_stim)]
                 )
                 parameters.add(
                     name="pulse_duration",
@@ -647,9 +589,7 @@ class OcpFes:
                         max_bound=np.array([pulse_intensity["fixed"]] * n_stim),
                         interpolation=InterpolationType.CONSTANT,
                     )
-                    parameters_init["pulse_intensity"] = np.array(
-                        [pulse_intensity["fixed"]] * n_stim
-                    )
+                    parameters_init["pulse_intensity"] = np.array([pulse_intensity["fixed"]] * n_stim)
 
             elif pulse_intensity["min"] and pulse_intensity["max"]:
                 parameters_bounds.add(
@@ -667,12 +607,7 @@ class OcpFes:
                     scaling=VariableScaling("pulse_intensity", [1] * n_stim),
                 )
 
-        return (
-            parameters,
-            parameters_bounds,
-            parameters_init,
-            parameter_objectives
-        )
+        return (parameters, parameters_bounds, parameters_init, parameter_objectives)
 
     @staticmethod
     def _build_constraints(model, n_shooting, final_time, stim_time, control_type):
@@ -690,7 +625,7 @@ class OcpFes:
         index_inf = 0
         stim_index = []
 
-        for i in range(n_shooting+additional_nodes):
+        for i in range(n_shooting + additional_nodes):
             if i in stim_at_node:
                 index_sup += 1
                 if index_sup >= max_stim_to_keep:
@@ -706,7 +641,7 @@ class OcpFes:
 
         if isinstance(model, DingModelPulseDurationFrequency):
             index = 0
-            for i in range(n_shooting+additional_nodes):
+            for i in range(n_shooting + additional_nodes):
                 if i in stim_at_node and i != 0:
                     index += 1
                 constraints.add(
@@ -758,12 +693,8 @@ class OcpFes:
             elif variable_bound_list[i] == "A":
                 min_bounds[i] = 0
 
-        starting_bounds_min = np.concatenate(
-            (starting_bounds, min_bounds, min_bounds), axis=1
-        )
-        starting_bounds_max = np.concatenate(
-            (starting_bounds, max_bounds, max_bounds), axis=1
-        )
+        starting_bounds_min = np.concatenate((starting_bounds, min_bounds, min_bounds), axis=1)
+        starting_bounds_max = np.concatenate((starting_bounds, max_bounds, max_bounds), axis=1)
 
         for j in range(len(variable_bound_list)):
             x_bounds.add(
@@ -806,12 +737,10 @@ class OcpFes:
                 if objective["force_tracking"] is None
                 else OcpFes._build_fourier_coefficient(objective["force_tracking"])
             )
-            force_to_track = (
-                FourierSeries().fit_func_by_fourier_series_with_real_coeffs(
-                    np.linspace(0, 1, n_shooting + 1),
-                    force_fourier_coefficient,
-                )[np.newaxis, :]
-            )
+            force_to_track = FourierSeries().fit_func_by_fourier_series_with_real_coeffs(
+                np.linspace(0, 1, n_shooting + 1),
+                force_fourier_coefficient,
+            )[np.newaxis, :]
 
             objective_functions.add(
                 ObjectiveFcn.Lagrange.TRACK_STATE,

@@ -87,9 +87,7 @@ class DingModelFrequencyWithFatigue(DingModelFrequency):
     # ---- Needed for the example ---- #
     @property
     def name_dof(self, with_muscle_name: bool = False) -> list[str]:
-        muscle_name = (
-            "_" + self.muscle_name if self.muscle_name and with_muscle_name else ""
-        )
+        muscle_name = "_" + self.muscle_name if self.muscle_name and with_muscle_name else ""
         return [
             "Cn" + muscle_name,
             "F" + muscle_name,
@@ -202,9 +200,7 @@ class DingModelFrequencyWithFatigue(DingModelFrequency):
         -------
         The value of the derivative time_state_force_no_cross_bridge (ms)
         """
-        return (
-            -(tau1 - self.tau1_rest) / self.tau_fat + self.alpha_tau1 * f
-        )  # Equation n°9
+        return -(tau1 - self.tau1_rest) / self.tau_fat + self.alpha_tau1 * f  # Equation n°9
 
     def km_dot_fun(self, km: MX, f: MX) -> MX | float:
         """

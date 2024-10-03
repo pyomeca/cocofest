@@ -19,10 +19,7 @@ def main(show_plot=True, animate=True):
     # Define the marker target to match
     z = model.markers(np.array([0, 0]))[0].to_array()[2]
     get_circle_coord_list = np.array(
-        [
-            get_circle_coord(theta, 0.35, 0, 0.1, z)
-            for theta in np.linspace(0, -2 * np.pi, n_frames)
-        ]
+        [get_circle_coord(theta, 0.35, 0, 0.1, z) for theta in np.linspace(0, -2 * np.pi, n_frames)]
     )
     target_q = np.array(
         [
@@ -35,12 +32,8 @@ def main(show_plot=True, animate=True):
     # Perform the inverse kinematics
     ik = biorbd.InverseKinematics(model, target_q)
     ik_q = ik.solve(method="trf")
-    ik_qdot = np.array(
-        [np.gradient(ik_q[i], (1 / n_frames)) for i in range(ik_q.shape[0])]
-    )
-    ik_qddot = np.array(
-        [np.gradient(ik_qdot[i], (1 / (n_frames))) for i in range(ik_qdot.shape[0])]
-    )
+    ik_qdot = np.array([np.gradient(ik_q[i], (1 / n_frames)) for i in range(ik_q.shape[0])])
+    ik_qddot = np.array([np.gradient(ik_qdot[i], (1 / (n_frames))) for i in range(ik_qdot.shape[0])])
 
     # Perform the inverse dynamics
     tau_shape = (model.nbQ(), ik_q.shape[1] - 1)
@@ -57,9 +50,7 @@ def main(show_plot=True, animate=True):
         ax1.plot(np.linspace(0, 1, n_frames), ik_q[1], color="blue", label="elbow")
         ax1.set(xlabel="Time (s)", ylabel="Angle (rad)")
         ax2.set_title("Tau")
-        ax2.plot(
-            np.linspace(0, 1, n_frames - 1), tau[0], color="orange", label="shoulder"
-        )
+        ax2.plot(np.linspace(0, 1, n_frames - 1), tau[0], color="orange", label="shoulder")
         ax2.plot(np.linspace(0, 1, n_frames - 1), tau[1], color="blue", label="elbow")
         ax2.set(xlabel="Time (s)", ylabel="Torque (N.m)")
         plt.legend()
@@ -67,9 +58,7 @@ def main(show_plot=True, animate=True):
 
     # pyorerun animation
     if animate:
-        biorbd_model = biorbd.Model(
-            "../../msk_models/simplified_UL_Seth_full_mesh.bioMod"
-        )
+        biorbd_model = biorbd.Model("../../msk_models/simplified_UL_Seth_full_mesh.bioMod")
         prr_model = BiorbdModel.from_biorbd_object(biorbd_model)
 
         nb_seconds = 1
