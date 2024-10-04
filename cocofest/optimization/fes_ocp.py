@@ -27,9 +27,11 @@ from ..models.ding2003_integrate import DingModelFrequencyIntegrate
 from ..models.ding2007 import DingModelPulseDurationFrequency
 from ..models.ding2007_integrate import DingModelPulseDurationFrequencyIntegrate
 from ..models.ding2007_with_fatigue import DingModelPulseDurationFrequencyWithFatigue
+from ..models.ding2007_with_fatigue_integrate import DingModelPulseDurationFrequencyWithFatigueIntegrate
 from ..models.hmed2018 import DingModelIntensityFrequency
 from ..models.hmed2018_integrate import DingModelIntensityFrequencyIntegrate
 from ..models.hmed2018_with_fatigue import DingModelIntensityFrequencyWithFatigue
+from ..models.hmed2018_with_fatigue_integrate import DingModelIntensityFrequencyWithFatigueIntegrate
 from ..custom_constraints import CustomConstraint
 
 
@@ -321,7 +323,7 @@ class OcpFes:
 
         if isinstance(
             model,
-            DingModelPulseDurationFrequency | DingModelPulseDurationFrequencyWithFatigue,
+            DingModelPulseDurationFrequency | DingModelPulseDurationFrequencyWithFatigue | DingModelPulseDurationFrequencyIntegrate | DingModelPulseDurationFrequencyWithFatigueIntegrate,
         ):
             if pulse_duration["fixed"] is None and [pulse_duration["min"], pulse_duration["max"]].count(None) != 0:
                 raise ValueError("pulse duration or pulse duration min max bounds need to be set for this model")
@@ -369,7 +371,7 @@ class OcpFes:
             if not isinstance(pulse_duration["bimapping"], None | bool):
                 raise NotImplementedError("If added, pulse duration parameter mapping must be a bool type")
 
-        if isinstance(model, DingModelIntensityFrequency | DingModelIntensityFrequencyWithFatigue):
+        if isinstance(model, DingModelIntensityFrequency | DingModelIntensityFrequencyWithFatigue | DingModelIntensityFrequencyIntegrate | DingModelIntensityFrequencyWithFatigueIntegrate):
             if pulse_intensity["fixed"] is None and [pulse_intensity["min"], pulse_intensity["max"]].count(None) != 0:
                 raise ValueError("Pulse intensity or pulse intensity min max bounds need to be set for this model")
             if all(
@@ -425,7 +427,7 @@ class OcpFes:
             if not isinstance(pulse_intensity["bimapping"], None | bool):
                 raise NotImplementedError("If added, pulse intensity parameter mapping must be a bool type")
 
-        if objective["force_tracking"]:
+        if objective["force_tracking"] is not None:
             if isinstance(objective["force_tracking"], list):
                 if isinstance(objective["force_tracking"][0], np.ndarray) and isinstance(
                     objective["force_tracking"][1], np.ndarray
@@ -443,11 +445,11 @@ class OcpFes:
             else:
                 raise TypeError("force_tracking must be list type")
 
-        if objective["end_node_tracking"]:
+        if objective["end_node_tracking"] is not None:
             if not isinstance(objective["end_node_tracking"], int | float):
                 raise TypeError("end_node_tracking must be int or float type")
 
-        if objective["custom"]:
+        if objective["custom"] is not None:
             if not isinstance(objective["custom"], ObjectiveList):
                 raise TypeError("custom_objective must be a ObjectiveList type")
             if not all(isinstance(x, Objective) for x in objective["custom"][0]):
