@@ -127,7 +127,11 @@ class OcpFesId(OcpFes):
 
         if not model._is_integrate:
             constraints = OcpFesId._build_constraints(
-                model=model, n_shooting=n_shooting, final_time=final_time, stim_time=stim_time, control_type=control_type
+                model=model,
+                n_shooting=n_shooting,
+                final_time=final_time,
+                stim_time=stim_time,
+                control_type=control_type,
             )
             u_bounds, u_init = OcpFesId._set_u_bounds(model=model)
         else:

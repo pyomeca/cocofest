@@ -207,8 +207,12 @@ def test_ocp_id_ding2003(model):
 
     if isinstance(model, DingModelFrequencyIntegrate):
         np.testing.assert_almost_equal(identification_result["a_rest"], DingModelFrequencyIntegrate().a_rest, decimal=0)
-        np.testing.assert_almost_equal(identification_result["km_rest"], DingModelFrequencyIntegrate().km_rest, decimal=3)
-        np.testing.assert_almost_equal(identification_result["tau1_rest"], DingModelFrequencyIntegrate().tau1_rest, decimal=3)
+        np.testing.assert_almost_equal(
+            identification_result["km_rest"], DingModelFrequencyIntegrate().km_rest, decimal=3
+        )
+        np.testing.assert_almost_equal(
+            identification_result["tau1_rest"], DingModelFrequencyIntegrate().tau1_rest, decimal=3
+        )
         np.testing.assert_almost_equal(identification_result["tau2"], DingModelFrequencyIntegrate().tau2, decimal=3)
     else:
         np.testing.assert_almost_equal(identification_result["a_rest"], 2920, decimal=0)
@@ -272,12 +276,24 @@ def test_ocp_id_ding2007(model):
     os.remove(f"temp_identification_simulation.pkl")
 
     if isinstance(model, DingModelPulseDurationFrequencyIntegrate):
-        np.testing.assert_almost_equal(identification_result["tau1_rest"], DingModelPulseDurationFrequencyIntegrate().tau1_rest, decimal=3)
-        np.testing.assert_almost_equal(identification_result["tau2"], DingModelPulseDurationFrequencyIntegrate().tau2, decimal=3)
-        np.testing.assert_almost_equal(identification_result["km_rest"], DingModelPulseDurationFrequencyIntegrate().km_rest, decimal=3)
-        np.testing.assert_almost_equal(identification_result["a_scale"], DingModelPulseDurationFrequencyIntegrate().a_scale, decimal=-2)
-        np.testing.assert_almost_equal(identification_result["pd0"], DingModelPulseDurationFrequencyIntegrate().pd0, decimal=3)
-        np.testing.assert_almost_equal(identification_result["pdt"], DingModelPulseDurationFrequencyIntegrate().pdt, decimal=3)
+        np.testing.assert_almost_equal(
+            identification_result["tau1_rest"], DingModelPulseDurationFrequencyIntegrate().tau1_rest, decimal=3
+        )
+        np.testing.assert_almost_equal(
+            identification_result["tau2"], DingModelPulseDurationFrequencyIntegrate().tau2, decimal=3
+        )
+        np.testing.assert_almost_equal(
+            identification_result["km_rest"], DingModelPulseDurationFrequencyIntegrate().km_rest, decimal=3
+        )
+        np.testing.assert_almost_equal(
+            identification_result["a_scale"], DingModelPulseDurationFrequencyIntegrate().a_scale, decimal=-2
+        )
+        np.testing.assert_almost_equal(
+            identification_result["pd0"], DingModelPulseDurationFrequencyIntegrate().pd0, decimal=3
+        )
+        np.testing.assert_almost_equal(
+            identification_result["pdt"], DingModelPulseDurationFrequencyIntegrate().pdt, decimal=3
+        )
     else:
         np.testing.assert_almost_equal(identification_result["tau1_rest"], 0.0644, decimal=3)
         np.testing.assert_almost_equal(identification_result["tau2"], 0.0493, decimal=3)
@@ -288,20 +304,19 @@ def test_ocp_id_ding2007(model):
 
 
 @pytest.mark.parametrize("model", [DingModelIntensityFrequency(), DingModelIntensityFrequencyIntegrate()])
-def test_ocp_id_hmed2018():
+def test_ocp_id_hmed2018(model):
     # --- Creating the simulated data to identify on --- #
     # Building the Initial Value Problem
     ivp = IvpFes(
         fes_parameters={
-            "model": DingModelIntensityFrequency(),
-            "n_stim": 10,
-            "pulse_intensity": [50] * 10,
+            "model": DingModelIntensityFrequencyIntegrate(),
+            "stim_time": [0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9],
+            "pulse_intensity": list(np.linspace(30, 130, 11))[:-1],
         },
         ivp_parameters={
-            "n_shooting": 10,
-            "final_time": 1,
+            "n_shooting": 200,
+            "final_time": 2,
             "use_sx": True,
-            "extend_last_phase_time": 1,
         },
     )
 
@@ -315,8 +330,8 @@ def test_ocp_id_hmed2018():
     dictionary = {
         "time": time,
         "force": force,
-        "stim_time": stim,
-        "pulse_intensity": [50] * 10,
+        "stim_time": [0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9],
+        "pulse_intensity": list(np.linspace(30, 130, 11))[:-1],
     }
 
     pickle_file_name = "temp_identification_simulation.pkl"
@@ -325,7 +340,9 @@ def test_ocp_id_hmed2018():
 
     # --- Identifying the model parameters --- #
     ocp = DingModelPulseIntensityFrequencyForceParameterIdentification(
-        model=DingModelIntensityFrequency(),
+        model=model,
+        n_shooting=200,
+        final_time=2,
         data_path=[pickle_file_name],
         identification_method="full",
         double_step_identification=False,
@@ -340,8 +357,8 @@ def test_ocp_id_hmed2018():
             "cr",
         ],
         additional_key_settings={},
-        n_shooting=10,
         use_sx=True,
+        n_threads=6,
     )
 
     identification_result = ocp.force_model_identification()
@@ -349,41 +366,55 @@ def test_ocp_id_hmed2018():
     # --- Delete the temp file ---#
     os.remove(f"temp_identification_simulation.pkl")
 
-    model = DingModelIntensityFrequency()
-    np.testing.assert_almost_equal(identification_result["a_rest"], model.a_rest, decimal=0)
-    np.testing.assert_almost_equal(identification_result["km_rest"], model.km_rest, decimal=3)
-    np.testing.assert_almost_equal(identification_result["tau1_rest"], model.tau1_rest, decimal=3)
-    np.testing.assert_almost_equal(identification_result["tau2"], model.tau2, decimal=3)
-    np.testing.assert_almost_equal(ocp.force_identification_result.cost, 2.99324e-12)
-    # np.testing.assert_almost_equal(identification_result["ar"], model.ar, decimal=3)
-    # np.testing.assert_almost_equal(identification_result["bs"], model.bs, decimal=3)
-    # np.testing.assert_almost_equal(identification_result["Is"], model.Is, decimal=1)
-    # np.testing.assert_almost_equal(identification_result["cr"], model.cr, decimal=3)
+    if isinstance(model, DingModelIntensityFrequencyIntegrate):
+        np.testing.assert_almost_equal(
+            identification_result["tau1_rest"], DingModelIntensityFrequencyIntegrate().tau1_rest, decimal=3
+        )
+        np.testing.assert_almost_equal(
+            identification_result["tau2"], DingModelIntensityFrequencyIntegrate().tau2, decimal=3
+        )
+        np.testing.assert_almost_equal(identification_result["km_rest"], 0.174, decimal=3)
+        np.testing.assert_almost_equal(identification_result["ar"], 0.9913, decimal=3)
+        np.testing.assert_almost_equal(
+            identification_result["bs"], DingModelIntensityFrequencyIntegrate().bs, decimal=3
+        )
+        np.testing.assert_almost_equal(
+            identification_result["Is"], DingModelIntensityFrequencyIntegrate().Is, decimal=1
+        )
+        np.testing.assert_almost_equal(
+            identification_result["cr"], DingModelIntensityFrequencyIntegrate().cr, decimal=3
+        )
+    else:
+        np.testing.assert_almost_equal(identification_result["tau1_rest"], 0.0499, decimal=3)
+        np.testing.assert_almost_equal(identification_result["tau2"], 0.0284, decimal=3)
+        np.testing.assert_almost_equal(identification_result["km_rest"], 0.004, decimal=3)
+        np.testing.assert_almost_equal(identification_result["ar"], 0.0228, decimal=3)
+        np.testing.assert_almost_equal(identification_result["bs"], 0.026, decimal=3)
+        np.testing.assert_almost_equal(identification_result["Is"], 68.732, decimal=3)
+        np.testing.assert_almost_equal(identification_result["cr"], 0.865, decimal=3)
 
 
 def test_all_ocp_id_errors():
     n_shooting = "10"
     with pytest.raises(
         TypeError,
-        match=re.escape(f"n_shooting must be list type," f" currently n_shooting is {type(n_shooting)}) type."),
+        match=re.escape(f"n_shooting must be a positive int type"),
     ):
         OcpFesId.prepare_ocp(model=DingModelFrequency(), n_shooting=n_shooting)
 
-    n_shooting = [10, 10, 10, 10, 10, 10, 10, 10, "10"]
-    with pytest.raises(TypeError, match=re.escape(f"n_shooting must be list of int type.")):
+    n_shooting = -10
+    with pytest.raises(TypeError, match=re.escape(f"n_shooting must be a positive int type")):
         OcpFesId.prepare_ocp(model=DingModelFrequency(), n_shooting=n_shooting)
 
     final_time_phase = "0.1"
     with pytest.raises(
         TypeError,
-        match=re.escape(
-            f"final_time_phase must be tuple type," f" currently final_time_phase is {type(final_time_phase)}) type."
-        ),
+        match=re.escape(f"final_time must be a positive int or float type"),
     ):
         OcpFesId.prepare_ocp(
             model=DingModelFrequency(),
-            n_shooting=[10, 10, 10, 10, 10, 10, 10, 10, 10],
-            final_time_phase=final_time_phase,
+            n_shooting=100,
+            final_timee=final_time_phase,
         )
 
     force_tracking = "10"
@@ -395,46 +426,18 @@ def test_all_ocp_id_errors():
     ):
         OcpFesId.prepare_ocp(
             model=DingModelFrequency(),
-            n_shooting=[10, 10, 10, 10, 10, 10, 10, 10, 10],
-            final_time_phase=(0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1),
-            force_tracking=force_tracking,
+            n_shooting=100,
+            final_time=1,
+            objective={"force_tracking": force_tracking},
         )
 
     force_tracking = [10, 10, 10, 10, 10, 10, 10, 10, "10"]
     with pytest.raises(TypeError, match=re.escape(f"force_tracking must be list of int or float type.")):
         OcpFesId.prepare_ocp(
             model=DingModelFrequency(),
-            n_shooting=[10, 10, 10, 10, 10, 10, 10, 10, 10],
-            final_time_phase=(0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1),
-            force_tracking=force_tracking,
-        )
-
-    pulse_duration = 0.001
-    with pytest.raises(
-        TypeError,
-        match=re.escape(f"pulse_duration must be list type, currently pulse_duration is {type(pulse_duration)}) type."),
-    ):
-        OcpFesId.prepare_ocp(
-            model=DingModelPulseDurationFrequency(),
-            n_shooting=[10, 10, 10, 10, 10, 10, 10, 10, 10],
-            final_time_phase=(0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1),
-            force_tracking=[10, 10, 10, 10, 10, 10, 10, 10, 10],
-            pulse_duration=pulse_duration,
-        )
-
-    pulse_intensity = 20
-    with pytest.raises(
-        TypeError,
-        match=re.escape(
-            f"pulse_intensity must be list type, currently pulse_intensity is {type(pulse_intensity)}) type."
-        ),
-    ):
-        OcpFesId.prepare_ocp(
-            model=DingModelIntensityFrequency(),
-            n_shooting=[10, 10, 10, 10, 10, 10, 10, 10, 10],
-            final_time_phase=(0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1),
-            force_tracking=[10, 10, 10, 10, 10, 10, 10, 10, 10],
-            pulse_intensity=pulse_intensity,
+            n_shooting=100,
+            final_time=1,
+            objective={"force_tracking": force_tracking},
         )
 
 

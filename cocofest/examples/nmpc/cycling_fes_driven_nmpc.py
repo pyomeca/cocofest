@@ -87,6 +87,4 @@ SolutionToPickle(sol[0], "results/cycling_fes_driven_nmpc_full_fatigue.pkl", "")
 ]
 
 biorbd_model = biorbd.Model("../msk_models/simplified_UL_Seth_full_mesh.bioMod")
-PickleAnimate("results/cycling_fes_driven_nmpc_full_fatigue.pkl").animate(
-    model=biorbd_model
-)
+PickleAnimate("results/cycling_fes_driven_nmpc_full_fatigue.pkl").animate(model=biorbd_model)

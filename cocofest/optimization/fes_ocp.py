@@ -323,7 +323,10 @@ class OcpFes:
 
         if isinstance(
             model,
-            DingModelPulseDurationFrequency | DingModelPulseDurationFrequencyWithFatigue | DingModelPulseDurationFrequencyIntegrate | DingModelPulseDurationFrequencyWithFatigueIntegrate,
+            DingModelPulseDurationFrequency
+            | DingModelPulseDurationFrequencyWithFatigue
+            | DingModelPulseDurationFrequencyIntegrate
+            | DingModelPulseDurationFrequencyWithFatigueIntegrate,
         ):
             if pulse_duration["fixed"] is None and [pulse_duration["min"], pulse_duration["max"]].count(None) != 0:
                 raise ValueError("pulse duration or pulse duration min max bounds need to be set for this model")
@@ -371,7 +374,13 @@ class OcpFes:
             if not isinstance(pulse_duration["bimapping"], None | bool):
                 raise NotImplementedError("If added, pulse duration parameter mapping must be a bool type")
 
-        if isinstance(model, DingModelIntensityFrequency | DingModelIntensityFrequencyWithFatigue | DingModelIntensityFrequencyIntegrate | DingModelIntensityFrequencyWithFatigueIntegrate):
+        if isinstance(
+            model,
+            DingModelIntensityFrequency
+            | DingModelIntensityFrequencyWithFatigue
+            | DingModelIntensityFrequencyIntegrate
+            | DingModelIntensityFrequencyWithFatigueIntegrate,
+        ):
             if pulse_intensity["fixed"] is None and [pulse_intensity["min"], pulse_intensity["max"]].count(None) != 0:
                 raise ValueError("Pulse intensity or pulse intensity min max bounds need to be set for this model")
             if all(

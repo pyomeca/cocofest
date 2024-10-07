@@ -65,7 +65,9 @@ def test_ding2007_ivp(model, pulse_duration):
         np.testing.assert_almost_equal(result["F"][0][-1], 36.263299814887766)
 
 
-@pytest.mark.parametrize("model", [DingModelIntensityFrequencyIntegrate(), DingModelIntensityFrequencyWithFatigueIntegrate()])
+@pytest.mark.parametrize(
+    "model", [DingModelIntensityFrequencyIntegrate(), DingModelIntensityFrequencyWithFatigueIntegrate()]
+)
 @pytest.mark.parametrize("pulse_intensity", [50, [50, 60, 70]])
 def test_hmed2018_ivp(model, pulse_intensity):
     fes_parameters = {"model": model, "stim_time": [0, 0.1, 0.2], "pulse_intensity": pulse_intensity}
@@ -262,18 +264,27 @@ def test_all_ivp_errors():
 
     with pytest.raises(ValueError, match="ode_solver must be a OdeSolver type"):
         IvpFes(
-            fes_parameters={"model": DingModelFrequencyIntegrate(), "stim_time": [0, 0.1, 0.2],},
+            fes_parameters={
+                "model": DingModelFrequencyIntegrate(),
+                "stim_time": [0, 0.1, 0.2],
+            },
             ivp_parameters={"n_shooting": 100, "final_time": 0.3, "ode_solver": None},
         )
 
     with pytest.raises(ValueError, match="use_sx must be a bool type"):
         IvpFes(
-            fes_parameters={"model": DingModelFrequencyIntegrate(), "stim_time": [0, 0.1, 0.2],},
+            fes_parameters={
+                "model": DingModelFrequencyIntegrate(),
+                "stim_time": [0, 0.1, 0.2],
+            },
             ivp_parameters={"n_shooting": 100, "final_time": 0.3, "use_sx": None},
         )
 
     with pytest.raises(ValueError, match="n_thread must be a int type"):
         IvpFes(
-            fes_parameters={"model": DingModelFrequencyIntegrate(), "stim_time": [0, 0.1, 0.2],},
+            fes_parameters={
+                "model": DingModelFrequencyIntegrate(),
+                "stim_time": [0, 0.1, 0.2],
+            },
             ivp_parameters={"n_shooting": 100, "final_time": 0.3, "n_threads": None},
         )

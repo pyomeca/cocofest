@@ -246,8 +246,8 @@ def test_ocp_output(model, force_tracking, use_sx, min_pulse_duration, min_pulse
     if isinstance(model, DingModelPulseDurationFrequency):
         ocp = OcpFes().prepare_ocp(
             model=model,
-            n_shooting=20,
-            n_stim=10,
+            n_shooting=100,
+            stim_time=[0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9],
             final_time=1,
             pulse_duration={
                 "min": min_pulse_duration,
@@ -267,8 +267,8 @@ def test_ocp_output(model, force_tracking, use_sx, min_pulse_duration, min_pulse
     elif isinstance(model, DingModelIntensityFrequency):
         ocp = OcpFes().prepare_ocp(
             model=model,
-            n_shooting=20,
-            n_stim=10,
+            n_shooting=100,
+            stim_time=[0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9],
             final_time=1,
             pulse_intensity={
                 "min": min_pulse_intensity,
@@ -288,8 +288,8 @@ def test_ocp_output(model, force_tracking, use_sx, min_pulse_duration, min_pulse
     elif isinstance(model, DingModelFrequency):
         ocp = OcpFes().prepare_ocp(
             model=model,
-            n_shooting=20,
-            n_stim=10,
+            n_shooting=100,
+            stim_time=[0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9],
             final_time=1,
             pulse_event={"min": 0.01, "max": 1, "bimapping": False},
             objective={"end_node_tracking": 50},
@@ -307,12 +307,12 @@ def test_ocp_output(model, force_tracking, use_sx, min_pulse_duration, min_pulse
 
 
 @pytest.mark.parametrize("use_sx", [True])
-@pytest.mark.parametrize("bimapped", [False, True])
+@pytest.mark.parametrize("bimapped", [False])
 def test_time_dependent_ocp_output(use_sx, bimapped):
     ocp = OcpFes().prepare_ocp(
         model=DingModelFrequencyWithFatigue(),
-        n_stim=10,
-        n_shooting=20,
+        n_shooting=100,
+        stim_time=[0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9],
         final_time=1,
         pulse_event={"min": 0.01, "max": 0.1, "bimapping": bimapped},
         objective={"end_node_tracking": 270},

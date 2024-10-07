@@ -467,7 +467,9 @@ def test_all_ocp_fes_errors():
         OcpFes.prepare_ocp(model=DingModelFrequencyIntegrate(), stim_time=[0, 0.1, 0.2], n_shooting=-3)
 
     with pytest.raises(TypeError, match="final_time must be a positive int or float type"):
-        OcpFes.prepare_ocp(model=DingModelFrequencyIntegrate(), stim_time=[0, 0.1, 0.2], n_shooting=30, final_time="0.3")
+        OcpFes.prepare_ocp(
+            model=DingModelFrequencyIntegrate(), stim_time=[0, 0.1, 0.2], n_shooting=30, final_time="0.3"
+        )
 
     pulse_mode = "doublet"
     with pytest.raises(
@@ -599,7 +601,9 @@ def test_all_ocp_fes_errors():
         ValueError,
         match="Pulse intensity or pulse intensity min max bounds need to be set for this model",
     ):
-        OcpFes.prepare_ocp(model=DingModelIntensityFrequencyIntegrate(), stim_time=[0, 0.1, 0.2], n_shooting=10, final_time=0.3)
+        OcpFes.prepare_ocp(
+            model=DingModelIntensityFrequencyIntegrate(), stim_time=[0, 0.1, 0.2], n_shooting=10, final_time=0.3
+        )
 
     with pytest.raises(
         ValueError,

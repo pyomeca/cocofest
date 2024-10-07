@@ -208,7 +208,7 @@ class IvpFes:
             raise ValueError("ivp_parameters must be a dictionary")
 
         if not isinstance(self.fes_parameters["model"], FesModel):
-            raise ValueError("model must be a FesModel type")
+            raise TypeError("model must be a FesModel type")
 
         if isinstance(
             self.fes_parameters["model"],
@@ -428,7 +428,9 @@ class IvpFes:
                 "The number of stimulation needs to be integer within the final time t, set round down "
                 "to True or set final_time * frequency to make the result an integer."
             )
-        fes_parameters["stim_time"] = list(np.round([i * 1 / fes_parameters["frequency"] for i in range(fes_parameters["n_stim"])], 3))
+        fes_parameters["stim_time"] = list(
+            np.round([i * 1 / fes_parameters["frequency"] for i in range(fes_parameters["n_stim"])], 3)
+        )
         return cls(
             fes_parameters,
             ivp_parameters,
@@ -464,7 +466,8 @@ class IvpFes:
         ivp_parameters["final_time"] = n_stim / frequency
 
         fes_parameters["stim_time"] = list(
-            np.round([i * 1 / fes_parameters["frequency"] for i in range(fes_parameters["n_stim"])], 3))
+            np.round([i * 1 / fes_parameters["frequency"] for i in range(fes_parameters["n_stim"])], 3)
+        )
 
         return cls(
             fes_parameters,

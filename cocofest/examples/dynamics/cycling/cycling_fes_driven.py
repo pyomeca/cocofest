@@ -50,8 +50,10 @@ def main():
             "bimapping": False,
         },
         msk_info={"with_residual_torque": True},
-        objective={"cycling": {"x_center": 0.35, "y_center": 0, "radius": 0.1, "target": "marker"},
-                   "minimize_residual_torque": True},
+        objective={
+            "cycling": {"x_center": 0.35, "y_center": 0, "radius": 0.1, "target": "marker"},
+            "minimize_residual_torque": True,
+        },
         warm_start=False,
         n_threads=5,
     )
