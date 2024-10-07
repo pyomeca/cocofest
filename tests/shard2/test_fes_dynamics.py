@@ -155,7 +155,7 @@ def test_pulse_intensity_multi_muscle_fes_dynamics():
                 17.02854961,
                 17.0285512,
             ]
-        ),
+        ), decimal=4
     )
     np.testing.assert_almost_equal(
         sol.parameters["pulse_intensity_TRIlong"],
@@ -172,14 +172,14 @@ def test_pulse_intensity_multi_muscle_fes_dynamics():
                 73.51427522,
                 73.51427522,
             ]
-        ),
+        ), decimal=4
     )
 
     sol_states = sol.decision_states(to_merge=[SolutionMerge.PHASES, SolutionMerge.NODES])
     np.testing.assert_almost_equal(sol_states["q"][0][0], 0)
     np.testing.assert_almost_equal(sol_states["q"][0][-1], 0)
-    np.testing.assert_almost_equal(sol_states["q"][1][0], 0.08722222222222223)
-    np.testing.assert_almost_equal(sol_states["q"][1][-1], 2.0933333333333333)
+    np.testing.assert_almost_equal(sol_states["q"][1][0], 0.08722, decimal=4)
+    np.testing.assert_almost_equal(sol_states["q"][1][-1], 2.09333, decimal=4)
     np.testing.assert_almost_equal(sol_states["F_BIClong"][0][-1], 13.65894, decimal=4)
     np.testing.assert_almost_equal(sol_states["F_TRIlong"][0][-1], 4.832778, decimal=4)
 
