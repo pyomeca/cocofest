@@ -117,7 +117,7 @@ jobs:
         run: pwd; ls -a -l
 
       - name: Merge coverage reports
-        run: coverage combine .coverage1 .coverage2
+        run: coverage combine coverage1 coverage2
 
       - name: Show current dir content with new .coverage file
         run: pwd; ls -a
