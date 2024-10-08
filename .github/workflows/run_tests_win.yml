@@ -108,8 +108,8 @@ jobs:
       - name: Rename coverage files
         run: |
           pwd; ls -a -l
-          cd coverage1
-          ls -a -l
+#          cd coverage1
+#          ls -a -l
           for shard in {1,2}; do
             mv coverage${shard}/coverage.xml coverage${shard}.xml
 #            mv coverage${shard}/.coverage* .coverage${shard}
