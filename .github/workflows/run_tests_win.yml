@@ -110,7 +110,7 @@ jobs:
           for shard in {1,2}; do
             mv coverage${shard}/coverage.xml coverage${shard}.xml
             pwd; ls -a -l
-            mv coverage${shard}/.coverage* .coverage${shard}
+            mv coverage${shard}.xml/.coverage* .coverage${shard}
           done
 
       - name: Show current dir content
