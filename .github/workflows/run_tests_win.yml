@@ -107,16 +107,17 @@ jobs:
 
       - name: Rename coverage files
         run: |
-          pwd; ls -a -l
           for shard in {1,2}; do
             mv coverage${shard}/coverage.xml coverage${shard}.xml
+            pwd; ls -a -l
+            mv coverage${shard}/.coverage* .coverage${shard}
           done
 
       - name: Show current dir content
         run: pwd; ls -a -l
 
       - name: Merge coverage reports
-        run: coverage combine coverage1.xml coverage2.xml
+        run: coverage combine .coverage1 .coverage2
 
       - name: Show current dir content with new .coverage file
         run: pwd; ls -a
