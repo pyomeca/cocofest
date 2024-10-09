@@ -105,24 +105,12 @@ jobs:
         id: download
         uses: actions/download-artifact@v3
 
-      - name: List contents of coverage directories
-        run: |
-          for shard in {1,2}; do
-            echo "Contents of coverage${shard}:"
-            ls -a -l coverage${shard}
-          done
-
       - name: Rename coverage files
         run: |
           for shard in {1,2}; do
-            mv coverage${shard}/.coverage .coverage${shard}
             mv coverage${shard}/coverage.xml coverage${shard}.xml
+            mv coverage${shard}/.coverage* .coverage${shard}
           done
-
-   #          for shard in {1,2}; do
-#            mv coverage${shard}/coverage.xml coverage${shard}.xml
-#            pwd; ls -a -l
-#            mv coverage${shard}.xml/.coverage* .coverage${shard}
 
       - name: Show current dir content
         run: pwd; ls -a -l
