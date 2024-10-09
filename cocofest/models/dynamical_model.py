@@ -1,7 +1,7 @@
 from typing import Callable
 import numpy as np
 
-from casadi import vertcat, MX, SX
+from casadi import vertcat, MX, SX, horzcat
 from bioptim import (
     BiorbdModel,
     OptimalControlProgram,
@@ -30,6 +30,7 @@ class FesMskModel(BiorbdModel):
         activate_force_length_relationship: bool = False,
         activate_force_velocity_relationship: bool = False,
         activate_residual_torque: bool = False,
+        segments_to_apply_external_forces: list[str] = None,
     ):
         """
         The custom model that will be used in the optimal control program for the FES-MSK models
@@ -49,10 +50,9 @@ class FesMskModel(BiorbdModel):
         activate_residual_torque: bool
             If the residual torque should be activated
         """
-
-        super().__init__(biorbd_path)
+        super().__init__(biorbd_path, segments_to_apply_external_forces=segments_to_apply_external_forces)
+        self.bio_model = BiorbdModel(biorbd_path, segments_to_apply_external_forces=segments_to_apply_external_forces)
         self._name = name
-        self.bio_model = BiorbdModel(biorbd_path)
 
         self._model_sanity(
             muscles_model,
@@ -110,6 +110,7 @@ class FesMskModel(BiorbdModel):
         nlp: NonLinearProgram,
         muscle_models: list[FesModel],
         state_name_list=None,
+        external_forces=None,
     ) -> DynamicsEvaluation:
         """
         The custom dynamics function that provides the derivative of the states: dxdt = f(t, x, u, p, s)
@@ -134,6 +135,8 @@ class FesMskModel(BiorbdModel):
             The list of the muscle models
         state_name_list: list[str]
             The states names list
+        external_forces: MX | SX
+            The external forces acting on the system
         Returns
         -------
         The derivative of the states in the tuple[MX | SX] format
@@ -160,7 +163,7 @@ class FesMskModel(BiorbdModel):
         # You can directly call biorbd function (as for ddq) or call bioptim accessor (as for dq)
         dq = DynamicsFunctions.compute_qdot(nlp, q, qdot)
         total_torque = muscles_tau + tau if self.activate_residual_torque else muscles_tau
-        ddq = nlp.model.forward_dynamics(q, qdot, total_torque)
+        ddq = nlp.model.forward_dynamics(q=q, qdot=qdot, tau=total_torque, external_forces=external_forces)
 
         dxdt = vertcat(dxdt_muscle_list, dq, ddq)
 
@@ -271,6 +274,15 @@ class FesMskModel(BiorbdModel):
             A list of values to pass to the dynamics at each node. Experimental external forces should be included here.
 
         """
+        external_forces = None
+        if numerical_data_timeseries is not None:
+            for key in numerical_data_timeseries.keys():
+                if key == "external_forces":
+                    _check_numerical_timeseries_format(numerical_data_timeseries[key], nlp.ns, nlp.phase_idx)
+                    external_forces = nlp.numerical_timeseries[0].mx
+                    for i in range(1, numerical_data_timeseries[key].shape[1]):
+                        external_forces = horzcat(external_forces, nlp.numerical_timeseries[i].mx)
+
         state_name_list = StateConfigure().configure_all_muscle_states(self.muscles_dynamics_model, ocp, nlp)
         ConfigureProblem.configure_q(ocp, nlp, as_states=True, as_controls=False)
         state_name_list.append("q")
@@ -289,6 +301,7 @@ class FesMskModel(BiorbdModel):
             dyn_func=self.muscle_dynamic,
             muscle_models=self.muscles_dynamics_model,
             state_name_list=state_name_list,
+            external_forces=external_forces,
         )
 
     @staticmethod
@@ -314,3 +327,19 @@ class FesMskModel(BiorbdModel):
 
         if not isinstance(activate_force_velocity_relationship, bool):
             raise TypeError("The activate_force_velocity_relationship must be a boolean")
+
+
+def _check_numerical_timeseries_format(numerical_timeseries: np.ndarray, n_shooting: int, phase_idx: int):
+    """Check if the numerical_data_timeseries is of the right format"""
+    if type(numerical_timeseries) is not np.ndarray:
+        raise RuntimeError(
+            f"Phase {phase_idx} has numerical_data_timeseries of type {type(numerical_timeseries)} "
+            f"but it should be of type np.ndarray"
+        )
+    if numerical_timeseries is not None and numerical_timeseries.shape[2] != n_shooting + 1:
+        raise RuntimeError(
+            f"Phase {phase_idx} has {n_shooting}+1 shooting points but the numerical_data_timeseries "
+            f"has {numerical_timeseries.shape[2]} shooting points."
+            f"The numerical_data_timeseries should be of format dict[str, np.ndarray] "
+            f"where the list is the number of shooting points of the phase "
+        )

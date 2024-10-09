@@ -96,7 +96,11 @@ class OcpFesMsk:
             msk_info["custom_constraint"],
         )
 
-        dynamics = OcpFesMsk._declare_dynamics(input_dict["model"])
+        external_forces = None
+        if input_dict["external_forces"]:
+            external_forces = OcpFesMsk._prepare_external_force(input_dict["external_forces"], input_dict["n_shooting"], input_dict["model"])
+
+        dynamics = OcpFesMsk._declare_dynamics(input_dict["model"], external_forces)
         initial_state = (
             get_initial_guess(
                 input_dict["model"].path,
@@ -165,6 +169,7 @@ class OcpFesMsk:
         ode_solver: OdeSolverBase = OdeSolver.RK4(n_integration_steps=1),
         control_type: ControlType = ControlType.CONSTANT,
         n_threads: int = 1,
+        external_forces: dict = None,
     ):
         """
         Prepares the Optimal Control Program (OCP) with a musculoskeletal model for a movement to be solved.
@@ -204,6 +209,8 @@ class OcpFesMsk:
             The type of control to use.
         n_threads : int
             The number of threads to use while solving (multi-threading if > 1).
+        external_forces : dict
+            Dictionary containing the parameters related to the external forces.
 
         Returns
         -------
@@ -226,6 +233,7 @@ class OcpFesMsk:
             "ode_solver": ode_solver,
             "n_threads": n_threads,
             "control_type": control_type,
+            "external_forces": external_forces,
         }
 
         optimization_dict = OcpFesMsk._prepare_optimization_problem(input_dict)
@@ -300,16 +308,64 @@ class OcpFesMsk:
         return pulse_duration, pulse_intensity, objective, msk_info
 
     @staticmethod
-    def _declare_dynamics(bio_models):
-        dynamics = DynamicsList()
-        dynamics.add(
-            bio_models.declare_model_variables,
-            dynamic_function=bio_models.muscle_dynamic,
-            expand_dynamics=True,
-            expand_continuity=False,
-            phase=0,
-            phase_dynamics=PhaseDynamics.SHARED_DURING_THE_PHASE,
-        )
+    def _prepare_external_force(external_forces, n_shooting, model):
+        # Building the external forces array
+        external_forces_array = np.zeros((9, 1, n_shooting + 1))
+
+        if isinstance(external_forces["point_of_application"], str):
+            raise ValueError("Work in progess")
+            # marker_idx = model.bio_model.marker_index(external_forces["point_of_application"])
+
+        # Filling the external forces array for torque, force, and point of application
+        external_forces_array = OcpFesMsk.fill_external_forces(external_forces_array, external_forces["torque"], [0, 1, 2], n_shooting, "torque")
+        external_forces_array = OcpFesMsk.fill_external_forces(external_forces_array, external_forces["force"], [3, 4, 5], n_shooting, "force")
+        external_forces_array = OcpFesMsk.fill_external_forces(external_forces_array, external_forces["point_of_application"], [6, 7, 8], n_shooting,
+                             "point of application")
+
+        return external_forces_array
+
+    @staticmethod
+    def fill_external_forces(array, values, indices, n_shooting, label):
+        # The external forces are defined as a 3D array with the following structure:
+        # - The first dimension is the torque, force and point of application (Mx, My, Mz, Fx, Fy, Fz, Px, Py, Pz)
+        # - The second dimension is the number of external forces to apply (here by default 1)
+        # - The third dimension is the number of shooting points
+        if values.shape == (3,):
+            for i in range(3):
+                array[indices[i], 0, :] = np.array([values[i]] * (n_shooting + 1))
+        else:
+            if values.shape[1] != n_shooting + 1:
+                raise ValueError(
+                    f"The number of shooting points + 1 must be the same as the number of given {label} values")
+            for i in range(3):
+                array[indices[i], 0, :] = np.array(values[i])
+
+        return array
+
+    @staticmethod
+    def _declare_dynamics(bio_models, external_forces):
+        if isinstance(external_forces, np.ndarray):
+            dynamics = DynamicsList()
+            dynamics.add(
+                bio_models.declare_model_variables,
+                dynamic_function=bio_models.muscle_dynamic,
+                expand_dynamics=True,
+                expand_continuity=False,
+                phase=0,
+                phase_dynamics=PhaseDynamics.ONE_PER_NODE,
+                numerical_data_timeseries={"external_forces": external_forces},
+            )
+
+        else:
+            dynamics = DynamicsList()
+            dynamics.add(
+                bio_models.declare_model_variables,
+                dynamic_function=bio_models.muscle_dynamic,
+                expand_dynamics=True,
+                expand_continuity=False,
+                phase=0,
+                phase_dynamics=PhaseDynamics.SHARED_DURING_THE_PHASE,
+            )
         return dynamics
 
     @staticmethod
