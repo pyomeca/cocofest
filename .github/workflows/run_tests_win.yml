@@ -108,10 +108,16 @@ jobs:
       - name: Rename coverage files
         run: |
           for shard in {1,2}; do
-            mv coverage${shard}/coverage.xml coverage${shard}.xml
             pwd; ls -a -l
-            mv coverage${shard}.xml/.coverage* .coverage${shard}
+            mv coverage${shard}/.coverage* .coverage${shard}
+            pwd; ls -a -l
+            mv coverage${shard}/coverage.xml coverage${shard}.xml
           done
+
+   #          for shard in {1,2}; do
+#            mv coverage${shard}/coverage.xml coverage${shard}.xml
+#            pwd; ls -a -l
+#            mv coverage${shard}.xml/.coverage* .coverage${shard}
 
       - name: Show current dir content
         run: pwd; ls -a -l
