@@ -14,7 +14,7 @@ from cocofest import (
 )
 
 # --- Building force to track ---#
-time = np.linspace(0, 1, 100)
+time = np.linspace(0, 1, 1001)
 force = abs(np.sin(time * 5) + np.random.normal(scale=0.1, size=len(time))) * 100
 force_tracking = [time, force]
 
@@ -27,8 +27,8 @@ minimum_pulse_intensity = model.min_pulse_intensity()
 
 ocp = OcpFes().prepare_ocp(
     model=model,
-    n_stim=10,
-    n_shooting=20,
+    stim_time=list(np.round(np.linspace(0, 1, 31)[:-1], 3)),
+    n_shooting=1000,
     final_time=1,
     pulse_intensity={
         "min": minimum_pulse_intensity,
@@ -37,6 +37,7 @@ ocp = OcpFes().prepare_ocp(
     },
     objective={"force_tracking": force_tracking},
     use_sx=True,
+    n_threads=8,
 )
 
 # --- Solve the program --- #
@@ -56,9 +57,14 @@ plt.plot(time, force, color="red", label="force from file")
 plt.plot(time, y_approx, color="orange", label="force after fourier transform")
 
 solution_time = sol.decision_time(to_merge=SolutionMerge.KEYS, continuous=True)
-solution_time = [float(j) for sub in solution_time for j in sub]
+solution_time = [float(j) for j in solution_time]
 
-plt.plot(solution_time, sol_merged["F"].squeeze(), color="blue", label="force from optimized stimulation")
+plt.plot(
+    solution_time,
+    sol_merged["F"].squeeze(),
+    color="blue",
+    label="force from optimized stimulation",
+)
 plt.xlabel("Time (s)")
 plt.ylabel("Force (N)")
 plt.legend()

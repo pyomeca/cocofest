@@ -82,10 +82,30 @@ class PlotCyclingResult:
 
     def plot_rehastim(self):
 
-        triceps_brachii = {"theta": np.radians(100), "radii": 1 / 5, "width": np.radians(160), "bottom": 4 / 5}
-        biceps_brachii = {"theta": np.radians(295), "radii": 1 / 5, "width": np.radians(150), "bottom": 3 / 5}
-        deltoideus_anterior = {"theta": np.radians(100), "radii": 1 / 5, "width": np.radians(160), "bottom": 2 / 5}
-        deltoideus_posterior = {"theta": np.radians(295), "radii": 1 / 5, "width": np.radians(150), "bottom": 1 / 5}
+        triceps_brachii = {
+            "theta": np.radians(100),
+            "radii": 1 / 5,
+            "width": np.radians(160),
+            "bottom": 4 / 5,
+        }
+        biceps_brachii = {
+            "theta": np.radians(295),
+            "radii": 1 / 5,
+            "width": np.radians(150),
+            "bottom": 3 / 5,
+        }
+        deltoideus_anterior = {
+            "theta": np.radians(100),
+            "radii": 1 / 5,
+            "width": np.radians(160),
+            "bottom": 2 / 5,
+        }
+        deltoideus_posterior = {
+            "theta": np.radians(295),
+            "radii": 1 / 5,
+            "width": np.radians(150),
+            "bottom": 1 / 5,
+        }
         empty = {"theta": 1, "radii": 1 / 5, "width": 1, "bottom": 0}
         stimulated_muscles = {
             "triceps_brachii": triceps_brachii,
@@ -111,7 +131,13 @@ class PlotCyclingResult:
             width.append(stimulated_muscles[muscle]["width"])
             bottom.append(stimulated_muscles[muscle]["bottom"])
         bars = ax.bar(
-            theta, radii, width=width, bottom=bottom, label=stimulated_muscles.keys(), edgecolor="black", linewidth=2
+            theta,
+            radii,
+            width=width,
+            bottom=bottom,
+            label=stimulated_muscles.keys(),
+            edgecolor="black",
+            linewidth=2,
         )
         color = ["b", "g", "r", "c", "w"]
         for i in range(len(bars)):
@@ -214,7 +240,7 @@ class PlotCyclingResult:
 
         counter = 0
         muscle_name_list = list(pickle_data["parameters"].keys())
-        muscle_name_list.remove("pulse_apparition_time") if pulse_apparition_time_as_parameter else None
+        (muscle_name_list.remove("pulse_apparition_time") if pulse_apparition_time_as_parameter else None)
         muscle_name_list = [s.replace(parameter + "_", "", 1) for s in muscle_name_list]
 
         for muscle in muscle_name_list:
@@ -247,16 +273,43 @@ class PlotCyclingResult:
 
     @staticmethod
     def add_empty_muscle(data):
-        empty = {"theta": 1, "radii": 1 / len(data), "width": 1, "bottom": 0, "opacity": 0, "label": ""}
+        empty = {
+            "theta": 1,
+            "radii": 1 / len(data),
+            "width": 1,
+            "bottom": 0,
+            "opacity": 0,
+            "label": "",
+        }
         data["empty"] = empty
         return data
 
     @staticmethod
     def rehamove_data():
-        triceps_brachii = {"theta": np.radians(100), "radii": 1 / 5, "width": np.radians(160), "bottom": 4 / 5}
-        biceps_brachii = {"theta": np.radians(295), "radii": 1 / 5, "width": np.radians(150), "bottom": 3 / 5}
-        deltoideus_anterior = {"theta": np.radians(100), "radii": 1 / 5, "width": np.radians(160), "bottom": 2 / 5}
-        deltoideus_posterior = {"theta": np.radians(295), "radii": 1 / 5, "width": np.radians(150), "bottom": 1 / 5}
+        triceps_brachii = {
+            "theta": np.radians(100),
+            "radii": 1 / 5,
+            "width": np.radians(160),
+            "bottom": 4 / 5,
+        }
+        biceps_brachii = {
+            "theta": np.radians(295),
+            "radii": 1 / 5,
+            "width": np.radians(150),
+            "bottom": 3 / 5,
+        }
+        deltoideus_anterior = {
+            "theta": np.radians(100),
+            "radii": 1 / 5,
+            "width": np.radians(160),
+            "bottom": 2 / 5,
+        }
+        deltoideus_posterior = {
+            "theta": np.radians(295),
+            "radii": 1 / 5,
+            "width": np.radians(150),
+            "bottom": 1 / 5,
+        }
         empty = {"theta": 1, "radii": 1 / 5, "width": 1, "bottom": 0}
         stimulated_muscles = {
             "triceps_brachii": triceps_brachii,

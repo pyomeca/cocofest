@@ -13,7 +13,10 @@ class SolutionToPickle:
         bounds_key = self.sol.ocp.parameter_bounds.keys()
         bounds = {}
         for key in bounds_key:
-            bounds[key] = self.sol.ocp.parameter_bounds[key].min[0][0], self.sol.ocp.parameter_bounds[key].max[0][0]
+            bounds[key] = (
+                self.sol.ocp.parameter_bounds[key].min[0][0],
+                self.sol.ocp.parameter_bounds[key].max[0][0],
+            )
 
         time = self.sol.decision_time(to_merge=[SolutionMerge.PHASES, SolutionMerge.NODES])
         time = time.reshape(time.shape[0])

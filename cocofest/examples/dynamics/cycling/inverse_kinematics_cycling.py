@@ -21,7 +21,13 @@ def main(show_plot=True, animate=True):
     get_circle_coord_list = np.array(
         [get_circle_coord(theta, 0.35, 0, 0.1, z) for theta in np.linspace(0, -2 * np.pi, n_frames)]
     )
-    target_q = np.array([[get_circle_coord_list[:, 0]], [get_circle_coord_list[:, 1]], [get_circle_coord_list[:, 2]]])
+    target_q = np.array(
+        [
+            [get_circle_coord_list[:, 0]],
+            [get_circle_coord_list[:, 1]],
+            [get_circle_coord_list[:, 2]],
+        ]
+    )
 
     # Perform the inverse kinematics
     ik = biorbd.InverseKinematics(model, target_q)

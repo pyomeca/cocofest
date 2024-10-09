@@ -215,6 +215,44 @@ class StateConfigure:
             as_states_dot,
         )
 
+    @staticmethod
+    def configure_cn_sum(ocp, nlp, muscle_name: str = None):
+        """
+        Configure the calcium summation control
+
+        Parameters
+        ----------
+        ocp: OptimalControlProgram
+            A reference to the ocp
+        nlp: NonLinearProgram
+            A reference to the phase
+        muscle_name: str
+            The muscle name
+        """
+        muscle_name = "_" + muscle_name if muscle_name else ""
+        name = "Cn_sum" + muscle_name
+        name_cn_sum = [name]
+        return ConfigureProblem.configure_new_variable(name, name_cn_sum, ocp, nlp, as_states=False, as_controls=True)
+
+    @staticmethod
+    def configure_a_calculation(ocp, nlp, muscle_name: str = None):
+        """
+        Configure the force scaling factor calculation
+
+        Parameters
+        ----------
+        ocp: OptimalControlProgram
+            A reference to the ocp
+        nlp: NonLinearProgram
+            A reference to the phase
+        muscle_name: str
+            The muscle name
+        """
+        muscle_name = "_" + muscle_name if muscle_name else ""
+        name = "A_calculation" + muscle_name
+        name_cn_sum = [name]
+        return ConfigureProblem.configure_new_variable(name, name_cn_sum, ocp, nlp, as_states=False, as_controls=True)
+
     def configure_all_muscle_states(self, muscles_dynamics_model, ocp, nlp):
         state_name_list = []
         for muscle_dynamics_model in muscles_dynamics_model:
@@ -235,5 +273,9 @@ class StateConfigure:
         for state_key in fes_model.name_dof:
             if state_key in self.state_dictionary.keys():
                 self.state_dictionary[state_key](
-                    ocp=ocp, nlp=nlp, as_states=True, as_controls=False, muscle_name=fes_model.muscle_name
+                    ocp=ocp,
+                    nlp=nlp,
+                    as_states=True,
+                    as_controls=False,
+                    muscle_name=fes_model.muscle_name,
                 )

@@ -26,11 +26,11 @@ class PickleAnimate:
             self.model = biorbd.Model(model_path)
         self.time = self.data["time"]
         self.state_q = self.data["states"]["q"]
+        self.state_q = self.state_q if self.state_q.ndim == 2 else np.expand_dims(self.state_q, axis=0)
         self.frames = self.state_q.shape[1]
 
-    def animate(self, model_path: str = None):
-        if model_path:
-            self.model = biorbd.Model(model_path)
+    def animate(self, model: biorbd.Model = None):
+        self.model = model
         self.load()
 
         # pyorerun animation
@@ -43,9 +43,8 @@ class PickleAnimate:
         viz.add_animated_model(prr_model, self.state_q)
         viz.rerun("msk_model")
 
-    def multiple_animations(self, additional_path: list[str], model_path: str = None):
-        if model_path:
-            self.model = biorbd.Model(model_path)
+    def multiple_animations(self, additional_path: list[str], model: biorbd.Model = None):
+        self.model = model
         self.load()
         nb_seconds = self.time[-1]
         t_span = np.linspace(0, nb_seconds, self.frames)

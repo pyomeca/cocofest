@@ -22,7 +22,11 @@ from bioptim import (
     PhaseDynamics,
 )
 
-from cocofest import get_circle_coord, inverse_kinematics_cycling, inverse_dynamics_cycling
+from cocofest import (
+    get_circle_coord,
+    inverse_kinematics_cycling,
+    inverse_dynamics_cycling,
+)
 
 
 def prepare_ocp(
@@ -59,7 +63,11 @@ def prepare_ocp(
 
     # Dynamics
     dynamics = DynamicsList()
-    dynamics.add(DynamicsFcn.TORQUE_DRIVEN, expand_dynamics=True, phase_dynamics=PhaseDynamics.SHARED_DURING_THE_PHASE)
+    dynamics.add(
+        DynamicsFcn.TORQUE_DRIVEN,
+        expand_dynamics=True,
+        phase_dynamics=PhaseDynamics.SHARED_DURING_THE_PHASE,
+    )
 
     # Path constraint
     x_bounds = BoundsList()

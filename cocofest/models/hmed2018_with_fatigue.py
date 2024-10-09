@@ -27,10 +27,15 @@ class DingModelIntensityFrequencyWithFatigue(DingModelIntensityFrequency):
     """
 
     def __init__(
-        self, model_name: str = "hmed2018_with_fatigue", muscle_name: str = None, sum_stim_truncation: int = None
+        self,
+        model_name: str = "hmed2018_with_fatigue",
+        muscle_name: str = None,
+        sum_stim_truncation: int = None,
     ):
         super(DingModelIntensityFrequencyWithFatigue, self).__init__(
-            model_name=model_name, muscle_name=muscle_name, sum_stim_truncation=sum_stim_truncation
+            model_name=model_name,
+            muscle_name=muscle_name,
+            sum_stim_truncation=sum_stim_truncation,
         )
         self._with_fatigue = True
         # ---- Fatigue models ---- #
@@ -43,7 +48,13 @@ class DingModelIntensityFrequencyWithFatigue(DingModelIntensityFrequency):
     @property
     def name_dof(self, with_muscle_name: bool = False) -> list[str]:
         muscle_name = "_" + self.muscle_name if self.muscle_name and with_muscle_name else ""
-        return ["Cn" + muscle_name, "F" + muscle_name, "A" + muscle_name, "Tau1" + muscle_name, "Km" + muscle_name]
+        return [
+            "Cn" + muscle_name,
+            "F" + muscle_name,
+            "A" + muscle_name,
+            "Tau1" + muscle_name,
+            "Km" + muscle_name,
+        ]
 
     @property
     def nb_state(self) -> int:
@@ -103,9 +114,7 @@ class DingModelIntensityFrequencyWithFatigue(DingModelIntensityFrequency):
         a: MX = None,
         tau1: MX = None,
         km: MX = None,
-        t: MX = None,
-        t_stim_prev: list[MX] | list[float] = None,
-        intensity_stim: list[MX] | list[float] = None,
+        cn_sum: MX = None,
         force_length_relationship: float | MX = 1,
         force_velocity_relationship: float | MX = 1,
     ) -> MX:
@@ -124,12 +133,6 @@ class DingModelIntensityFrequencyWithFatigue(DingModelIntensityFrequency):
             The value of the time_state_force_no_cross_bridge (ms)
         km: MX
             The value of the cross_bridges (unitless)
-        t: MX
-            The current time at which the dynamics is evaluated (ms)
-        t_stim_prev: list[MX]
-            The time list of the previous stimulations (ms)
-        intensity_stim: list[MX]
-            The pulsation intensity of the current stimulation (mA)
         force_length_relationship: MX | float
             The force length relationship value (unitless)
         force_velocity_relationship: MX | float
@@ -139,8 +142,7 @@ class DingModelIntensityFrequencyWithFatigue(DingModelIntensityFrequency):
         -------
         The value of the derivative of each state dx/dt at the current time t
         """
-        r0 = km + self.r0_km_relationship  # Simplification
-        cn_dot = self.cn_dot_fun(cn, r0, t, t_stim_prev=t_stim_prev, intensity_stim=intensity_stim)  # Equation n°1
+        cn_dot = self.cn_dot_fun(cn=cn, cn_sum=cn_sum)  # Equation n°1
         f_dot = self.f_dot_fun(
             cn,
             f,
@@ -209,7 +211,6 @@ class DingModelIntensityFrequencyWithFatigue(DingModelIntensityFrequency):
         algebraic_states: MX,
         numerical_timeseries: MX,
         nlp: NonLinearProgram,
-        stim_prev: list[float] = None,
         fes_model=None,
         force_length_relationship: float | MX = 1,
         force_velocity_relationship: float | MX = 1,
@@ -233,8 +234,6 @@ class DingModelIntensityFrequencyWithFatigue(DingModelIntensityFrequency):
             The numerical timeseries of the system
         nlp: NonLinearProgram
             A reference to the phase
-        stim_prev: list[float]
-            The previous stimulation values
         fes_model: DingModelIntensityFrequencyWithFatigue
             The current phase fes model
         force_length_relationship: MX | float
@@ -245,34 +244,8 @@ class DingModelIntensityFrequencyWithFatigue(DingModelIntensityFrequency):
         -------
         The derivative of the states in the tuple[MX] format
         """
-        intensity_stim_prev = (
-            []
-        )  # Every stimulation intensity before the current phase, i.e.: the intensity of each phase
-        intensity_parameters = (
-            nlp.model.get_intensity_parameters(nlp, parameters)
-            if fes_model is None
-            else fes_model.get_intensity_parameters(nlp, parameters, muscle_name=fes_model.muscle_name)
-        )
-
-        if intensity_parameters.shape[0] == 1:  # check if pulse duration is mapped
-            for i in range(nlp.phase_idx + 1):
-                intensity_stim_prev.append(intensity_parameters[0])
-        else:
-            for i in range(nlp.phase_idx + 1):
-                intensity_stim_prev.append(intensity_parameters[i])
 
         dxdt_fun = fes_model.system_dynamics if fes_model else nlp.model.system_dynamics
-        stim_apparition = (
-            (
-                fes_model.get_stim_prev(nlp=nlp, parameters=parameters, idx=nlp.phase_idx)
-                if fes_model
-                else nlp.model.get_stim_prev(nlp=nlp, parameters=parameters, idx=nlp.phase_idx)
-            )
-            if stim_prev is None
-            else stim_prev
-        )  # Get the previous stimulation apparition time from the parameters
-        # if not provided from stim_prev, this way of getting the list is not optimal, but it is the only way to get it.
-        # Otherwise, it will create issues with free variables or wrong mx or sx type while calculating the dynamics
 
         return DynamicsEvaluation(
             dxdt=dxdt_fun(
@@ -281,9 +254,7 @@ class DingModelIntensityFrequencyWithFatigue(DingModelIntensityFrequency):
                 a=states[2],
                 tau1=states[3],
                 km=states[4],
-                t=time,
-                t_stim_prev=stim_apparition,
-                intensity_stim=intensity_stim_prev,
+                cn_sum=controls[0],
                 force_length_relationship=force_length_relationship,
                 force_velocity_relationship=force_velocity_relationship,
             ),
@@ -291,7 +262,10 @@ class DingModelIntensityFrequencyWithFatigue(DingModelIntensityFrequency):
         )
 
     def declare_ding_variables(
-        self, ocp: OptimalControlProgram, nlp: NonLinearProgram, numerical_data_timeseries: dict[str, np.ndarray] = None
+        self,
+        ocp: OptimalControlProgram,
+        nlp: NonLinearProgram,
+        numerical_data_timeseries: dict[str, np.ndarray] = None,
     ):
         """
         Tell the program which variables are states and controls.
@@ -306,9 +280,5 @@ class DingModelIntensityFrequencyWithFatigue(DingModelIntensityFrequency):
             A list of values to pass to the dynamics at each node. Experimental external forces should be included here.
         """
         StateConfigure().configure_all_fes_model_states(ocp, nlp, fes_model=self)
-        stim_prev = (
-            self._build_t_stim_prev(ocp, nlp.phase_idx)
-            if "pulse_apparition_time" not in nlp.parameters.keys()
-            else None
-        )
-        ConfigureProblem.configure_dynamics_function(ocp, nlp, dyn_func=self.dynamics, stim_prev=stim_prev)
+        StateConfigure().configure_cn_sum(ocp, nlp)
+        ConfigureProblem.configure_dynamics_function(ocp, nlp, dyn_func=self.dynamics)
