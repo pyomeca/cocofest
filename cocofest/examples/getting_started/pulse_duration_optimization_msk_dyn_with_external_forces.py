@@ -35,9 +35,9 @@ ocp = OcpFesMsk.prepare_ocp(
         "bound_type": "start_end",
         "bound_data": [[5], [120]],
         "with_residual_torque": True},
-    external_forces={"Global": True, "Segment_application": "r_ulna_radius_hand", "torque": np.array([0, 0, 0]), "force": np.array([0, 10, 0]), "point_of_application": np.array([0, 0, 0])},
+    external_forces={"Global": True, "Segment_application": "r_ulna_radius_hand", "torque": np.array([0, 0, 0]), "force": np.array([100, 0, 100]), "point_of_application": np.array([0, 0, 0])},
 )
 
 sol = ocp.solve()
-sol.animate()
+# sol.animate()
 sol.graphs(show_bounds=False)

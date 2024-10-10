@@ -4,7 +4,7 @@ This ocp was build to produce a elbow motion from 5 to 120 degrees.
 The stimulation frequency will be optimized between 10 and 100 Hz and pulse duration between minimal sensitivity
 threshold and 600us to satisfy the flexion and minimizing required elbow torque control.
 """
-
+from bioptim import Solver
 from cocofest import DingModelPulseDurationFrequencyWithFatigue, OcpFesMsk, FesMskModel
 
 model = FesMskModel(
@@ -35,6 +35,6 @@ ocp = OcpFesMsk.prepare_ocp(
     },
 )
 
-sol = ocp.solve()
-sol.animate()
+sol = ocp.solve(Solver.IPOPT(_max_iter=2000))
+# sol.animate()
 sol.graphs(show_bounds=False)

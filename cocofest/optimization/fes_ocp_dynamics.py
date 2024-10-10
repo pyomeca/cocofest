@@ -94,6 +94,7 @@ class OcpFesMsk:
             input_dict["stim_time"],
             input_dict["control_type"],
             msk_info["custom_constraint"],
+            input_dict["external_forces"],
         )
 
         external_forces = None
@@ -531,13 +532,14 @@ class OcpFesMsk:
         )
 
     @staticmethod
-    def _build_constraints(model, n_shooting, final_time, stim_time, control_type, custom_constraint=None):
+    def _build_constraints(model, n_shooting, final_time, stim_time, control_type, custom_constraint=None, external_forces=None):
         constraints = ConstraintList()
 
         if model.activate_residual_torque:
+            applied_node = n_shooting - 1 if external_forces else Node.END
             constraints.add(
                 ConstraintFcn.TRACK_CONTROL,
-                node=Node.END,
+                node=applied_node,
                 key="tau",
                 target=np.zeros(model.nb_tau),
             )
