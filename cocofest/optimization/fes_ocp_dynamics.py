@@ -355,6 +355,7 @@ class OcpFesMsk:
                 phase=0,
                 phase_dynamics=PhaseDynamics.ONE_PER_NODE,
                 numerical_data_timeseries={"external_forces": external_forces},
+                with_contact=True,
             )
 
         else:
@@ -366,6 +367,7 @@ class OcpFesMsk:
                 expand_continuity=False,
                 phase=0,
                 phase_dynamics=PhaseDynamics.SHARED_DURING_THE_PHASE,
+                with_contact=True,
             )
         return dynamics
 
@@ -587,6 +589,42 @@ class OcpFesMsk:
                     for j in range(len(custom_constraint[i])):
                         constraints.add(custom_constraint[i][j])
 
+        # wheel_target = np.linspace(np.pi, -np.pi, n_shooting + 1)[np.newaxis, :]
+        # constraints.add(ConstraintFcn.TRACK_STATE, key="q", index=0, node=Node.ALL, target=wheel_target)
+        # constraints.add(
+        #     ConstraintFcn.SUPERIMPOSE_MARKERS,
+        #     node=Node.ALL,
+        #     first_marker="wheel_center",
+        #     second_marker="global_wheel_center",
+        #     axes=[Axis.X, Axis.Y],
+        # )
+
+        constraints.add(
+            ConstraintFcn.TRACK_CONTACT_FORCES,
+            min_bound=-500,
+            max_bound=500,
+            node=Node.ALL_SHOOTING,
+            contact_index=1,
+        )
+
+        # x_center = 0.3
+        # y_center = 0
+        # radius = 0.1
+        # circle_coord_list = np.array(
+        #     [
+        #         get_circle_coord(theta, x_center, y_center, radius)[:-1]
+        #         for theta in np.linspace(0, -2 * np.pi, n_shooting + 1)
+        #     ]
+        # )
+        # constraints.add(
+        #     ConstraintFcn.TRACK_MARKERS,
+        #     axes=[Axis.X, Axis.Y],
+        #     marker_index=0,
+        #     target=circle_coord_list.T,
+        #     node=Node.ALL,
+        #     phase=0,
+        # )
+
         return constraints
 
     @staticmethod
@@ -714,6 +752,7 @@ class OcpFesMsk:
         if with_residual_torque:  # TODO : ADD SEVERAL INDIVIDUAL FIXED RESIDUAL TORQUE FOR EACH JOINT
             nb_tau = bio_models.nb_tau
             tau_min, tau_max, tau_init = [-50] * nb_tau, [50] * nb_tau, [0] * nb_tau
+            tau_min[-1], tau_max[-1] = 0, 0
             u_bounds.add(
                 key="tau", min_bound=tau_min, max_bound=tau_max, phase=0, interpolation=InterpolationType.CONSTANT
             )
@@ -805,7 +844,7 @@ class OcpFesMsk:
                 weight=10000000,
                 axes=[Axis.X, Axis.Y],
                 marker_index=0,
-                target=circle_coord_list.T,
+                target=circle_coord_list[:, np.newaxis].T,
                 node=Node.ALL,
                 phase=0,
                 quadratic=True,
@@ -865,6 +904,14 @@ class OcpFesMsk:
                 quadratic=True,
                 phase=0,
             )
+
+        # objective_functions.add(
+        #     ObjectiveFcn.Mayer.SUPERIMPOSE_MARKERS,
+        #     node=Node.ALL,
+        #     first_marker="wheel",
+        #     second_marker="COM_hand",
+        #     axes=[Axis.X, Axis.Y],
+        # )
 
         return objective_functions
 

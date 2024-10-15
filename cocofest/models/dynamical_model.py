@@ -255,10 +255,81 @@ class FesMskModel(BiorbdModel):
 
         return muscle_joint_torques, dxdt_muscle_list
 
+    @staticmethod
+    def forces_from_fes_driven(
+        time: MX.sym,
+        states: MX.sym,
+        controls: MX.sym,
+        parameters: MX.sym,
+        algebraic_states: MX.sym,
+        numerical_timeseries: MX.sym,
+        nlp,
+        with_passive_torque: bool = False,
+        with_ligament: bool = False,
+        external_forces: list = None,
+    ) -> MX:
+        """
+        Contact forces of a forward dynamics driven by muscles activations and joint torques with contact constraints.
+
+        Parameters
+        ----------
+        time: MX.sym
+            The time of the system
+        states: MX.sym
+            The state of the system
+        controls: MX.sym
+            The controls of the system
+        parameters: MX.sym
+            The parameters of the system
+        algebraic_states: MX.sym
+            The algebraic states of the system
+        numerical_timeseries: MX.sym
+            The numerical timeseries of the system
+        nlp: NonLinearProgram
+            The definition of the system
+        with_passive_torque: bool
+            If the dynamic with passive torque should be used
+        with_ligament: bool
+            If the dynamic with ligament should be used
+        external_forces: list[Any]
+            The external forces
+        Returns
+        ----------
+        MX.sym
+            The contact forces that ensure no acceleration at these contact points
+        """
+
+        q = nlp.get_var_from_states_or_controls("q", states, controls)
+        qdot = nlp.get_var_from_states_or_controls("qdot", states, controls)
+        residual_tau = nlp.get_var_from_states_or_controls("tau", states, controls) if "tau" in nlp.controls else None
+        # mus_activations = nlp.get_var_from_states_or_controls("muscles", states, controls)
+        # muscles_tau = DynamicsFunctions.compute_tau_from_muscle(nlp, q, qdot, mus_activations)
+
+        muscles_joint_torque, _ = FesMskModel.muscles_joint_torque(
+            time,
+            states,
+            controls,
+            parameters,
+            algebraic_states,
+            numerical_timeseries,
+            nlp,
+            nlp.model.muscles_dynamics_model,
+            nlp.states,
+            q,
+            qdot,
+        )
+
+        tau = muscles_joint_torque + residual_tau if residual_tau is not None else muscles_joint_torque
+        tau = tau + nlp.model.passive_joint_torque(q, qdot) if with_passive_torque else tau
+        tau = tau + nlp.model.ligament_joint_torque(q, qdot) if with_ligament else tau
+
+        return nlp.model.contact_forces(q, qdot, tau, external_forces)
+
     def declare_model_variables(
         self,
         ocp: OptimalControlProgram,
         nlp: NonLinearProgram,
+        with_contact: bool = False,
         numerical_data_timeseries: dict[str, np.ndarray] = None,
     ):
         """
@@ -303,6 +374,11 @@ class FesMskModel(BiorbdModel):
             state_name_list=state_name_list,
             external_forces=external_forces,
         )
+
+        if with_contact:
+            ConfigureProblem.configure_contact_function(
+                ocp, nlp, self.forces_from_fes_driven, external_forces=external_forces
+            )
 
     @staticmethod
     def _model_sanity(
