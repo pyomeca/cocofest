@@ -50,6 +50,8 @@ nmpc = NmpcFesMsk.prepare_nmpc(
     stim_time=list(np.round(np.linspace(0, 1, 11), 2))[:-1],
     cycle_len=100,
     cycle_duration=1,
+    n_cycles_simultaneous=1,
+    n_cycles_to_advance=1,
     pulse_duration={
         "min": minimum_pulse_duration,
         "max": 0.0006,
@@ -61,7 +63,7 @@ nmpc = NmpcFesMsk.prepare_nmpc(
         "minimize_muscle_fatigue": True,
         "minimize_residual_torque": True,
     },
-    warm_start=True,
+    initial_guess_warm_start=True,
     n_threads=8,
     control_type=ControlType.CONSTANT,  # ControlType.LINEAR_CONTINUOUS don't work for nmpc in bioptim
 )
@@ -73,18 +75,20 @@ def update_functions(_nmpc, cycle_idx, _sol):
     return cycle_idx < n_cycles_total  # True if there are still some cycle to perform
 
 
-sol = nmpc.solve(
-    update_functions,
-    solver=Solver.IPOPT(),
-    cyclic_options={"states": {}},
-    get_all_iterations=True,
-)
+if __name__ == '__main__':
+    sol = nmpc.solve(
+        update_functions,
+        solver=Solver.IPOPT(_max_iter=10000),
+        cyclic_options={"states": {}},
+        get_all_iterations=True,
+        # n_cycles_simultaneous=1,
+    )
 
-SolutionToPickle(sol[0], "results/cycling_fes_driven_nmpc_full_fatigue.pkl", "").pickle()
-[
-    SolutionToPickle(sol[1][i], "results/cycling_fes_driven_nmpc_" + str(i) + "_fatigue.pkl", "").pickle()
-    for i in range(len(sol[1]))
-]
+    SolutionToPickle(sol[0], "results/cycling_fes_driven_nmpc_full_fatigue.pkl", "").pickle()
+    [
+        SolutionToPickle(sol[1][i], "results/cycling_fes_driven_nmpc_" + str(i) + "_fatigue.pkl", "").pickle()
+        for i in range(len(sol[1]))
+    ]
 
-biorbd_model = biorbd.Model("../msk_models/simplified_UL_Seth_full_mesh.bioMod")
-PickleAnimate("results/cycling_fes_driven_nmpc_full_fatigue.pkl").animate(model=biorbd_model)
+    biorbd_model = biorbd.Model("../msk_models/simplified_UL_Seth_full_mesh.bioMod")
+    PickleAnimate("results/cycling_fes_driven_nmpc_full_fatigue.pkl").animate(model=biorbd_model)

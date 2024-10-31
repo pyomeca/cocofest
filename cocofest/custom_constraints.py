@@ -11,38 +11,18 @@ from .models.hmed2018 import DingModelIntensityFrequency
 
 class CustomConstraint:
     @staticmethod
-    def cn_sum(controller: PenaltyController, stim_time: list, stim_index: list) -> MX | SX:
-        intensity_in_model = True if isinstance(controller.model, DingModelIntensityFrequency) else False
-        lambda_i = (
-            [controller.model.lambda_i_calculation(controller.parameters["pulse_intensity"].cx[i]) for i in stim_index]
-            if intensity_in_model
-            else [1 for _ in range(len(stim_time))]
-        )
-        km = controller.states["Km"].cx if controller.model._with_fatigue else controller.model.km_rest
-        r0 = km + controller.model.r0_km_relationship
-        return controller.controls["Cn_sum"].cx - controller.model.cn_sum_fun(
-            r0=r0, t=controller.time.cx, t_stim_prev=stim_time, lambda_i=lambda_i
-        )
+    def cn_sum(controller: PenaltyController, stim_time: list, model_idx: int = None) -> MX | SX:
+        model = controller.model.muscles_dynamics_model[model_idx] if isinstance(model_idx, int) else controller.model
+        cn_sum_key = model.cn_sum_name
+        km_key = model.km_name
+        intensity_in_model = True if isinstance(model, DingModelIntensityFrequency) else False
+        pulse_intensity_key = model.pulse_intensity_name if intensity_in_model else None
+        pulse_intensity = controller.parameters[pulse_intensity_key].cx if intensity_in_model else None
+        lambda_i = model.get_lambda_i(nb_stim=len(stim_time), pulse_intensity=pulse_intensity)
+        km = controller.states[km_key].cx if model._with_fatigue else model.km_rest
+        r0 = model.get_r0(km=km)
 
-    @staticmethod
-    def cn_sum_msk(controller: PenaltyController, stim_time: list, model_idx: int, sum_truncation: int) -> MX | SX:
-        model = controller.model.muscles_dynamics_model[model_idx]
-        muscle_name = model.muscle_name
-        stim_time = model.stim_prev + stim_time
-        stim_time = stim_time[-sum_truncation:]
-
-        if isinstance(model, DingModelIntensityFrequency):
-            intensity_list = vertcat(
-                model.stim_pulse_intensity_prev, controller.parameters["pulse_intensity_" + muscle_name].cx
-            )
-            sum_truncation = sum_truncation if sum_truncation < intensity_list.shape[0] else intensity_list.shape[0]
-            intensity_list = intensity_list[-sum_truncation:]
-            lambda_i = [model.lambda_i_calculation(intensity_list[i]) for i in range(intensity_list.shape[0])]
-        else:
-            lambda_i = [1 for _ in range(len(stim_time))]
-        km = controller.states["Km_" + muscle_name].cx if model.with_fatigue else model.km_rest
-        r0 = km + model.r0_km_relationship
-        return controller.controls["Cn_sum_" + muscle_name].cx - model.cn_sum_fun(
+        return controller.controls[cn_sum_key].cx - model.cn_sum_fun(
             r0=r0, t=controller.time.cx, t_stim_prev=stim_time, lambda_i=lambda_i
         )
 

@@ -16,6 +16,7 @@ from bioptim import (
     SolutionMerge,
 )
 
+from ..optimization.fes_ocp import OcpFes
 from ..models.fes_model import FesModel
 from ..models.ding2003_integrate import DingModelFrequencyIntegrate
 from ..models.ding2007_integrate import DingModelPulseDurationFrequencyIntegrate
@@ -52,7 +53,7 @@ class IvpFes:
             model (FesModel type), stim_time (list), pulse_duration (float type), pulse_intensity (int | float type), pulse_mode (str type), frequency (int | float type), round_down (bool type)
         ivp_parameters: dict
             The parameters for the ivp problem including :
-            n_shooting (int type), final_time (int | float type), extend_last_phase_time (int | float type), ode_solver (OdeSolver type), use_sx (bool type), n_threads (int type)
+            final_time (int | float type), ode_solver (OdeSolver type), use_sx (bool type), n_threads (int type)
         """
 
         self._fill_fes_dict(fes_parameters)
@@ -69,7 +70,7 @@ class IvpFes:
         self.parameters = None
 
         self.final_time = self.ivp_parameters["final_time"]
-        self.n_shooting = self.ivp_parameters["n_shooting"]
+        self.n_shooting = OcpFes.prepare_n_shooting(self.stim_time, self.final_time)
 
         self.dt = np.array([self.final_time / self.n_shooting])
         self.pulse_mode = self.fes_parameters["pulse_mode"]
@@ -183,9 +184,7 @@ class IvpFes:
 
     def _fill_ivp_dict(self, ivp_parameters):
         default_ivp_dict = {
-            "n_shooting": None,
             "final_time": None,
-            "extend_last_phase_time": False,
             "ode_solver": OdeSolver.RK4(n_integration_steps=1),
             "use_sx": True,
             "n_threads": 1,
@@ -278,14 +277,8 @@ class IvpFes:
         if not isinstance(self.fes_parameters["pulse_mode"], str):
             raise ValueError("pulse_mode must be a string type")
 
-        if not isinstance(self.ivp_parameters["n_shooting"], int | list | None):
-            raise ValueError("n_shooting must be an int or a list type")
-
         if not isinstance(self.ivp_parameters["final_time"], int | float):
             raise ValueError("final_time must be an int or float type")
-
-        if not isinstance(self.ivp_parameters["extend_last_phase_time"], int | float | None):
-            raise ValueError("extend_last_phase_time must be an int or float type")
 
         if not isinstance(
             self.ivp_parameters["ode_solver"],
@@ -406,7 +399,7 @@ class IvpFes:
            model, pulse_duration, pulse_intensity, pulse_mode, frequency, round_down
         ivp_parameters: dict
            The parameters for the ivp problem including :
-           n_shooting, final_time, extend_last_phase_time, ode_solver, use_sx, n_threads
+           final_time, ode_solver, use_sx, n_threads
         """
 
         frequency = fes_parameters["frequency"]
@@ -453,7 +446,7 @@ class IvpFes:
            model, n_stim, pulse_duration, pulse_intensity, pulse_mode
         ivp_parameters: dict
            The parameters for the ivp problem including :
-           n_shooting, extend_last_phase_time, ode_solver, use_sx, n_threads
+           final_time, ode_solver, use_sx, n_threads
         """
 
         n_stim = fes_parameters["n_stim"]

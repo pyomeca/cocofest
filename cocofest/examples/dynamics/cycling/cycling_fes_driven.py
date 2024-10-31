@@ -42,7 +42,6 @@ def main():
     ocp = OcpFesMsk.prepare_ocp(
         model=model,
         stim_time=list(np.round(np.linspace(0, 1, 11), 3))[:-1],
-        n_shooting=100,
         final_time=1,
         pulse_duration={
             "min": minimum_pulse_duration,
@@ -54,7 +53,7 @@ def main():
             "cycling": {"x_center": 0.35, "y_center": 0, "radius": 0.1, "target": "marker"},
             "minimize_residual_torque": True,
         },
-        warm_start=False,
+        initial_guess_warm_start=False,
         n_threads=5,
     )
     ocp.add_plot_penalty(CostType.ALL)

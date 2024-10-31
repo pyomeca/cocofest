@@ -18,7 +18,6 @@ import matplotlib.pyplot as plt
 # Example n°5 : Identification of the parameters of the Ding model with the pulse intensity method for simulated data
 # --- Simulating data --- #
 # This problem was build to be integrated and has no objectives nor parameter to optimize.
-n_shooting = 500
 n_stim = 50
 final_time = 5
 
@@ -30,7 +29,7 @@ fes_parameters = {
     "pulse_intensity": pulse_intensity_values,
     "stim_time": stim_time,
 }
-ivp_parameters = {"n_shooting": n_shooting, "final_time": final_time, "use_sx": True}
+ivp_parameters = {"final_time": final_time, "use_sx": True}
 ivp = IvpFes(fes_parameters, ivp_parameters)
 
 # Integrating the solution
@@ -61,7 +60,6 @@ ocp = DingModelPulseIntensityFrequencyForceParameterIdentification(
         "cr",
     ],
     additional_key_settings={},
-    n_shooting=n_shooting,
     final_time=final_time,
     use_sx=True,
     n_threads=6,

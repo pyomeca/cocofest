@@ -23,7 +23,7 @@ from bioptim import (
 
 from ..custom_objectives import CustomObjective
 from ..dynamics.inverse_kinematics_and_dynamics import get_circle_coord
-from ..dynamics.warm_start import get_initial_guess
+from ..dynamics.initial_guess_warm_start import get_initial_guess
 from ..models.ding2003 import DingModelFrequency
 from ..models.ding2003_integrate import DingModelFrequencyIntegrate
 from ..models.ding2007 import DingModelPulseDurationFrequency
@@ -105,7 +105,7 @@ class OcpFesMsk:
                 objective,
                 n_threads=input_dict["n_threads"],
             )
-            if input_dict["warm_start"]
+            if input_dict["initial_guess_warm_start"]
             else None
         )
 
@@ -113,6 +113,7 @@ class OcpFesMsk:
             input_dict["model"],
             msk_info,
             initial_state,
+            input_dict["n_cycles_simultaneous"] if "n_cycles_simultaneous" in input_dict.keys() else 1,
         )
         u_bounds, u_init = OcpFesMsk._set_u_bounds(input_dict["model"], msk_info["with_residual_torque"])
 
@@ -124,6 +125,7 @@ class OcpFesMsk:
             input_dict["n_shooting"],
             muscle_force_key,
             objective,
+            input_dict["n_cycles_simultaneous"] if "n_cycles_simultaneous" in input_dict.keys() else 1,
         )
 
         optimization_dict = {
@@ -153,7 +155,6 @@ class OcpFesMsk:
     def prepare_ocp(
         model: FesMskModel = None,
         stim_time: list = None,
-        n_shooting: int = None,
         final_time: int | float = None,
         pulse_event: dict = None,
         pulse_duration: dict = None,
@@ -161,7 +162,7 @@ class OcpFesMsk:
         objective: dict = None,
         msk_info: dict = None,
         use_sx: bool = True,
-        warm_start: bool = False,
+        initial_guess_warm_start: bool = False,
         ode_solver: OdeSolverBase = OdeSolver.RK4(n_integration_steps=1),
         control_type: ControlType = ControlType.CONSTANT,
         n_threads: int = 1,
@@ -175,8 +176,6 @@ class OcpFesMsk:
             The FES model to use.
         stim_time : list
             The stimulation times.
-        n_shooting : int
-            Number of shooting points for each individual phase.
         final_time : int | float
             The final time of the OCP.
         pulse_event : dict
@@ -196,7 +195,7 @@ class OcpFesMsk:
             Dictionary containing parameters related to the musculoskeletal model.
         use_sx : bool
             The nature of the CasADi variables. MX are used if False.
-        warm_start : bool
+        initial_guess_warm_start : bool
             If a warm start is run to get the problem initial guesses.
         ode_solver : OdeSolverBase
             The ODE solver to use.
@@ -214,14 +213,14 @@ class OcpFesMsk:
         input_dict = {
             "model": model,
             "stim_time": stim_time,
-            "n_shooting": n_shooting,
+            "n_shooting": OcpFes.prepare_n_shooting(stim_time, final_time),
             "final_time": final_time,
             "pulse_event": pulse_event,
             "pulse_duration": pulse_duration,
             "pulse_intensity": pulse_intensity,
             "objective": objective,
             "msk_info": msk_info,
-            "warm_start": warm_start,
+            "initial_guess_warm_start": initial_guess_warm_start,
             "use_sx": use_sx,
             "ode_solver": ode_solver,
             "n_threads": n_threads,
@@ -504,11 +503,10 @@ class OcpFesMsk:
                         index_sup += 1
 
                     constraints.add(
-                        CustomConstraint.cn_sum_msk,
+                        CustomConstraint.cn_sum,
                         node=j,
                         stim_time=stim_time[index_inf:index_sup],
                         model_idx=i,
-                        sum_truncation=max_stim_to_keep,
                     )
 
                 if isinstance(model.muscles_dynamics_model[i], DingModelPulseDurationFrequency):
@@ -532,7 +530,7 @@ class OcpFesMsk:
         return constraints
 
     @staticmethod
-    def _set_bounds(bio_models, msk_info, initial_state):
+    def _set_bounds(bio_models, msk_info, initial_state, n_cycles_simultaneous=1):
         # ---- STATE BOUNDS REPRESENTATION ---- #
         #
         #                    |‾‾‾‾‾‾‾‾‾‾x_max_middle‾‾‾‾‾‾‾‾‾‾‾‾x_max_end‾
@@ -623,6 +621,12 @@ class OcpFesMsk:
 
         # Sets the initial state of q, qdot and muscle forces for all the phases if a warm start is used
         if initial_state:
+            for key in initial_state.keys():
+                repeated_array = np.tile(initial_state[key][:, :-1], (1, n_cycles_simultaneous))
+                # Append the last column of the original array to reach the desired shape
+                result_array = np.hstack((repeated_array, initial_state[key][:, -1:]))
+                initial_state[key] = result_array
+
             muscle_names = bio_models.muscle_names
             x_init.add(
                 key="q",
@@ -680,6 +684,7 @@ class OcpFesMsk:
         n_shooting,
         muscle_force_key,
         objective,
+        n_simultaneous_cycle: int = 1,
     ):
         # Creates the objective for our problem
         objective_functions = ObjectiveList()
@@ -739,7 +744,7 @@ class OcpFesMsk:
             circle_coord_list = np.array(
                 [
                     get_circle_coord(theta, x_center, y_center, radius)[:-1]
-                    for theta in np.linspace(0, -2 * np.pi, n_shooting + 1)
+                    for theta in np.linspace(0, -2 * np.pi * n_simultaneous_cycle, n_shooting * n_simultaneous_cycle + 1)
                 ]
             )
             objective_functions.add(

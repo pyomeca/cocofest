@@ -120,6 +120,23 @@ class DingModelFrequency(FesModel):
             "tau2": self.tau2,
         }
 
+    @property
+    def km_name(self) -> str:
+        muscle_name = "_" + self.muscle_name if self.muscle_name else ""
+        return "Km" + muscle_name
+
+    @property
+    def cn_sum_name(self):
+        muscle_name = "_" + self.muscle_name if self.muscle_name else ""
+        return "Cn_sum" + muscle_name
+
+    def get_r0(self, km: MX | float) -> MX | float:
+        return km + self.r0_km_relationship
+
+    @staticmethod
+    def get_lambda_i(nb_stim: int, pulse_intensity: MX | float) -> list[MX | float]:
+        return [1 for _ in range(nb_stim)]
+
     # ---- Model's dynamics ---- #
     def system_dynamics(
         self,

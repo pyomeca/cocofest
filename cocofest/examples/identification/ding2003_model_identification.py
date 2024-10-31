@@ -22,12 +22,11 @@ from cocofest.identification.identification_method import full_data_extraction
 
 
 # --- Setting simulation parameters --- #
-n_shooting = 200
 final_time = 2
 stim_time = np.round(np.linspace(0, 1, 11)[:-1], 2)
 ivp_model = DingModelFrequencyIntegrate()
 fes_parameters = {"model": ivp_model, "stim_time": stim_time}
-ivp_parameters = {"n_shooting": n_shooting, "final_time": final_time, "use_sx": True}
+ivp_parameters = {"final_time": final_time, "use_sx": True}
 
 # --- Creating the simulated data to identify on --- #
 # Building the Initial Value Problem
@@ -51,7 +50,6 @@ with open(pickle_file_name, "wb") as file:
 ocp_model = DingModelFrequency()
 ocp = DingModelFrequencyForceParameterIdentification(
     model=ocp_model,
-    n_shooting=n_shooting,
     final_time=final_time,
     data_path=[pickle_file_name],
     identification_method="full",

@@ -6,6 +6,7 @@ from ..models.ding2007 import DingModelPulseDurationFrequency
 from ..identification.ding2003_force_parameter_identification import (
     DingModelFrequencyForceParameterIdentification,
 )
+from ..optimization.fes_ocp import OcpFes
 from ..optimization.fes_identification_ocp import OcpFesId
 from .identification_method import (
     full_data_extraction,
@@ -29,7 +30,6 @@ class DingModelPulseDurationFrequencyForceParameterIdentification(DingModelFrequ
         double_step_identification: bool = False,
         key_parameter_to_identify: list = None,
         additional_key_settings: dict = None,
-        n_shooting: int = 100,
         final_time: float = 1,
         objective: dict = None,
         use_sx: bool = True,
@@ -56,8 +56,6 @@ class DingModelPulseDurationFrequencyForceParameterIdentification(DingModelFrequ
             List of keys of the parameters to identify.
         additional_key_settings: dict
             Additional settings for the keys.
-        n_shooting: int
-            The number of shooting points for the OCP.
         final_time: float
             The final time for the OCP.
         objective: dict
@@ -80,7 +78,6 @@ class DingModelPulseDurationFrequencyForceParameterIdentification(DingModelFrequ
             double_step_identification=double_step_identification,
             key_parameter_to_identify=key_parameter_to_identify,
             additional_key_settings=additional_key_settings,
-            n_shooting=n_shooting,
             final_time=final_time,
             objective=objective,
             use_sx=use_sx,
@@ -230,7 +227,6 @@ class DingModelPulseDurationFrequencyForceParameterIdentification(DingModelFrequ
             self.double_step_identification,
             self.key_parameter_to_identify,
             self.additional_key_settings,
-            self.n_shooting,
         )
         self.check_experiment_force_format(self.data_path)
         # --- Data extraction --- #
@@ -240,13 +236,13 @@ class DingModelPulseDurationFrequencyForceParameterIdentification(DingModelFrequ
         time, stim, force, discontinuity = average_data_extraction(self.data_path)
         pulse_duration = {"fixed": self.pulse_duration_extraction(self.data_path)}
 
-        force_at_node = force_at_node_in_ocp(time, force, self.n_shooting, self.final_time, force_curve_number)
+        n_shooting = OcpFes.prepare_n_shooting(stim, self.final_time)
+        force_at_node = force_at_node_in_ocp(time, force, n_shooting, self.final_time, force_curve_number)
 
         # --- Building force ocp --- #
         self.force_ocp = OcpFesId.prepare_ocp(
             model=self.model,
             stim_time=list(np.round(stim, 3)),
-            n_shooting=self.n_shooting,
             final_time_phase=self.final_time,
             objective={"force_tracking": force_at_node},
             discontinuity_in_ocp=discontinuity,
@@ -288,13 +284,11 @@ class DingModelPulseDurationFrequencyForceParameterIdentification(DingModelFrequ
                 self.double_step_identification,
                 self.key_parameter_to_identify,
                 self.additional_key_settings,
-                self.n_shooting,
             )
             self.check_experiment_force_format(self.data_path)
 
         # --- Data extraction --- #
         # --- Force model --- #
-        stimulated_n_shooting = self.n_shooting
         force_curve_number = None
         stim = None
         time = None
@@ -316,7 +310,8 @@ class DingModelPulseDurationFrequencyForceParameterIdentification(DingModelFrequ
                 self.data_path
             )  # TODO : adapt this for sparse data
 
-        force_at_node = force_at_node_in_ocp(time, force, self.n_shooting, self.final_time, force_curve_number)
+        n_shooting = OcpFes.prepare_n_shooting(stim, self.final_time)
+        force_at_node = force_at_node_in_ocp(time, force, n_shooting, self.final_time, force_curve_number)
 
         if self.double_step_identification:
             initial_guess = self._force_model_identification_for_initial_guess()
@@ -328,7 +323,6 @@ class DingModelPulseDurationFrequencyForceParameterIdentification(DingModelFrequ
         start_time = time_package.time()
         self.force_ocp = OcpFesId.prepare_ocp(
             model=self.model,
-            n_shooting=self.n_shooting,
             final_time=self.final_time,
             stim_time=list(np.round(stim, 3)),
             key_parameter_to_identify=self.key_parameter_to_identify,

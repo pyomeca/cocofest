@@ -34,7 +34,7 @@ def prepare_ocp(
     n_shooting: int,
     final_time: int,
     objective: dict,
-    warm_start: bool = False,
+    initial_guess_warm_start: bool = False,
 ) -> OptimalControlProgram:
 
     # Adding the model
@@ -84,7 +84,7 @@ def prepare_ocp(
     x_init = InitialGuessList()
     u_init = InitialGuessList()
     # If warm start, the initial guess is the result of the inverse kinematics and dynamics
-    if warm_start:
+    if initial_guess_warm_start:
         q_guess, qdot_guess, qddotguess = inverse_kinematics_cycling(
             biorbd_model_path, n_shooting, x_center, y_center, radius, ik_method="trf"
         )
@@ -115,7 +115,7 @@ def main():
         n_shooting=100,
         final_time=1,
         objective={"cycling": {"x_center": 0.35, "y_center": 0, "radius": 0.1}},
-        warm_start=True,
+        initial_guess_warm_start=True,
     )
     ocp.add_plot_penalty(CostType.ALL)
     sol = ocp.solve()

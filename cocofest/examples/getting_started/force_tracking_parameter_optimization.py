@@ -28,7 +28,6 @@ minimum_pulse_intensity = model.min_pulse_intensity()
 ocp = OcpFes().prepare_ocp(
     model=model,
     stim_time=list(np.round(np.linspace(0, 1, 31)[:-1], 3)),
-    n_shooting=1000,
     final_time=1,
     pulse_intensity={
         "min": minimum_pulse_intensity,

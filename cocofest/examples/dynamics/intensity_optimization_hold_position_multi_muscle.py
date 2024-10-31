@@ -57,7 +57,6 @@ model = FesMskModel(
 ocp = OcpFesMsk.prepare_ocp(
     model=model,
     stim_time=np.linspace(0, 1, 11)[:-1],
-    n_shooting=100,
     final_time=1,
     pulse_event={"min": 0.1, "max": 1, "bimapping": True},
     pulse_intensity={

@@ -5,6 +5,7 @@ The stimulation frequency will be optimized between 10 and 100 Hz and pulse dura
 threshold and 600us to satisfy the flexion and minimizing required elbow torque control.
 """
 
+from bioptim import Solver
 from cocofest import DingModelPulseDurationFrequencyWithFatigue, OcpFesMsk, FesMskModel
 
 model = FesMskModel(
@@ -20,7 +21,6 @@ minimum_pulse_duration = DingModelPulseDurationFrequencyWithFatigue().pd0
 ocp = OcpFesMsk.prepare_ocp(
     model=model,
     stim_time=[0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9],
-    n_shooting=100,
     final_time=1,
     pulse_duration={
         "min": minimum_pulse_duration,
@@ -35,6 +35,8 @@ ocp = OcpFesMsk.prepare_ocp(
     },
 )
 
-sol = ocp.solve()
-sol.animate()
-sol.graphs(show_bounds=False)
+if __name__ == '__main__':
+    sol = ocp.solve(Solver.IPOPT(show_online_optim=True))
+    sol.animate()
+    sol.graphs(show_bounds=False)
+

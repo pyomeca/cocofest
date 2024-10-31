@@ -60,6 +60,11 @@ class DingModelIntensityFrequency(DingModelFrequency):
             "cr": self.cr,
         }
 
+    @property
+    def pulse_intensity_name(self):
+        muscle_name = "_" + self.muscle_name if self.muscle_name else ""
+        return "pulse_intensity" + muscle_name
+
     def set_ar(self, model, ar: MX | float):
         # models is required for bioptim compatibility
         self.ar = ar
@@ -72,6 +77,9 @@ class DingModelIntensityFrequency(DingModelFrequency):
 
     def set_cr(self, model, cr: MX | float):
         self.cr = cr
+
+    def get_lambda_i(self, nb_stim: int, pulse_intensity: MX | float) -> list[MX | float]:
+        return [self.lambda_i_calculation(pulse_intensity[i]) for i in range(nb_stim)]
 
     # ---- Absolutely needed methods ---- #
     def serialize(self) -> tuple[Callable, dict]:

@@ -22,7 +22,6 @@ for i in range(10):
         "n_stim": n_stim,
     }
     ivp_parameters = {
-        "n_shooting": n_shooting,
         "final_time": final_time,
         "use_sx": True,
     }

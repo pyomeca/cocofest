@@ -24,11 +24,10 @@ from cocofest.identification.identification_method import full_data_extraction
 stim_time = np.round(np.linspace(0, 1, 11)[:-1], 2)
 pulse_duration = np.random.uniform(0.0002, 0.0006, 10).tolist()
 
-n_shooting = 200
 final_time = 2
 ivp_model = DingModelPulseDurationFrequencyIntegrate()
 fes_parameters = {"model": ivp_model, "stim_time": stim_time, "pulse_duration": pulse_duration}
-ivp_parameters = {"n_shooting": n_shooting, "final_time": final_time, "use_sx": True}
+ivp_parameters = {"final_time": final_time, "use_sx": True}
 
 # --- Creating the simulated data to identify on --- #
 # Building the Initial Value Problem
@@ -57,7 +56,6 @@ ocp = DingModelPulseDurationFrequencyForceParameterIdentification(
     double_step_identification=False,
     key_parameter_to_identify=["tau1_rest", "tau2", "km_rest", "a_scale", "pd0", "pdt"],
     additional_key_settings={},
-    n_shooting=n_shooting,
     final_time=final_time,
     use_sx=True,
     n_threads=6,

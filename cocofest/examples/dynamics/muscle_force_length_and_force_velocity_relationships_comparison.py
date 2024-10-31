@@ -31,7 +31,6 @@ for i in range(2):
     ocp = OcpFesMsk.prepare_ocp(
         model=model,
         stim_time=np.linspace(0, 1, 11)[:-1],
-        n_shooting=100,
         final_time=1,
         pulse_duration={"fixed": 0.00025},
         msk_info={

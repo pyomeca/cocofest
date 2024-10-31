@@ -34,7 +34,6 @@ class OcpFesId(OcpFes):
     @staticmethod
     def prepare_ocp(
         model: FesModel = None,
-        n_shooting: int = None,
         final_time: float | int = None,
         stim_time: list = None,
         pulse_duration: dict = None,
@@ -60,8 +59,6 @@ class OcpFesId(OcpFes):
             The model used to solve the ocp
         final_time: float, int
             The final time of each phase, it corresponds to the stimulation apparition time
-        n_shooting: list[int],
-            The number of shooting points for each phase
         pulse_duration: dict,
             The duration of the stimulation
         pulse_intensity: dict,
@@ -84,6 +81,7 @@ class OcpFesId(OcpFes):
             temp_objective,
         ) = OcpFes._fill_dict({}, pulse_duration, pulse_intensity, {})
 
+        n_shooting = OcpFes.prepare_n_shooting(stim_time, final_time)
         OcpFesId._sanity_check(
             model=model,
             n_shooting=n_shooting,
@@ -99,7 +97,6 @@ class OcpFesId(OcpFes):
 
         OcpFesId._sanity_check_id(
             model=model,
-            n_shooting=n_shooting,
             final_time=final_time,
             objective=objective,
             pulse_duration=pulse_duration,
@@ -164,15 +161,11 @@ class OcpFesId(OcpFes):
     @staticmethod
     def _sanity_check_id(
         model=None,
-        n_shooting=None,
         final_time=None,
         objective=None,
         pulse_duration=None,
         pulse_intensity=None,
     ):
-        if not isinstance(n_shooting, int):
-            raise TypeError(f"n_shooting must be list type," f" currently n_shooting is {type(n_shooting)}) type.")
-
         if not isinstance(final_time, int | float):
             raise TypeError(f"final_time must be int or float type.")
 

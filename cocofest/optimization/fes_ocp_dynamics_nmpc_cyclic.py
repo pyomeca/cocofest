@@ -2,7 +2,7 @@ import numpy as np
 
 from bioptim import (
     OdeSolver,
-    CyclicNonlinearModelPredictiveControl,
+    MultiCyclicNonlinearModelPredictiveControl,
     ControlType,
 )
 
@@ -10,7 +10,7 @@ from .fes_ocp_dynamics import OcpFesMsk
 from ..models.dynamical_model import FesMskModel
 
 
-class NmpcFesMsk(CyclicNonlinearModelPredictiveControl):
+class NmpcFesMsk(MultiCyclicNonlinearModelPredictiveControl):
     def advance_window_bounds_states(self, sol, **extra):
         super(NmpcFesMsk, self).advance_window_bounds_states(sol)
         self.update_stim(sol)
@@ -32,12 +32,14 @@ class NmpcFesMsk(CyclicNonlinearModelPredictiveControl):
         stim_time: list = None,
         cycle_len: int = None,
         cycle_duration: int | float = None,
+        n_cycles_simultaneous: int = None,
+        n_cycles_to_advance: int = None,
         pulse_event: dict = None,
         pulse_duration: dict = None,
         pulse_intensity: dict = None,
         objective: dict = None,
         msk_info: dict = None,
-        warm_start: bool = False,
+        initial_guess_warm_start: bool = False,
         use_sx: bool = True,
         ode_solver: OdeSolver = OdeSolver.RK4(n_integration_steps=1),
         n_threads: int = 1,
@@ -49,12 +51,14 @@ class NmpcFesMsk(CyclicNonlinearModelPredictiveControl):
             "stim_time": stim_time,
             "n_shooting": cycle_len,
             "final_time": cycle_duration,
+            "n_cycles_simultaneous": n_cycles_simultaneous,
+            "n_cycles_to_advance": n_cycles_to_advance,
             "pulse_event": pulse_event,
             "pulse_duration": pulse_duration,
             "pulse_intensity": pulse_intensity,
             "objective": objective,
             "msk_info": msk_info,
-            "warm_start": warm_start,
+            "initial_guess_warm_start": initial_guess_warm_start,
             "use_sx": use_sx,
             "ode_solver": ode_solver,
             "n_threads": n_threads,
@@ -68,6 +72,8 @@ class NmpcFesMsk(CyclicNonlinearModelPredictiveControl):
             dynamics=optimization_dict["dynamics"],
             cycle_len=cycle_len,
             cycle_duration=cycle_duration,
+            n_cycles_simultaneous=n_cycles_simultaneous,
+            n_cycles_to_advance=n_cycles_to_advance,
             common_objective_functions=optimization_dict["objective_functions"],
             x_init=optimization_dict["x_init"],
             x_bounds=optimization_dict["x_bounds"],

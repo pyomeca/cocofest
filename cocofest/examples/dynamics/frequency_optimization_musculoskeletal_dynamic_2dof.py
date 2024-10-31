@@ -21,7 +21,6 @@ model = FesMskModel(
 ocp = OcpFesMsk.prepare_ocp(
     model=model,
     stim_time=np.linspace(0, 1, 11)[:-1],
-    n_shooting=100,
     final_time=1,
     pulse_event={"min": 0.01, "max": 0.1, "bimapping": True},
     objective={"minimize_residual_torque": True},
