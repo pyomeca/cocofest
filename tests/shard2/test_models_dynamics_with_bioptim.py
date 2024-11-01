@@ -5,8 +5,8 @@ from bioptim import Solver, SolutionMerge
 from cocofest import (
     DingModelFrequency,
     DingModelFrequencyWithFatigue,
-    DingModelPulseDurationFrequency,
-    DingModelIntensityFrequency,
+    DingModelPulseWidthFrequency,
+    DingModelPulseIntensityFrequency,
     OcpFes,
 )
 
@@ -224,8 +224,8 @@ time = np.array(
 init_force = force - force[0]
 init_force_tracking = [time, init_force]
 
-minimum_pulse_duration = DingModelPulseDurationFrequency().pd0
-minimum_pulse_intensity = DingModelIntensityFrequency().min_pulse_intensity()
+minimum_pulse_width = DingModelPulseWidthFrequency().pd0
+minimum_pulse_intensity = DingModelPulseIntensityFrequency().min_pulse_intensity()
 
 
 @pytest.mark.parametrize("use_sx", [True])  # Later add False
@@ -233,24 +233,23 @@ minimum_pulse_intensity = DingModelIntensityFrequency().min_pulse_intensity()
     "model",
     [
         DingModelFrequency(),
-        DingModelPulseDurationFrequency(),
-        DingModelIntensityFrequency(),
+        DingModelPulseWidthFrequency(),
+        DingModelPulseIntensityFrequency(),
     ],
 )
 @pytest.mark.parametrize("force_tracking", [init_force_tracking])
 @pytest.mark.parametrize(
-    "min_pulse_duration, min_pulse_intensity",
-    [(minimum_pulse_duration, minimum_pulse_intensity)],
+    "min_pulse_width, min_pulse_intensity",
+    [(minimum_pulse_width, minimum_pulse_intensity)],
 )
-def test_ocp_output(model, force_tracking, use_sx, min_pulse_duration, min_pulse_intensity):
-    if isinstance(model, DingModelPulseDurationFrequency):
+def test_ocp_output(model, force_tracking, use_sx, min_pulse_width, min_pulse_intensity):
+    if isinstance(model, DingModelPulseWidthFrequency):
         ocp = OcpFes().prepare_ocp(
             model=model,
-            n_shooting=100,
             stim_time=[0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9],
             final_time=1,
-            pulse_duration={
-                "min": min_pulse_duration,
+            pulse_width={
+                "min": min_pulse_width,
                 "max": 0.0006,
                 "bimapping": False,
             },
@@ -264,10 +263,9 @@ def test_ocp_output(model, force_tracking, use_sx, min_pulse_duration, min_pulse
         # for key in ocp.states.key():
         #     np.testing.assert_almost_equal(ocp.states[key], pickle_file.states[key])
 
-    elif isinstance(model, DingModelIntensityFrequency):
+    elif isinstance(model, DingModelPulseIntensityFrequency):
         ocp = OcpFes().prepare_ocp(
             model=model,
-            n_shooting=100,
             stim_time=[0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9],
             final_time=1,
             pulse_intensity={
@@ -288,7 +286,6 @@ def test_ocp_output(model, force_tracking, use_sx, min_pulse_duration, min_pulse
     elif isinstance(model, DingModelFrequency):
         ocp = OcpFes().prepare_ocp(
             model=model,
-            n_shooting=100,
             stim_time=[0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9],
             final_time=1,
             pulse_event={"min": 0.01, "max": 1, "bimapping": False},
@@ -311,7 +308,6 @@ def test_ocp_output(model, force_tracking, use_sx, min_pulse_duration, min_pulse
 def test_time_dependent_ocp_output(use_sx, bimapped):
     ocp = OcpFes().prepare_ocp(
         model=DingModelFrequencyWithFatigue(),
-        n_shooting=100,
         stim_time=[0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9],
         final_time=1,
         pulse_event={"min": 0.01, "max": 0.1, "bimapping": bimapped},

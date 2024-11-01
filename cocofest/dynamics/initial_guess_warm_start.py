@@ -32,7 +32,6 @@ def get_initial_guess(
     n_shooting: int,
     objective: dict,
     n_threads: int,
-
 ) -> dict:
     """
     Get the initial guess for the ocp
@@ -130,7 +129,10 @@ def prepare_muscle_driven_ocp(
     y_center = objective["cycling"]["y_center"]
     radius = objective["cycling"]["radius"]
     get_circle_coord_list = np.array(
-        [get_circle_coord(theta, x_center, y_center, radius)[:-1] for theta in np.linspace(0, -2 * np.pi, n_shooting + 1)]
+        [
+            get_circle_coord(theta, x_center, y_center, radius)[:-1]
+            for theta in np.linspace(0, -2 * np.pi, n_shooting + 1)
+        ]
     )
 
     objective_functions = ObjectiveList()

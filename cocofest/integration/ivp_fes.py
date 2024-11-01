@@ -18,11 +18,11 @@ from bioptim import (
 
 from ..optimization.fes_ocp import OcpFes
 from ..models.fes_model import FesModel
-from ..models.ding2003_integrate import DingModelFrequencyIntegrate
-from ..models.ding2007_integrate import DingModelPulseDurationFrequencyIntegrate
-from ..models.ding2007_with_fatigue_integrate import DingModelPulseDurationFrequencyWithFatigueIntegrate
-from ..models.hmed2018_integrate import DingModelIntensityFrequencyIntegrate
-from ..models.hmed2018_with_fatigue_integrate import DingModelIntensityFrequencyWithFatigueIntegrate
+from ..models.ding2003 import DingModelFrequency
+from ..models.ding2007 import DingModelPulseWidthFrequency
+from ..models.ding2007_with_fatigue import DingModelPulseWidthFrequencyWithFatigue
+from ..models.hmed2018 import DingModelPulseIntensityFrequency
+from ..models.hmed2018_with_fatigue import DingModelPulseIntensityFrequencyWithFatigue
 
 
 class IvpFes:
@@ -50,7 +50,7 @@ class IvpFes:
         ----------
         fes_parameters: dict
             The parameters for the fes configuration including :
-            model (FesModel type), stim_time (list), pulse_duration (float type), pulse_intensity (int | float type), pulse_mode (str type), frequency (int | float type), round_down (bool type)
+            model (FesModel type), stim_time (list), pulse_width (float type), pulse_intensity (int | float type), pulse_mode (str type), frequency (int | float type), round_down (bool type)
         ivp_parameters: dict
             The parameters for the ivp problem including :
             final_time (int | float type), ode_solver (OdeSolver type), use_sx (bool type), n_threads (int type)
@@ -63,7 +63,7 @@ class IvpFes:
         self.model = self.fes_parameters["model"]
         self.n_stim = len(self.fes_parameters["stim_time"])
         self.stim_time = self.fes_parameters["stim_time"]
-        self.pulse_duration = self.fes_parameters["pulse_duration"]
+        self.pulse_width = self.fes_parameters["pulse_width"]
         self.pulse_intensity = self.fes_parameters["pulse_intensity"]
 
         self.parameter_mappings = None
@@ -82,7 +82,7 @@ class IvpFes:
 
         parameters.add(
             name="pulse_apparition_time",
-            function=DingModelFrequencyIntegrate.set_pulse_apparition_time,
+            function=DingModelFrequency.set_pulse_apparition_time,
             size=self.n_stim,
             scaling=VariableScaling("pulse_apparition_time", [1] * self.n_stim),
         )
@@ -97,38 +97,38 @@ class IvpFes:
 
         if isinstance(
             self.model,
-            DingModelPulseDurationFrequencyIntegrate | DingModelPulseDurationFrequencyWithFatigueIntegrate,
+            DingModelPulseWidthFrequency | DingModelPulseWidthFrequencyWithFatigue,
         ):
-            if isinstance(self.pulse_duration, int | float):
-                parameters_init["pulse_duration"] = np.array([self.pulse_duration] * self.n_stim)
+            if isinstance(self.pulse_width, int | float):
+                parameters_init["pulse_width"] = np.array([self.pulse_width] * self.n_stim)
                 parameters_bounds.add(
-                    "pulse_duration",
-                    min_bound=np.array([self.pulse_duration]),
-                    max_bound=np.array([self.pulse_duration]),
+                    "pulse_width",
+                    min_bound=np.array([self.pulse_width]),
+                    max_bound=np.array([self.pulse_width]),
                     interpolation=InterpolationType.CONSTANT,
                 )
             else:
-                parameters_init["pulse_duration"] = np.array(self.pulse_duration)
+                parameters_init["pulse_width"] = np.array(self.pulse_width)
                 parameters_bounds.add(
-                    "pulse_duration",
-                    min_bound=np.array(self.pulse_duration),
-                    max_bound=np.array(self.pulse_duration),
+                    "pulse_width",
+                    min_bound=np.array(self.pulse_width),
+                    max_bound=np.array(self.pulse_width),
                     interpolation=InterpolationType.CONSTANT,
                 )
 
             parameters.add(
-                name="pulse_duration",
-                function=DingModelPulseDurationFrequencyIntegrate.set_impulse_duration,
+                name="pulse_width",
+                function=DingModelPulseWidthFrequency.set_impulse_width,
                 size=self.n_stim,
-                scaling=VariableScaling("pulse_duration", [1] * self.n_stim),
+                scaling=VariableScaling("pulse_width", [1] * self.n_stim),
             )
 
-            if parameters_init["pulse_duration"].shape[0] != self.n_stim:
-                raise ValueError("pulse_duration list must have the same length as n_stim")
+            if parameters_init["pulse_width"].shape[0] != self.n_stim:
+                raise ValueError("pulse_width list must have the same length as n_stim")
 
         if isinstance(
             self.model,
-            DingModelIntensityFrequencyIntegrate | DingModelIntensityFrequencyWithFatigueIntegrate,
+            DingModelPulseIntensityFrequency | DingModelPulseIntensityFrequencyWithFatigue,
         ):
             if isinstance(self.pulse_intensity, int | float):
                 parameters_init["pulse_intensity"] = np.array([self.pulse_intensity] * self.n_stim)
@@ -138,7 +138,7 @@ class IvpFes:
 
             parameters.add(
                 name="pulse_intensity",
-                function=DingModelIntensityFrequencyIntegrate.set_impulse_intensity,
+                function=DingModelPulseIntensityFrequency.set_impulse_intensity,
                 size=self.n_stim,
                 scaling=VariableScaling("pulse_intensity", [1] * self.n_stim),
             )
@@ -168,7 +168,7 @@ class IvpFes:
         default_fes_dict = {
             "model": FesModel,
             "stim_time": None,
-            "pulse_duration": 0.0003,
+            "pulse_width": 0.0003,
             "pulse_intensity": 50,
             "pulse_mode": "single",
         }
@@ -211,40 +211,35 @@ class IvpFes:
 
         if isinstance(
             self.fes_parameters["model"],
-            DingModelPulseDurationFrequencyIntegrate | DingModelPulseDurationFrequencyWithFatigueIntegrate,
+            DingModelPulseWidthFrequency | DingModelPulseWidthFrequencyWithFatigue,
         ):
-            pulse_duration_format = (
-                isinstance(self.fes_parameters["pulse_duration"], int | float | list)
-                if not isinstance(self.fes_parameters["pulse_duration"], bool)
+            pulse_width_format = (
+                isinstance(self.fes_parameters["pulse_width"], int | float | list)
+                if not isinstance(self.fes_parameters["pulse_width"], bool)
                 else False
             )
-            pulse_duration_format = (
-                all([isinstance(pulse_duration, int) for pulse_duration in self.fes_parameters["pulse_duration"]])
-                if pulse_duration_format == list
-                else pulse_duration_format
+            pulse_width_format = (
+                all([isinstance(pulse_width, int) for pulse_width in self.fes_parameters["pulse_width"]])
+                if pulse_width_format == list
+                else pulse_width_format
             )
 
-            if pulse_duration_format is False:
-                raise TypeError("pulse_duration must be int, float or list type")
+            if pulse_width_format is False:
+                raise TypeError("pulse_width must be int, float or list type")
 
-            minimum_pulse_duration = self.fes_parameters["model"].pd0
-            min_pulse_duration_check = (
-                all(
-                    [
-                        pulse_duration >= minimum_pulse_duration
-                        for pulse_duration in self.fes_parameters["pulse_duration"]
-                    ]
-                )
-                if isinstance(self.fes_parameters["pulse_duration"], list)
-                else self.fes_parameters["pulse_duration"] >= minimum_pulse_duration
+            minimum_pulse_width = self.fes_parameters["model"].pd0
+            min_pulse_width_check = (
+                all([pulse_width >= minimum_pulse_width for pulse_width in self.fes_parameters["pulse_width"]])
+                if isinstance(self.fes_parameters["pulse_width"], list)
+                else self.fes_parameters["pulse_width"] >= minimum_pulse_width
             )
 
-            if min_pulse_duration_check is False:
-                raise ValueError("Pulse duration must be greater than minimum pulse duration")
+            if min_pulse_width_check is False:
+                raise ValueError("pulse width must be greater than minimum pulse width")
 
         if isinstance(
             self.fes_parameters["model"],
-            DingModelIntensityFrequencyIntegrate | DingModelIntensityFrequencyWithFatigueIntegrate,
+            DingModelPulseIntensityFrequency | DingModelPulseIntensityFrequencyWithFatigue,
         ):
             pulse_intensity_format = (
                 isinstance(self.fes_parameters["pulse_intensity"], int | float | list)
@@ -263,8 +258,8 @@ class IvpFes:
             minimum_pulse_intensity = (
                 all(
                     [
-                        pulse_duration >= self.fes_parameters["model"].min_pulse_intensity()
-                        for pulse_duration in self.fes_parameters["pulse_intensity"]
+                        pulse_width >= self.fes_parameters["model"].min_pulse_intensity()
+                        for pulse_width in self.fes_parameters["pulse_intensity"]
                     ]
                 )
                 if isinstance(self.fes_parameters["pulse_intensity"], list)
@@ -396,7 +391,7 @@ class IvpFes:
         ----------
         fes_parameters: dict
            The parameters for the fes configuration including :
-           model, pulse_duration, pulse_intensity, pulse_mode, frequency, round_down
+           model, pulse_width, pulse_intensity, pulse_mode, frequency, round_down
         ivp_parameters: dict
            The parameters for the ivp problem including :
            final_time, ode_solver, use_sx, n_threads
@@ -443,7 +438,7 @@ class IvpFes:
         ----------
         fes_parameters: dict
            The parameters for the fes configuration including :
-           model, n_stim, pulse_duration, pulse_intensity, pulse_mode
+           model, n_stim, pulse_width, pulse_intensity, pulse_mode
         ivp_parameters: dict
            The parameters for the ivp problem including :
            final_time, ode_solver, use_sx, n_threads

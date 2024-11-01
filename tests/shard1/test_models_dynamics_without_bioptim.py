@@ -1,15 +1,11 @@
 import numpy as np
 from casadi import DM
 
-from cocofest import (
-    DingModelFrequencyWithFatigueIntegrate,
-    DingModelPulseDurationFrequencyWithFatigueIntegrate,
-    DingModelIntensityFrequencyWithFatigueIntegrate,
-)
+from cocofest import ModelMaker
 
 
 def test_ding2003_dynamics():
-    model = DingModelFrequencyWithFatigueIntegrate()
+    model = ModelMaker.create_model("ding2003_with_fatigue", is_approximated=False)
     assert model.nb_state == 5
     assert model.name_dof == ["Cn", "F", "A", "Tau1", "Km"]
     np.testing.assert_almost_equal(
@@ -63,8 +59,9 @@ def test_ding2003_dynamics():
     )
     np.testing.assert_almost_equal(model.exp_time_fun(t=0.1, t_stim_i=0.09), 0.6065306597126332)
     np.testing.assert_almost_equal(model.ri_fun(r0=1.05, time_between_stim=0.1), 1.0003368973499542)
-    np.testing.assert_almost_equal(model.cn_sum_fun(r0=1.05, t=0.11, t_stim_prev=[0, 0.1]), 0.6108217697230208)
-    np.testing.assert_almost_equal(model.cn_dot_fun(cn=0, r0=1.05, t=0.11, t_stim_prev=[0, 0.1]), 30.54108848615104)
+    cn_sum = model.cn_sum_fun(r0=1.05, t=0.11, t_stim_prev=[0, 0.1], lambda_i=[1, 1])
+    np.testing.assert_almost_equal(cn_sum, 0.6108217697230208)
+    np.testing.assert_almost_equal(model.cn_dot_fun(cn=0, cn_sum=cn_sum), 30.54108848615104)
     np.testing.assert_almost_equal(
         model.f_dot_fun(cn=5, f=100, a=3009, tau1=0.050957, km=0.103),
         2037.0703505791284,
@@ -75,7 +72,7 @@ def test_ding2003_dynamics():
 
 
 def test_ding2007_dynamics():
-    model = DingModelPulseDurationFrequencyWithFatigueIntegrate()
+    model = ModelMaker.create_model("ding2007_with_fatigue", is_approximated=False)
     assert model.nb_state == 5
     assert model.name_dof == [
         "Cn",
@@ -134,7 +131,7 @@ def test_ding2007_dynamics():
                 km=0.103,
                 t=0.11,
                 t_stim_prev=[0, 0.1],
-                impulse_time=[0.0002, 0.0002],
+                pulse_width=[0.0002, 0.0002],
             )
         ).squeeze(),
         np.array(DM([-4.179e02, -4.905e02, -4.000e-04, 2.108e-02, 1.900e-05])).squeeze(),
@@ -142,9 +139,10 @@ def test_ding2007_dynamics():
     )
     np.testing.assert_almost_equal(model.exp_time_fun(t=0.1, t_stim_i=0.09), 0.4028903215291327)
     np.testing.assert_almost_equal(model.ri_fun(r0=1.05, time_between_stim=0.1), 1.0000056342790253)
-    np.testing.assert_almost_equal(model.cn_sum_fun(r0=1.05, t=0.11, t_stim_prev=[0, 0.1]), 0.4029379914553837)
+    cn_sum = model.cn_sum_fun(r0=1.05, t=0.11, t_stim_prev=[0, 0.1], lambda_i=[1, 1])
+    np.testing.assert_almost_equal(cn_sum, 0.4029379914553837)
     np.testing.assert_almost_equal(
-        model.cn_dot_fun(cn=0, r0=1.05, t=0.11, t_stim_prev=[0, 0.1]),
+        model.cn_dot_fun(cn=0, cn_sum=cn_sum),
         36.63072649594398,
     )
     np.testing.assert_almost_equal(
@@ -155,13 +153,13 @@ def test_ding2007_dynamics():
     np.testing.assert_almost_equal(model.tau1_dot_fun(tau1=0.060601, f=100), 0.021)
     np.testing.assert_almost_equal(model.km_dot_fun(km=0.103, f=100), 0.000286716535433071)
     np.testing.assert_almost_equal(
-        np.array(model.a_calculation(a_scale=4920, t=0, t_stim_prev=[0.1], impulse_time=[0.0002])).squeeze(),
+        np.array(model.a_calculation(a_scale=4920, t=0, t_stim_prev=[0.1], pulse_width=[0.0002])).squeeze(),
         np.array(DM(1464.4646488)).squeeze(),
     )
 
 
 def test_hmed2018_dynamics():
-    model = DingModelIntensityFrequencyWithFatigueIntegrate()
+    model = ModelMaker.create_model("hmed2018_with_fatigue", is_approximated=False)
     assert model.nb_state == 5
     assert model.name_dof == [
         "Cn",
@@ -222,7 +220,7 @@ def test_hmed2018_dynamics():
                 km=0.103,
                 t=0.11,
                 t_stim_prev=[0, 0.1],
-                intensity_stim=[30, 50],
+                pulse_intensity=[30, 50],
             )
         ).squeeze(),
         np.array(DM([-241, 2037.07, -0.0004, 0.021, 1.9e-05])).squeeze(),
@@ -230,12 +228,14 @@ def test_hmed2018_dynamics():
     )
     np.testing.assert_almost_equal(model.exp_time_fun(t=0.1, t_stim_i=0.09), 0.6065306597126332)
     np.testing.assert_almost_equal(model.ri_fun(r0=1.05, time_between_stim=0.1), 1.0003368973499542)
+    lambda_i = model.get_lambda_i(nb_stim=2, pulse_intensity=[30, 50])
+    cn_sum = model.cn_sum_fun(r0=1.05, t=0.11, t_stim_prev=[0, 0.1], lambda_i=lambda_i)
     np.testing.assert_almost_equal(
-        np.array(model.cn_sum_fun(r0=1.05, t=0.11, t_stim_prev=[0, 0.1], intensity_stim=[30, 50])).squeeze(),
+        np.array(cn_sum).squeeze(),
         np.array(DM(0.1798732)).squeeze(),
     )
     np.testing.assert_almost_equal(
-        np.array(model.cn_dot_fun(cn=0, r0=1.05, t=0.11, t_stim_prev=[0, 0.1], intensity_stim=[30, 50])).squeeze(),
+        np.array(model.cn_dot_fun(cn=0, cn_sum=cn_sum)).squeeze(),
         np.array(DM(8.9936611)).squeeze(),
     )
     np.testing.assert_almost_equal(
@@ -246,6 +246,6 @@ def test_hmed2018_dynamics():
     np.testing.assert_almost_equal(model.tau1_dot_fun(tau1=0.050957, f=100), 0.021)
     np.testing.assert_almost_equal(model.km_dot_fun(km=0.103, f=100), 1.8999999999999998e-05)
     np.testing.assert_almost_equal(
-        np.array(model.lambda_i_calculation(intensity_stim=30)).squeeze(),
+        np.array(model.lambda_i_calculation(pulse_intensity=30)).squeeze(),
         np.array(DM(0.0799499)).squeeze(),
     )

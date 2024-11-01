@@ -8,7 +8,7 @@ import numpy as np
 
 from bioptim import SolutionMerge
 from cocofest import (
-    DingModelIntensityFrequency,
+    ModelMaker,
     FourierSeries,
     OcpFes,
 )
@@ -22,7 +22,7 @@ force_tracking = [time, force]
 # This ocp was build to track a force curve along the problem.
 # The stimulation won't be optimized and is already set to one pulse every 0.1 seconds (n_stim/final_time).
 # Plus the pulsation intensity will be optimized between 0 and 130 mA and are not the same across the problem.
-model = DingModelIntensityFrequency()
+model = ModelMaker.create_model("hmed2018", is_approximated=True)
 minimum_pulse_intensity = model.min_pulse_intensity()
 
 ocp = OcpFes().prepare_ocp(

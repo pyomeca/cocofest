@@ -2,7 +2,7 @@ import time as time_package
 import numpy as np
 
 from bioptim import Solver, Objective, OdeSolver, ControlType
-from ..models.hmed2018 import DingModelIntensityFrequency
+from ..models.hmed2018 import DingModelPulseIntensityFrequency
 from ..identification.ding2003_force_parameter_identification import (
     DingModelFrequencyForceParameterIdentification,
 )
@@ -24,7 +24,7 @@ class DingModelPulseIntensityFrequencyForceParameterIdentification(DingModelFreq
 
     def __init__(
         self,
-        model: DingModelIntensityFrequency,
+        model: DingModelPulseIntensityFrequency,
         data_path: str | list[str] = None,
         identification_method: str = "full",
         double_step_identification: bool = False,
@@ -43,7 +43,7 @@ class DingModelPulseIntensityFrequencyForceParameterIdentification(DingModelFreq
 
         Parameters
         ----------
-        model: DingModelPulseDurationFrequency
+        model: DingModelPulseWidthFrequency
             The model to use for the OCP.
         data_path: str | list[str]
             The path to the force model data.

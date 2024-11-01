@@ -8,8 +8,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 pickle_path = [
-    r"../result_file/pulse_duration_minimize_muscle_force.pkl",
-    r"../result_file/pulse_duration_minimize_muscle_fatigue.pkl",
+    r"../result_file/pulse_width_minimize_muscle_force.pkl",
+    r"../result_file/pulse_width_minimize_muscle_fatigue.pkl",
 ]
 
 with open(pickle_path[0], "rb") as f:

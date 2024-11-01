@@ -25,12 +25,9 @@ from ..custom_objectives import CustomObjective
 from ..dynamics.inverse_kinematics_and_dynamics import get_circle_coord
 from ..dynamics.initial_guess_warm_start import get_initial_guess
 from ..models.ding2003 import DingModelFrequency
-from ..models.ding2003_integrate import DingModelFrequencyIntegrate
-from ..models.ding2007 import DingModelPulseDurationFrequency
-from ..models.ding2007_integrate import DingModelPulseDurationFrequencyIntegrate
+from ..models.ding2007 import DingModelPulseWidthFrequency
 from ..models.dynamical_model import FesMskModel
-from ..models.hmed2018 import DingModelIntensityFrequency
-from ..models.hmed2018_integrate import DingModelIntensityFrequencyIntegrate
+from ..models.hmed2018 import DingModelPulseIntensityFrequency
 from ..optimization.fes_ocp import OcpFes
 from ..fourier_approx import FourierSeries
 from ..custom_constraints import CustomConstraint
@@ -40,26 +37,26 @@ class OcpFesMsk:
     @staticmethod
     def _prepare_optimization_problem(input_dict: dict) -> dict:
 
-        (pulse_event, pulse_duration, pulse_intensity, objective) = OcpFes._fill_dict(
+        (pulse_event, pulse_width, pulse_intensity, objective) = OcpFes._fill_dict(
             input_dict["pulse_event"],
-            input_dict["pulse_duration"],
+            input_dict["pulse_width"],
             input_dict["pulse_intensity"],
             input_dict["objective"],
         )
 
         (
-            pulse_duration,
+            pulse_width,
             pulse_intensity,
             objective,
             msk_info,
-        ) = OcpFesMsk._fill_msk_dict(pulse_duration, pulse_intensity, objective, input_dict["msk_info"])
+        ) = OcpFesMsk._fill_msk_dict(pulse_width, pulse_intensity, objective, input_dict["msk_info"])
 
         OcpFes._sanity_check(
             model=input_dict["model"],
             n_shooting=input_dict["n_shooting"],
             final_time=input_dict["final_time"],
             pulse_event=pulse_event,
-            pulse_duration=pulse_duration,
+            pulse_width=pulse_width,
             pulse_intensity=pulse_intensity,
             objective=objective,
             use_sx=input_dict["use_sx"],
@@ -82,7 +79,7 @@ class OcpFesMsk:
             model=input_dict["model"],
             stim_time=input_dict["stim_time"],
             pulse_event=pulse_event,
-            pulse_duration=pulse_duration,
+            pulse_width=pulse_width,
             pulse_intensity=pulse_intensity,
             use_sx=input_dict["use_sx"],
         )
@@ -157,7 +154,7 @@ class OcpFesMsk:
         stim_time: list = None,
         final_time: int | float = None,
         pulse_event: dict = None,
-        pulse_duration: dict = None,
+        pulse_width: dict = None,
         pulse_intensity: dict = None,
         objective: dict = None,
         msk_info: dict = None,
@@ -181,7 +178,7 @@ class OcpFesMsk:
         pulse_event : dict
             Dictionary containing parameters related to the appearance of the pulse.
             It should contain the following keys: "min", "max", "bimapping", "frequency", "round_down", "pulse_mode".
-        pulse_duration : dict
+        pulse_width : dict
             Dictionary containing parameters related to the duration of the pulse.
             It should contain the following keys: "fixed", "min", "max", "bimapping", "similar_for_all_muscles".
             Optional if not using the Ding2007 models
@@ -216,7 +213,7 @@ class OcpFesMsk:
             "n_shooting": OcpFes.prepare_n_shooting(stim_time, final_time),
             "final_time": final_time,
             "pulse_event": pulse_event,
-            "pulse_duration": pulse_duration,
+            "pulse_width": pulse_width,
             "pulse_intensity": pulse_intensity,
             "objective": objective,
             "msk_info": msk_info,
@@ -251,10 +248,10 @@ class OcpFesMsk:
         )
 
     @staticmethod
-    def _fill_msk_dict(pulse_duration, pulse_intensity, objective, msk_info):
+    def _fill_msk_dict(pulse_width, pulse_intensity, objective, msk_info):
 
-        pulse_duration = pulse_duration if pulse_duration else {}
-        default_pulse_duration = {
+        pulse_width = pulse_width if pulse_width else {}
+        default_pulse_width = {
             "fixed": None,
             "min": None,
             "max": None,
@@ -291,12 +288,12 @@ class OcpFesMsk:
             "custom_constraint": None,
         }
 
-        pulse_duration = {**default_pulse_duration, **pulse_duration}
+        pulse_width = {**default_pulse_width, **pulse_width}
         pulse_intensity = {**default_pulse_intensity, **pulse_intensity}
         objective = {**default_objective, **objective}
         msk_info = {**default_msk_info, **msk_info}
 
-        return pulse_duration, pulse_intensity, objective, msk_info
+        return pulse_width, pulse_intensity, objective, msk_info
 
     @staticmethod
     def _declare_dynamics(bio_models):
@@ -316,7 +313,7 @@ class OcpFesMsk:
         model: FesMskModel,
         stim_time: list,
         pulse_event: dict,
-        pulse_duration: dict,
+        pulse_width: dict,
         pulse_intensity: dict,
         use_sx: bool = True,
     ):
@@ -343,71 +340,62 @@ class OcpFesMsk:
         parameters_init["pulse_apparition_time"] = np.array(stim_time)
 
         for i in range(len(model.muscles_dynamics_model)):
-            if isinstance(
-                model.muscles_dynamics_model[i],
-                DingModelPulseDurationFrequency | DingModelPulseDurationFrequencyIntegrate,
-            ):
-                if pulse_duration["bimapping"]:
+            if isinstance(model.muscles_dynamics_model[i], DingModelPulseWidthFrequency):
+                if pulse_width["bimapping"]:
                     n_stim = 1
                 parameter_name = (
-                    "pulse_duration"
-                    if pulse_duration["same_for_all_muscles"]
-                    else "pulse_duration" + "_" + model.muscles_dynamics_model[i].muscle_name
+                    "pulse_width"
+                    if pulse_width["same_for_all_muscles"]
+                    else "pulse_width" + "_" + model.muscles_dynamics_model[i].muscle_name
                 )
-                if pulse_duration["fixed"]:  # TODO : ADD SEVERAL INDIVIDUAL FIXED PULSE DURATION FOR EACH MUSCLE
-                    if (pulse_duration["same_for_all_muscles"] and i == 0) or not pulse_duration[
-                        "same_for_all_muscles"
-                    ]:
+                if pulse_width["fixed"]:  # TODO : ADD SEVERAL INDIVIDUAL FIXED pulse width FOR EACH MUSCLE
+                    if (pulse_width["same_for_all_muscles"] and i == 0) or not pulse_width["same_for_all_muscles"]:
                         parameters.add(
                             name=parameter_name,
-                            function=DingModelPulseDurationFrequency.set_impulse_duration,
+                            function=DingModelPulseWidthFrequency.set_impulse_width,
                             size=n_stim,
                             scaling=VariableScaling(parameter_name, [1] * n_stim),
                         )
-                        if isinstance(pulse_duration["fixed"], list):
+                        if isinstance(pulse_width["fixed"], list):
                             parameters_bounds.add(
                                 parameter_name,
-                                min_bound=np.array(pulse_duration["fixed"]),
-                                max_bound=np.array(pulse_duration["fixed"]),
+                                min_bound=np.array(pulse_width["fixed"]),
+                                max_bound=np.array(pulse_width["fixed"]),
                                 interpolation=InterpolationType.CONSTANT,
                             )
                             parameters_init.add(
                                 key=parameter_name,
-                                initial_guess=np.array(pulse_duration["fixed"]),
+                                initial_guess=np.array(pulse_width["fixed"]),
                             )
                         else:
                             parameters_bounds.add(
                                 parameter_name,
-                                min_bound=np.array([pulse_duration["fixed"]] * n_stim),
-                                max_bound=np.array([pulse_duration["fixed"]] * n_stim),
+                                min_bound=np.array([pulse_width["fixed"]] * n_stim),
+                                max_bound=np.array([pulse_width["fixed"]] * n_stim),
                                 interpolation=InterpolationType.CONSTANT,
                             )
-                            parameters_init[parameter_name] = np.array([pulse_duration["fixed"]] * n_stim)
+                            parameters_init[parameter_name] = np.array([pulse_width["fixed"]] * n_stim)
 
                 elif (
-                    pulse_duration["min"] and pulse_duration["max"]
-                ):  # TODO : ADD SEVERAL MIN MAX PULSE DURATION FOR EACH MUSCLE
-                    if (pulse_duration["same_for_all_muscles"] and i == 0) or not pulse_duration[
-                        "same_for_all_muscles"
-                    ]:
+                    pulse_width["min"] and pulse_width["max"]
+                ):  # TODO : ADD SEVERAL MIN MAX pulse width FOR EACH MUSCLE
+                    if (pulse_width["same_for_all_muscles"] and i == 0) or not pulse_width["same_for_all_muscles"]:
                         parameters_bounds.add(
                             parameter_name,
-                            min_bound=[pulse_duration["min"]],
-                            max_bound=[pulse_duration["max"]],
+                            min_bound=[pulse_width["min"]],
+                            max_bound=[pulse_width["max"]],
                             interpolation=InterpolationType.CONSTANT,
                         )
-                        pulse_duration_avg = (pulse_duration["max"] + pulse_duration["min"]) / 2
-                        parameters_init[parameter_name] = np.array([pulse_duration_avg] * n_stim)
+                        pulse_width_avg = (pulse_width["max"] + pulse_width["min"]) / 2
+                        parameters_init[parameter_name] = np.array([pulse_width_avg] * n_stim)
                         parameters.add(
                             name=parameter_name,
-                            function=DingModelPulseDurationFrequency.set_impulse_duration,
+                            function=DingModelPulseWidthFrequency.set_impulse_width,
                             size=n_stim,
                             scaling=VariableScaling(parameter_name, [1] * n_stim),
                         )
 
-            if isinstance(
-                model.muscles_dynamics_model[i], DingModelIntensityFrequency | DingModelIntensityFrequencyIntegrate
-            ):
+            if isinstance(model.muscles_dynamics_model[i], DingModelPulseIntensityFrequency):
                 if pulse_intensity["bimapping"]:
                     n_stim = 1
                 parameter_name = (
@@ -421,7 +409,7 @@ class OcpFesMsk:
                     ]:
                         parameters.add(
                             name=parameter_name,
-                            function=DingModelIntensityFrequency.set_impulse_intensity,
+                            function=DingModelPulseIntensityFrequency.set_impulse_intensity,
                             size=n_stim,
                             scaling=VariableScaling(parameter_name, [1] * n_stim),
                         )
@@ -461,7 +449,7 @@ class OcpFesMsk:
                         parameters_init[parameter_name] = np.array([intensity_avg] * n_stim)
                         parameters.add(
                             name=parameter_name,
-                            function=DingModelIntensityFrequency.set_impulse_intensity,
+                            function=DingModelPulseIntensityFrequency.set_impulse_intensity,
                             size=n_stim,
                             scaling=VariableScaling(parameter_name, [1] * n_stim),
                         )
@@ -485,7 +473,7 @@ class OcpFesMsk:
                 target=np.zeros(model.nb_tau),
             )
 
-        if not isinstance(model.muscles_dynamics_model[0], DingModelFrequencyIntegrate):
+        if model.muscles_dynamics_model[0].is_approximated:
             time_vector = np.linspace(0, final_time, n_shooting + 1)
             stim_at_node = [np.where(stim_time[i] <= time_vector)[0][0] for i in range(len(stim_time))]
             additional_node = 1 if control_type == ControlType.LINEAR_CONTINUOUS else 0
@@ -509,7 +497,7 @@ class OcpFesMsk:
                         model_idx=i,
                     )
 
-                if isinstance(model.muscles_dynamics_model[i], DingModelPulseDurationFrequency):
+                if isinstance(model.muscles_dynamics_model[i], DingModelPulseWidthFrequency):
                     index = 0
                     for j in range(n_shooting + additional_node):
                         if j in stim_at_node and j != 0:
@@ -665,12 +653,12 @@ class OcpFesMsk:
             )
             u_init.add(key="tau", initial_guess=tau_init, phase=0)
 
-        if not isinstance(bio_models.muscles_dynamics_model[0], DingModelFrequencyIntegrate):
+        if bio_models.muscles_dynamics_model[0].is_approximated:
             for i in range(len(bio_models.muscles_dynamics_model)):
                 u_init.add(key="Cn_sum_" + bio_models.muscles_dynamics_model[i].muscle_name, initial_guess=[0], phase=0)
 
             for i in range(len(bio_models.muscles_dynamics_model)):
-                if isinstance(bio_models.muscles_dynamics_model[i], DingModelPulseDurationFrequency):
+                if isinstance(bio_models.muscles_dynamics_model[i], DingModelPulseWidthFrequency):
                     u_init.add(
                         key="A_calculation_" + bio_models.muscles_dynamics_model[i].muscle_name,
                         initial_guess=[0],
@@ -744,7 +732,9 @@ class OcpFesMsk:
             circle_coord_list = np.array(
                 [
                     get_circle_coord(theta, x_center, y_center, radius)[:-1]
-                    for theta in np.linspace(0, -2 * np.pi * n_simultaneous_cycle, n_shooting * n_simultaneous_cycle + 1)
+                    for theta in np.linspace(
+                        0, -2 * np.pi * n_simultaneous_cycle, n_shooting * n_simultaneous_cycle + 1
+                    )
                 ]
             )
             objective_functions.add(

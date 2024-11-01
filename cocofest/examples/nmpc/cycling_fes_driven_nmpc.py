@@ -1,7 +1,7 @@
 """
 This example will do a nmpc of 10 stimulation example with Ding's 2007 frequency model.
 This ocp was build to produce a elbow motion from 5 to 120 degrees.
-The pulse duration between minimal sensitivity threshold and 600us to satisfy the flexion and minimizing required elbow
+The pulse width between minimal sensitivity threshold and 600us to satisfy the flexion and minimizing required elbow
 torque control.
 """
 
@@ -9,7 +9,7 @@ import numpy as np
 import biorbd
 from bioptim import Solver, ControlType
 from cocofest import (
-    DingModelPulseDurationFrequencyWithFatigue,
+    DingModelPulseWidthFrequencyWithFatigue,
     NmpcFesMsk,
     FesMskModel,
     PickleAnimate,
@@ -17,12 +17,12 @@ from cocofest import (
 )
 
 
-minimum_pulse_duration = DingModelPulseDurationFrequencyWithFatigue().pd0
-DeltoideusClavicle_A_model = DingModelPulseDurationFrequencyWithFatigue(muscle_name="DeltoideusClavicle_A")
-DeltoideusScapula_P_model = DingModelPulseDurationFrequencyWithFatigue(muscle_name="DeltoideusScapula_P")
-TRIlong_model = DingModelPulseDurationFrequencyWithFatigue(muscle_name="TRIlong")
-BIC_long_model = DingModelPulseDurationFrequencyWithFatigue(muscle_name="BIC_long")
-BIC_brevis_model = DingModelPulseDurationFrequencyWithFatigue(muscle_name="BIC_brevis")
+minimum_pulse_width = DingModelPulseWidthFrequencyWithFatigue().pd0
+DeltoideusClavicle_A_model = DingModelPulseWidthFrequencyWithFatigue(muscle_name="DeltoideusClavicle_A")
+DeltoideusScapula_P_model = DingModelPulseWidthFrequencyWithFatigue(muscle_name="DeltoideusScapula_P")
+TRIlong_model = DingModelPulseWidthFrequencyWithFatigue(muscle_name="TRIlong")
+BIC_long_model = DingModelPulseWidthFrequencyWithFatigue(muscle_name="BIC_long")
+BIC_brevis_model = DingModelPulseWidthFrequencyWithFatigue(muscle_name="BIC_brevis")
 
 DeltoideusClavicle_A_model.alpha_a = -4.0 * 10e-1
 DeltoideusScapula_P_model.alpha_a = -4.0 * 10e-1
@@ -52,8 +52,8 @@ nmpc = NmpcFesMsk.prepare_nmpc(
     cycle_duration=1,
     n_cycles_simultaneous=1,
     n_cycles_to_advance=1,
-    pulse_duration={
-        "min": minimum_pulse_duration,
+    pulse_width={
+        "min": minimum_pulse_width,
         "max": 0.0006,
         "bimapping": False,
     },
@@ -75,7 +75,7 @@ def update_functions(_nmpc, cycle_idx, _sol):
     return cycle_idx < n_cycles_total  # True if there are still some cycle to perform
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     sol = nmpc.solve(
         update_functions,
         solver=Solver.IPOPT(_max_iter=10000),

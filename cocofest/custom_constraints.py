@@ -6,7 +6,7 @@ from casadi import MX, SX, vertcat
 
 from bioptim import PenaltyController
 
-from .models.hmed2018 import DingModelIntensityFrequency
+from .models.hmed2018 import DingModelPulseIntensityFrequency
 
 
 class CustomConstraint:
@@ -15,7 +15,7 @@ class CustomConstraint:
         model = controller.model.muscles_dynamics_model[model_idx] if isinstance(model_idx, int) else controller.model
         cn_sum_key = model.cn_sum_name
         km_key = model.km_name
-        intensity_in_model = True if isinstance(model, DingModelIntensityFrequency) else False
+        intensity_in_model = True if isinstance(model, DingModelPulseIntensityFrequency) else False
         pulse_intensity_key = model.pulse_intensity_name if intensity_in_model else None
         pulse_intensity = controller.parameters[pulse_intensity_key].cx if intensity_in_model else None
         lambda_i = model.get_lambda_i(nb_stim=len(stim_time), pulse_intensity=pulse_intensity)
@@ -28,7 +28,7 @@ class CustomConstraint:
 
     @staticmethod
     def cn_sum_identification(controller: PenaltyController, stim_time: list, stim_index: list) -> MX | SX:
-        intensity_in_model = True if isinstance(controller.model, DingModelIntensityFrequency) else False
+        intensity_in_model = True if isinstance(controller.model, DingModelPulseIntensityFrequency) else False
         ar, bs, Is, cr = None, None, None, None
         if intensity_in_model:
             ar = controller.parameters["ar"].cx if "ar" in controller.parameters.keys() else controller.model.ar
@@ -58,10 +58,10 @@ class CustomConstraint:
     @staticmethod
     def a_calculation(controller: PenaltyController, last_stim_index: int) -> MX | SX:
         a = controller.states["A"].cx if controller.model.with_fatigue else controller.model.a_scale
-        last_stim_index = 0 if controller.parameters["pulse_duration"].cx.shape == (1, 1) else last_stim_index
+        last_stim_index = 0 if controller.parameters["pulse_width"].cx.shape == (1, 1) else last_stim_index
         a_calculation = controller.model.a_calculation(
             a_scale=a,
-            impulse_time=controller.parameters["pulse_duration"].cx[last_stim_index],
+            pulse_width=controller.parameters["pulse_width"].cx[last_stim_index],
         )
         return controller.controls["A_calculation"].cx - a_calculation
 
@@ -71,11 +71,11 @@ class CustomConstraint:
         muscle_name = model.muscle_name
         a = controller.states["A_" + muscle_name].cx if model.with_fatigue else model.a_scale
         last_stim_index = (
-            0 if controller.parameters["pulse_duration_" + muscle_name].cx.shape == (1, 1) else last_stim_index
+            0 if controller.parameters["pulse_width_" + muscle_name].cx.shape == (1, 1) else last_stim_index
         )
         a_calculation = model.a_calculation(
             a_scale=a,
-            impulse_time=controller.parameters["pulse_duration_" + muscle_name].cx[last_stim_index],
+            pulse_width=controller.parameters["pulse_width_" + muscle_name].cx[last_stim_index],
         )
         return controller.controls["A_calculation_" + muscle_name].cx - a_calculation
 
@@ -88,10 +88,10 @@ class CustomConstraint:
         )
         pd0 = controller.parameters["pd0"].cx if "pd0" in controller.parameters.keys() else controller.model.pd0
         pdt = controller.parameters["pdt"].cx if "pdt" in controller.parameters.keys() else controller.model.pdt
-        last_stim_index = 0 if controller.parameters["pulse_duration"].cx.shape == (1, 1) else last_stim_index
+        last_stim_index = 0 if controller.parameters["pulse_width"].cx.shape == (1, 1) else last_stim_index
         a_calculation = controller.model.a_calculation_identification(
             a_scale=a,
-            impulse_time=controller.parameters["pulse_duration"].cx[last_stim_index],
+            pulse_width=controller.parameters["pulse_width"].cx[last_stim_index],
             pd0=pd0,
             pdt=pdt,
         )

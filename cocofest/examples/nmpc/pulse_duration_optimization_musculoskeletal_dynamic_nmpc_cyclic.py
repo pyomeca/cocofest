@@ -1,7 +1,7 @@
 """
 This example will do a nmpc of 10 stimulation example with Ding's 2007 frequency model.
 This ocp was build to produce a elbow motion from 5 to 120 degrees.
-The pulse duration between minimal sensitivity threshold and 600us to satisfy the flexion and minimizing required elbow
+The pulse width between minimal sensitivity threshold and 600us to satisfy the flexion and minimizing required elbow
 torque control.
 """
 
@@ -9,7 +9,7 @@ import os
 import biorbd
 from bioptim import Solver
 from cocofest import (
-    DingModelPulseDurationFrequencyWithFatigue,
+    DingModelPulseWidthFrequencyWithFatigue,
     NmpcFesMsk,
     FesMskModel,
     SolutionToPickle,
@@ -19,12 +19,12 @@ from cocofest import (
 model = FesMskModel(
     name=None,
     biorbd_path="../msk_models/arm26_biceps_1dof.bioMod",
-    muscles_model=[DingModelPulseDurationFrequencyWithFatigue(muscle_name="BIClong")],
+    muscles_model=[DingModelPulseWidthFrequencyWithFatigue(muscle_name="BIClong")],
     activate_force_length_relationship=True,
     activate_force_velocity_relationship=True,
 )
 
-minimum_pulse_duration = DingModelPulseDurationFrequencyWithFatigue().pd0
+minimum_pulse_width = DingModelPulseWidthFrequencyWithFatigue().pd0
 
 nmpc_fes_msk = NmpcFesMsk()
 nmpc = nmpc_fes_msk.prepare_nmpc(
@@ -32,8 +32,8 @@ nmpc = nmpc_fes_msk.prepare_nmpc(
     stim_time=[0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9],
     cycle_len=100,
     cycle_duration=1,
-    pulse_duration={
-        "min": minimum_pulse_duration,
+    pulse_width={
+        "min": minimum_pulse_width,
         "max": 0.0006,
         "bimapping": False,
     },

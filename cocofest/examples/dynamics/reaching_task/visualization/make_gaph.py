@@ -10,8 +10,8 @@ import matplotlib.pyplot as plt
 chosen_graph_to_plot = "duration"
 
 duration_path = [
-    r"../result_file/pulse_duration_minimize_muscle_force.pkl",
-    r"../result_file/pulse_duration_minimize_muscle_fatigue.pkl",
+    r"../result_file/pulse_width_minimize_muscle_force.pkl",
+    r"../result_file/pulse_width_minimize_muscle_fatigue.pkl",
 ]
 
 chosen_graph_to_plot_path = duration_path if chosen_graph_to_plot == "duration" else None

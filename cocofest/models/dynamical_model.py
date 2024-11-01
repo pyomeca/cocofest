@@ -13,8 +13,7 @@ from bioptim import (
 
 from ..models.fes_model import FesModel
 from ..models.ding2003 import DingModelFrequency
-from ..models.ding2003_integrate import DingModelFrequencyIntegrate
-from .state_configue import StateConfigure
+from .state_configure import StateConfigure
 from .hill_coefficients import (
     muscle_force_length_coefficient,
     muscle_force_velocity_coefficient,
@@ -197,9 +196,8 @@ class FesMskModel(BiorbdModel):
             muscle_states_idxs = [
                 i for i in range(len(state_name_list)) if muscle_model.muscle_name in state_name_list[i]
             ]
-            muscle_states = vertcat()
-            for i in range(len(muscle_states_idxs)):
-                muscle_states = vertcat(muscle_states, states[muscle_states_idxs[i]])
+
+            muscle_states = vertcat(*[states[i] for i in muscle_states_idxs])
 
             muscle_idx = bio_muscle_names_at_index.index(muscle_model.muscle_name)
 
@@ -277,7 +275,7 @@ class FesMskModel(BiorbdModel):
         ConfigureProblem.configure_qdot(ocp, nlp, as_states=True, as_controls=False)
         state_name_list.append("qdot")
         for muscle_model in self.muscles_dynamics_model:
-            if not isinstance(muscle_model, DingModelFrequencyIntegrate):
+            if muscle_model.is_approximated:
                 StateConfigure().configure_cn_sum(ocp, nlp, muscle_name=str(muscle_model.muscle_name))
                 StateConfigure().configure_a_calculation(ocp, nlp, muscle_name=str(muscle_model.muscle_name))
         if self.activate_residual_torque:
@@ -303,8 +301,8 @@ class FesMskModel(BiorbdModel):
                     raise TypeError(
                         f"The current model type used is {type(muscles_model)}, it must be a FesModel type."
                         f"Current available models are: DingModelFrequency, DingModelFrequencyWithFatigue,"
-                        f"DingModelPulseDurationFrequency, DingModelPulseDurationFrequencyWithFatigue,"
-                        f"DingModelIntensityFrequency, DingModelIntensityFrequencyWithFatigue"
+                        f"DingModelPulseWidthFrequency, DingModelPulseWidthFrequencyWithFatigue,"
+                        f"DingModelPulseIntensityFrequency, DingModelPulseIntensityFrequencyWithFatigue"
                     )
 
             raise TypeError("The given muscles_model must be a list of FesModel")

@@ -1,7 +1,7 @@
 import numpy as np
 
 from bioptim import Solver, SolutionMerge
-from cocofest import NmpcFes, DingModelPulseDurationFrequencyWithFatigue
+from cocofest import NmpcFes, DingModelPulseWidthFrequencyWithFatigue
 
 #
 # def test_nmpc_cyclic():
@@ -14,8 +14,8 @@ from cocofest import NmpcFes, DingModelPulseDurationFrequencyWithFatigue
 #     cycles_len = 100
 #     cycle_duration = 1
 #
-#     minimum_pulse_duration = DingModelPulseDurationFrequencyWithFatigue().pd0
-#     fes_model = DingModelPulseDurationFrequencyWithFatigue()
+#     minimum_pulse_width = DingModelPulseWidthFrequencyWithFatigue().pd0
+#     fes_model = DingModelPulseWidthFrequencyWithFatigue()
 #     fes_model.alpha_a = -4.0 * 10e-1  # Increasing the fatigue rate to make the fatigue more visible
 #
 #     nmpc = NmpcFes.prepare_nmpc(
@@ -23,8 +23,8 @@ from cocofest import NmpcFes, DingModelPulseDurationFrequencyWithFatigue
 #         stim_time=list(np.round(np.linspace(0, 1, 11), 2))[:-1],
 #         cycle_len=cycles_len,
 #         cycle_duration=cycle_duration,
-#         pulse_duration={
-#             "min": minimum_pulse_duration,
+#         pulse_width={
+#             "min": minimum_pulse_width,
 #             "max": 0.0006,
 #             "bimapping": False,
 #         },

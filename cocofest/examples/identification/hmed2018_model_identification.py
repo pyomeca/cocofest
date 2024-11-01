@@ -12,8 +12,8 @@ import numpy as np
 from bioptim import SolutionMerge
 
 from cocofest import (
-    DingModelIntensityFrequency,
-    DingModelIntensityFrequencyIntegrate,
+    ModelMaker,
+    DingModelPulseIntensityFrequency,
     DingModelPulseIntensityFrequencyForceParameterIdentification,
     IvpFes,
 )
@@ -24,7 +24,7 @@ from cocofest.identification.identification_method import full_data_extraction
 stim_time = np.round(np.linspace(0, 1, 11)[:-1], 2)
 pulse_intensity = np.random.randint(20, 130, 10).tolist()
 final_time = 2
-ivp_model = DingModelIntensityFrequencyIntegrate()
+ivp_model = ModelMaker.create_model("hmed2018", is_approximated=False)
 fes_parameters = {"model": ivp_model, "stim_time": stim_time, "pulse_intensity": pulse_intensity}
 ivp_parameters = {"final_time": final_time, "use_sx": True}
 
@@ -47,7 +47,7 @@ with open(pickle_file_name, "wb") as file:
     pickle.dump(dictionary, file)
 
 # --- Identifying the model parameters --- #
-ocp_model = DingModelIntensityFrequency()
+ocp_model = DingModelPulseIntensityFrequency()
 ocp = DingModelPulseIntensityFrequencyForceParameterIdentification(
     model=ocp_model,
     data_path=[pickle_file_name],
@@ -81,14 +81,14 @@ print(identified_parameters)
 ) = full_data_extraction([pickle_file_name])
 
 result_dict = {
-    "a_rest": [identified_parameters["a_rest"], DingModelIntensityFrequency().a_rest],
-    "km_rest": [identified_parameters["km_rest"], DingModelIntensityFrequency().km_rest],
-    "tau1_rest": [identified_parameters["tau1_rest"], DingModelIntensityFrequency().tau1_rest],
-    "tau2": [identified_parameters["tau2"], DingModelIntensityFrequency().tau2],
-    "ar": [identified_parameters["ar"], DingModelIntensityFrequency().ar],
-    "bs": [identified_parameters["bs"], DingModelIntensityFrequency().bs],
-    "Is": [identified_parameters["Is"], DingModelIntensityFrequency().Is],
-    "cr": [identified_parameters["cr"], DingModelIntensityFrequency().cr],
+    "a_rest": [identified_parameters["a_rest"], DingModelPulseIntensityFrequency().a_rest],
+    "km_rest": [identified_parameters["km_rest"], DingModelPulseIntensityFrequency().km_rest],
+    "tau1_rest": [identified_parameters["tau1_rest"], DingModelPulseIntensityFrequency().tau1_rest],
+    "tau2": [identified_parameters["tau2"], DingModelPulseIntensityFrequency().tau2],
+    "ar": [identified_parameters["ar"], DingModelPulseIntensityFrequency().ar],
+    "bs": [identified_parameters["bs"], DingModelPulseIntensityFrequency().bs],
+    "Is": [identified_parameters["Is"], DingModelPulseIntensityFrequency().Is],
+    "cr": [identified_parameters["cr"], DingModelPulseIntensityFrequency().cr],
 }
 
 # Plotting the identification result
