@@ -102,6 +102,7 @@ def test_pulse_width_multi_muscle_fes_dynamics():
     np.testing.assert_almost_equal(sol_states["F_TRIlong"][0][-1], 3.9810503521165272, decimal=4)
 
 
+#
 def test_pulse_intensity_multi_muscle_fes_dynamics():
     model = FesMskModel(
         biorbd_path=biorbd_model_path,
