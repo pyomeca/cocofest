@@ -1,7 +1,7 @@
 from typing import Callable
 import numpy as np
 
-from casadi import vertcat, MX, SX
+from casadi import vertcat, MX, SX, Function
 from bioptim import (
     BiorbdModel,
     OptimalControlProgram,
@@ -9,6 +9,7 @@ from bioptim import (
     ConfigureProblem,
     DynamicsFunctions,
     DynamicsEvaluation,
+    ParameterList,
 )
 
 from ..models.fes_model import FesModel
@@ -29,6 +30,7 @@ class FesMskModel(BiorbdModel):
         activate_force_length_relationship: bool = False,
         activate_force_velocity_relationship: bool = False,
         activate_residual_torque: bool = False,
+        parameters: ParameterList = None,
     ):
         """
         The custom model that will be used in the optimal control program for the FES-MSK models
@@ -47,11 +49,13 @@ class FesMskModel(BiorbdModel):
             If the force-velocity relationship should be activated
         activate_residual_torque: bool
             If the residual torque should be activated
+        parameters: ParameterList
+            The parameters that will be used in the model
         """
-
-        super().__init__(biorbd_path)
+        super().__init__(biorbd_path, parameters=parameters)
         self._name = name
-        self.bio_model = BiorbdModel(biorbd_path)
+        self.bio_model = BiorbdModel(biorbd_path, parameters=parameters)
+        self.biorbd_path = biorbd_path
 
         self._model_sanity(
             muscles_model,
@@ -159,8 +163,7 @@ class FesMskModel(BiorbdModel):
         # You can directly call biorbd function (as for ddq) or call bioptim accessor (as for dq)
         dq = DynamicsFunctions.compute_qdot(nlp, q, qdot)
         total_torque = muscles_tau + tau if self.activate_residual_torque else muscles_tau
-        ddq = nlp.model.forward_dynamics(q, qdot, total_torque)
-
+        ddq = nlp.model.forward_dynamics(with_contact=False)(q, qdot, total_torque, [], parameters)
         dxdt = vertcat(dxdt_muscle_list, dq, ddq)
 
         return DynamicsEvaluation(dxdt=dxdt, defects=None)
@@ -184,9 +187,17 @@ class FesMskModel(BiorbdModel):
         muscle_forces = vertcat()
         muscle_idx_list = []
 
-        updatedModel = nlp.model.bio_model.model.UpdateKinematicsCustom(q, qdot)
-        nlp.model.bio_model.model.updateMuscles(updatedModel, q, qdot)
-        updated_muscle_length_jacobian = nlp.model.bio_model.model.musclesLengthJacobian(updatedModel, q, False).to_mx()
+        Q = nlp.model.bio_model.q
+        Qdot = nlp.model.bio_model.qdot
+
+        # updatedModel = nlp.model.bio_model.model.UpdateKinematicsCustom(q, qdot)
+        # nlp.model.bio_model.model.updateMuscles(updatedModel, q, qdot)
+        # updated_muscle_length_jacobian = nlp.model.bio_model.model.musclesLengthJacobian(updatedModel, q, False).to_mx()
+
+        updatedModel = nlp.model.bio_model.model.UpdateKinematicsCustom(Q, Qdot)
+        nlp.model.bio_model.model.updateMuscles(updatedModel, Q, Qdot)
+        updated_muscle_length_jacobian = nlp.model.bio_model.model.musclesLengthJacobian(updatedModel, Q, False).to_mx()
+        updated_muscle_length_jacobian = Function("musclesLengthJacobian", [Q, Qdot], [updated_muscle_length_jacobian])(q, qdot)
 
         bio_muscle_names_at_index = []
         for i in range(len(nlp.model.bio_model.model.muscles())):
@@ -205,22 +216,26 @@ class FesMskModel(BiorbdModel):
                 muscle_force_length_coefficient(
                     model=updatedModel,
                     muscle=nlp.model.bio_model.model.muscle(muscle_idx),
-                    q=q,
+                    q=Q,
                 )
                 if nlp.model.activate_force_velocity_relationship
                 else 1
             )
+            muscle_force_length_coeff = Function("muscle_force_length_coeff", [Q, Qdot],
+                                                      [muscle_force_length_coeff])(q, qdot)
 
             muscle_force_velocity_coeff = (
                 muscle_force_velocity_coefficient(
                     model=updatedModel,
                     muscle=nlp.model.bio_model.model.muscle(muscle_idx),
-                    q=q,
-                    qdot=qdot,
+                    q=Q,
+                    qdot=Qdot,
                 )
                 if nlp.model.activate_force_velocity_relationship
                 else 1
             )
+            muscle_force_velocity_coeff = Function("muscle_force_velocity_coeff", [Q, Qdot],
+                                                 [muscle_force_velocity_coeff])(q, qdot)
 
             muscle_dxdt = muscle_model.dynamics(
                 time,
