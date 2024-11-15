@@ -114,6 +114,9 @@ class OcpFesId(OcpFes):
             pulse_intensity=pulse_intensity,
             use_sx=use_sx,
         )
+
+        OcpFesId.update_model_param(model, parameters)
+
         dynamics = OcpFesId._declare_dynamics(model=model)
         x_bounds, x_init = OcpFesId._set_bounds(
             model=model,

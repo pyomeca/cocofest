@@ -67,6 +67,7 @@ class OcpFes:
             pulse_intensity=pulse_intensity,
             use_sx=input_dict["use_sx"],
         )
+        OcpFes.update_model_param(input_dict["model"], parameters)
 
         dynamics = OcpFes._declare_dynamics(input_dict["model"])
         x_bounds, x_init = OcpFes._set_bounds(input_dict["model"])
@@ -772,3 +773,11 @@ class OcpFes:
         #     objective_functions.add(ObjectiveFcn.Mayer.MINIMIZE_TIME, weight=0.001, quadratic=True)
 
         return objective_functions
+
+    @staticmethod
+    def update_model_param(model, parameters):
+        for param_key in parameters:
+            if parameters[param_key].function:
+                param_scaling = parameters[param_key].scaling.scaling
+                param_reduced = parameters[param_key].cx
+                parameters[param_key].function(model, param_reduced * param_scaling, **parameters[param_key].kwargs)
