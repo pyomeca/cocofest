@@ -127,14 +127,14 @@ class OcpFesMsk:
 
         # rebuilding model for the OCP
         model = FesMskModel(
-                            name=input_dict["model"].name,
-                            biorbd_path=input_dict["model"].biorbd_path,
-                            muscles_model=input_dict["model"].muscles_dynamics_model,
-                            activate_force_length_relationship=input_dict["model"].activate_force_length_relationship,
-                            activate_force_velocity_relationship=input_dict["model"].activate_force_velocity_relationship,
-                            activate_residual_torque=input_dict["model"].activate_residual_torque,
-                            parameters=parameters,
-                        )
+            name=input_dict["model"].name,
+            biorbd_path=input_dict["model"].biorbd_path,
+            muscles_model=input_dict["model"].muscles_dynamics_model,
+            activate_force_length_relationship=input_dict["model"].activate_force_length_relationship,
+            activate_force_velocity_relationship=input_dict["model"].activate_force_velocity_relationship,
+            activate_residual_torque=input_dict["model"].activate_residual_torque,
+            parameters=parameters,
+        )
 
         optimization_dict = {
             "model": model,

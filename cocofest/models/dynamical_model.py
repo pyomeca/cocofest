@@ -190,14 +190,12 @@ class FesMskModel(BiorbdModel):
         Q = nlp.model.bio_model.q
         Qdot = nlp.model.bio_model.qdot
 
-        # updatedModel = nlp.model.bio_model.model.UpdateKinematicsCustom(q, qdot)
-        # nlp.model.bio_model.model.updateMuscles(updatedModel, q, qdot)
-        # updated_muscle_length_jacobian = nlp.model.bio_model.model.musclesLengthJacobian(updatedModel, q, False).to_mx()
-
         updatedModel = nlp.model.bio_model.model.UpdateKinematicsCustom(Q, Qdot)
         nlp.model.bio_model.model.updateMuscles(updatedModel, Q, Qdot)
         updated_muscle_length_jacobian = nlp.model.bio_model.model.musclesLengthJacobian(updatedModel, Q, False).to_mx()
-        updated_muscle_length_jacobian = Function("musclesLengthJacobian", [Q, Qdot], [updated_muscle_length_jacobian])(q, qdot)
+        updated_muscle_length_jacobian = Function("musclesLengthJacobian", [Q, Qdot], [updated_muscle_length_jacobian])(
+            q, qdot
+        )
 
         bio_muscle_names_at_index = []
         for i in range(len(nlp.model.bio_model.model.muscles())):
@@ -221,8 +219,9 @@ class FesMskModel(BiorbdModel):
                 if nlp.model.activate_force_velocity_relationship
                 else 1
             )
-            muscle_force_length_coeff = Function("muscle_force_length_coeff", [Q, Qdot],
-                                                      [muscle_force_length_coeff])(q, qdot)
+            muscle_force_length_coeff = Function("muscle_force_length_coeff", [Q, Qdot], [muscle_force_length_coeff])(
+                q, qdot
+            )
 
             muscle_force_velocity_coeff = (
                 muscle_force_velocity_coefficient(
@@ -234,8 +233,9 @@ class FesMskModel(BiorbdModel):
                 if nlp.model.activate_force_velocity_relationship
                 else 1
             )
-            muscle_force_velocity_coeff = Function("muscle_force_velocity_coeff", [Q, Qdot],
-                                                 [muscle_force_velocity_coeff])(q, qdot)
+            muscle_force_velocity_coeff = Function(
+                "muscle_force_velocity_coeff", [Q, Qdot], [muscle_force_velocity_coeff]
+            )(q, qdot)
 
             muscle_dxdt = muscle_model.dynamics(
                 time,
