@@ -125,8 +125,19 @@ class OcpFesMsk:
             input_dict["n_cycles_simultaneous"] if "n_cycles_simultaneous" in input_dict.keys() else 1,
         )
 
+        # rebuilding model for the OCP
+        model = FesMskModel(
+            name=input_dict["model"].name,
+            biorbd_path=input_dict["model"].biorbd_path,
+            muscles_model=input_dict["model"].muscles_dynamics_model,
+            activate_force_length_relationship=input_dict["model"].activate_force_length_relationship,
+            activate_force_velocity_relationship=input_dict["model"].activate_force_velocity_relationship,
+            activate_residual_torque=input_dict["model"].activate_residual_torque,
+            parameters=parameters,
+        )
+
         optimization_dict = {
-            "model": input_dict["model"],
+            "model": model,
             "dynamics": dynamics,
             "n_shooting": input_dict["n_shooting"],
             "final_time": input_dict["final_time"],
