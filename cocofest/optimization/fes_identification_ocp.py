@@ -15,17 +15,16 @@ from bioptim import (
     PhaseTransitionFcn,
     PhaseTransitionList,
     VariableScaling,
+    Node,
 )
 
-from ..custom_objectives import CustomObjective
 from ..models.fes_model import FesModel
-from ..models.ding2007 import DingModelPulseDurationFrequency
-from ..models.ding2007_with_fatigue import DingModelPulseDurationFrequencyWithFatigue
+
 from ..models.ding2003 import DingModelFrequency
-from ..models.ding2003_with_fatigue import DingModelFrequencyWithFatigue
-from ..models.hmed2018 import DingModelIntensityFrequency
-from ..models.hmed2018_with_fatigue import DingModelIntensityFrequencyWithFatigue
+from ..models.ding2007 import DingModelPulseWidthFrequency
+from ..models.hmed2018 import DingModelPulseIntensityFrequency
 from ..optimization.fes_ocp import OcpFes
+from ..custom_constraints import CustomConstraint
 
 
 class OcpFesId(OcpFes):
@@ -35,11 +34,11 @@ class OcpFesId(OcpFes):
     @staticmethod
     def prepare_ocp(
         model: FesModel = None,
-        n_shooting: list[int] = None,
-        final_time_phase: tuple | list = None,
-        pulse_duration: int | float | list = None,
-        pulse_intensity: int | float | list = None,
-        force_tracking: list = None,
+        final_time: float | int = None,
+        stim_time: list = None,
+        pulse_width: dict = None,
+        pulse_intensity: dict = None,
+        objective: dict = None,
         key_parameter_to_identify: list = None,
         additional_key_settings: dict = None,
         custom_objective: list[Objective] = None,
@@ -47,6 +46,7 @@ class OcpFesId(OcpFes):
         use_sx: bool = True,
         ode_solver: OdeSolver = OdeSolver.RK4(n_integration_steps=1),
         n_threads: int = 1,
+        control_type: ControlType = ControlType.CONSTANT,
         **kwargs,
     ):
         """
@@ -57,16 +57,14 @@ class OcpFesId(OcpFes):
         ----------
         model:  FesModel
             The model used to solve the ocp
-        final_time_phase: tuple, list
+        final_time: float, int
             The final time of each phase, it corresponds to the stimulation apparition time
-        n_shooting: list[int],
-            The number of shooting points for each phase
-        force_tracking: list[np.ndarray, np.ndarray],
-            The force tracking to follow
-        pulse_duration: int | float | list[int] | list[float],
+        pulse_width: dict,
             The duration of the stimulation
-        pulse_intensity: int | float | list[int] | list[float],
+        pulse_intensity: dict,
             The intensity of the stimulation
+        objective: dict,
+            The objective to minimize
         discontinuity_in_ocp: list[int],
             The phases where the continuity is not respected
         ode_solver: OdeSolver
@@ -76,126 +74,133 @@ class OcpFesId(OcpFes):
         n_thread: int
             The number of thread to use while solving (multi-threading if > 1)
         """
+        (
+            pulse_event,
+            pulse_width,
+            pulse_intensity,
+            temp_objective,
+        ) = OcpFes._fill_dict({}, pulse_width, pulse_intensity, {})
 
+        n_shooting = OcpFes.prepare_n_shooting(stim_time, final_time)
         OcpFesId._sanity_check(
             model=model,
-            custom_objective=custom_objective,
+            n_shooting=n_shooting,
+            final_time=final_time,
+            pulse_event=pulse_event,
+            pulse_width=pulse_width,
+            pulse_intensity=pulse_intensity,
+            objective=temp_objective,
             use_sx=use_sx,
             ode_solver=ode_solver,
             n_threads=n_threads,
-            fixed_pulse_duration=pulse_duration,
-            fixed_pulse_intensity=pulse_intensity,
         )
 
         OcpFesId._sanity_check_id(
             model=model,
-            n_shooting=n_shooting,
-            final_time_phase=final_time_phase,
-            force_tracking=force_tracking,
-            pulse_duration=pulse_duration,
+            final_time=final_time,
+            objective=objective,
+            pulse_width=pulse_width,
             pulse_intensity=pulse_intensity,
         )
 
-        n_stim = len(final_time_phase)
-        models = [model for i in range(n_stim)]
+        n_stim = len(stim_time)
 
-        constraints = ConstraintList()
         parameters, parameters_bounds, parameters_init = OcpFesId._set_parameters(
             n_stim=n_stim,
-            stim_apparition_time=final_time_phase,
+            stim_apparition_time=stim_time,
             parameter_to_identify=key_parameter_to_identify,
             parameter_setting=additional_key_settings,
-            pulse_duration=pulse_duration,
+            pulse_width=pulse_width,
             pulse_intensity=pulse_intensity,
             use_sx=use_sx,
         )
-        dynamics = OcpFesId._declare_dynamics(models=models, n_stim=n_stim)
+        dynamics = OcpFesId._declare_dynamics(model=model)
         x_bounds, x_init = OcpFesId._set_bounds(
             model=model,
-            n_stim=n_stim,
-            n_shooting=n_shooting,
-            force_tracking=force_tracking,
+            force_tracking=objective["force_tracking"],
             discontinuity_in_ocp=discontinuity_in_ocp,
         )
-        objective_functions = OcpFesId._set_objective(
-            model=model,
-            n_stim=n_stim,
-            n_shooting=n_shooting,
-            force_tracking=force_tracking,
-            custom_objective=custom_objective,
-        )
-        phase_transitions = OcpFesId._set_phase_transition(discontinuity_in_ocp)
+        objective_functions = OcpFesId._set_objective(model=model, objective=objective)
+
+        if model.is_approximated:
+            constraints = OcpFesId._build_constraints(
+                model=model,
+                n_shooting=n_shooting,
+                final_time=final_time,
+                stim_time=stim_time,
+                control_type=control_type,
+            )
+            u_bounds, u_init = OcpFesId._set_u_bounds(model=model)
+        else:
+            constraints = ConstraintList()
+            u_bounds, u_init = None, None
+
+        # phase_transitions = OcpFesId._set_phase_transition(discontinuity_in_ocp)
 
         return OptimalControlProgram(
-            bio_model=models,
+            bio_model=[model],
             dynamics=dynamics,
             n_shooting=n_shooting,
-            phase_time=final_time_phase,
+            phase_time=final_time,
             x_init=x_init,
             x_bounds=x_bounds,
+            u_init=u_init,
+            u_bounds=u_bounds,
             objective_functions=objective_functions,
             constraints=constraints,
             ode_solver=ode_solver,
-            control_type=ControlType.CONSTANT,
+            control_type=control_type,
             use_sx=use_sx,
             parameters=parameters,
             parameter_bounds=parameters_bounds,
             parameter_init=parameters_init,
-            phase_transitions=phase_transitions,
+            # phase_transitions=phase_transitions,
             n_threads=n_threads,
         )
 
     @staticmethod
     def _sanity_check_id(
         model=None,
-        n_shooting=None,
-        final_time_phase=None,
-        force_tracking=None,
-        pulse_duration=None,
+        final_time=None,
+        objective=None,
+        pulse_width=None,
         pulse_intensity=None,
     ):
-        if not isinstance(n_shooting, list):
-            raise TypeError(f"n_shooting must be list type," f" currently n_shooting is {type(n_shooting)}) type.")
-        else:
-            if not all(isinstance(val, int) for val in n_shooting):
-                raise TypeError(f"n_shooting must be list of int type.")
+        if not isinstance(final_time, int | float):
+            raise TypeError(f"final_time must be int or float type.")
 
-        if isinstance(final_time_phase, tuple):
-            if not all(isinstance(val, int | float) for val in final_time_phase):
-                raise TypeError(f"final_time_phase must be tuple of int or float type.")
-            if len(final_time_phase) != len(n_shooting):
-                raise ValueError(
-                    f"final_time_phase must have same length as n_shooting, currently final_time_phase is {len(final_time_phase)} and n_shooting is {len(n_shooting)}."
-                )
-        else:
+        if not isinstance(objective["force_tracking"], list):
             raise TypeError(
-                f"final_time_phase must be tuple type,"
-                f" currently final_time_phase is {type(final_time_phase)}) type."
-            )
-
-        if not isinstance(force_tracking, list):
-            raise TypeError(
-                f"force_tracking must be list type," f" currently force_tracking is {type(force_tracking)}) type."
+                f"force_tracking must be list type,"
+                f" currently force_tracking is {type(objective['force_tracking'])}) type."
             )
         else:
-            if not all(isinstance(val, int | float) for val in force_tracking):
+            if not all(isinstance(val, int | float) for val in objective["force_tracking"]):
                 raise TypeError(f"force_tracking must be list of int or float type.")
 
-        if isinstance(model, DingModelPulseDurationFrequency):
-            if not isinstance(pulse_duration, list):
+        if isinstance(model, DingModelPulseWidthFrequency):
+            if not isinstance(pulse_width, dict):
                 raise TypeError(
-                    f"pulse_duration must be list type," f" currently pulse_duration is {type(pulse_duration)}) type."
+                    f"pulse_width must be dict type," f" currently pulse_width is {type(pulse_width)}) type."
                 )
 
-        if isinstance(model, DingModelIntensityFrequency):
-            if not isinstance(pulse_intensity, list):
+        if isinstance(model, DingModelPulseIntensityFrequency):
+            if isinstance(pulse_intensity, dict):
+                if not isinstance(pulse_intensity["fixed"], int | float | list):
+                    raise ValueError(f"fixed pulse_intensity must be a int, float or list type.")
+
+            else:
                 raise TypeError(
-                    f"pulse_intensity must be list type,"
+                    f"pulse_intensity must be dict type,"
                     f" currently pulse_intensity is {type(pulse_intensity)}) type."
                 )
 
     @staticmethod
-    def _set_bounds(model=None, n_stim=None, n_shooting=None, force_tracking=None, discontinuity_in_ocp=None):
+    def _set_bounds(
+        model: FesModel = None,
+        force_tracking=None,
+        discontinuity_in_ocp=None,
+    ):
         # ---- STATE BOUNDS REPRESENTATION ---- #
         #
         #                    |‾‾‾‾‾‾‾‾‾‾x_max_middle‾‾‾‾‾‾‾‾‾‾‾‾x_max_end‾
@@ -228,71 +233,52 @@ class OcpFesId(OcpFes):
 
         starting_bounds_min = np.concatenate((starting_bounds, min_bounds, min_bounds), axis=1)
         starting_bounds_max = np.concatenate((starting_bounds, max_bounds, max_bounds), axis=1)
-        middle_bound_min = np.concatenate((min_bounds, min_bounds, min_bounds), axis=1)
-        middle_bound_max = np.concatenate((max_bounds, max_bounds, max_bounds), axis=1)
 
-        for i in range(n_stim):
-            for j in range(len(variable_bound_list)):
-                if i == 0 or i in discontinuity_in_ocp:
-                    x_bounds.add(
-                        variable_bound_list[j],
-                        min_bound=np.array([starting_bounds_min[j]]),
-                        max_bound=np.array([starting_bounds_max[j]]),
-                        phase=i,
-                        interpolation=InterpolationType.CONSTANT_WITH_FIRST_AND_LAST_DIFFERENT,
-                    )
-                else:
-                    x_bounds.add(
-                        variable_bound_list[j],
-                        min_bound=np.array([middle_bound_min[j]]),
-                        max_bound=np.array([middle_bound_max[j]]),
-                        phase=i,
-                        interpolation=InterpolationType.CONSTANT_WITH_FIRST_AND_LAST_DIFFERENT,
-                    )
+        for j in range(len(variable_bound_list)):
+            x_bounds.add(
+                variable_bound_list[j],
+                min_bound=np.array([starting_bounds_min[j]]),
+                max_bound=np.array([starting_bounds_max[j]]),
+                phase=0,
+                interpolation=InterpolationType.CONSTANT_WITH_FIRST_AND_LAST_DIFFERENT,
+            )
 
         x_init = InitialGuessList()
-        for i in range(n_stim):
-            min_node = sum(n_shooting[:i])
-            max_node = sum(n_shooting[: i + 1])
-            force_in_phase = force_tracking[min_node : max_node + 1]
-            if i == n_stim - 1:
-                force_in_phase.append(0)
-            x_init.add("F", np.array([force_in_phase]), phase=i, interpolation=InterpolationType.EACH_FRAME)
-            x_init.add("Cn", [0], phase=i, interpolation=InterpolationType.CONSTANT)
-            if model._with_fatigue:
-                for j in range(len(variable_bound_list)):
-                    if variable_bound_list[j] == "F" or variable_bound_list[j] == "Cn":
-                        pass
-                    else:
-                        x_init.add(variable_bound_list[j], model.standard_rest_values()[j])
+
+        x_init.add(
+            "F",
+            np.array([force_tracking]),
+            phase=0,
+            interpolation=InterpolationType.EACH_FRAME,
+        )
+        x_init.add("Cn", [0], phase=0, interpolation=InterpolationType.CONSTANT)
+        if model._with_fatigue:
+            for j in range(len(variable_bound_list)):
+                if variable_bound_list[j] == "F" or variable_bound_list[j] == "Cn":
+                    pass
+                else:
+                    x_init.add(variable_bound_list[j], model.standard_rest_values()[j])
 
         return x_bounds, x_init
 
     @staticmethod
-    def _set_objective(model, n_stim, n_shooting, force_tracking, custom_objective, **kwargs):
+    def _set_objective(model, objective):
         # Creates the objective for our problem (in this case, match a force curve)
         objective_functions = ObjectiveList()
 
-        if force_tracking:
-            node_idx = 0
-            for i in range(n_stim):
-                for j in range(n_shooting[i]):
-                    objective_functions.add(
-                        CustomObjective.track_state_from_time_interpolate,
-                        custom_type=ObjectiveFcn.Mayer,
-                        node=j,
-                        force=force_tracking[node_idx],
-                        key="F",
-                        minimization_type="best fit" if model._with_fatigue else "least square",
-                        quadratic=True,
-                        weight=1,
-                        phase=i,
-                    )
-                    node_idx += 1
+        if objective["force_tracking"]:
+            objective_functions.add(
+                ObjectiveFcn.Lagrange.TRACK_STATE,
+                key="F",
+                weight=1,
+                target=np.array(objective["force_tracking"])[np.newaxis, :],
+                node=Node.ALL,
+                quadratic=True,
+            )
 
-        if custom_objective:
-            for i in range(len(custom_objective)):
-                objective_functions.add(custom_objective[i])
+        if "custom" in objective and objective["custom"] is not None:
+            for i in range(len(objective["custom"])):
+                objective_functions.add(objective["custom"][i])
 
         return objective_functions
 
@@ -303,12 +289,28 @@ class OcpFesId(OcpFes):
         parameter_to_identify,
         parameter_setting,
         use_sx,
-        pulse_duration=None,
-        pulse_intensity=None,
+        pulse_width: dict = None,
+        pulse_intensity: dict = None,
     ):
         parameters = ParameterList(use_sx=use_sx)
         parameters_bounds = BoundsList()
         parameters_init = InitialGuessList()
+
+        parameters.add(
+            name="pulse_apparition_time",
+            function=DingModelFrequency.set_pulse_apparition_time,
+            size=n_stim,
+            scaling=VariableScaling("pulse_apparition_time", [1] * n_stim),
+        )
+
+        parameters_init["pulse_apparition_time"] = np.array(stim_apparition_time)
+
+        parameters_bounds.add(
+            "pulse_apparition_time",
+            min_bound=stim_apparition_time,
+            max_bound=stim_apparition_time,
+            interpolation=InterpolationType.CONSTANT,
+        )
 
         for i in range(len(parameter_to_identify)):
             parameters.add(
@@ -316,7 +318,8 @@ class OcpFesId(OcpFes):
                 function=parameter_setting[parameter_to_identify[i]]["function"],
                 size=1,
                 scaling=VariableScaling(
-                    parameter_to_identify[i], [parameter_setting[parameter_to_identify[i]]["scaling"]]
+                    parameter_to_identify[i],
+                    [parameter_setting[parameter_to_identify[i]]["scaling"]],
                 ),
             )
             parameters_bounds.add(
@@ -330,60 +333,111 @@ class OcpFesId(OcpFes):
                 initial_guess=np.array([parameter_setting[parameter_to_identify[i]]["initial_guess"]]),
             )
 
-        if pulse_duration:
+        if pulse_width["fixed"]:
             parameters.add(
-                name="pulse_duration",
-                function=DingModelPulseDurationFrequency.set_impulse_duration,
+                name="pulse_width",
+                function=DingModelPulseWidthFrequency.set_impulse_width,
                 size=n_stim,
-                scaling=VariableScaling("pulse_duration", [1] * n_stim),
+                scaling=VariableScaling("pulse_width", [1] * n_stim),
             )
-            if isinstance(pulse_duration, list):
+            if isinstance(pulse_width["fixed"], list):
                 parameters_bounds.add(
-                    "pulse_duration",
-                    min_bound=np.array(pulse_duration),
-                    max_bound=np.array(pulse_duration),
+                    "pulse_width",
+                    min_bound=np.array(pulse_width["fixed"]),
+                    max_bound=np.array(pulse_width["fixed"]),
                     interpolation=InterpolationType.CONSTANT,
                 )
-                parameters_init.add(key="pulse_duration", initial_guess=np.array(pulse_duration))
+                parameters_init.add(key="pulse_width", initial_guess=np.array(pulse_width["fixed"]))
             else:
                 parameters_bounds.add(
-                    "pulse_duration",
-                    min_bound=np.array([pulse_duration] * n_stim),
-                    max_bound=np.array([pulse_duration] * n_stim),
+                    "pulse_width",
+                    min_bound=np.array([pulse_width["fixed"]] * n_stim),
+                    max_bound=np.array([pulse_width["fixed"]] * n_stim),
                     interpolation=InterpolationType.CONSTANT,
                 )
-                parameters_init.add(key="pulse_duration", initial_guess=np.array([pulse_duration] * n_stim))
+                parameters_init.add(
+                    key="pulse_width",
+                    initial_guess=np.array([pulse_width] * n_stim),
+                )
 
-        if pulse_intensity:
+        if pulse_intensity["fixed"]:
             parameters.add(
                 name="pulse_intensity",
-                function=DingModelIntensityFrequency.set_impulse_intensity,
+                function=DingModelPulseIntensityFrequency.set_impulse_intensity,
                 size=n_stim,
                 scaling=VariableScaling("pulse_intensity", [1] * n_stim),
             )
-            if isinstance(pulse_intensity, list):
+            if isinstance(pulse_intensity["fixed"], list):
                 parameters_bounds.add(
                     "pulse_intensity",
-                    min_bound=np.array(pulse_intensity),
-                    max_bound=np.array(pulse_intensity),
+                    min_bound=np.array(pulse_intensity["fixed"]),
+                    max_bound=np.array(pulse_intensity["fixed"]),
                     interpolation=InterpolationType.CONSTANT,
                 )
-                parameters_init.add(key="pulse_intensity", initial_guess=np.array(pulse_intensity))
+                parameters_init.add(key="pulse_intensity", initial_guess=np.array(pulse_intensity["fixed"]))
             else:
                 parameters_bounds.add(
                     "pulse_intensity",
-                    min_bound=np.array([pulse_intensity] * n_stim),
-                    max_bound=np.array([pulse_intensity] * n_stim),
+                    min_bound=np.array([pulse_intensity["fixed"]] * n_stim),
+                    max_bound=np.array([pulse_intensity["fixed"]] * n_stim),
                     interpolation=InterpolationType.CONSTANT,
                 )
-                parameters_init.add(key="pulse_intensity", initial_guess=np.array([pulse_intensity] * n_stim))
+                parameters_init.add(
+                    key="pulse_intensity",
+                    initial_guess=np.array([pulse_intensity["fixed"]] * n_stim),
+                )
 
         return parameters, parameters_bounds, parameters_init
+
+    @staticmethod
+    def _build_constraints(model, n_shooting, final_time, stim_time, control_type):
+        constraints = ConstraintList()
+
+        time_vector = np.linspace(0, final_time, n_shooting + 1)
+        stim_at_node = [np.where(stim_time[i] <= time_vector)[0][0] for i in range(len(stim_time))]
+        additional_nodes = 1 if control_type == ControlType.LINEAR_CONTINUOUS else 0
+        if model._sum_stim_truncation:
+            max_stim_to_keep = model._sum_stim_truncation
+        else:
+            max_stim_to_keep = 10000000
+
+        index_sup = 0
+        index_inf = 0
+        stim_index = []
+        for i in range(n_shooting + additional_nodes):
+            if i in stim_at_node:
+                index_sup += 1
+                if index_sup >= max_stim_to_keep:
+                    index_inf = index_sup - max_stim_to_keep
+                stim_index = [i for i in range(index_inf, index_sup)]
+
+            constraints.add(
+                CustomConstraint.cn_sum_identification,
+                node=i,
+                stim_time=stim_time[index_inf:index_sup],
+                stim_index=stim_index,
+            )
+
+        if isinstance(model, DingModelPulseWidthFrequency):
+            index_sup = 0
+            for i in range(n_shooting + additional_nodes):
+                if i in stim_at_node and i != 0:
+                    index_sup += 1
+                constraints.add(
+                    CustomConstraint.a_calculation_identification,
+                    node=i,
+                    last_stim_index=index_sup,
+                )
+
+        return constraints
 
     @staticmethod
     def _set_phase_transition(discontinuity_in_ocp):
         phase_transitions = PhaseTransitionList()
         if discontinuity_in_ocp:
             for i in range(len(discontinuity_in_ocp)):
-                phase_transitions.add(PhaseTransitionFcn.DISCONTINUOUS, phase_pre_idx=discontinuity_in_ocp[i] - 1)
+                phase_transitions.add(
+                    PhaseTransitionFcn.DISCONTINUOUS,
+                    phase_pre_idx=discontinuity_in_ocp[i] - 1,
+                )
         return phase_transitions

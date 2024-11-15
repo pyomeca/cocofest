@@ -58,7 +58,10 @@ for mode in modes:
                 "n_stim": n_stim,
                 "pulse_mode": mode,
             }
-            ivp_parameters = {"n_shooting": temp_node_shooting, "final_time": 1, "use_sx": True}
+            ivp_parameters = {
+                "final_time": 1,
+                "use_sx": True,
+            }
             ivp = IvpFes(
                 fes_parameters=fes_parameters,
                 ivp_parameters=ivp_parameters,

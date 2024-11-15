@@ -1,33 +1,35 @@
 """
-This example will do a 10 stimulation example with Ding's 2007 pulse duration and frequency model.
+This example will do a 10 stimulation example with Ding's 2007 pulse width and frequency model.
 This ocp was build to match a force value of 200N at the end of the last node.
 """
 
-from cocofest import DingModelPulseDurationFrequencyWithFatigue, OcpFes
+from bioptim import Solver
+from cocofest import OcpFes, ModelMaker
 
 # --- Build ocp --- #
 # This ocp was build to match a force value of 200N at the end of the last node.
 # The stimulation will be optimized between 0.01 to 0.1 seconds and are equally spaced (a fixed frequency).
-# Plus the pulsation duration will be optimized between 0 and 0.0006 seconds and are not the same across the problem.
+# Plus the pulsation width will be optimized between 0 and 0.0006 seconds and are not the same across the problem.
 # The flag with_fatigue is set to True by default, this will include the fatigue model
-minimum_pulse_duration = DingModelPulseDurationFrequencyWithFatigue().pd0
+
+model = ModelMaker.create_model("ding2007_with_fatigue", is_approximated=False)
+
+minimum_pulse_width = model.pd0
 ocp = OcpFes().prepare_ocp(
-    model=DingModelPulseDurationFrequencyWithFatigue(),
-    n_stim=10,
-    n_shooting=20,
-    final_time=1,
-    pulse_event={"min": 0.01, "max": 0.1, "bimapping": True},
-    pulse_duration={
-        "min": minimum_pulse_duration,
+    model=model,
+    stim_time=[0, 0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 0.45],
+    final_time=0.5,
+    pulse_width={
+        "min": minimum_pulse_width,
         "max": 0.0006,
-        "bimapping": False,
+        "bimapping": True,
     },
-    objective={"end_node_tracking": 200},
+    objective={"end_node_tracking": 100},
     use_sx=True,
+    n_threads=5,
 )
 
 # --- Solve the program --- #
-sol = ocp.solve()
-
+sol = ocp.solve(Solver.IPOPT(_hessian_approximation="limited-memory"))
 # --- Show results --- #
 sol.graphs()

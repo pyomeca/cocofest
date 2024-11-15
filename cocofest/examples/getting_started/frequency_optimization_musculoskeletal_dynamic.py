@@ -5,35 +5,35 @@ The stimulation frequency will be optimized between 10 and 100 Hz to satisfy the
 elbow torque control.
 """
 
-from bioptim import (
-    ObjectiveFcn,
-    ObjectiveList,
-    Solver,
-)
+import numpy as np
 
-from cocofest import DingModelFrequencyWithFatigue, OcpFesMsk
+from cocofest import DingModelFrequencyWithFatigue, OcpFesMsk, FesMskModel
 
 
-objective_functions = ObjectiveList()
-n_stim = 10
-for i in range(n_stim):
-    objective_functions.add(ObjectiveFcn.Lagrange.MINIMIZE_CONTROL, key="tau", weight=1, quadratic=True, phase=i)
-
-ocp = OcpFesMsk.prepare_ocp(
-    biorbd_model_path="../msk_models/arm26_biceps_1dof.bioMod",
-    bound_type="start_end",
-    bound_data=[[5], [120]],
-    fes_muscle_models=[DingModelFrequencyWithFatigue(muscle_name="BIClong")],
-    n_stim=n_stim,
-    n_shooting=10,
-    final_time=1,
-    pulse_event={"min": 0.01, "max": 0.1, "bimapping": True},
-    objective={"custom": objective_functions},
-    with_residual_torque=True,
+model = FesMskModel(
+    name=None,
+    biorbd_path="../msk_models/arm26_biceps_1dof.bioMod",
+    muscles_model=[DingModelFrequencyWithFatigue(muscle_name="BIClong")],
     activate_force_length_relationship=True,
     activate_force_velocity_relationship=True,
+    activate_residual_torque=True,
 )
 
-sol = ocp.solve(Solver.IPOPT(_max_iter=1000))
+ocp = OcpFesMsk.prepare_ocp(
+    model=model,
+    stim_time=list(np.round(np.linspace(0, 1, 11)[:-1], 2)),
+    final_time=1,
+    pulse_event={"min": 0.01, "max": 0.1, "bimapping": True},
+    objective={"minimize_residual_torque": True},
+    msk_info={
+        "with_residual_torque": True,
+        "bound_type": "start_end",
+        "bound_data": [[5], [120]],
+    },
+    use_sx=True,
+    n_threads=5,
+)
+
+sol = ocp.solve()
 sol.animate()
 sol.graphs(show_bounds=False)

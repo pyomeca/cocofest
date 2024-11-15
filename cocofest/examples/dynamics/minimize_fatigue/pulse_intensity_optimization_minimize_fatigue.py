@@ -7,17 +7,11 @@ Intensity can be optimized from sensitivity threshold to 130mA. No residual torq
 
 import numpy as np
 
-from bioptim import (
-    Node,
-    ObjectiveFcn,
-    ObjectiveList,
-    Solver,
-)
+from bioptim import Node, ObjectiveFcn, ObjectiveList, Solver
 
-from cocofest import DingModelIntensityFrequencyWithFatigue, OcpFesMsk
+from cocofest import DingModelPulseIntensityFrequencyWithFatigue, OcpFesMsk, FesMskModel
 
-n_stim = 10
-n_shooting = 10
+
 objective_functions = ObjectiveList()
 objective_functions.add(
     ObjectiveFcn.Mayer.MINIMIZE_STATE,
@@ -27,34 +21,40 @@ objective_functions.add(
     target=np.array([[0, 0]]).T,
     weight=100,
     quadratic=True,
-    phase=n_stim - 1,
+    phase=0,
 )
 
-minimum_pulse_intensity = DingModelIntensityFrequencyWithFatigue.min_pulse_intensity(
-    DingModelIntensityFrequencyWithFatigue()
+minimum_pulse_intensity = DingModelPulseIntensityFrequencyWithFatigue.min_pulse_intensity(
+    DingModelPulseIntensityFrequencyWithFatigue()
+)
+model = FesMskModel(
+    name=None,
+    biorbd_path="../../msk_models/arm26_biceps_triceps.bioMod",
+    muscles_model=[
+        DingModelPulseIntensityFrequencyWithFatigue(muscle_name="BIClong"),
+        DingModelPulseIntensityFrequencyWithFatigue(muscle_name="TRIlong"),
+    ],
+    activate_force_length_relationship=True,
+    activate_force_velocity_relationship=True,
+    activate_residual_torque=False,
 )
 
 ocp = OcpFesMsk.prepare_ocp(
-    biorbd_model_path="../../msk_models/arm26_biceps_triceps.bioMod",
-    bound_type="start_end",
-    bound_data=[[0, 5], [0, 90]],
-    fes_muscle_models=[
-        DingModelIntensityFrequencyWithFatigue(muscle_name="BIClong"),
-        DingModelIntensityFrequencyWithFatigue(muscle_name="TRIlong"),
-    ],
-    n_stim=n_stim,
-    n_shooting=10,
+    model=model,
+    stim_time=list(np.linspace(0, 1, 11))[:-1],
     final_time=1,
     pulse_intensity={
         "min": minimum_pulse_intensity,
         "max": 130,
         "bimapping": False,
     },
-    with_residual_torque=False,
-    objective={"custom": objective_functions},
-    activate_force_length_relationship=True,
-    activate_force_velocity_relationship=False,
-    minimize_muscle_fatigue=True,
+    objective={"custom": objective_functions, "minimize_fatigue": True},
+    msk_info={
+        "with_residual_torque": False,
+        "bound_type": "start_end",
+        "bound_data": [[0, 5], [0, 90]],
+    },
+    n_threads=5,
 )
 
 sol = ocp.solve(Solver.IPOPT(_max_iter=1000))

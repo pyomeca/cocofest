@@ -127,11 +127,9 @@ def average_data_extraction(model_data_path):
         model_time_data = [item for sublist in model_time_data for item in sublist]
 
         model_time_data = model_time_data[:smallest_list]
-        train_duration = 1
+        train_width = 1
 
-        average_stim_apparition = np.linspace(0, train_duration, int(stimulation_temp_frequency * train_duration) + 1)[
-            :-1
-        ]
+        average_stim_apparition = np.linspace(0, train_width, int(stimulation_temp_frequency * train_duration) + 1)[:-1]
         average_stim_apparition = [time for time in average_stim_apparition]
         if i == len(model_data_path) - 1:
             average_stim_apparition = np.append(average_stim_apparition, model_time_data[-1]).tolist()
@@ -252,7 +250,7 @@ def sparse_data_extraction(model_data_path, force_curve_number=5):
     # )
 
 
-def force_at_node_in_ocp(time, force, n_shooting, final_time_phase, sparse=None):
+def force_at_node_in_ocp(time, force, n_shooting, final_time, sparse=None):
     """
     Interpolates the force at each node in the optimal control problem (OCP).
 
@@ -262,10 +260,8 @@ def force_at_node_in_ocp(time, force, n_shooting, final_time_phase, sparse=None)
         List of time data.
     force : list
         List of force data.
-    n_shooting : list
+    n_shooting : int
         List of number of shooting points for each phase.
-    final_time_phase : list
-        List of final time for each phase.
     sparse : int, optional
         Number of sparse points, by default None.
 
@@ -275,52 +271,8 @@ def force_at_node_in_ocp(time, force, n_shooting, final_time_phase, sparse=None)
         List of force at each node in the OCP.
     """
 
-    temp_time = []
-    for i in range(len(final_time_phase)):
-        for j in range(n_shooting[i]):
-            temp_time.append(sum(final_time_phase[:i]) + j * final_time_phase[i] / (n_shooting[i]))
-    force_at_node = np.interp(temp_time, time, force).tolist()
+    temp_time = np.linspace(0, final_time, n_shooting + 1)
+    force_at_node = list(np.interp(temp_time, time, force))
     # if sparse:  # TODO check this part
     #     force_at_node = force_at_node[0:sparse] + force_at_node[:-sparse]
     return force_at_node
-
-
-def node_shooting_list_creation(stim, stimulated_n_shooting):
-    """
-    Creates a list of node shooting points.
-
-    Parameters
-    ----------
-    stim : list
-        List of stimulation times.
-    stimulated_n_shooting : int
-        Number of shooting points for stimulated phase.
-
-    Returns
-    -------
-    tuple
-        A tuple containing the list of number of shooting points for each phase and the final time for each phase.
-    """
-
-    first_final_time = stim[1] if stim[0] == 0 else stim[0]
-    final_time_phase = (first_final_time,)
-    for i in range(1, len(stim)):
-        final_time_phase = final_time_phase + (stim[i] - stim[i - 1],)
-
-    threshold_stimulation_interval = np.mean(final_time_phase)
-    stimulation_interval_average_without_rest_time = np.delete(
-        np.array(final_time_phase),
-        np.where(np.logical_or(final_time_phase > threshold_stimulation_interval, np.array(final_time_phase) == 0)),
-    )
-    stimulation_interval_average = np.mean(stimulation_interval_average_without_rest_time)
-    n_shooting = []
-
-    for i in range(len(final_time_phase)):
-        if final_time_phase[i] > threshold_stimulation_interval:
-            temp_final_time = final_time_phase[i]
-            rest_n_shooting = int((temp_final_time / stimulation_interval_average) * stimulated_n_shooting)
-            n_shooting.append(rest_n_shooting)
-        else:
-            n_shooting.append(stimulated_n_shooting)
-
-    return n_shooting, final_time_phase

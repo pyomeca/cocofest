@@ -6,7 +6,11 @@ import biorbd
 
 # This function gets the x, y, z circle coordinates based on the angle theta
 def get_circle_coord(
-    theta: int | float, x_center: int | float, y_center: int | float, radius: int | float, z: int | float = None
+    theta: int | float,
+    x_center: int | float,
+    y_center: int | float,
+    radius: int | float,
+    z: int | float = None,
 ) -> list:
     """
     Get the x, y, z coordinates of a circle based on the angle theta and the center of the circle

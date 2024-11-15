@@ -8,8 +8,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 pickle_path = [
-    r"../result_file/pulse_duration_minimize_muscle_force.pkl",
-    r"../result_file/pulse_duration_minimize_muscle_fatigue.pkl",
+    r"../result_file/pulse_width_minimize_muscle_force.pkl",
+    r"../result_file/pulse_width_minimize_muscle_fatigue.pkl",
 ]
 
 with open(pickle_path[0], "rb") as f:
@@ -18,8 +18,22 @@ with open(pickle_path[0], "rb") as f:
 with open(pickle_path[1], "rb") as f:
     data_minimize_fatigue = pickle.load(f)
 
-force_muscle_keys = ["F_BIClong", "F_BICshort", "F_TRIlong", "F_TRIlat", "F_TRImed", "F_BRA"]
-fatigue_muscle_keys = ["A_BIClong", "A_BICshort", "A_TRIlong", "A_TRIlat", "A_TRImed", "A_BRA"]
+force_muscle_keys = [
+    "F_BIClong",
+    "F_BICshort",
+    "F_TRIlong",
+    "F_TRIlat",
+    "F_TRImed",
+    "F_BRA",
+]
+fatigue_muscle_keys = [
+    "A_BIClong",
+    "A_BICshort",
+    "A_TRIlong",
+    "A_TRIlat",
+    "A_TRImed",
+    "A_BRA",
+]
 muscle_names = ["BIClong", "BICshort", "TRIlong", "TRIlat", "TRImed", "BRA"]
 
 # Force graph
@@ -56,8 +70,16 @@ for j in range(2):
                 xticklabels=[0, 0.5, 1, 1.5],
             )
 
-        axs[i][j].plot(data_minimize_force["time"], data_minimize_force["states"][force_muscle_keys[index]], lw=5)
-        axs[i][j].plot(data_minimize_fatigue["time"], data_minimize_fatigue["states"][force_muscle_keys[index]], lw=5)
+        axs[i][j].plot(
+            data_minimize_force["time"],
+            data_minimize_force["states"][force_muscle_keys[index]],
+            lw=5,
+        )
+        axs[i][j].plot(
+            data_minimize_fatigue["time"],
+            data_minimize_fatigue["states"][force_muscle_keys[index]],
+            lw=5,
+        )
         axs[i][j].text(
             0.5,
             0.9,
@@ -76,7 +98,16 @@ for j in range(2):
 
         index += 1
 
-fig.text(0.5, 0.02, "Time (s)", ha="center", va="center", fontsize=18, weight="bold", font="Times New Roman")
+fig.text(
+    0.5,
+    0.02,
+    "Time (s)",
+    ha="center",
+    va="center",
+    fontsize=18,
+    weight="bold",
+    font="Times New Roman",
+)
 fig.text(
     0.025,
     0.5,
@@ -89,7 +120,10 @@ fig.text(
     font="Times New Roman",
 )
 fig.legend(
-    ["Force", "Fatigue"], loc="upper right", ncol=1, prop={"family": "Times New Roman", "size": 14, "weight": "bold"}
+    ["Force", "Fatigue"],
+    loc="upper right",
+    ncol=1,
+    prop={"family": "Times New Roman", "size": 14, "weight": "bold"},
 )
 plt.show()
 
@@ -145,9 +179,21 @@ fig.text(
     weight="bold",
     font="Times New Roman",
 )
-axs[1].text(0.75, -25, "Time (s)", ha="center", va="center", fontsize=18, weight="bold", font="Times New Roman")
+axs[1].text(
+    0.75,
+    -25,
+    "Time (s)",
+    ha="center",
+    va="center",
+    fontsize=18,
+    weight="bold",
+    font="Times New Roman",
+)
 fig.legend(
-    ["Force", "Fatigue"], loc="upper right", ncol=1, prop={"family": "Times New Roman", "size": 14, "weight": "bold"}
+    ["Force", "Fatigue"],
+    loc="upper right",
+    ncol=1,
+    prop={"family": "Times New Roman", "size": 14, "weight": "bold"},
 )
 plt.show()
 
@@ -192,8 +238,18 @@ plt.setp(
 a_force_sum_percentage = (np.array(a_force_sum_list) / a_sum_base_line) * 100
 a_fatigue_sum_percentage = (np.array(a_fatigue_sum_list) / a_sum_base_line) * 100
 
-axs.plot(data_minimize_force["time"], a_force_sum_percentage, lw=5, label="Minimize force production")
-axs.plot(data_minimize_force["time"], a_fatigue_sum_percentage, lw=5, label="Maximize muscle capacity")
+axs.plot(
+    data_minimize_force["time"],
+    a_force_sum_percentage,
+    lw=5,
+    label="Minimize force production",
+)
+axs.plot(
+    data_minimize_force["time"],
+    a_fatigue_sum_percentage,
+    lw=5,
+    label="Maximize muscle capacity",
+)
 
 axs.set_xlim(left=0, right=1.5)
 

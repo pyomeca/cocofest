@@ -1,7 +1,7 @@
 from typing import Callable
 
 import numpy as np
-from casadi import MX, exp, vertcat
+from casadi import MX, exp, vertcat, if_else
 
 from bioptim import (
     ConfigureProblem,
@@ -10,7 +10,7 @@ from bioptim import (
     OptimalControlProgram,
 )
 
-from .state_configue import StateConfigure
+from .state_configure import StateConfigure
 from .fes_model import FesModel
 
 
@@ -34,22 +34,34 @@ class DingModelFrequency(FesModel):
         model_name: str = "ding2003",
         muscle_name: str = None,
         sum_stim_truncation: int = None,
+        is_approximated: bool = False,
     ):
         super().__init__()
         self._model_name = model_name
         self._muscle_name = muscle_name
         self._sum_stim_truncation = sum_stim_truncation
         self._with_fatigue = False
+        self.is_approximated = is_approximated
         self.pulse_apparition_time = None
+        self.stim_prev = []
+
+        # --- Default values --- #
+        TAUC_DEFAULT = 0.020  # Value from Ding's experimentation [1] (s)
+        R0_KM_RELATIONSHIP_DEFAULT = 1.04  # (unitless)
+        A_REST_DEFAULT = 3009  # Value from Ding's experimentation [1] (N.s-1)
+        TAU1_REST_DEFAULT = 0.050957  # Value from Ding's experimentation [1] (s)
+        TAU2_DEFAULT = 0.060  # Close value from Ding's experimentation [2] (s)
+        KM_REST_DEFAULT = 0.103  # Value from Ding's experimentation [1] (unitless)
+
         # ---- Custom values for the example ---- #
-        self.tauc = 0.020  # Value from Ding's experimentation [1] (s)
-        self.r0_km_relationship = 1.04  # (unitless)
+        self.tauc = TAUC_DEFAULT  # Value from Ding's experimentation [1] (s)
+        self.r0_km_relationship = R0_KM_RELATIONSHIP_DEFAULT  # (unitless)
         # ---- Different values for each person ---- #
         # ---- Force models ---- #
-        self.a_rest = 3009  # Value from Ding's experimentation [1] (N.s-1)
-        self.tau1_rest = 0.050957  # Value from Ding's experimentation [1] (s)
-        self.tau2 = 0.060  # Close value from Ding's experimentation [2] (s)
-        self.km_rest = 0.103  # Value from Ding's experimentation [1] (unitless)
+        self.a_rest = A_REST_DEFAULT
+        self.tau1_rest = TAU1_REST_DEFAULT
+        self.tau2 = TAU2_DEFAULT
+        self.km_rest = KM_REST_DEFAULT
 
     def set_a_rest(self, model, a_rest: MX | float):
         # models is required for bioptim compatibility
@@ -111,7 +123,29 @@ class DingModelFrequency(FesModel):
 
     @property
     def identifiable_parameters(self):
-        return {"a_rest": self.a_rest, "tau1_rest": self.tau1_rest, "km_rest": self.km_rest, "tau2": self.tau2}
+        return {
+            "a_rest": self.a_rest,
+            "tau1_rest": self.tau1_rest,
+            "km_rest": self.km_rest,
+            "tau2": self.tau2,
+        }
+
+    @property
+    def km_name(self) -> str:
+        muscle_name = "_" + self.muscle_name if self.muscle_name else ""
+        return "Km" + muscle_name
+
+    @property
+    def cn_sum_name(self):
+        muscle_name = "_" + self.muscle_name if self.muscle_name else ""
+        return "Cn_sum" + muscle_name
+
+    def get_r0(self, km: MX | float) -> MX | float:
+        return km + self.r0_km_relationship
+
+    @staticmethod
+    def get_lambda_i(nb_stim: int, pulse_intensity: MX | float) -> list[MX | float]:
+        return [1 for _ in range(nb_stim)]
 
     # ---- Model's dynamics ---- #
     def system_dynamics(
@@ -120,6 +154,7 @@ class DingModelFrequency(FesModel):
         f: MX,
         t: MX = None,
         t_stim_prev: list[MX] | list[float] = None,
+        cn_sum: MX | float = None,
         force_length_relationship: MX | float = 1,
         force_velocity_relationship: MX | float = 1,
     ) -> MX:
@@ -133,9 +168,11 @@ class DingModelFrequency(FesModel):
         f: MX
             The value of the force (N)
         t: MX
-            The current time at which the dynamics is evaluated (ms)
-        t_stim_prev: list[MX]
-            The time list of the previous stimulations (ms)
+            The current time at which the dynamics is evaluated (s)
+        t_stim_prev: list[MX] | list[float]
+            The time list of the previous stimulations (s)
+        cn_sum: MX | float
+            The sum of the ca_troponin_complex (unitless)
         force_length_relationship: MX | float
             The force length relationship value (unitless)
         force_velocity_relationship: MX | float
@@ -145,8 +182,7 @@ class DingModelFrequency(FesModel):
         -------
         The value of the derivative of each state dx/dt at the current time t
         """
-        r0 = self.km_rest + self.r0_km_relationship  # Simplification
-        cn_dot = self.cn_dot_fun(cn, r0, t, t_stim_prev=t_stim_prev)  # Equation n°1
+        cn_dot = self.calculate_cn_dot(cn, cn_sum, t, t_stim_prev)
         f_dot = self.f_dot_fun(
             cn,
             f,
@@ -188,7 +224,7 @@ class DingModelFrequency(FesModel):
         """
         return 1 + (r0 - 1) * exp(-time_between_stim / self.tauc)  # Part of Eq n°1
 
-    def cn_sum_fun(self, r0: MX | float, t: MX, t_stim_prev: list[MX]) -> MX | float:
+    def cn_sum_fun(self, r0: MX | float, t: MX, t_stim_prev: list[MX], lambda_i: list[MX]) -> MX | float:
         """
         Parameters
         ----------
@@ -204,41 +240,37 @@ class DingModelFrequency(FesModel):
         A part of the n°1 equation
         """
         sum_multiplier = 0
-        enough_stim_to_truncate = self._sum_stim_truncation and len(t_stim_prev) > self._sum_stim_truncation
-        if enough_stim_to_truncate:
-            t_stim_prev = t_stim_prev[-self._sum_stim_truncation - 1 :]
-        if len(t_stim_prev) == 1:
-            ri = 1
-            exp_time = self.exp_time_fun(t, t_stim_prev[0])  # Part of Eq n°1
-            sum_multiplier += ri * exp_time  # Part of Eq n°1
-        else:
-            for i in range(1, len(t_stim_prev)):
-                previous_phase_time = t_stim_prev[i] - t_stim_prev[i - 1]
-                ri = self.ri_fun(r0, previous_phase_time)  # Part of Eq n°1
-                exp_time = self.exp_time_fun(t, t_stim_prev[i])  # Part of Eq n°1
-                sum_multiplier += ri * exp_time  # Part of Eq n°1
+
+        for i in range(len(t_stim_prev)):
+            previous_phase_time = t_stim_prev[i] - t_stim_prev[i - 1]
+            ri = 1 if i == 0 else self.ri_fun(r0, previous_phase_time)  # Part of Eq n°1
+            exp_time = self.exp_time_fun(t, t_stim_prev[i])  # Part of Eq n°1
+            coefficient = 1 if self.is_approximated else if_else(t_stim_prev[i] <= t, 1, 0)
+            sum_multiplier += ri * exp_time * lambda_i[i] * coefficient
         return sum_multiplier
 
-    def cn_dot_fun(self, cn: MX, r0: MX | float, t: MX, t_stim_prev: list[MX]) -> MX | float:
+    def cn_dot_fun(self, cn: MX, cn_sum: MX) -> MX | float:
         """
         Parameters
         ----------
         cn: MX
             The previous step value of ca_troponin_complex (unitless)
-        r0: MX | float
-            Mathematical term characterizing the magnitude of enhancement in CN from the following stimuli (unitless)
-        t: MX
-            The current time at which the dynamics is evaluated (ms)
-        t_stim_prev: list[MX]
-            The time list of the previous stimulations (ms)
 
         Returns
         -------
         The value of the derivative ca_troponin_complex (unitless)
         """
-        sum_multiplier = self.cn_sum_fun(r0, t, t_stim_prev=t_stim_prev)  # Part of Eq n°1
 
-        return (1 / self.tauc) * sum_multiplier - (cn / self.tauc)  # Equation n°1
+        return (1 / self.tauc) * cn_sum - (cn / self.tauc)  # Equation n°1
+
+    def calculate_cn_dot(self, cn, cn_sum, t, t_stim_prev, pulse_intensity=1):
+        if self.is_approximated:
+            return self.cn_dot_fun(cn=cn, cn_sum=cn_sum)
+        else:
+            cn_sum = self.cn_sum_fun(
+                self.get_r0(self.km_rest), t, t_stim_prev, self.get_lambda_i(len(t_stim_prev), pulse_intensity)
+            )
+            return self.cn_dot_fun(cn, cn_sum)
 
     def f_dot_fun(
         self,
@@ -287,7 +319,6 @@ class DingModelFrequency(FesModel):
         algebraic_states: MX,
         numerical_timeseries: MX,
         nlp: NonLinearProgram,
-        stim_prev: list[MX] = None,
         fes_model=None,
         force_length_relationship: MX | float = 1,
         force_velocity_relationship: MX | float = 1,
@@ -311,8 +342,6 @@ class DingModelFrequency(FesModel):
             The numerical timeseries of the system
         nlp: NonLinearProgram
             A reference to the phase
-        stim_prev: list[MX]
-            The time list of the previous stimulations (s)
         fes_model: DingModelFrequency
             The current phase fes model
         force_length_relationship: MX | float
@@ -323,19 +352,15 @@ class DingModelFrequency(FesModel):
         -------
         The derivative of the states in the tuple[MX] format
         """
+        model = fes_model if fes_model else nlp.model
+        dxdt_fun = model.system_dynamics
+        stim_apparition = None
+        cn_sum = None
 
-        dxdt_fun = fes_model.system_dynamics if fes_model else nlp.model.system_dynamics
-        stim_apparition = (
-            (
-                fes_model.get_stim_prev(nlp=nlp, parameters=parameters, idx=nlp.phase_idx)
-                if fes_model
-                else nlp.model.get_stim_prev(nlp=nlp, parameters=parameters, idx=nlp.phase_idx)
-            )
-            if stim_prev is None
-            else stim_prev
-        )  # Get the previous stimulation apparition time from the parameters
-        # if not provided from stim_prev, this way of getting the list is not optimal, but it is the only way to get it.
-        # Otherwise, it will create issues with free variables or wrong mx or sx type while calculating the dynamics
+        if model.is_approximated:
+            cn_sum = controls[0]
+        else:
+            stim_apparition = model.get_stim(nlp=nlp, parameters=parameters)
 
         return DynamicsEvaluation(
             dxdt=dxdt_fun(
@@ -343,13 +368,17 @@ class DingModelFrequency(FesModel):
                 f=states[1],
                 t=time,
                 t_stim_prev=stim_apparition,
+                cn_sum=cn_sum,
                 force_length_relationship=force_length_relationship,
                 force_velocity_relationship=force_velocity_relationship,
             ),
         )
 
     def declare_ding_variables(
-        self, ocp: OptimalControlProgram, nlp: NonLinearProgram, numerical_data_timeseries: dict[str, np.ndarray] = None
+        self,
+        ocp: OptimalControlProgram,
+        nlp: NonLinearProgram,
+        numerical_data_timeseries: dict[str, np.ndarray] = None,
     ):
         """
         Tell the program which variables are states and controls.
@@ -364,15 +393,12 @@ class DingModelFrequency(FesModel):
             A list of values to pass to the dynamics at each node. Experimental external forces should be included here.
         """
         StateConfigure().configure_all_fes_model_states(ocp, nlp, fes_model=self)
-        stim_prev = (
-            self._build_t_stim_prev(ocp, nlp.phase_idx)
-            if "pulse_apparition_time" not in nlp.parameters.keys()
-            else None
-        )
-        ConfigureProblem.configure_dynamics_function(ocp, nlp, dyn_func=self.dynamics, stim_prev=stim_prev)
+        if self.is_approximated:
+            StateConfigure().configure_cn_sum(ocp, nlp)
+        ConfigureProblem.configure_dynamics_function(ocp, nlp, dyn_func=self.dynamics)
 
     @staticmethod
-    def get_stim_prev(nlp: NonLinearProgram, parameters: MX, idx: int) -> list[float]:
+    def get_stim(nlp: NonLinearProgram, parameters: MX) -> list[float]:
         """
         Get the nlp list of previous stimulation apparition time
 
@@ -382,43 +408,16 @@ class DingModelFrequency(FesModel):
             The NonLinearProgram of the ocp of the current phase
         parameters: MX
             The parameters of the ocp
-        idx: int
-            The index of the current phase
 
         Returns
         -------
-        The list of previous stimulation time
+        The list of stimulation time
         """
-        t_stim_prev = []
+        t_stim = []
         for j in range(parameters.shape[0]):
             if "pulse_apparition_time" in nlp.parameters.cx[j].str():
-                t_stim_prev.append(parameters[j])
-            if len(t_stim_prev) > idx:
-                break
-
-        return t_stim_prev
-
-    @staticmethod
-    def _build_t_stim_prev(ocp: OptimalControlProgram, idx: int) -> list[float]:
-        """
-        Builds a list of previous stimulation apparition time from known ocp phase time when the pulse_apparition_time
-        is not a declared optimized parameter
-
-        Parameters
-        ----------
-        ocp: OptimalControlProgram
-            The OptimalControlProgram of the problem
-        idx: int
-            The index of the current phase
-
-        Returns
-        -------
-        The list of previous stimulation time
-        """
-        t_stim_prev = [0]
-        for i in range(idx):
-            t_stim_prev.append(t_stim_prev[-1] + ocp.phase_time[i])
-        return t_stim_prev
+                t_stim.append(parameters[j])
+        return t_stim
 
     def set_pulse_apparition_time(self, value: list[MX]):
         """

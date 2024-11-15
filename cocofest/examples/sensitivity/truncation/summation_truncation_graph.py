@@ -175,7 +175,12 @@ cbar1.ax.set_yticklabels(
 )
 
 axs.plot(
-    np.arange(1, 101, 1).tolist(), np.arange(1, 101, 1).tolist(), color="red", ls="-", label="Ground truth", linewidth=4
+    np.arange(1, 101, 1).tolist(),
+    np.arange(1, 101, 1).tolist(),
+    color="red",
+    ls="-",
+    label="Ground truth",
+    linewidth=4,
 )
 
 x_beneath_1e_8 = np.arange(1, 101, 1).tolist()
@@ -184,9 +189,23 @@ for i in range(1):
     y_beneath_1e_8 = []
     for j in range(len((all_mode_list_error_beneath_1e_8[i]))):
         y_beneath_1e_8.append(parameter_list[i][all_mode_list_error_beneath_1e_8[i][j]][1])
-    axs.plot(x_beneath_1e_8, y_beneath_1e_8, color="darkred", label=r"Calcium absolute error < 1e⁻⁸", linewidth=3)
+    axs.plot(
+        x_beneath_1e_8,
+        y_beneath_1e_8,
+        color="darkred",
+        label=r"Calcium absolute error < 1e⁻⁸",
+        linewidth=3,
+    )
 
-axs.scatter(0, 0, color="white", label="Initialization (s) | 100 Integrations (s)", marker="+", s=0, lw=0)
+axs.scatter(
+    0,
+    0,
+    color="white",
+    label="Initialization (s) | 100 Integrations (s)",
+    marker="+",
+    s=0,
+    lw=0,
+)
 axs.scatter(
     1,
     1,
@@ -217,7 +236,11 @@ axs.scatter(
 
 axs.set_xlabel("Frequency (Hz)", fontsize=25, fontname="Times New Roman")
 axs.xaxis.set_major_locator(MaxNLocator(integer=True))
-axs.set_ylabel("Past stimulations kept for computation (n)", fontsize=25, fontname="Times New Roman")
+axs.set_ylabel(
+    "Past stimulations kept for computation (n)",
+    fontsize=25,
+    fontname="Times New Roman",
+)
 axs.yaxis.set_major_locator(MaxNLocator(integer=True))
 
 ticks = np.arange(1, 101, 1).tolist()

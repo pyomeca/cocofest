@@ -9,17 +9,17 @@ from bioptim import (
     NonLinearProgram,
     OptimalControlProgram,
 )
-from .ding2007 import DingModelPulseDurationFrequency
-from .state_configue import StateConfigure
+from .ding2007 import DingModelPulseWidthFrequency
+from .state_configure import StateConfigure
 
 
-class DingModelPulseDurationFrequencyWithFatigue(DingModelPulseDurationFrequency):
+class DingModelPulseWidthFrequencyWithFatigue(DingModelPulseWidthFrequency):
     """
     This is a custom models that inherits from bioptim. CustomModel.
     As CustomModel is an abstract class, some methods are mandatory and must be implemented.
     Such as serialize, name_dof, nb_state.
 
-    This is the Ding 2007 model using the stimulation frequency and pulse duration in input.
+    This is the Ding 2007 model using the stimulation frequency and pulse width in input.
 
     Ding, J., Chou, L. W., Kesar, T. M., Lee, S. C., Johnston, T. E., Wexler, A. S., & Binder‐Macleod, S. A. (2007).
     Mathematical model that predicts the force–intensity and force–frequency relationships after spinal cord injuries.
@@ -31,23 +31,51 @@ class DingModelPulseDurationFrequencyWithFatigue(DingModelPulseDurationFrequency
         model_name: str = "ding_2007_with_fatigue",
         muscle_name: str = None,
         sum_stim_truncation: int = None,
+        is_approximated: bool = False,
+        tauc: float = None,
+        a_rest: float = None,
+        tau1_rest: float = None,
+        km_rest: float = None,
+        tau2: float = None,
+        pd0: float = None,
+        pdt: float = None,
+        a_scale: float = None,
+        alpha_a: float = None,
+        alpha_tau1: float = None,
+        alpha_km: float = None,
+        tau_fat: float = None,
     ):
-        super(DingModelPulseDurationFrequencyWithFatigue, self).__init__(
-            model_name=model_name, muscle_name=muscle_name, sum_stim_truncation=sum_stim_truncation
+        super(DingModelPulseWidthFrequencyWithFatigue, self).__init__(
+            model_name=model_name,
+            muscle_name=muscle_name,
+            sum_stim_truncation=sum_stim_truncation,
+            is_approximated=is_approximated,
         )
         self._with_fatigue = True
 
+        # --- Default values --- #
+        ALPHA_A_DEFAULT = -4.0 * 10e-7  # Value from Ding's experimentation [1] (s^-2)
+        ALPHA_TAU1_DEFAULT = 2.1 * 10e-5  # Value from Ding's experimentation [1] (N^-1)
+        TAU_FAT_DEFAULT = 127  # Value from Ding's experimentation [1] (s)
+        ALPHA_KM_DEFAULT = 1.9 * 10e-8  # Value from Ding's experimentation [1] (s^-1.N^-1)
+
         # ---- Fatigue models ---- #
-        self.alpha_a = -4.0 * 10e-7  # Value from Ding's experimentation [1] (s^-2)
-        self.alpha_tau1 = 2.1 * 10e-5  # Value from Ding's experimentation [1] (N^-1)
-        self.tau_fat = 127  # Value from Ding's experimentation [1] (s)
-        self.alpha_km = 1.9 * 10e-8  # Value from Ding's experimentation [1] (s^-1.N^-1)
+        self.alpha_a = ALPHA_A_DEFAULT
+        self.alpha_tau1 = ALPHA_TAU1_DEFAULT
+        self.tau_fat = TAU_FAT_DEFAULT
+        self.alpha_km = ALPHA_KM_DEFAULT
 
     # ---- Absolutely needed methods ---- #
     @property
     def name_dof(self, with_muscle_name: bool = False) -> list[str]:
         muscle_name = "_" + self.muscle_name if self.muscle_name and with_muscle_name else ""
-        return ["Cn" + muscle_name, "F" + muscle_name, "A" + muscle_name, "Tau1" + muscle_name, "Km" + muscle_name]
+        return [
+            "Cn" + muscle_name,
+            "F" + muscle_name,
+            "A" + muscle_name,
+            "Tau1" + muscle_name,
+            "Km" + muscle_name,
+        ]
 
     @property
     def nb_state(self) -> int:
@@ -80,7 +108,7 @@ class DingModelPulseDurationFrequencyWithFatigue(DingModelPulseDurationFrequency
         # This is where you can serialize your models
         # This is useful if you want to save your models and load it later
         return (
-            DingModelPulseDurationFrequencyWithFatigue,
+            DingModelPulseWidthFrequencyWithFatigue,
             {
                 "tauc": self.tauc,
                 "a_rest": self.a_rest,
@@ -106,7 +134,9 @@ class DingModelPulseDurationFrequencyWithFatigue(DingModelPulseDurationFrequency
         km: MX = None,
         t: MX = None,
         t_stim_prev: list[MX] | list[float] = None,
-        impulse_time: MX = None,
+        pulse_width: MX = None,
+        cn_sum: MX = None,
+        a_scale: MX = None,
         force_length_relationship: MX | float = 1,
         force_velocity_relationship: MX | float = 1,
     ) -> MX:
@@ -126,11 +156,16 @@ class DingModelPulseDurationFrequencyWithFatigue(DingModelPulseDurationFrequency
         km: MX
             The value of the cross_bridges (unitless)
         t: MX
-            The current time at which the dynamics is evaluated (ms)
-        t_stim_prev: list[MX]
-            The time list of the previous stimulations (ms)
-        impulse_time: MX
-            The pulsation duration of the current stimulation (ms)
+            The current time at which the dynamics is evaluated (s)
+        t_stim_prev: list[MX] | list[float]
+            The time list of the previous stimulations (s)
+        pulse_width: MX
+            The time of the impulse (s)
+        cn_sum: MX | float
+            The sum of the ca_troponin_complex (unitless)
+        a_scale: MX | float
+            The scaling factor (unitless)
+
         force_length_relationship: MX | float
             The force length relationship value (unitless)
         force_velocity_relationship: MX | float
@@ -140,18 +175,28 @@ class DingModelPulseDurationFrequencyWithFatigue(DingModelPulseDurationFrequency
         -------
         The value of the derivative of each state dx/dt at the current time t
         """
-        r0 = km + self.r0_km_relationship  # Simplification
-        cn_dot = self.cn_dot_fun(cn, r0, t, t_stim_prev=t_stim_prev)  # Equation n°1 from Ding's 2003 article
-        a_calculated = self.a_calculation(a_scale=a, impulse_time=impulse_time)  # Equation n°3 from Ding's 2007 article
+        cn_dot = self.calculate_cn_dot(cn, cn_sum, t, t_stim_prev)
+        a_scale = (
+            a_scale
+            if self.is_approximated
+            else self.a_calculation(
+                a_scale=self.a_scale,
+                pulse_width=pulse_width,
+                t=t,
+                t_stim_prev=t_stim_prev,
+            )
+        )
+
         f_dot = self.f_dot_fun(
             cn,
             f,
-            a_calculated,
+            a_scale,
             tau1,
             km,
             force_length_relationship=force_length_relationship,
             force_velocity_relationship=force_velocity_relationship,
         )  # Equation n°2 from Ding's 2003 article
+
         a_dot = self.a_dot_fun(a, f)
         tau1_dot = self.tau1_dot_fun(tau1, f)  # Equation n°9 from Ding's 2003 article
         km_dot = self.km_dot_fun(km, f)  # Equation n°11 from Ding's 2003 article
@@ -211,7 +256,6 @@ class DingModelPulseDurationFrequencyWithFatigue(DingModelPulseDurationFrequency
         algebraic_states: MX,
         numerical_timeseries: MX,
         nlp: NonLinearProgram,
-        stim_prev: list[float] = None,
         fes_model=None,
         force_length_relationship: MX | float = 1,
         force_velocity_relationship: MX | float = 1,
@@ -235,9 +279,7 @@ class DingModelPulseDurationFrequencyWithFatigue(DingModelPulseDurationFrequency
             The numerical timeseries of the system
         nlp: NonLinearProgram
             A reference to the phase
-        stim_prev: list[float]
-            The previous stimulation time
-        fes_model: DingModelPulseDurationFrequencyWithFatigue
+        fes_model: DingModelPulseWidthFrequencyWithFatigue
             The current phase fes model
         force_length_relationship: MX | float
             The force length relationship value (unitless)
@@ -247,29 +289,28 @@ class DingModelPulseDurationFrequencyWithFatigue(DingModelPulseDurationFrequency
         -------
         The derivative of the states in the tuple[MX] format
         """
-        pulse_duration_parameters = (
-            nlp.model.get_pulse_duration_parameters(nlp, parameters)
-            if fes_model is None
-            else fes_model.get_pulse_duration_parameters(nlp, parameters, muscle_name=fes_model.muscle_name)
-        )
+        model = fes_model if fes_model else nlp.model
+        dxdt_fun = model.system_dynamics
 
-        if pulse_duration_parameters.shape[0] == 1:  # check if pulse duration is mapped
-            impulse_time = pulse_duration_parameters[0]
+        if model.is_approximated:
+            cn_sum = controls[0]
+            a_scale = controls[1]
+            stim_apparition = None
+            pulse_width = None
         else:
-            impulse_time = pulse_duration_parameters[nlp.phase_idx]
-
-        dxdt_fun = fes_model.system_dynamics if fes_model else nlp.model.system_dynamics
-        stim_apparition = (
-            (
-                fes_model.get_stim_prev(nlp=nlp, parameters=parameters, idx=nlp.phase_idx)
-                if fes_model
-                else nlp.model.get_stim_prev(nlp=nlp, parameters=parameters, idx=nlp.phase_idx)
+            pulse_width = (
+                model.get_pulse_width_parameters(nlp, parameters)
+                if fes_model is None
+                else fes_model.get_pulse_width_parameters(nlp, parameters, muscle_name=fes_model.muscle_name)
             )
-            if stim_prev is None
-            else stim_prev
-        )  # Get the previous stimulation apparition time from the parameters
-        # if not provided from stim_prev, this way of getting the list is not optimal, but it is the only way to get it.
-        # Otherwise, it will create issues with free variables or wrong mx or sx type while calculating the dynamics
+
+            stim_apparition = model.get_stim(nlp=nlp, parameters=parameters)
+
+            if len(pulse_width) == 1 and len(stim_apparition) != 1:
+                pulse_width = pulse_width * len(stim_apparition)
+
+            cn_sum = None
+            a_scale = None
 
         return DynamicsEvaluation(
             dxdt=dxdt_fun(
@@ -280,7 +321,9 @@ class DingModelPulseDurationFrequencyWithFatigue(DingModelPulseDurationFrequency
                 km=states[4],
                 t=time,
                 t_stim_prev=stim_apparition,
-                impulse_time=impulse_time,
+                pulse_width=pulse_width,
+                cn_sum=cn_sum,
+                a_scale=a_scale,
                 force_length_relationship=force_length_relationship,
                 force_velocity_relationship=force_velocity_relationship,
             ),
@@ -288,7 +331,10 @@ class DingModelPulseDurationFrequencyWithFatigue(DingModelPulseDurationFrequency
         )
 
     def declare_ding_variables(
-        self, ocp: OptimalControlProgram, nlp: NonLinearProgram, numerical_data_timeseries: dict[str, np.ndarray] = None
+        self,
+        ocp: OptimalControlProgram,
+        nlp: NonLinearProgram,
+        numerical_data_timeseries: dict[str, np.ndarray] = None,
     ):
         """
         Tell the program which variables are states and controls.
@@ -303,9 +349,7 @@ class DingModelPulseDurationFrequencyWithFatigue(DingModelPulseDurationFrequency
             A list of values to pass to the dynamics at each node. Experimental external forces should be included here.
         """
         StateConfigure().configure_all_fes_model_states(ocp, nlp, fes_model=self)
-        stim_prev = (
-            self._build_t_stim_prev(ocp=ocp, idx=nlp.phase_idx)
-            if "pulse_apparition_time" not in nlp.parameters.keys()
-            else None
-        )
-        ConfigureProblem.configure_dynamics_function(ocp, nlp, dyn_func=self.dynamics, stim_prev=stim_prev)
+        if self.is_approximated:
+            StateConfigure().configure_cn_sum(ocp, nlp)
+            StateConfigure().configure_a_calculation(ocp, nlp)
+        ConfigureProblem.configure_dynamics_function(ocp, nlp, dyn_func=self.dynamics)
