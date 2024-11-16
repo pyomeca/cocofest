@@ -36,6 +36,6 @@ ocp = OcpFesMsk.prepare_ocp(
 )
 
 if __name__ == "__main__":
-    sol = ocp.solve(Solver.IPOPT(show_online_optim=True))
+    sol = ocp.solve(Solver.IPOPT(show_online_optim=False, _max_iter=2000))
     sol.animate()
     sol.graphs(show_bounds=False)
