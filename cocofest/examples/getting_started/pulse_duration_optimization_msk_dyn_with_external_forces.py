@@ -6,6 +6,7 @@ threshold and 600us to satisfy the flexion and minimizing required elbow torque 
 External forces will be applied to the system to simulate a real-world scenario.
 """
 import numpy as np
+from bioptim import Solver
 
 from cocofest import DingModelPulseWidthFrequencyWithFatigue, OcpFesMsk, FesMskModel
 
@@ -34,9 +35,9 @@ ocp = OcpFesMsk.prepare_ocp(
         "bound_type": "start_end",
         "bound_data": [[5], [120]],
         "with_residual_torque": True},
-    # external_forces={"Segment_application": "r_ulna_radius_hand", "torque": np.array([0, 0, 0]), "with_contact": False},
+    external_forces={"Segment_application": "r_ulna_radius_hand", "torque": np.array([0, 0, -1]), "with_contact": False},
 )
 
-sol = ocp.solve()
+sol = ocp.solve(Solver.IPOPT(show_online_optim=False, _max_iter=2000))
 sol.animate()
 sol.graphs(show_bounds=False)

@@ -549,7 +549,7 @@ class OcpFesMsk:
     def _build_constraints(model, n_shooting, final_time, stim_time, control_type, custom_constraint=None, external_forces=None):
         constraints = ConstraintList()
 
-        if model.activate_residual_torque:
+        if model.activate_residual_torque and control_type == ControlType.LINEAR_CONTINUOUS:
             applied_node = n_shooting - 1 if external_forces else Node.END
             constraints.add(
                 ConstraintFcn.TRACK_CONTROL,
@@ -769,7 +769,6 @@ class OcpFesMsk:
         if with_residual_torque:  # TODO : ADD SEVERAL INDIVIDUAL FIXED RESIDUAL TORQUE FOR EACH JOINT
             nb_tau = bio_models.nb_tau
             tau_min, tau_max, tau_init = [-50] * nb_tau, [50] * nb_tau, [0] * nb_tau
-            tau_min[-1], tau_max[-1] = 0, 0
             u_bounds.add(
                 key="tau", min_bound=tau_min, max_bound=tau_max, phase=0, interpolation=InterpolationType.CONSTANT
             )

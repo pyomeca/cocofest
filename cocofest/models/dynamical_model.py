@@ -147,8 +147,6 @@ class FesMskModel(BiorbdModel):
         The derivative of the states in the tuple[MX | SX] format
         """
 
-        if external_forces is None:
-            external_forces = []
         q = DynamicsFunctions.get(nlp.states["q"], states)
         qdot = DynamicsFunctions.get(nlp.states["qdot"], states)
         tau = DynamicsFunctions.get(nlp.controls["tau"], controls) if "tau" in nlp.controls.keys() else 0
@@ -170,7 +168,7 @@ class FesMskModel(BiorbdModel):
         # You can directly call biorbd function (as for ddq) or call bioptim accessor (as for dq)
         dq = DynamicsFunctions.compute_qdot(nlp, q, qdot)
         total_torque = muscles_tau + tau if self.activate_residual_torque else muscles_tau
-        external_forces = [] if external_forces is None else external_forces
+        external_forces = nlp.get_external_forces(states, controls, algebraic_states, numerical_data_timeseries)
         ddq = nlp.model.forward_dynamics(with_contact=False)(q, qdot, total_torque, external_forces, parameters)  # q, qdot, tau, external_forces, parameters
         # TODO: Add the with_contact=True when the contact forces will be added
         dxdt = vertcat(dxdt_muscle_list, dq, ddq)
@@ -285,7 +283,6 @@ class FesMskModel(BiorbdModel):
         nlp,
         with_passive_torque: bool = False,
         with_ligament: bool = False,
-        external_forces: list = None,
         state_name_list=None,
     ) -> MX:
         """
@@ -311,8 +308,8 @@ class FesMskModel(BiorbdModel):
             If the dynamic with passive torque should be used
         with_ligament: bool
             If the dynamic with ligament should be used
-        external_forces: list[Any]
-            The external forces
+        state_name_list: list[str]
+            The states names list
         Returns
         ----------
         MX.sym
@@ -367,14 +364,6 @@ class FesMskModel(BiorbdModel):
             A list of values to pass to the dynamics at each node. Experimental external forces should be included here.
 
         """
-        external_forces = None
-        if numerical_data_timeseries is not None:
-            for key in numerical_data_timeseries.keys():
-                if key == "external_forces":
-                    _check_numerical_timeseries_format(numerical_data_timeseries[key], nlp.ns, nlp.phase_idx)
-                    external_forces = nlp.numerical_timeseries[0].cx
-                    for i in range(1, numerical_data_timeseries[key].shape[1]):
-                        external_forces = horzcat(external_forces, nlp.numerical_timeseries[i].cx)
 
         state_name_list = StateConfigure().configure_all_muscle_states(self.muscles_dynamics_model, ocp, nlp)
         ConfigureProblem.configure_q(ocp, nlp, as_states=True, as_controls=False)
@@ -394,12 +383,11 @@ class FesMskModel(BiorbdModel):
             dyn_func=self.muscle_dynamic,
             muscle_models=self.muscles_dynamics_model,
             state_name_list=state_name_list,
-            external_forces=external_forces,
         )
 
         if with_contact:
             ConfigureProblem.configure_contact_function(
-                ocp, nlp, self.forces_from_fes_driven, external_forces=external_forces, state_name_list=state_name_list
+                ocp, nlp, self.forces_from_fes_driven, state_name_list=state_name_list
             )
 
     @staticmethod
