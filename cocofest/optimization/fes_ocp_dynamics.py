@@ -94,6 +94,7 @@ class OcpFesMsk:
             input_dict["control_type"],
             msk_info["custom_constraint"],
             input_dict["external_forces"],
+            cycling=True if "cycling" in objective.keys() else False,
         )
 
         numerical_time_series = None
@@ -546,7 +547,7 @@ class OcpFesMsk:
         )
 
     @staticmethod
-    def _build_constraints(model, n_shooting, final_time, stim_time, control_type, custom_constraint=None, external_forces=None):
+    def _build_constraints(model, n_shooting, final_time, stim_time, control_type, custom_constraint=None, external_forces=None, cycling=False):
         constraints = ConstraintList()
 
         if model.activate_residual_torque and control_type == ControlType.LINEAR_CONTINUOUS:
@@ -593,6 +594,25 @@ class OcpFesMsk:
                             last_stim_index=index,
                             model_idx=i,
                         )
+
+        cycling_with_contact = False if external_forces is None else cycling and external_forces["with_contact"]
+
+        if cycling_with_contact:
+            constraints.add(
+                ConstraintFcn.TRACK_MARKERS_VELOCITY,
+                node=Node.ALL,
+                marker_index=model.marker_index("wheel_center"),
+                axes=[Axis.X, Axis.Y],
+                min_bound=np.array([0, 0]),
+                max_bound=np.array([0.05 ** 2, 0.05 ** 2]),
+            )
+            constraints.add(
+                ConstraintFcn.SUPERIMPOSE_MARKERS,
+                first_marker="wheel_center",
+                second_marker="global_wheel_center",
+                node=Node.ALL,
+                axes=[Axis.X, Axis.Y],
+            )
 
         if custom_constraint:
             for i in range(len(custom_constraint)):
