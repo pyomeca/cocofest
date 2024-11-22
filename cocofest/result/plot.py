@@ -164,15 +164,15 @@ class PlotCyclingResult:
             if sum(["pulse_intensity" in parameter_key for parameter_key in solution.ocp.parameters.keys()]) > 0
             else False
         )
-        pulse_duration = (
+        pulse_width = (
             True
-            if sum(["pulse_duration" in parameter_key for parameter_key in solution.ocp.parameters.keys()]) > 0
+            if sum(["pulse_width" in parameter_key for parameter_key in solution.ocp.parameters.keys()]) > 0
             else False
         )
-        parameter = "pulse_intensity" if intensity else "pulse_duration" if pulse_duration else None
+        parameter = "pulse_intensity" if intensity else "pulse_width" if pulse_width else None
         if parameter is None:
             raise ValueError(
-                "The solution must contain either a pulse intensity or a pulse duration parameter to be plotted with the PlotCyclingResult class"
+                "The solution must contain either a pulse intensity or a pulse width parameter to be plotted with the PlotCyclingResult class"
             )
 
         counter = 0
@@ -227,15 +227,13 @@ class PlotCyclingResult:
             if sum(["pulse_intensity" in parameter_key for parameter_key in pickle_data["parameters"]]) > 0
             else False
         )
-        pulse_duration = (
-            True
-            if sum(["pulse_duration" in parameter_key for parameter_key in pickle_data["parameters"]]) > 0
-            else False
+        pulse_width = (
+            True if sum(["pulse_width" in parameter_key for parameter_key in pickle_data["parameters"]]) > 0 else False
         )
-        parameter = "pulse_intensity" if intensity else "pulse_duration" if pulse_duration else None
+        parameter = "pulse_intensity" if intensity else "pulse_width" if pulse_width else None
         if parameter is None:
             raise ValueError(
-                "The solution must contain either a pulse intensity or a pulse duration parameter to be plotted with the PlotCyclingResult class"
+                "The solution must contain either a pulse intensity or a pulse width parameter to be plotted with the PlotCyclingResult class"
             )
 
         counter = 0

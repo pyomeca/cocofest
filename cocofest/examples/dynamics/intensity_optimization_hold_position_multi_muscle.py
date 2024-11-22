@@ -9,7 +9,7 @@ import numpy as np
 
 from bioptim import Node, ObjectiveFcn, ObjectiveList
 
-from cocofest import DingModelIntensityFrequencyWithFatigue, OcpFesMsk, FesMskModel
+from cocofest import DingModelPulseIntensityFrequencyWithFatigue, OcpFesMsk, FesMskModel
 
 n_shooting = 100
 objective_functions = ObjectiveList()
@@ -35,19 +35,19 @@ objective_functions.add(
     phase=0,
 )
 
-minimum_pulse_intensity = DingModelIntensityFrequencyWithFatigue.min_pulse_intensity(
-    DingModelIntensityFrequencyWithFatigue()
+minimum_pulse_intensity = DingModelPulseIntensityFrequencyWithFatigue.min_pulse_intensity(
+    DingModelPulseIntensityFrequencyWithFatigue()
 )
 model = FesMskModel(
     name=None,
     biorbd_path="../msk_models/arm26.bioMod",
     muscles_model=[
-        DingModelIntensityFrequencyWithFatigue(muscle_name="BIClong"),
-        DingModelIntensityFrequencyWithFatigue(muscle_name="BICshort"),
-        DingModelIntensityFrequencyWithFatigue(muscle_name="TRIlong"),
-        DingModelIntensityFrequencyWithFatigue(muscle_name="TRIlat"),
-        DingModelIntensityFrequencyWithFatigue(muscle_name="TRImed"),
-        DingModelIntensityFrequencyWithFatigue(muscle_name="BRA"),
+        DingModelPulseIntensityFrequencyWithFatigue(muscle_name="BIClong"),
+        DingModelPulseIntensityFrequencyWithFatigue(muscle_name="BICshort"),
+        DingModelPulseIntensityFrequencyWithFatigue(muscle_name="TRIlong"),
+        DingModelPulseIntensityFrequencyWithFatigue(muscle_name="TRIlat"),
+        DingModelPulseIntensityFrequencyWithFatigue(muscle_name="TRImed"),
+        DingModelPulseIntensityFrequencyWithFatigue(muscle_name="BRA"),
     ],
     activate_force_length_relationship=True,
     activate_force_velocity_relationship=True,
@@ -57,7 +57,6 @@ model = FesMskModel(
 ocp = OcpFesMsk.prepare_ocp(
     model=model,
     stim_time=np.linspace(0, 1, 11)[:-1],
-    n_shooting=100,
     final_time=1,
     pulse_event={"min": 0.1, "max": 1, "bimapping": True},
     pulse_intensity={

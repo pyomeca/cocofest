@@ -4,21 +4,20 @@ The example model is the Ding2003 frequency model.
 """
 
 import matplotlib.pyplot as plt
-from cocofest import DingModelFrequencyWithFatigueIntegrate, IvpFes
+from cocofest import IvpFes, ModelMaker
 
 # --- Example n°1 : Single --- #
 # --- Build ocp --- #
 # This example shows how to create a problem with single pulses.
 # The stimulation won't be optimized.
-ns = 1000
 final_time = 1
-
+model = ModelMaker.create_model("ding_2003_with_fatigue", is_approximated=False)
 fes_parameters = {
-    "model": DingModelFrequencyWithFatigueIntegrate(),
+    "model": model,
     "pulse_mode": "single",
     "stim_time": [0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9],
 }
-ivp_parameters = {"n_shooting": ns, "final_time": final_time, "use_sx": True}
+ivp_parameters = {"final_time": final_time, "use_sx": True}
 
 ivp = IvpFes(
     fes_parameters,

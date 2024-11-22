@@ -88,7 +88,6 @@ for i in range(len(pickle_file_list)):
     ocp = OcpFesMsk.prepare_ocp(
         model=model,
         stim_time=stim_time,
-        n_shooting=1000,
         final_time=1,
         pulse_event={"min": 0.01, "max": 0.1, "bimapping": False},
         objective={

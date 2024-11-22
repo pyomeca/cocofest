@@ -9,9 +9,9 @@ import matplotlib.pyplot as plt
 
 from bioptim import SolutionMerge
 
-from cocofest import DingModelPulseDurationFrequencyWithFatigue, OcpFesMsk, FesMskModel
+from cocofest import DingModelPulseWidthFrequencyWithFatigue, OcpFesMsk, FesMskModel
 
-minimum_pulse_duration = DingModelPulseDurationFrequencyWithFatigue().pd0
+minimum_pulse_width = DingModelPulseWidthFrequencyWithFatigue().pd0
 
 sol_list = []
 sol_time = []
@@ -22,7 +22,7 @@ for i in range(2):
     model = FesMskModel(
         name=None,
         biorbd_path="../msk_models/arm26_biceps_1dof.bioMod",
-        muscles_model=[DingModelPulseDurationFrequencyWithFatigue(muscle_name="BIClong")],
+        muscles_model=[DingModelPulseWidthFrequencyWithFatigue(muscle_name="BIClong")],
         activate_force_length_relationship=activate_force_length_relationship[i],
         activate_force_velocity_relationship=activate_force_length_relationship[i],
         activate_residual_torque=False,
@@ -31,9 +31,8 @@ for i in range(2):
     ocp = OcpFesMsk.prepare_ocp(
         model=model,
         stim_time=np.linspace(0, 1, 11)[:-1],
-        n_shooting=100,
         final_time=1,
-        pulse_duration={"fixed": 0.00025},
+        pulse_width={"fixed": 0.00025},
         msk_info={
             "bound_type": "start",
             "bound_data": [0],

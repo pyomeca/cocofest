@@ -10,6 +10,7 @@ from bioptim import (
     DynamicsList,
     InitialGuessList,
     InterpolationType,
+    Node,
     ObjectiveFcn,
     ObjectiveList,
     OdeSolver,
@@ -62,7 +63,7 @@ def get_initial_guess(
     ocp, q, qdot = prepare_muscle_driven_ocp(biorbd_model_path, n_shooting, final_time, objective, n_threads)
 
     # Solving the ocp to get muscle controls
-    sol = ocp.solve(Solver.IPOPT(_tol=1e-4))
+    sol = ocp.solve()
     muscles_control = sol.decision_controls(to_merge=[SolutionMerge.PHASES, SolutionMerge.NODES])
     model = biorbd.Model(biorbd_model_path)
 
@@ -128,20 +129,23 @@ def prepare_muscle_driven_ocp(
     y_center = objective["cycling"]["y_center"]
     radius = objective["cycling"]["radius"]
     get_circle_coord_list = np.array(
-        [get_circle_coord(theta, x_center, y_center, radius)[:-1] for theta in np.linspace(0, -2 * np.pi, n_shooting)]
+        [
+            get_circle_coord(theta, x_center, y_center, radius)[:-1]
+            for theta in np.linspace(0, -2 * np.pi, n_shooting + 1)
+        ]
     )
+
     objective_functions = ObjectiveList()
-    for i in range(n_shooting):
-        objective_functions.add(
-            ObjectiveFcn.Mayer.TRACK_MARKERS,
-            weight=100,
-            axes=[Axis.X, Axis.Y],
-            marker_index=0,
-            target=np.array(get_circle_coord_list[i]),
-            node=i,
-            phase=0,
-            quadratic=True,
-        )
+    objective_functions.add(
+        ObjectiveFcn.Mayer.TRACK_MARKERS,
+        weight=100,
+        axes=[Axis.X, Axis.Y],
+        marker_index=0,
+        target=get_circle_coord_list.T,
+        node=Node.ALL,
+        phase=0,
+        quadratic=True,
+    )
 
     # Dynamics
     dynamics = DynamicsList()

@@ -7,25 +7,24 @@ External forces will be applied to the system to simulate a real-world scenario.
 """
 import numpy as np
 
-from cocofest import DingModelPulseDurationFrequencyWithFatigue, OcpFesMsk, FesMskModel
+from cocofest import DingModelPulseWidthFrequencyWithFatigue, OcpFesMsk, FesMskModel
 
 model = FesMskModel(
     name=None,
     biorbd_path="../msk_models/arm26_biceps_1dof.bioMod",
-    muscles_model=[DingModelPulseDurationFrequencyWithFatigue(muscle_name="BIClong")],
+    muscles_model=[DingModelPulseWidthFrequencyWithFatigue(muscle_name="BIClong")],
     activate_force_length_relationship=True,
     activate_force_velocity_relationship=True,
     activate_residual_torque=True,
-    segments_to_apply_external_forces=["r_ulna_radius_hand"],
+    external_force_set=None,  # External forces will be added later
 )
 
-minimum_pulse_duration = DingModelPulseDurationFrequencyWithFatigue().pd0
+minimum_pulse_duration = DingModelPulseWidthFrequencyWithFatigue().pd0
 ocp = OcpFesMsk.prepare_ocp(
     model=model,
     stim_time=[0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9],
-    n_shooting=100,
     final_time=1,
-    pulse_duration={
+    pulse_width={
         "min": minimum_pulse_duration,
         "max": 0.0006,
         "bimapping": False,
@@ -35,9 +34,9 @@ ocp = OcpFesMsk.prepare_ocp(
         "bound_type": "start_end",
         "bound_data": [[5], [120]],
         "with_residual_torque": True},
-    external_forces={"Global": True, "Segment_application": "r_ulna_radius_hand", "torque": np.array([0, 0, 0]), "force": np.array([100, 0, 100]), "point_of_application": np.array([0, 0, 0])},
+    # external_forces={"Segment_application": "r_ulna_radius_hand", "torque": np.array([0, 0, 0]), "with_contact": False},
 )
 
 sol = ocp.solve()
-# sol.animate()
+sol.animate()
 sol.graphs(show_bounds=False)

@@ -11,8 +11,8 @@ from bioptim import (
 )
 
 from cocofest import (
-    DingModelPulseDurationFrequencyWithFatigue,
-    DingModelIntensityFrequencyWithFatigue,
+    DingModelPulseWidthFrequencyWithFatigue,
+    DingModelPulseIntensityFrequencyWithFatigue,
     OcpFesMsk,
     FesMskModel,
 )
@@ -23,26 +23,25 @@ biomodel_folder = os.path.dirname(ocp_module.__file__)
 biorbd_model_path = biomodel_folder + "/arm26_biceps_triceps.bioMod"
 
 
-def test_pulse_duration_multi_muscle_fes_dynamics():
+def test_pulse_width_multi_muscle_fes_dynamics():
     model = FesMskModel(
         biorbd_path=biorbd_model_path,
         muscles_model=[
-            DingModelPulseDurationFrequencyWithFatigue(muscle_name="BIClong"),
-            DingModelPulseDurationFrequencyWithFatigue(muscle_name="TRIlong"),
+            DingModelPulseWidthFrequencyWithFatigue(muscle_name="BIClong", is_approximated=True),
+            DingModelPulseWidthFrequencyWithFatigue(muscle_name="TRIlong", is_approximated=True),
         ],
         activate_force_length_relationship=True,
         activate_force_velocity_relationship=True,
         activate_residual_torque=True,
     )
 
-    minimum_pulse_duration = DingModelPulseDurationFrequencyWithFatigue().pd0
+    minimum_pulse_width = DingModelPulseWidthFrequencyWithFatigue().pd0
     ocp = OcpFesMsk.prepare_ocp(
         model=model,
         stim_time=[0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9],
-        n_shooting=100,
         final_time=1,
-        pulse_duration={
-            "min": minimum_pulse_duration,
+        pulse_width={
+            "min": minimum_pulse_width,
             "max": 0.0006,
             "bimapping": False,
         },
@@ -60,7 +59,7 @@ def test_pulse_duration_multi_muscle_fes_dynamics():
 
     np.testing.assert_almost_equal(sol.cost, 864.1739, decimal=3)
     np.testing.assert_almost_equal(
-        sol.parameters["pulse_duration_BIClong"],
+        sol.parameters["pulse_width_BIClong"],
         np.array(
             [
                 0.00013141,
@@ -77,7 +76,7 @@ def test_pulse_duration_multi_muscle_fes_dynamics():
         ),
     )
     np.testing.assert_almost_equal(
-        sol.parameters["pulse_duration_TRIlong"],
+        sol.parameters["pulse_width_TRIlong"],
         np.array(
             [
                 0.0003657,
@@ -103,24 +102,24 @@ def test_pulse_duration_multi_muscle_fes_dynamics():
     np.testing.assert_almost_equal(sol_states["F_TRIlong"][0][-1], 3.9810503521165272, decimal=4)
 
 
+#
 def test_pulse_intensity_multi_muscle_fes_dynamics():
     model = FesMskModel(
         biorbd_path=biorbd_model_path,
         muscles_model=[
-            DingModelIntensityFrequencyWithFatigue(muscle_name="BIClong"),
-            DingModelIntensityFrequencyWithFatigue(muscle_name="TRIlong"),
+            DingModelPulseIntensityFrequencyWithFatigue(muscle_name="BIClong", is_approximated=True),
+            DingModelPulseIntensityFrequencyWithFatigue(muscle_name="TRIlong", is_approximated=True),
         ],
         activate_force_length_relationship=True,
         activate_force_velocity_relationship=True,
         activate_residual_torque=True,
     )
 
-    minimum_pulse_intensity = DingModelIntensityFrequencyWithFatigue().min_pulse_intensity()
+    minimum_pulse_intensity = DingModelPulseIntensityFrequencyWithFatigue().min_pulse_intensity()
 
     ocp = OcpFesMsk.prepare_ocp(
         model=model,
         stim_time=[0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9],
-        n_shooting=100,
         final_time=1,
         pulse_intensity={
             "min": minimum_pulse_intensity,
@@ -190,8 +189,8 @@ def test_fes_models_inputs_sanity_check_errors():
     model = FesMskModel(
         biorbd_path=biorbd_model_path,
         muscles_model=[
-            DingModelIntensityFrequencyWithFatigue(muscle_name="BIClong"),
-            DingModelIntensityFrequencyWithFatigue(muscle_name="TRIlong"),
+            DingModelPulseIntensityFrequencyWithFatigue(muscle_name="BIClong"),
+            DingModelPulseIntensityFrequencyWithFatigue(muscle_name="TRIlong"),
         ],
         activate_force_length_relationship=True,
         activate_force_velocity_relationship=True,
@@ -205,9 +204,8 @@ def test_fes_models_inputs_sanity_check_errors():
         ocp = OcpFesMsk.prepare_ocp(
             model=model,
             stim_time=[0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9],
-            n_shooting=100,
             final_time=1,
-            pulse_duration={"min": 0.0003, "max": 0.0006},
+            pulse_width={"min": 0.0003, "max": 0.0006},
             msk_info={
                 "bound_type": "hello",
                 "bound_data": [[0, 5], [0, 120]],
@@ -221,9 +219,8 @@ def test_fes_models_inputs_sanity_check_errors():
         ocp = OcpFesMsk.prepare_ocp(
             model=model,
             stim_time=[0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9],
-            n_shooting=100,
             final_time=1,
-            pulse_duration={"min": 0.0003, "max": 0.0006},
+            pulse_width={"min": 0.0003, "max": 0.0006},
             msk_info={
                 "bound_type": "start_end",
                 "bound_data": "[[0, 5], [0, 120]]",
@@ -237,9 +234,8 @@ def test_fes_models_inputs_sanity_check_errors():
         ocp = OcpFesMsk.prepare_ocp(
             model=model,
             stim_time=[0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9],
-            n_shooting=100,
             final_time=1,
-            pulse_duration={"min": 0.0003, "max": 0.0006},
+            pulse_width={"min": 0.0003, "max": 0.0006},
             msk_info={
                 "bound_type": "start_end",
                 "bound_data": [[0, 5, 7], [0, 120, 150]],
@@ -253,9 +249,8 @@ def test_fes_models_inputs_sanity_check_errors():
         ocp = OcpFesMsk.prepare_ocp(
             model=model,
             stim_time=[0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9],
-            n_shooting=100,
             final_time=1,
-            pulse_duration={"min": 0.0003, "max": 0.0006},
+            pulse_width={"min": 0.0003, "max": 0.0006},
             msk_info={
                 "bound_type": "start_end",
                 "bound_data": ["[0, 5]", [0, 120]],
@@ -269,9 +264,8 @@ def test_fes_models_inputs_sanity_check_errors():
         ocp = OcpFesMsk.prepare_ocp(
             model=model,
             stim_time=[0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9],
-            n_shooting=100,
             final_time=1,
-            pulse_duration={"min": 0.0003, "max": 0.0006},
+            pulse_width={"min": 0.0003, "max": 0.0006},
             msk_info={
                 "bound_type": "start_end",
                 "bound_data": [[0, 5], [0, "120"]],
@@ -285,9 +279,8 @@ def test_fes_models_inputs_sanity_check_errors():
         ocp = OcpFesMsk.prepare_ocp(
             model=model,
             stim_time=[0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9],
-            n_shooting=100,
             final_time=1,
-            pulse_duration={"min": 0.0003, "max": 0.0006},
+            pulse_width={"min": 0.0003, "max": 0.0006},
             msk_info={
                 "bound_type": "start",
                 "bound_data": [0, 5, 10],
@@ -301,9 +294,8 @@ def test_fes_models_inputs_sanity_check_errors():
         ocp = OcpFesMsk.prepare_ocp(
             model=model,
             stim_time=[0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9],
-            n_shooting=100,
             final_time=1,
-            pulse_duration={"min": 0.0003, "max": 0.0006},
+            pulse_width={"min": 0.0003, "max": 0.0006},
             msk_info={
                 "bound_type": "end",
                 "bound_data": [0, "5"],
@@ -320,7 +312,7 @@ def test_fes_models_inputs_sanity_check_errors():
     #         stim_time=[0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9],
     #         n_shooting=100,
     #         final_time=1,
-    #         pulse_duration={"min": 0.0003, "max": 0.0006},
+    #         pulse_width={"min": 0.0003, "max": 0.0006},
     #         msk_info={"bound_type": "start",
     #                   "bound_data": [0, 5],
     #                   },
@@ -338,7 +330,7 @@ def test_fes_models_inputs_sanity_check_errors():
     #         stim_time=[0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9],
     #         n_shooting=100,
     #         final_time=1,
-    #         pulse_duration={"min": 0.0003, "max": 0.0006},
+    #         pulse_width={"min": 0.0003, "max": 0.0006},
     #         msk_info={"bound_type": "start",
     #                   "bound_data": [0, 5],
     #                   },
@@ -359,7 +351,7 @@ def test_fes_models_inputs_sanity_check_errors():
     #         stim_time=[0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9],
     #         n_shooting=100,
     #         final_time=1,
-    #         pulse_duration={"min": 0.0003, "max": 0.0006},
+    #         pulse_width={"min": 0.0003, "max": 0.0006},
     #         msk_info={"bound_type": "start",
     #                   "bound_data": [0, 5],
     #                   },
@@ -375,7 +367,7 @@ def test_fes_models_inputs_sanity_check_errors():
     #         stim_time=[0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9],
     #         n_shooting=100,
     #         final_time=1,
-    #         pulse_duration={"min": 0.0003, "max": 0.0006},
+    #         pulse_width={"min": 0.0003, "max": 0.0006},
     #         msk_info={"bound_type": "start",
     #                   "bound_data": [0, 5],
     #                   },
@@ -391,7 +383,7 @@ def test_fes_models_inputs_sanity_check_errors():
     #         stim_time=[0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9],
     #         n_shooting=100,
     #         final_time=1,
-    #         pulse_duration={"min": 0.0003, "max": 0.0006},
+    #         pulse_width={"min": 0.0003, "max": 0.0006},
     #         msk_info={"bound_type": "start",
     #                   "bound_data": [0, 5],
     #                   },
@@ -407,7 +399,7 @@ def test_fes_models_inputs_sanity_check_errors():
     #         stim_time=[0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9],
     #         n_shooting=100,
     #         final_time=1,
-    #         pulse_duration={"min": 0.0003, "max": 0.0006},
+    #         pulse_width={"min": 0.0003, "max": 0.0006},
     #         msk_info={"bound_type": "start",
     #                   "bound_data": [0, 5],
     #                   },
@@ -423,7 +415,7 @@ def test_fes_models_inputs_sanity_check_errors():
     #         stim_time=[0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9],
     #         n_shooting=100,
     #         final_time=1,
-    #         pulse_duration={"min": 0.0003, "max": 0.0006},
+    #         pulse_width={"min": 0.0003, "max": 0.0006},
     #         msk_info={"bound_type": "start",
     #                   "bound_data": [0, 5],
     #                   },
@@ -439,7 +431,7 @@ def test_fes_models_inputs_sanity_check_errors():
     #         stim_time=[0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9],
     #         n_shooting=100,
     #         final_time=1,
-    #         pulse_duration={"min": 0.0003, "max": 0.0006},
+    #         pulse_width={"min": 0.0003, "max": 0.0006},
     #         msk_info={"bound_type": "start",
     #                   "bound_data": [0, 5],
     #                   },
@@ -455,7 +447,7 @@ def test_fes_models_inputs_sanity_check_errors():
     #         stim_time=[0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9],
     #         n_shooting=100,
     #         final_time=1,
-    #         pulse_duration={"min": 0.0003, "max": 0.0006},
+    #         pulse_width={"min": 0.0003, "max": 0.0006},
     #         msk_info={"bound_type": "start",
     #                   "bound_data": [0, 5],
     #                   },
@@ -471,7 +463,7 @@ def test_fes_models_inputs_sanity_check_errors():
     #         stim_time=[0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9],
     #         n_shooting=100,
     #         final_time=1,
-    #         pulse_duration={"min": 0.0003, "max": 0.0006},
+    #         pulse_width={"min": 0.0003, "max": 0.0006},
     #         msk_info={"bound_type": "start",
     #                   "bound_data": [0, 5],
     #                   },
@@ -487,7 +479,7 @@ def test_fes_models_inputs_sanity_check_errors():
     #         stim_time=[0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9],
     #         n_shooting=100,
     #         final_time=1,
-    #         pulse_duration={"min": 0.0003, "max": 0.0006},
+    #         pulse_width={"min": 0.0003, "max": 0.0006},
     #         msk_info={"bound_type": "start",
     #                   "bound_data": [0, 5],
     #                   "with_residual_torque": "hello"},
@@ -498,7 +490,7 @@ def test_fes_models_inputs_sanity_check_errors():
 # def test_fes_muscle_models_sanity_check_errors():
 #     model = FesMskModel(biorbd_path=biorbd_model_path,
 #                         muscles_model=[
-#                             DingModelIntensityFrequencyWithFatigue(muscle_name="BIClong"),
+#                             DingModelPulseIntensityFrequencyWithFatigue(muscle_name="BIClong"),
 #                         ],
 #                         activate_force_length_relationship=True,
 #                         activate_force_velocity_relationship=True,

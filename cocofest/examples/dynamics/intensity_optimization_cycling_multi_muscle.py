@@ -7,7 +7,7 @@ sensitivity threshold and 130mA to satisfy the maintained elbow. No residual tor
 
 import numpy as np
 
-from cocofest import DingModelIntensityFrequency, OcpFesMsk, FesMskModel
+from cocofest import DingModelPulseIntensityFrequency, OcpFesMsk, FesMskModel
 
 
 track_q = [
@@ -18,18 +18,18 @@ track_q = [
     ],
 ]
 
-minimum_pulse_intensity = DingModelIntensityFrequency.min_pulse_intensity(DingModelIntensityFrequency())
+minimum_pulse_intensity = DingModelPulseIntensityFrequency.min_pulse_intensity(DingModelPulseIntensityFrequency())
 
 model = FesMskModel(
     name=None,
     biorbd_path="../msk_models/arm26.bioMod",
     muscles_model=[
-        DingModelIntensityFrequency(muscle_name="BIClong"),
-        DingModelIntensityFrequency(muscle_name="BICshort"),
-        DingModelIntensityFrequency(muscle_name="TRIlong"),
-        DingModelIntensityFrequency(muscle_name="TRIlat"),
-        DingModelIntensityFrequency(muscle_name="TRImed"),
-        DingModelIntensityFrequency(muscle_name="BRA"),
+        DingModelPulseIntensityFrequency(muscle_name="BIClong"),
+        DingModelPulseIntensityFrequency(muscle_name="BICshort"),
+        DingModelPulseIntensityFrequency(muscle_name="TRIlong"),
+        DingModelPulseIntensityFrequency(muscle_name="TRIlat"),
+        DingModelPulseIntensityFrequency(muscle_name="TRImed"),
+        DingModelPulseIntensityFrequency(muscle_name="BRA"),
     ],
     activate_force_length_relationship=True,
     activate_force_velocity_relationship=True,
@@ -39,7 +39,6 @@ model = FesMskModel(
 ocp = OcpFesMsk.prepare_ocp(
     model=model,
     stim_time=list(np.round(np.linspace(0, 1, 31), 3))[:-1],
-    n_shooting=1000,
     final_time=1,
     pulse_event={"min": 0.05, "max": 1, "bimapping": True},
     pulse_intensity={

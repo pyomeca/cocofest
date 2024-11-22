@@ -5,16 +5,16 @@ The stimulation frequency will be optimized between 10 and 100 Hz and pulse inte
 threshold and 130mA to satisfy the flexion and minimizing required elbow torque control.
 """
 
-from cocofest import DingModelIntensityFrequencyWithFatigue, OcpFesMsk, FesMskModel
+from cocofest import DingModelPulseIntensityFrequencyWithFatigue, OcpFesMsk, FesMskModel
 
 
-minimum_pulse_intensity = DingModelIntensityFrequencyWithFatigue.min_pulse_intensity(
-    DingModelIntensityFrequencyWithFatigue()
+minimum_pulse_intensity = DingModelPulseIntensityFrequencyWithFatigue.min_pulse_intensity(
+    DingModelPulseIntensityFrequencyWithFatigue()
 )
 
 model = FesMskModel(
     biorbd_path="../msk_models/arm26_biceps_1dof.bioMod",
-    muscles_model=[DingModelIntensityFrequencyWithFatigue(muscle_name="BIClong")],
+    muscles_model=[DingModelPulseIntensityFrequencyWithFatigue(muscle_name="BIClong")],
     activate_force_length_relationship=True,
     activate_force_velocity_relationship=True,
     activate_residual_torque=True,
@@ -23,7 +23,6 @@ model = FesMskModel(
 ocp = OcpFesMsk.prepare_ocp(
     model=model,
     stim_time=[0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9],
-    n_shooting=100,
     final_time=1,
     pulse_intensity={"min": minimum_pulse_intensity, "max": 130, "bimapping": False},
     objective={"minimize_residual_torque": True},

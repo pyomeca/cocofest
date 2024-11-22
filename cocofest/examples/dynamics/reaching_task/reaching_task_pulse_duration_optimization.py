@@ -1,5 +1,5 @@
 """
-This example will do a pulse duration optimization to either minimize overall muscle force or muscle fatigue
+This example will do a pulse width optimization to either minimize overall muscle force or muscle fatigue
 for a reaching task. Those ocp were build to move from starting position (arm: 0°, elbow: 5°) to a target position
 defined in the bioMod file. At the end of the simulation 2 files will be created, one for each optimization.
 The files will contain the time, states, controls and parameters of the ocp.
@@ -15,7 +15,7 @@ from bioptim import (
 )
 
 from cocofest import (
-    DingModelPulseDurationFrequencyWithFatigue,
+    DingModelPulseWidthFrequencyWithFatigue,
     OcpFesMsk,
     SolutionToPickle,
     FesMskModel,
@@ -54,12 +54,12 @@ a_scale_proportion_list = [
 # Build the functional electrical stimulation models according
 # to number and name of muscle in the musculoskeletal model used
 fes_muscle_models = [
-    DingModelPulseDurationFrequencyWithFatigue(muscle_name="BIClong"),
-    DingModelPulseDurationFrequencyWithFatigue(muscle_name="BICshort"),
-    DingModelPulseDurationFrequencyWithFatigue(muscle_name="TRIlong"),
-    DingModelPulseDurationFrequencyWithFatigue(muscle_name="TRIlat"),
-    DingModelPulseDurationFrequencyWithFatigue(muscle_name="TRImed"),
-    DingModelPulseDurationFrequencyWithFatigue(muscle_name="BRA"),
+    DingModelPulseWidthFrequencyWithFatigue(muscle_name="BIClong"),
+    DingModelPulseWidthFrequencyWithFatigue(muscle_name="BICshort"),
+    DingModelPulseWidthFrequencyWithFatigue(muscle_name="TRIlong"),
+    DingModelPulseWidthFrequencyWithFatigue(muscle_name="TRIlat"),
+    DingModelPulseWidthFrequencyWithFatigue(muscle_name="TRImed"),
+    DingModelPulseWidthFrequencyWithFatigue(muscle_name="BRA"),
 ]
 
 # Applying the scaling
@@ -76,7 +76,7 @@ model = FesMskModel(
     activate_residual_torque=False,
 )
 
-minimum_pulse_duration = DingModelPulseDurationFrequencyWithFatigue().pd0
+minimum_pulse_width = DingModelPulseWidthFrequencyWithFatigue().pd0
 pickle_file_list = ["minimize_muscle_fatigue.pkl", "minimize_muscle_force.pkl"]
 stim_time = list(np.round(np.linspace(0, 1.5, 61), 3))[:-1]
 
@@ -95,10 +95,9 @@ for i in range(len(pickle_file_list)):
     ocp = OcpFesMsk.prepare_ocp(
         model=model,
         stim_time=stim_time,
-        n_shooting=1000,
         final_time=1.5,
-        pulse_duration={
-            "min": minimum_pulse_duration,
+        pulse_width={
+            "min": minimum_pulse_width,
             "max": 0.0006,
             "bimapping": False,
         },
@@ -116,7 +115,7 @@ for i in range(len(pickle_file_list)):
     )
 
     sol = ocp.solve(Solver.IPOPT(_max_iter=10000))
-    SolutionToPickle(sol, "pulse_duration_" + pickle_file_list[i], "result_file/").pickle()
+    SolutionToPickle(sol, "pulse_width_" + pickle_file_list[i], "result_file/").pickle()
 
 # [1] Dahmane, R., Djordjevič, S., Šimunič, B., & Valenčič, V. (2005).
 # Spatial fiber type distribution in normal human muscle: histochemical and tensiomyographical evaluation.

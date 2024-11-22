@@ -1,7 +1,7 @@
 """
-This example will do an optimal control program of a 10 stimulation example with Ding's 2007 pulse duration model.
+This example will do an optimal control program of a 10 stimulation example with Ding's 2007 pulse width model.
 Those ocp were build to produce a cycling motion.
-The stimulation frequency will be set to 10Hz and pulse duration will be optimized to satisfy the motion meanwhile
+The stimulation frequency will be set to 10Hz and pulse width will be optimized to satisfy the motion meanwhile
 reducing residual torque.
 """
 
@@ -12,7 +12,7 @@ from bioptim import CostType, Solver
 import biorbd
 
 from cocofest import (
-    DingModelPulseDurationFrequencyWithFatigue,
+    DingModelPulseWidthFrequencyWithFatigue,
     OcpFesMsk,
     PlotCyclingResult,
     SolutionToPickle,
@@ -22,17 +22,17 @@ from cocofest import (
 
 
 def main():
-    minimum_pulse_duration = DingModelPulseDurationFrequencyWithFatigue().pd0
+    minimum_pulse_width = DingModelPulseWidthFrequencyWithFatigue().pd0
 
     model = FesMskModel(
         name=None,
         biorbd_path="../../msk_models/simplified_UL_Seth.bioMod",
         muscles_model=[
-            DingModelPulseDurationFrequencyWithFatigue(muscle_name="DeltoideusClavicle_A"),
-            DingModelPulseDurationFrequencyWithFatigue(muscle_name="DeltoideusScapula_P"),
-            DingModelPulseDurationFrequencyWithFatigue(muscle_name="TRIlong"),
-            DingModelPulseDurationFrequencyWithFatigue(muscle_name="BIC_long"),
-            DingModelPulseDurationFrequencyWithFatigue(muscle_name="BIC_brevis"),
+            DingModelPulseWidthFrequencyWithFatigue(muscle_name="DeltoideusClavicle_A"),
+            DingModelPulseWidthFrequencyWithFatigue(muscle_name="DeltoideusScapula_P"),
+            DingModelPulseWidthFrequencyWithFatigue(muscle_name="TRIlong"),
+            DingModelPulseWidthFrequencyWithFatigue(muscle_name="BIC_long"),
+            DingModelPulseWidthFrequencyWithFatigue(muscle_name="BIC_brevis"),
         ],
         activate_force_length_relationship=True,
         activate_force_velocity_relationship=True,
@@ -42,10 +42,9 @@ def main():
     ocp = OcpFesMsk.prepare_ocp(
         model=model,
         stim_time=list(np.round(np.linspace(0, 1, 11), 3))[:-1],
-        n_shooting=100,
         final_time=1,
-        pulse_duration={
-            "min": minimum_pulse_duration,
+        pulse_width={
+            "min": minimum_pulse_width,
             "max": 0.0006,
             "bimapping": False,
         },
@@ -54,7 +53,7 @@ def main():
             "cycling": {"x_center": 0.35, "y_center": 0, "radius": 0.1, "target": "marker"},
             "minimize_residual_torque": True,
         },
-        warm_start=False,
+        initial_guess_warm_start=False,
         n_threads=5,
     )
     ocp.add_plot_penalty(CostType.ALL)

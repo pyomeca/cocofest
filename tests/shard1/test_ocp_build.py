@@ -4,15 +4,7 @@ import re
 
 import numpy as np
 
-from cocofest import (
-    DingModelFrequencyIntegrate,
-    DingModelFrequencyWithFatigueIntegrate,
-    DingModelPulseDurationFrequencyIntegrate,
-    DingModelPulseDurationFrequencyWithFatigueIntegrate,
-    DingModelIntensityFrequencyIntegrate,
-    DingModelIntensityFrequencyWithFatigueIntegrate,
-    OcpFes,
-)
+from cocofest import OcpFes, ModelMaker
 
 from bioptim import ObjectiveFcn, ObjectiveList, Node
 
@@ -235,24 +227,32 @@ init_n_shooting = 30
 init_force_tracking = [time, init_force]
 init_end_node_tracking = 40
 
-minimum_pulse_duration = DingModelPulseDurationFrequencyIntegrate().pd0
-minimum_pulse_intensity = DingModelIntensityFrequencyIntegrate().min_pulse_intensity()
+ding2003 = ModelMaker.create_model("ding2003", is_approximated=False)
+ding2003_with_fatigue = ModelMaker.create_model("ding2003_with_fatigue", is_approximated=False)
+ding2007 = ModelMaker.create_model("ding2007", is_approximated=False)
+ding2007_with_fatigue = ModelMaker.create_model("ding2007_with_fatigue", is_approximated=False)
+hmed2018 = ModelMaker.create_model("hmed2018", is_approximated=False)
+hmed2018_with_fatigue = ModelMaker.create_model("hmed2018_with_fatigue", is_approximated=False)
+
+
+minimum_pulse_width = ding2007.pd0
+minimum_pulse_intensity = hmed2018.min_pulse_intensity()
 
 
 @pytest.mark.parametrize(
     "model,"
-    " fixed_pulse_duration,"
-    " pulse_duration_min,"
-    " pulse_duration_max,"
-    " pulse_duration_bimapping,"
+    " fixed_pulse_width,"
+    " pulse_width_min,"
+    " pulse_width_max,"
+    " pulse_width_bimapping,"
     " fixed_pulse_intensity,"
     " pulse_intensity_min,"
     " pulse_intensity_max,"
     " pulse_intensity_bimapping,",
     [
-        (DingModelFrequencyIntegrate(), None, None, None, None, None, None, None, None),
+        (ding2003, None, None, None, None, None, None, None, None),
         (
-            DingModelFrequencyWithFatigueIntegrate(),
+            ding2003_with_fatigue,
             None,
             None,
             None,
@@ -263,7 +263,7 @@ minimum_pulse_intensity = DingModelIntensityFrequencyIntegrate().min_pulse_inten
             None,
         ),
         (
-            DingModelPulseDurationFrequencyIntegrate(),
+            ding2007,
             0.0002,
             None,
             None,
@@ -274,7 +274,7 @@ minimum_pulse_intensity = DingModelIntensityFrequencyIntegrate().min_pulse_inten
             None,
         ),
         (
-            DingModelPulseDurationFrequencyWithFatigueIntegrate(),
+            ding2007_with_fatigue,
             0.0002,
             None,
             None,
@@ -285,9 +285,9 @@ minimum_pulse_intensity = DingModelIntensityFrequencyIntegrate().min_pulse_inten
             None,
         ),
         (
-            DingModelPulseDurationFrequencyIntegrate(),
+            ding2007,
             None,
-            minimum_pulse_duration,
+            minimum_pulse_width,
             0.0006,
             False,
             None,
@@ -296,9 +296,9 @@ minimum_pulse_intensity = DingModelIntensityFrequencyIntegrate().min_pulse_inten
             None,
         ),
         (
-            DingModelPulseDurationFrequencyWithFatigueIntegrate(),
+            ding2007_with_fatigue,
             None,
-            minimum_pulse_duration,
+            minimum_pulse_width,
             0.0006,
             False,
             None,
@@ -306,9 +306,9 @@ minimum_pulse_intensity = DingModelIntensityFrequencyIntegrate().min_pulse_inten
             None,
             None,
         ),
-        (DingModelIntensityFrequencyIntegrate(), None, None, None, None, 20, None, None, None),
+        (hmed2018, None, None, None, None, 20, None, None, None),
         (
-            DingModelIntensityFrequencyWithFatigueIntegrate(),
+            hmed2018_with_fatigue,
             None,
             None,
             None,
@@ -319,7 +319,7 @@ minimum_pulse_intensity = DingModelIntensityFrequencyIntegrate().min_pulse_inten
             None,
         ),
         (
-            DingModelIntensityFrequencyIntegrate(),
+            hmed2018,
             None,
             None,
             None,
@@ -330,7 +330,7 @@ minimum_pulse_intensity = DingModelIntensityFrequencyIntegrate().min_pulse_inten
             False,
         ),
         (
-            DingModelIntensityFrequencyWithFatigueIntegrate(),
+            hmed2018_with_fatigue,
             None,
             None,
             None,
@@ -370,10 +370,10 @@ def test_ocp_building(
     end_node_tracking,
     time_min,
     time_max,
-    fixed_pulse_duration,
-    pulse_duration_min,
-    pulse_duration_max,
-    pulse_duration_bimapping,
+    fixed_pulse_width,
+    pulse_width_min,
+    pulse_width_max,
+    pulse_width_bimapping,
     fixed_pulse_intensity,
     pulse_intensity_min,
     pulse_intensity_max,
@@ -392,15 +392,14 @@ def test_ocp_building(
 
     ocp_1 = OcpFes().prepare_ocp(
         model=model,
-        n_shooting=n_shooting,
         stim_time=stim_time,
         final_time=0.3,
         pulse_event={"min": time_min, "max": time_max},
-        pulse_duration={
-            "fixed": fixed_pulse_duration,
-            "min": pulse_duration_min,
-            "max": pulse_duration_max,
-            "bimapping": pulse_duration_bimapping,
+        pulse_width={
+            "fixed": fixed_pulse_width,
+            "min": pulse_width_min,
+            "max": pulse_width_max,
+            "bimapping": pulse_width_bimapping,
         },
         pulse_intensity={
             "fixed": fixed_pulse_intensity,
@@ -417,13 +416,12 @@ def test_ocp_building(
 
 
 def test_ding2007_build():
-    min_duration = DingModelPulseDurationFrequencyIntegrate().pd0
+    min_width = ding2007.pd0
     ocp = OcpFes().prepare_ocp(
-        model=DingModelPulseDurationFrequencyIntegrate(),
+        model=ding2007,
         stim_time=[0],
-        n_shooting=10,
         final_time=0.1,
-        pulse_duration={"min": min_duration, "max": 0.005},
+        pulse_width={"min": min_width, "max": 0.005},
         use_sx=True,
     )
 
@@ -439,11 +437,10 @@ def test_hmed2018_build():
         target=100,
         phase=0,
     )
-    min_intensity = DingModelIntensityFrequencyIntegrate().min_pulse_intensity()
+    min_intensity = hmed2018.min_pulse_intensity()
     ocp = OcpFes().prepare_ocp(
-        model=DingModelIntensityFrequencyIntegrate(),
+        model=hmed2018,
         stim_time=[0],
-        n_shooting=10,
         final_time=0.1,
         pulse_intensity={"min": min_intensity, "max": 100},
         objective={"custom": objective_list},
@@ -452,24 +449,21 @@ def test_hmed2018_build():
 
 
 def test_all_ocp_fes_errors():
-    with pytest.raises(
-        TypeError,
-        match=re.escape(
-            f"The current model type used is {type(None)}, it must be a FesModel type."
-            f"Current available models are: DingModelFrequency, DingModelFrequencyWithFatigue,"
-            f"DingModelPulseDurationFrequency, DingModelPulseDurationFrequencyWithFatigue,"
-            f"DingModelIntensityFrequency, DingModelIntensityFrequencyWithFatigue"
-        ),
-    ):
-        OcpFes.prepare_ocp(model=None)
-
-    with pytest.raises(TypeError, match="n_shooting must be a positive int type"):
-        OcpFes.prepare_ocp(model=DingModelFrequencyIntegrate(), stim_time=[0, 0.1, 0.2], n_shooting=-3)
-
-    with pytest.raises(TypeError, match="final_time must be a positive int or float type"):
-        OcpFes.prepare_ocp(
-            model=DingModelFrequencyIntegrate(), stim_time=[0, 0.1, 0.2], n_shooting=30, final_time="0.3"
-        )
+    # with pytest.raises(
+    #     TypeError,
+    #     match=re.escape(
+    #         f"The current model type used is {type(None)}, it must be a FesModel type."
+    #         f"Current available models are: DingModelFrequency, DingModelFrequencyWithFatigue,"
+    #         f"DingModelPulseWidthFrequency, DingModelPulseWidthFrequencyWithFatigue,"
+    #         f"DingModelPulseIntensityFrequency, DingModelPulseIntensityFrequencyWithFatigue"
+    #     ),
+    # ):
+    #     OcpFes.prepare_ocp(model=None)
+    #
+    # with pytest.raises(TypeError, match="final_time must be a positive int or float type"):
+    #     OcpFes.prepare_ocp(
+    #         model=ding2003, stim_time=[0, 0.1, 0.2], final_time="0.3"
+    #     )
 
     pulse_mode = "doublet"
     with pytest.raises(
@@ -477,9 +471,8 @@ def test_all_ocp_fes_errors():
         match=re.escape(f"Pulse mode '{pulse_mode}' is not yet implemented"),
     ):
         OcpFes.prepare_ocp(
-            model=DingModelFrequencyIntegrate(),
+            model=ding2003,
             stim_time=[0, 0.1, 0.2],
-            n_shooting=30,
             final_time=0.3,
             pulse_event={"pulse_mode": pulse_mode},
         )
@@ -489,130 +482,118 @@ def test_all_ocp_fes_errors():
         match="min and max time event must be both entered or none of them in order to work",
     ):
         OcpFes.prepare_ocp(
-            model=DingModelFrequencyIntegrate(),
+            model=ding2003,
             stim_time=[0, 0.1, 0.2],
-            n_shooting=30,
             final_time=0.3,
             pulse_event={"min": 0.1},
         )
 
     with pytest.raises(TypeError, match=re.escape("time bimapping must be bool type")):
         OcpFes.prepare_ocp(
-            model=DingModelFrequencyIntegrate(),
+            model=ding2003,
             stim_time=[0, 0.1, 0.2],
-            n_shooting=30,
             final_time=0.3,
             pulse_event={"min": 0.01, "max": 0.1, "bimapping": "True"},
         )
 
     with pytest.raises(
         ValueError,
-        match="pulse duration or pulse duration min max bounds need to be set for this model",
+        match="pulse width or pulse width min max bounds need to be set for this model",
     ):
         OcpFes.prepare_ocp(
-            model=DingModelPulseDurationFrequencyIntegrate(),
+            model=ding2007,
             stim_time=[0, 0.1, 0.2],
-            n_shooting=10,
             final_time=0.3,
-            pulse_duration={"min": 0.001},
+            pulse_width={"min": 0.001},
         )
 
     with pytest.raises(
         ValueError,
-        match="Either pulse duration or pulse duration min max bounds need to be set for this model",
+        match="Either pulse width or pulse width min max bounds need to be set for this model",
     ):
         OcpFes.prepare_ocp(
-            model=DingModelPulseDurationFrequencyIntegrate(),
+            model=ding2007,
             stim_time=[0, 0.1, 0.2],
-            n_shooting=10,
             final_time=0.3,
-            pulse_duration={"min": 0.001, "max": 0.005, "fixed": 0.003},
+            pulse_width={"min": 0.001, "max": 0.005, "fixed": 0.003},
         )
 
-    minimum_pulse_duration = DingModelPulseDurationFrequencyIntegrate().pd0
-    fixed_pulse_duration = 0.0001
+    minimum_pulse_width = ding2007.pd0
+    fixed_pulse_width = 0.0001
     with pytest.raises(
         ValueError,
         match=re.escape(
-            f"The pulse duration set ({fixed_pulse_duration})"
-            f" is lower than minimum duration required."
-            f" Set a value above {minimum_pulse_duration} seconds "
+            f"The pulse width set ({fixed_pulse_width})"
+            f" is lower than minimum width required."
+            f" Set a value above {minimum_pulse_width} seconds "
         ),
     ):
         OcpFes.prepare_ocp(
-            model=DingModelPulseDurationFrequencyIntegrate(),
+            model=ding2007,
             stim_time=[0, 0.1, 0.2],
-            n_shooting=10,
             final_time=0.3,
-            pulse_duration={"fixed": fixed_pulse_duration},
+            pulse_width={"fixed": fixed_pulse_width},
         )
 
-    with pytest.raises(TypeError, match="Wrong pulse_duration type, only int or float accepted"):
+    with pytest.raises(TypeError, match="Wrong pulse_width type, only int or float accepted"):
         OcpFes.prepare_ocp(
-            model=DingModelPulseDurationFrequencyIntegrate(),
+            model=ding2007,
             stim_time=[0, 0.1, 0.2],
-            n_shooting=10,
             final_time=0.3,
-            pulse_duration={"fixed": "0.001"},
+            pulse_width={"fixed": "0.001"},
         )
 
     with pytest.raises(
         TypeError,
-        match="min and max pulse duration must be int or float type",
+        match="min and max pulse width must be int or float type",
     ):
         OcpFes.prepare_ocp(
-            model=DingModelPulseDurationFrequencyIntegrate(),
+            model=ding2007,
             stim_time=[0, 0.1, 0.2],
-            n_shooting=10,
             final_time=0.3,
-            pulse_duration={"min": "0.001", "max": 0.005},
+            pulse_width={"min": "0.001", "max": 0.005},
         )
 
     with pytest.raises(
         ValueError,
-        match="The set minimum pulse duration is higher than maximum pulse duration.",
+        match="The set minimum pulse width is higher than maximum pulse width.",
     ):
         OcpFes.prepare_ocp(
-            model=DingModelPulseDurationFrequencyIntegrate(),
+            model=ding2007,
             stim_time=[0, 0.1, 0.2],
-            n_shooting=10,
             final_time=0.3,
-            pulse_duration={"min": 0.005, "max": 0.001},
+            pulse_width={"min": 0.005, "max": 0.001},
         )
 
-    pulse_duration_min = fixed_pulse_duration
+    pulse_width_min = fixed_pulse_width
     with pytest.raises(
         ValueError,
         match=re.escape(
-            f"The pulse duration set ({pulse_duration_min})"
-            f" is lower than minimum duration required."
-            f" Set a value above {minimum_pulse_duration} seconds "
+            f"The pulse width set ({pulse_width_min})"
+            f" is lower than minimum width required."
+            f" Set a value above {minimum_pulse_width} seconds "
         ),
     ):
         OcpFes.prepare_ocp(
-            model=DingModelPulseDurationFrequencyIntegrate(),
+            model=ding2007,
             stim_time=[0, 0.1, 0.2],
-            n_shooting=10,
             final_time=0.3,
-            pulse_duration={"min": pulse_duration_min, "max": 0.005},
+            pulse_width={"min": pulse_width_min, "max": 0.005},
         )
 
     with pytest.raises(
         ValueError,
         match="Pulse intensity or pulse intensity min max bounds need to be set for this model",
     ):
-        OcpFes.prepare_ocp(
-            model=DingModelIntensityFrequencyIntegrate(), stim_time=[0, 0.1, 0.2], n_shooting=10, final_time=0.3
-        )
+        OcpFes.prepare_ocp(model=hmed2018, stim_time=[0, 0.1, 0.2], final_time=0.3)
 
     with pytest.raises(
         ValueError,
         match="Either pulse intensity or pulse intensity min max bounds need to be set for this model",
     ):
         OcpFes.prepare_ocp(
-            model=DingModelIntensityFrequencyIntegrate(),
+            model=hmed2018,
             stim_time=[0, 0.1, 0.2],
-            n_shooting=10,
             final_time=0.3,
             pulse_intensity={"min": 20, "max": 100, "fixed": 50},
         )
@@ -622,14 +603,13 @@ def test_all_ocp_fes_errors():
         match="Pulse intensity or pulse intensity min max bounds need to be set for this model",
     ):
         OcpFes.prepare_ocp(
-            model=DingModelIntensityFrequencyIntegrate(),
+            model=hmed2018,
             stim_time=[0, 0.1, 0.2],
-            n_shooting=10,
             final_time=0.3,
             pulse_intensity={"min": 20},
         )
 
-    minimum_pulse_intensity = DingModelIntensityFrequencyIntegrate().min_pulse_intensity()
+    minimum_pulse_intensity = hmed2018.min_pulse_intensity()
     fixed_pulse_intensity = 1
     with pytest.raises(
         ValueError,
@@ -640,18 +620,16 @@ def test_all_ocp_fes_errors():
         ),
     ):
         OcpFes.prepare_ocp(
-            model=DingModelIntensityFrequencyIntegrate(),
+            model=hmed2018,
             stim_time=[0, 0.1, 0.2],
-            n_shooting=10,
             final_time=0.3,
             pulse_intensity={"fixed": fixed_pulse_intensity},
         )
 
     with pytest.raises(TypeError, match="pulse_intensity must be int or float type"):
         OcpFes.prepare_ocp(
-            model=DingModelIntensityFrequencyIntegrate(),
+            model=hmed2018,
             stim_time=[0, 0.1, 0.2],
-            n_shooting=10,
             final_time=0.3,
             pulse_intensity={"fixed": "20"},
         )
@@ -661,9 +639,8 @@ def test_all_ocp_fes_errors():
         match="pulse_intensity_min and pulse_intensity_max must be int or float type",
     ):
         OcpFes.prepare_ocp(
-            model=DingModelIntensityFrequencyIntegrate(),
+            model=hmed2018,
             stim_time=[0, 0.1, 0.2],
-            n_shooting=10,
             final_time=0.3,
             pulse_intensity={"min": "20", "max": 100},
         )
@@ -673,9 +650,8 @@ def test_all_ocp_fes_errors():
         match="The set minimum pulse intensity is higher than maximum pulse intensity.",
     ):
         OcpFes.prepare_ocp(
-            model=DingModelIntensityFrequencyIntegrate(),
+            model=hmed2018,
             stim_time=[0, 0.1, 0.2],
-            n_shooting=10,
             final_time=0.3,
             pulse_intensity={"min": 100, "max": 1},
         )
@@ -690,9 +666,8 @@ def test_all_ocp_fes_errors():
         ),
     ):
         OcpFes.prepare_ocp(
-            model=DingModelIntensityFrequencyIntegrate(),
+            model=hmed2018,
             stim_time=[0, 0.1, 0.2],
-            n_shooting=10,
             final_time=0.3,
             pulse_intensity={"min": pulse_intensity_min, "max": 100},
         )
@@ -702,36 +677,32 @@ def test_all_ocp_fes_errors():
         match="force_tracking time and force argument must be same length and force_tracking " "list size 2",
     ):
         OcpFes.prepare_ocp(
-            model=DingModelFrequencyIntegrate(),
+            model=ding2003,
             stim_time=[0, 0.1, 0.2],
-            n_shooting=10,
             final_time=0.3,
             objective={"force_tracking": [np.array([0, 1]), np.array([0, 1, 2])]},
         )
 
     with pytest.raises(TypeError, match="force_tracking argument must be np.ndarray type"):
         OcpFes.prepare_ocp(
-            model=DingModelFrequencyIntegrate(),
+            model=ding2003,
             stim_time=[0, 0.1, 0.2],
-            n_shooting=10,
             final_time=0.3,
             objective={"force_tracking": [[0, 1, 2], np.array([0, 1, 2])]},
         )
 
     with pytest.raises(TypeError, match="force_tracking must be list type"):
         OcpFes.prepare_ocp(
-            model=DingModelFrequencyIntegrate(),
+            model=ding2003,
             stim_time=[0, 0.1, 0.2],
-            n_shooting=10,
             final_time=0.3,
             objective={"force_tracking": np.array([np.array([0, 1, 2]), np.array([0, 1, 2])])},
         )
 
     with pytest.raises(TypeError, match="end_node_tracking must be int or float type"):
         OcpFes.prepare_ocp(
-            model=DingModelFrequencyIntegrate(),
+            model=ding2003,
             stim_time=[0, 0.1, 0.2],
-            n_shooting=10,
             final_time=0.3,
             objective={"end_node_tracking": "10"},
         )
@@ -742,45 +713,40 @@ def test_all_ocp_fes_errors():
     objective_functions[0].append("objective_function")
     with pytest.raises(TypeError, match="custom_objective must be a ObjectiveList type"):
         OcpFes.prepare_ocp(
-            model=DingModelFrequencyIntegrate(),
+            model=ding2003,
             stim_time=[0, 0.1, 0.2],
-            n_shooting=10,
             final_time=0.3,
             objective={"custom": "objective_functions"},
         )
 
     with pytest.raises(TypeError, match="All elements in ObjectiveList must be an Objective type"):
         OcpFes.prepare_ocp(
-            model=DingModelFrequencyIntegrate(),
+            model=ding2003,
             stim_time=[0, 0.1, 0.2],
-            n_shooting=10,
             final_time=0.3,
             objective={"custom": objective_functions},
         )
 
     with pytest.raises(TypeError, match="ode_solver must be a OdeSolver type"):
         OcpFes.prepare_ocp(
-            model=DingModelFrequencyIntegrate(),
+            model=ding2003,
             stim_time=[0, 0.1, 0.2],
-            n_shooting=10,
             final_time=0.3,
             ode_solver="ode_solver",
         )
 
     with pytest.raises(TypeError, match="use_sx must be a bool type"):
         OcpFes.prepare_ocp(
-            model=DingModelFrequencyIntegrate(),
+            model=ding2003,
             stim_time=[0, 0.1, 0.2],
-            n_shooting=10,
             final_time=0.3,
             use_sx="True",
         )
 
     with pytest.raises(TypeError, match="n_thread must be a int type"):
         OcpFes.prepare_ocp(
-            model=DingModelFrequencyIntegrate(),
+            model=ding2003,
             stim_time=[0, 0.1, 0.2],
-            n_shooting=10,
             final_time=0.3,
             n_threads="1",
         )

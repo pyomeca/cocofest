@@ -13,7 +13,7 @@ from bioptim import (
     ObjectiveList,
 )
 
-from cocofest import DingModelIntensityFrequencyWithFatigue, OcpFesMsk, FesMskModel
+from cocofest import DingModelPulseIntensityFrequencyWithFatigue, OcpFesMsk, FesMskModel
 
 n_shooting = 100
 objective_functions = ObjectiveList()
@@ -38,13 +38,13 @@ objective_functions.add(
     phase=0,
 )
 
-minimum_pulse_intensity = DingModelIntensityFrequencyWithFatigue.min_pulse_intensity(
-    DingModelIntensityFrequencyWithFatigue()
+minimum_pulse_intensity = DingModelPulseIntensityFrequencyWithFatigue.min_pulse_intensity(
+    DingModelPulseIntensityFrequencyWithFatigue()
 )
 model = FesMskModel(
     name=None,
     biorbd_path="../msk_models/arm26_biceps_1dof.bioMod",
-    muscles_model=[DingModelIntensityFrequencyWithFatigue(muscle_name="BIClong")],
+    muscles_model=[DingModelPulseIntensityFrequencyWithFatigue(muscle_name="BIClong")],
     activate_force_length_relationship=True,
     activate_force_velocity_relationship=True,
     activate_residual_torque=False,
@@ -53,7 +53,6 @@ model = FesMskModel(
 ocp = OcpFesMsk.prepare_ocp(
     model=model,
     stim_time=np.linspace(0, 1, 11)[:-1],
-    n_shooting=n_shooting,
     final_time=1,
     pulse_event={"min": 0.1, "max": 1, "bimapping": True},
     pulse_intensity={

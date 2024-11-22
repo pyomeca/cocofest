@@ -29,7 +29,6 @@ class ParameterIdentification(ABC):
         double_step_identification,
         key_parameter_to_identify,
         additional_key_settings,
-        n_shooting,
     ):
         """
 

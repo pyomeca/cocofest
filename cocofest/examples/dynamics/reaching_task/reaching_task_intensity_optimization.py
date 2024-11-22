@@ -9,7 +9,7 @@ import numpy as np
 
 from bioptim import Axis, ConstraintFcn, ConstraintList, Node, Solver
 
-from cocofest import DingModelIntensityFrequencyWithFatigue, OcpFesMsk, FesMskModel, SolutionToPickle
+from cocofest import DingModelPulseIntensityFrequencyWithFatigue, OcpFesMsk, FesMskModel, SolutionToPickle
 
 # Fiber type proportion from [1]
 biceps_fiber_type_2_proportion = 0.607
@@ -42,20 +42,20 @@ a_rest_proportion_list = [
 ]
 
 fes_muscle_models = [
-    DingModelIntensityFrequencyWithFatigue(muscle_name="BIClong"),
-    DingModelIntensityFrequencyWithFatigue(muscle_name="BICshort"),
-    DingModelIntensityFrequencyWithFatigue(muscle_name="TRIlong"),
-    DingModelIntensityFrequencyWithFatigue(muscle_name="TRIlat"),
-    DingModelIntensityFrequencyWithFatigue(muscle_name="TRImed"),
-    DingModelIntensityFrequencyWithFatigue(muscle_name="BRA"),
+    DingModelPulseIntensityFrequencyWithFatigue(muscle_name="BIClong"),
+    DingModelPulseIntensityFrequencyWithFatigue(muscle_name="BICshort"),
+    DingModelPulseIntensityFrequencyWithFatigue(muscle_name="TRIlong"),
+    DingModelPulseIntensityFrequencyWithFatigue(muscle_name="TRIlat"),
+    DingModelPulseIntensityFrequencyWithFatigue(muscle_name="TRImed"),
+    DingModelPulseIntensityFrequencyWithFatigue(muscle_name="BRA"),
 ]
 
 for i in range(len(fes_muscle_models)):
     fes_muscle_models[i].alpha_a = fes_muscle_models[i].alpha_a * alpha_a_proportion_list[i]
     fes_muscle_models[i].a_rest = fes_muscle_models[i].a_rest * a_rest_proportion_list[i]
 
-minimum_pulse_intensity = DingModelIntensityFrequencyWithFatigue.min_pulse_intensity(
-    DingModelIntensityFrequencyWithFatigue()
+minimum_pulse_intensity = DingModelPulseIntensityFrequencyWithFatigue.min_pulse_intensity(
+    DingModelPulseIntensityFrequencyWithFatigue()
 )
 
 model = FesMskModel(
@@ -89,7 +89,6 @@ for i in range(len(pickle_file_list)):
     ocp = OcpFesMsk.prepare_ocp(
         model=model,
         stim_time=stim_time,
-        n_shooting=1000,
         final_time=1,
         pulse_intensity={
             "min": minimum_pulse_intensity,

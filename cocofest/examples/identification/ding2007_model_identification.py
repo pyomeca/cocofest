@@ -12,23 +12,22 @@ import numpy as np
 from bioptim import SolutionMerge
 
 from cocofest import (
-    DingModelPulseDurationFrequency,
-    DingModelPulseDurationFrequencyIntegrate,
-    DingModelPulseDurationFrequencyForceParameterIdentification,
+    DingModelPulseWidthFrequency,
+    DingModelPulseWidthFrequencyForceParameterIdentification,
     IvpFes,
+    ModelMaker,
 )
 from cocofest.identification.identification_method import full_data_extraction
 
 
 # --- Setting simulation parameters --- #
 stim_time = np.round(np.linspace(0, 1, 11)[:-1], 2)
-pulse_duration = np.random.uniform(0.0002, 0.0006, 10).tolist()
+pulse_width = np.random.uniform(0.0002, 0.0006, 10).tolist()
 
-n_shooting = 200
 final_time = 2
-ivp_model = DingModelPulseDurationFrequencyIntegrate()
-fes_parameters = {"model": ivp_model, "stim_time": stim_time, "pulse_duration": pulse_duration}
-ivp_parameters = {"n_shooting": n_shooting, "final_time": final_time, "use_sx": True}
+ivp_model = ModelMaker.create_model("ding2007", is_approximated=False)
+fes_parameters = {"model": ivp_model, "stim_time": stim_time, "pulse_width": pulse_width}
+ivp_parameters = {"final_time": final_time, "use_sx": True}
 
 # --- Creating the simulated data to identify on --- #
 # Building the Initial Value Problem
@@ -42,22 +41,21 @@ noise = np.random.normal(0, 5, len(result["F"][0]))
 force = result["F"][0] + noise
 
 # Saving the data in a pickle file
-dictionary = {"time": time, "force": force, "stim_time": stim_time, "pulse_duration": pulse_duration}
+dictionary = {"time": time, "force": force, "stim_time": stim_time, "pulse_width": pulse_width}
 
 pickle_file_name = "../data/temp_identification_simulation.pkl"
 with open(pickle_file_name, "wb") as file:
     pickle.dump(dictionary, file)
 
 # --- Identifying the model parameters --- #
-ocp_model = DingModelPulseDurationFrequency()
-ocp = DingModelPulseDurationFrequencyForceParameterIdentification(
+ocp_model = DingModelPulseWidthFrequency()
+ocp = DingModelPulseWidthFrequencyForceParameterIdentification(
     model=ocp_model,
     data_path=[pickle_file_name],
     identification_method="full",
     double_step_identification=False,
     key_parameter_to_identify=["tau1_rest", "tau2", "km_rest", "a_scale", "pd0", "pdt"],
     additional_key_settings={},
-    n_shooting=n_shooting,
     final_time=final_time,
     use_sx=True,
     n_threads=6,
@@ -75,12 +73,12 @@ print(identified_parameters)
 ) = full_data_extraction([pickle_file_name])
 
 result_dict = {
-    "tau1_rest": [identified_parameters["tau1_rest"], DingModelPulseDurationFrequency().tau1_rest],
-    "tau2": [identified_parameters["tau2"], DingModelPulseDurationFrequency().tau2],
-    "km_rest": [identified_parameters["km_rest"], DingModelPulseDurationFrequency().km_rest],
-    "a_scale": [identified_parameters["a_scale"], DingModelPulseDurationFrequency().a_scale],
-    "pd0": [identified_parameters["pd0"], DingModelPulseDurationFrequency().pd0],
-    "pdt": [identified_parameters["pdt"], DingModelPulseDurationFrequency().pdt],
+    "tau1_rest": [identified_parameters["tau1_rest"], DingModelPulseWidthFrequency().tau1_rest],
+    "tau2": [identified_parameters["tau2"], DingModelPulseWidthFrequency().tau2],
+    "km_rest": [identified_parameters["km_rest"], DingModelPulseWidthFrequency().km_rest],
+    "a_scale": [identified_parameters["a_scale"], DingModelPulseWidthFrequency().a_scale],
+    "pd0": [identified_parameters["pd0"], DingModelPulseWidthFrequency().pd0],
+    "pdt": [identified_parameters["pdt"], DingModelPulseWidthFrequency().pdt],
 }
 
 # Plotting the identification result
