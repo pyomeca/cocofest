@@ -94,7 +94,7 @@ def prepare_ocp(
         u_init.add("tau", u_guess, interpolation=InterpolationType.EACH_FRAME)
 
     return OptimalControlProgram(
-        bio_model,
+        [bio_model],
         dynamics,
         n_shooting,
         final_time,
@@ -119,7 +119,7 @@ def main():
     )
     ocp.add_plot_penalty(CostType.ALL)
     sol = ocp.solve()
-    sol.animate()
+    sol.animate(viewer="pyorerun")
     sol.graphs()
 
 

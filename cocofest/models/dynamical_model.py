@@ -170,7 +170,7 @@ class FesMskModel(BiorbdModel):
         total_torque = muscles_tau + tau if self.activate_residual_torque else muscles_tau
         external_forces = nlp.get_external_forces(states, controls, algebraic_states, numerical_data_timeseries)
         with_contact = True if nlp.model.bio_model.contact_names != () else False
-        ddq = nlp.model.forward_dynamics(with_contact=False)(q, qdot, total_torque, external_forces, parameters)  # q, qdot, tau, external_forces, parameters
+        ddq = nlp.model.forward_dynamics(with_contact=with_contact)(q, qdot, total_torque, external_forces, parameters)  # q, qdot, tau, external_forces, parameters
         # TODO: Add a better way of with_contact=True
         dxdt = vertcat(dxdt_muscle_list, dq, ddq)
 

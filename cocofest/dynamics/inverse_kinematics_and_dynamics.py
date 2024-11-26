@@ -91,8 +91,8 @@ def inverse_kinematics_cycling(
     if 0 <= model.nbMarkers() > 1:
         raise ValueError("The model must have only one markers to perform the inverse kinematics")
 
-    z = model.markers(np.array([0, 0]))[0].to_array()[2]
-    if z != model.markers(np.array([np.pi / 2, np.pi / 2]))[0].to_array()[2]:
+    z = model.markers(np.array([0]*model.nbQ()))[0].to_array()[2]
+    if z != model.markers(np.array([np.pi / 2]*model.nbQ()))[0].to_array()[2]:
         print("The model not strictly 2d. Warm start not optimal.")
 
     x_y_z_coord = np.array(
