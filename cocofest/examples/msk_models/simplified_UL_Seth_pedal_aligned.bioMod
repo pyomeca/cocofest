@@ -141,8 +141,8 @@ gravity	0 -9.8065999999999995 0
 			1.0		0.0		0.0		0.0
 			0.0		0.0		0.0		1.0
 		rotations x
-		// ranges
-				// 0 2.2689280300000001
+		ranges
+				-1 2.2689280300000001
 	endsegment
 
 	// Segment
@@ -211,7 +211,7 @@ gravity	0 -9.8065999999999995 0
 //Pedal segment
 variables
     $wheel_radius 0.1
-    $wheel_x_position 0.3 // X position of the wheel
+    $wheel_x_position 0.35 // X position of the wheel
     $wheel_y_position 0.0  // Y position of the wheel
 endvariables
 
@@ -224,7 +224,7 @@ segment wheel_rotation
         0.0    0.0    1.0    0.075
         0.0    0.0    0.0    1.0
     rotations z
-    rangesQ -2*pi 2*pi
+    rangesQ -4*pi 4*pi
 endsegment
 
 segment wheel

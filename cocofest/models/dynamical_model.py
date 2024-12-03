@@ -33,6 +33,7 @@ class FesMskModel(BiorbdModel):
         activate_residual_torque: bool = False,
         parameters: ParameterList = None,
         external_force_set: ExternalForceSetTimeSeries = None,
+        for_cycling: bool = False,
     ):
         """
         The custom model that will be used in the optimal control program for the FES-MSK models
@@ -70,6 +71,9 @@ class FesMskModel(BiorbdModel):
         self.activate_force_length_relationship = activate_force_length_relationship
         self.activate_force_velocity_relationship = activate_force_velocity_relationship
         self.activate_residual_torque = activate_residual_torque
+        self.parameters_list = parameters
+        self.external_forces_set = external_force_set
+        self.for_cycling = for_cycling
 
     # ---- Absolutely needed methods ---- #
     def serialize(self) -> tuple[Callable, dict]:
@@ -81,6 +85,9 @@ class FesMskModel(BiorbdModel):
                 "muscles_model": self.muscles_dynamics_model,
                 "activate_force_length_relationship": self.activate_force_length_relationship,
                 "activate_force_velocity_relationship": self.activate_force_velocity_relationship,
+                "activate_residual_torque": self.activate_residual_torque,
+                "parameters": self.parameters_list,
+                "external_force_set": self.external_forces_set,
             },
         )
 

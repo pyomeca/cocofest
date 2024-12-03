@@ -1,9 +1,9 @@
 """
 This example will do a 10 stimulation example with Ding's 2007 frequency model.
-This ocp was build to produce a elbow motion from 5 to 120 degrees.
-The stimulation frequency will be optimized between 10 and 100 Hz and pulse duration between minimal sensitivity
-threshold and 600us to satisfy the flexion and minimizing required elbow torque control.
-External forces will be applied to the system to simulate a real-world scenario.
+This ocp was build to produce a hand cycling motion.
+The pulse duration will be optimized between minimal sensitivity threshold and 600us to satisfy the motion while
+minimizing residual joints torques and produced muscular forces.
+External forces will be applied to the system to simulate a real-world scenario with contacts at the pedal center.
 """
 import numpy as np
 from bioptim import Solver, ControlType
@@ -47,12 +47,10 @@ ocp = OcpFesMsk.prepare_ocp_for_cycling(
     control_type=ControlType.CONSTANT,
 )
 
-# sol = ocp.solve(solver=Solver.IPOPT(_max_iter=1))
 sol = ocp.solve(Solver.IPOPT(show_online_optim=False, _max_iter=10000))
-SolutionToPickle(sol, "hand_cycling_external_forces.pkl", "").pickle()
+SolutionToPickle(sol, "hand_cycling_external_forces1.pkl", "").pickle()
 biorbd_model = biorbd.Model("../msk_models/simplified_UL_Seth_pedal_aligned_test.bioMod")
-PickleAnimate("hand_cycling_external_forces.pkl").animate(model=biorbd_model)
+PickleAnimate("hand_cycling_external_forces1.pkl").animate(model=biorbd_model)
 
 sol.animate(show_tracked_markers=True)
-# sol.animate(viewer="pyorerun")
 sol.graphs(show_bounds=True)

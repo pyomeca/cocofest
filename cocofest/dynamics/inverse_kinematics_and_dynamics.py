@@ -1,5 +1,6 @@
 import math
 import numpy as np
+from scipy.interpolate import interp1d
 
 import biorbd
 
@@ -50,6 +51,7 @@ def inverse_kinematics_cycling(
     y_center: int | float,
     radius: int | float,
     ik_method: str = "trf",
+    cycling_number: int = 1,
 ) -> tuple:
     """
     Perform the inverse kinematics of a cycling movement
@@ -80,6 +82,8 @@ def inverse_kinematics_cycling(
             -‘lm’ : Levenberg-Marquardt algorithm as implemented in MINPACK.
                     Does not handle bounds and sparse Jacobians.
                     Usually the most efficient method for small unconstrained problems.
+    cycling_number: int
+        The number of cycle performed in a single problem
 
     Returns
     ----------
@@ -88,20 +92,27 @@ def inverse_kinematics_cycling(
     """
 
     model = biorbd.Model(model_path)
-    if 0 <= model.nbMarkers() > 1:
-        raise ValueError("The model must have only one markers to perform the inverse kinematics")
 
     z = model.markers(np.array([0]*model.nbQ()))[0].to_array()[2]
     if z != model.markers(np.array([np.pi / 2]*model.nbQ()))[0].to_array()[2]:
         print("The model not strictly 2d. Warm start not optimal.")
 
+    f = interp1d(np.linspace(0, -360 * cycling_number, 360 * cycling_number + 1),
+                 np.linspace(0, -360 * cycling_number, 360 * cycling_number + 1), kind="linear")
+    x_new = f(np.linspace(0, -360 * cycling_number, n_shooting+1))
+    x_new_rad = np.deg2rad(x_new)
+
     x_y_z_coord = np.array(
         [
-            get_circle_coord(theta, x_center, y_center, radius, z=z)
-            for theta in np.linspace(0, -2 * np.pi + (-2 * np.pi / n_shooting), n_shooting + 1)
+            get_circle_coord(theta, x_center, y_center, radius)
+            for theta in x_new_rad
         ]
     ).T
-    target_q = x_y_z_coord.reshape((3, 1, n_shooting + 1))
+
+    target_q_hand = x_y_z_coord.reshape((3, 1, n_shooting+1))  # Hand marker_target
+    wheel_center_x_y_z_coord = np.array([x_center, y_center, z])
+    target_q_wheel_center = np.tile(wheel_center_x_y_z_coord[:, np.newaxis, np.newaxis], (1, 1, n_shooting+1))  # Wheel marker_target
+    target_q = np.concatenate((target_q_hand, target_q_wheel_center), axis=1)
     ik = biorbd.InverseKinematics(model, target_q)
     ik_q = ik.solve(method=ik_method)
     ik_qdot = np.array([np.gradient(ik_q[i], (1 / n_shooting)) for i in range(ik_q.shape[0])])
@@ -136,9 +147,9 @@ def inverse_dynamics_cycling(
         joints torques
     """
     model = biorbd.Model(model_path)
-    tau_shape = (model.nbQ(), q.shape[1] - 1)
+    tau_shape = (model.nbQ(), q.shape[1])
     tau = np.zeros(tau_shape)
     for i in range(tau.shape[1]):
         tau_i = model.InverseDynamics(q[:, i], qdot[:, i], qddot[:, i])
         tau[:, i] = tau_i.to_array()
-    return tau
+    return tau[:, :-1]
