@@ -96,9 +96,15 @@ class OcpFesMsk:
             input_dict["control_type"],
             msk_info["custom_constraint"],
             input_dict["external_forces"],
+            input_dict["n_cycles_simultaneous"] if "n_cycles_simultaneous" in input_dict.keys() else 1,
         )
 
-        numerical_time_series, with_contact, external_force_set = OcpFesMsk._prepare_numerical_time_series(input_dict["n_shooting"], input_dict["external_forces"])
+        if input_dict["external_forces"]:
+            input_dict["n_total_cycles"] = input_dict["n_total_cycles"] if "n_total_cycles" in input_dict.keys() else 1
+            numerical_time_series, with_contact, external_force_set = OcpFesMsk._prepare_numerical_time_series(input_dict["n_shooting"] * input_dict["n_total_cycles"], input_dict["external_forces"], input_dict)
+        else:
+            numerical_time_series, with_contact, external_force_set = None, False, None
+
         dynamics = OcpFesMsk._declare_dynamics(input_dict["model"], numerical_time_series=numerical_time_series, with_contact=with_contact)
 
         x_bounds, x_init = OcpFesMsk._set_bounds_fes(input_dict["model"])
@@ -129,6 +135,7 @@ class OcpFesMsk:
             activate_residual_torque=input_dict["model"].activate_residual_torque,
             parameters=parameters,
             external_force_set=external_force_set,
+            for_cycling=input_dict["model"].for_cycling if "for_cycling" in input_dict["model"].__dict__.keys() else False,
         )
 
         optimization_dict = {
@@ -320,17 +327,49 @@ class OcpFesMsk:
     def _prepare_optimization_problem_for_cycling(optimization_dict: dict, input_dict: dict) -> dict:
         OcpFesMsk._check_if_cycling_objectives_are_feasible(input_dict["objective"]["cycling"], input_dict["model"])
 
-        q_guess, qdot_guess, u_guess = OcpFesMsk._prepare_initial_guess_cycling(input_dict["model"].biorbd_path,
+        if "cycling" in input_dict["objective"].keys():
+            # Adding an objective function to track a marker in a circular trajectory
+            x_center = input_dict["objective"]["cycling"]["x_center"]
+            y_center = input_dict["objective"]["cycling"]["y_center"]
+            radius = input_dict["objective"]["cycling"]["radius"]
+
+            from scipy.interpolate import interp1d
+            f = interp1d(np.linspace(0, -360 * input_dict["n_cycles_simultaneous"], 360 * input_dict["n_cycles_simultaneous"] + 1),
+                         np.linspace(0, -360 * input_dict["n_cycles_simultaneous"], 360 * input_dict["n_cycles_simultaneous"] + 1), kind="linear")
+            x_new = f(np.linspace(0, -360 * input_dict["n_cycles_simultaneous"], input_dict["n_cycles_simultaneous"] * input_dict["n_shooting"] + 1))
+            x_new_rad = np.deg2rad(x_new)
+
+            circle_coord_list = np.array(
+                [
+                    get_circle_coord(theta, x_center, y_center, radius)[:-1]
+                    for theta in x_new_rad
+                ]
+            ).T
+
+            optimization_dict["objective_functions"].add(
+                ObjectiveFcn.Mayer.TRACK_MARKERS,
+                weight=100000,
+                axes=[Axis.X, Axis.Y],
+                marker_index=0,
+                target=circle_coord_list,
+                node=Node.ALL,
+                phase=0,
+                quadratic=True,
+            )
+
+        q_guess, qdot_guess = OcpFesMsk._prepare_initial_guess_cycling(input_dict["model"].biorbd_path,
                                                                                 input_dict["n_shooting"],
                                                                                 input_dict["objective"]["cycling"]["x_center"],
                                                                                 input_dict["objective"]["cycling"]["y_center"],
-                                                                                input_dict["objective"]["cycling"]["radius"])
-        x_initial_guess = {"q_guess": q_guess, "qdot_guess": qdot_guess}
-        x_bounds, x_init = OcpFesMsk._set_bounds_msk_for_cycling(optimization_dict["x_bounds"], optimization_dict["x_init"], input_dict["model"], x_initial_guess)
+                                                                                input_dict["objective"]["cycling"]["radius"],
+                                                                                input_dict["n_cycles_simultaneous"],)
 
-        u_initial_guess = {"u_guess": u_guess}
-        input_dict["msk_info"]["with_residual_torque"] = input_dict["msk_info"]["with_residual_torque"] if "with_residual_torque" in input_dict["msk_info"].keys() else False
-        u_bounds, u_init = OcpFesMsk._set_u_bounds_msk_for_cycling(optimization_dict["u_bounds"], optimization_dict["u_init"], input_dict["model"], input_dict["msk_info"]["with_residual_torque"], u_initial_guess)
+        x_initial_guess = {"q_guess": q_guess, "qdot_guess": qdot_guess}
+        x_bounds, x_init = OcpFesMsk._set_bounds_msk_for_cycling(optimization_dict["x_bounds"], optimization_dict["x_init"], input_dict["model"], x_initial_guess, input_dict["n_cycles_simultaneous"])
+
+        u_bounds = BoundsList()
+        u_bounds.add(key="tau", min_bound=np.array([-50, -50, -0]), max_bound=np.array([50, 50, 0]), phase=0,
+                                      interpolation=InterpolationType.CONSTANT_WITH_FIRST_AND_LAST_DIFFERENT)
 
         if "with_contact" in input_dict["external_forces"] and input_dict["external_forces"]["with_contact"]:
             constraints = OcpFesMsk._build_constraints_for_cycling(optimization_dict["constraints"], input_dict["model"])
@@ -340,9 +379,10 @@ class OcpFesMsk:
         optimization_dict_for_cycling = {
             "x_init": x_init,
             "x_bounds": x_bounds,
-            "u_init": u_init,
+            "u_init": optimization_dict["u_init"],
             "u_bounds": u_bounds,
             "constraints": constraints,
+            "objective_functions": optimization_dict["objective_functions"],
         }
 
         return optimization_dict_for_cycling
@@ -396,20 +436,19 @@ class OcpFesMsk:
         return pulse_width, pulse_intensity, objective, msk_info
 
     @staticmethod
-    def _prepare_numerical_time_series(n_shooting, external_forces):
+    def _prepare_numerical_time_series(n_shooting, external_forces, input_dict):
 
-        if external_forces:
-            external_force_set = ExternalForceSetTimeSeries(nb_frames=n_shooting)
-            reshape_values_array = np.tile(external_forces["torque"][:, np.newaxis], (1, n_shooting))
-            external_force_set.add_torque(segment=external_forces["Segment_application"],
-                                          values=reshape_values_array)
+        total_n_shooting = input_dict["n_shooting"] * input_dict["n_cycles_simultaneous"]
+        total_external_forces_frame = input_dict["n_total_cycles"] * input_dict["n_shooting"] if input_dict["n_total_cycles"] >= input_dict["n_cycles_simultaneous"] else total_n_shooting
+        external_force_set = ExternalForceSetTimeSeries(nb_frames=total_external_forces_frame)
 
-            numerical_time_series = {"external_forces": external_force_set.to_numerical_time_series()}
-            with_contact = external_forces["with_contact"] if "with_contact" in external_forces.keys() else False
-        else:
-            numerical_time_series = None
-            with_contact = False
-            external_force_set = None
+        external_force_array = np.array(input_dict["external_forces"]["torque"])
+        reshape_values_array = np.tile(external_force_array[:, np.newaxis], (1, total_external_forces_frame))
+        external_force_set.add_torque(segment=external_forces["Segment_application"],
+                                      values=reshape_values_array)
+
+        numerical_time_series = {"external_forces": external_force_set.to_numerical_time_series()}
+        with_contact = external_forces["with_contact"] if "with_contact" in external_forces.keys() else False
 
         return numerical_time_series, with_contact, external_force_set
 
@@ -582,7 +621,7 @@ class OcpFesMsk:
         )
 
     @staticmethod
-    def _build_constraints(model, n_shooting, final_time, stim_time, control_type, custom_constraint=None, external_forces=None):  #, cycling=False):
+    def _build_constraints(model, n_shooting, final_time, stim_time, control_type, custom_constraint=None, external_forces=None, simultaneous_cycle=1):  #, cycling=False):
         constraints = ConstraintList()
 
         if model.activate_residual_torque and control_type == ControlType.LINEAR_CONTINUOUS:
@@ -595,7 +634,7 @@ class OcpFesMsk:
             )
 
         if model.muscles_dynamics_model[0].is_approximated:
-            time_vector = np.linspace(0, final_time, n_shooting + 1)
+            time_vector = np.linspace(0, final_time*simultaneous_cycle, n_shooting + 1)
             stim_at_node = [np.where(stim_time[i] <= time_vector)[0][0] for i in range(len(stim_time))]
             additional_node = 1 if control_type == ControlType.LINEAR_CONTINUOUS else 0
 
@@ -640,30 +679,31 @@ class OcpFesMsk:
 
     @staticmethod
     def _build_constraints_for_cycling(constraints, model):
-        constraints.add(
-            ConstraintFcn.TRACK_MARKERS_VELOCITY,
-            node=Node.START,
-            marker_index=model.marker_index("wheel_center"),
-            axes=[Axis.X, Axis.Y],
-        )
+        # constraints.add(
+        #     ConstraintFcn.TRACK_MARKERS_VELOCITY,
+        #     node=Node.START,
+        #     marker_index=model.marker_index("wheel_center"),
+        #     axes=[Axis.X, Axis.Y],
+        # )
 
         constraints.add(
             ConstraintFcn.SUPERIMPOSE_MARKERS,
             first_marker="wheel_center",
             second_marker="global_wheel_center",
-            node=Node.START,
+            node=Node.ALL,
             axes=[Axis.X, Axis.Y],
         )
         return constraints
 
     @staticmethod
-    def _prepare_initial_guess_cycling(biorbd_model_path, n_shooting, x_center, y_center, radius):
-        biorbd_model_path = "../msk_models/simplified_UL_Seth_pedal_aligned_test_one_marker.bioMod"  #TODO : make it a def entry
+    def _prepare_initial_guess_cycling(biorbd_model_path, n_shooting, x_center, y_center, radius, n_cycles_simultaneous=1,):
+        biorbd_model_path = "../../msk_models/simplified_UL_Seth_pedal_aligned_test_one_marker.bioMod"  #TODO : make it a def entry
         q_guess, qdot_guess, qddotguess = inverse_kinematics_cycling(
-            biorbd_model_path, n_shooting, x_center, y_center, radius, ik_method="trf"
+            biorbd_model_path, n_shooting * n_cycles_simultaneous, x_center, y_center, radius, ik_method="trf", cycling_number=n_cycles_simultaneous
         )
-        u_guess = inverse_dynamics_cycling(biorbd_model_path, q_guess, qdot_guess, qddotguess)
-        return q_guess, qdot_guess, u_guess
+        # u_guess = inverse_dynamics_cycling(biorbd_model_path, q_guess, qdot_guess, qddotguess)
+
+        return q_guess, qdot_guess  #, u_guess
 
     @staticmethod
     def _set_bounds_fes(bio_models):
@@ -762,12 +802,15 @@ class OcpFesMsk:
         return x_bounds, x_init
 
     @staticmethod
-    def _set_bounds_msk_for_cycling(x_bounds, x_init, bio_models, initial_guess):
+    def _set_bounds_msk_for_cycling(x_bounds, x_init, bio_models, initial_guess, n_cycles_simultaneous: int = 1):
         q_x_bounds = bio_models.bounds_from_ranges("q")
         qdot_x_bounds = bio_models.bounds_from_ranges("qdot")
         qdot_x_bounds.max[2] = [0, 0, 0]
 
-        x_bounds.add(key="q", bounds=q_x_bounds, phase=0)
+        x_bounds.add(key="q", bounds=q_x_bounds, phase=0, interpolation=InterpolationType.CONSTANT_WITH_FIRST_AND_LAST_DIFFERENT)
+        x_bounds["q"].min[-1, :] = x_bounds["q"].min[-1, :] * n_cycles_simultaneous  # Allow the wheel to spin as much as needed
+        x_bounds["q"].max[-1, :] = x_bounds["q"].max[-1, :] * n_cycles_simultaneous
+
         x_bounds.add(key="qdot", bounds=qdot_x_bounds, phase=0)
 
         if initial_guess["q_guess"] is not None:
@@ -1035,7 +1078,7 @@ class OcpFesMsk:
             if not isinstance(objective["cycling"], dict):
                 raise TypeError(f"cycling_objective: {objective['cycling']} must be dictionary type")
 
-            cycling_objective_keys = ["x_center", "y_center", "radius", "target"]
+            cycling_objective_keys = ["x_center", "y_center", "radius"]
             if not all([cycling_objective_keys[i] in objective["cycling"] for i in range(len(cycling_objective_keys))]):
                 raise ValueError(
                     f"cycling_objective dictionary must contain the following keys: {cycling_objective_keys}"
@@ -1044,16 +1087,16 @@ class OcpFesMsk:
             if not all([isinstance(objective["cycling"][key], int | float) for key in cycling_objective_keys[:3]]):
                 raise TypeError(f"cycling_objective x_center, y_center and radius inputs must be int or float")
 
-            if isinstance(objective["cycling"][cycling_objective_keys[-1]], str):
-                if (
-                    objective["cycling"][cycling_objective_keys[-1]] != "marker"
-                    and objective["cycling"][cycling_objective_keys[-1]] != "q"
-                ):
-                    raise ValueError(
-                        f"{objective['cycling'][cycling_objective_keys[-1]]} not implemented chose between 'marker' and 'q' as 'target'"
-                    )
-            else:
-                raise TypeError(f"cycling_objective target must be string type")
+            # if isinstance(objective["cycling"][cycling_objective_keys[-1]], str):
+            #     if (
+            #         objective["cycling"][cycling_objective_keys[-1]] != "marker"
+            #         and objective["cycling"][cycling_objective_keys[-1]] != "q"
+            #     ):
+            #         raise ValueError(
+            #             f"{objective['cycling'][cycling_objective_keys[-1]]} not implemented chose between 'marker' and 'q' as 'target'"
+            #         )
+            # else:
+            #     raise TypeError(f"cycling_objective target must be string type")
 
         if objective["q_tracking"]:
             if not isinstance(objective["q_tracking"], list) and len(objective["q_tracking"]) != 2:

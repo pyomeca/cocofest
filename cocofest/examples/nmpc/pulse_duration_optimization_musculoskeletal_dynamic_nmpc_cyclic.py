@@ -5,15 +5,12 @@ The pulse width between minimal sensitivity threshold and 600us to satisfy the f
 torque control.
 """
 
-import os
 import biorbd
 from bioptim import Solver, MultiCyclicNonlinearModelPredictiveControl, Solution
 from cocofest import (
     DingModelPulseWidthFrequencyWithFatigue,
     NmpcFesMsk,
     FesMskModel,
-    SolutionToPickle,
-    PickleAnimate,
 )
 
 model = FesMskModel(
