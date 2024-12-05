@@ -31,12 +31,16 @@ class DingModelFrequencyWithFatigue(DingModelFrequency):
         self,
         model_name: str = "ding2003_with_fatigue",
         muscle_name: str = None,
+        stim_time: list[float] = None,
+        previous_stim: dict = None,
         sum_stim_truncation: int = None,
         is_approximated: bool = False,
     ):
         super().__init__(
             model_name=model_name,
             muscle_name=muscle_name,
+            stim_time=stim_time,
+            previous_stim=previous_stim,
             sum_stim_truncation=sum_stim_truncation,
         )
         self._with_fatigue = True
@@ -139,7 +143,6 @@ class DingModelFrequencyWithFatigue(DingModelFrequency):
         tau1: MX = None,
         km: MX = None,
         t: MX = None,
-        t_stim_prev: list[MX] | list[float] = None,
         cn_sum: MX | float = None,
         force_length_relationship: MX | float = 1,
         force_velocity_relationship: MX | float = 1,
@@ -161,8 +164,6 @@ class DingModelFrequencyWithFatigue(DingModelFrequency):
             The value of the cross_bridges (unitless)
         t: MX
             The current time at which the dynamics is evaluated (s)
-        t_stim_prev: list[MX] | list[float]
-            The time list of the previous stimulations (s)
         cn_sum: MX | float
             The sum of the ca_troponin_complex (unitless)
         force_length_relationship: MX | float
@@ -174,6 +175,7 @@ class DingModelFrequencyWithFatigue(DingModelFrequency):
         -------
         The value of the derivative of each state dx/dt at the current time t
         """
+        t_stim_prev = self.all_stim
         cn_dot = self.calculate_cn_dot(cn, cn_sum, t, t_stim_prev)
         f_dot = self.f_dot_fun(
             cn,
@@ -278,13 +280,13 @@ class DingModelFrequencyWithFatigue(DingModelFrequency):
         """
         model = fes_model if fes_model else nlp.model
         dxdt_fun = model.system_dynamics
-        stim_apparition = None
+        # stim_apparition = None
         cn_sum = None
 
         if model.is_approximated:
             cn_sum = controls[0]
-        else:
-            stim_apparition = model.get_stim(nlp=nlp, parameters=parameters)
+        # else:
+        #     stim_apparition = model.get_stim(nlp=nlp, parameters=parameters)
 
         return DynamicsEvaluation(
             dxdt=dxdt_fun(
@@ -295,7 +297,6 @@ class DingModelFrequencyWithFatigue(DingModelFrequency):
                 km=states[4],
                 cn_sum=cn_sum,
                 t=time,
-                t_stim_prev=stim_apparition,
                 force_length_relationship=force_length_relationship,
                 force_velocity_relationship=force_velocity_relationship,
             ),

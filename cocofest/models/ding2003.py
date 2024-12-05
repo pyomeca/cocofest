@@ -33,6 +33,8 @@ class DingModelFrequency(FesModel):
         self,
         model_name: str = "ding2003",
         muscle_name: str = None,
+        stim_time: list[float] = None,
+        previous_stim: dict = None,
         sum_stim_truncation: int = None,
         is_approximated: bool = False,
     ):
@@ -43,7 +45,9 @@ class DingModelFrequency(FesModel):
         self._with_fatigue = False
         self.is_approximated = is_approximated
         self.pulse_apparition_time = None
-        self.stim_prev = []
+        self.stim_time = stim_time
+        self.previous_stim = previous_stim
+        self.all_stim = self.previous_stim["time"] + self.stim_time if self.previous_stim else self.stim_time
 
         # --- Default values --- #
         TAUC_DEFAULT = 0.020  # Value from Ding's experimentation [1] (s)
@@ -153,7 +157,6 @@ class DingModelFrequency(FesModel):
         cn: MX,
         f: MX,
         t: MX = None,
-        t_stim_prev: list[MX] | list[float] = None,
         cn_sum: MX | float = None,
         force_length_relationship: MX | float = 1,
         force_velocity_relationship: MX | float = 1,
@@ -169,8 +172,6 @@ class DingModelFrequency(FesModel):
             The value of the force (N)
         t: MX
             The current time at which the dynamics is evaluated (s)
-        t_stim_prev: list[MX] | list[float]
-            The time list of the previous stimulations (s)
         cn_sum: MX | float
             The sum of the ca_troponin_complex (unitless)
         force_length_relationship: MX | float
@@ -182,6 +183,7 @@ class DingModelFrequency(FesModel):
         -------
         The value of the derivative of each state dx/dt at the current time t
         """
+        t_stim_prev = self.all_stim
         cn_dot = self.calculate_cn_dot(cn, cn_sum, t, t_stim_prev)
         f_dot = self.f_dot_fun(
             cn,
@@ -367,7 +369,6 @@ class DingModelFrequency(FesModel):
                 cn=states[0],
                 f=states[1],
                 t=time,
-                t_stim_prev=stim_apparition,
                 cn_sum=cn_sum,
                 force_length_relationship=force_length_relationship,
                 force_velocity_relationship=force_velocity_relationship,
@@ -396,36 +397,3 @@ class DingModelFrequency(FesModel):
         if self.is_approximated:
             StateConfigure().configure_cn_sum(ocp, nlp)
         ConfigureProblem.configure_dynamics_function(ocp, nlp, dyn_func=self.dynamics)
-
-    @staticmethod
-    def get_stim(nlp: NonLinearProgram, parameters: MX) -> list[float]:
-        """
-        Get the nlp list of previous stimulation apparition time
-
-        Parameters
-        ----------
-        nlp: NonLinearProgram
-            The NonLinearProgram of the ocp of the current phase
-        parameters: MX
-            The parameters of the ocp
-
-        Returns
-        -------
-        The list of stimulation time
-        """
-        t_stim = []
-        for j in range(parameters.shape[0]):
-            if "pulse_apparition_time" in nlp.parameters.cx[j].str():
-                t_stim.append(parameters[j])
-        return t_stim
-
-    def set_pulse_apparition_time(self, value: list[MX]):
-        """
-        Sets the pulse apparition time for each pulse (phases) according to the ocp parameter "pulse_apparition_time"
-
-        Parameters
-        ----------
-        value: list[MX]
-            The pulse apparition time list (s)
-        """
-        self.pulse_apparition_time = value

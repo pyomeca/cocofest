@@ -31,6 +31,8 @@ class DingModelPulseWidthFrequency(DingModelFrequency):
         self,
         model_name: str = "ding_2007",
         muscle_name: str = None,
+        stim_time: list[float] = None,
+        previous_stim: dict = None,
         sum_stim_truncation: int = None,
         is_approximated: bool = False,
         tauc: float = None,
@@ -49,6 +51,8 @@ class DingModelPulseWidthFrequency(DingModelFrequency):
         super(DingModelPulseWidthFrequency, self).__init__(
             model_name=model_name,
             muscle_name=muscle_name,
+            stim_time=stim_time,
+            previous_stim=previous_stim,
             sum_stim_truncation=sum_stim_truncation,
             is_approximated=is_approximated,
         )
@@ -117,7 +121,6 @@ class DingModelPulseWidthFrequency(DingModelFrequency):
         cn: MX,
         f: MX,
         t: MX = None,
-        t_stim_prev: list[MX] | list[float] = None,
         pulse_width: MX = None,
         cn_sum: MX = None,
         a_scale: MX = None,
@@ -135,8 +138,6 @@ class DingModelPulseWidthFrequency(DingModelFrequency):
             The value of the force (N)
         t: MX
             The current time at which the dynamics is evaluated (s)
-        t_stim_prev: list[MX] | list[float]
-            The time list of the previous stimulations (s)
         pulse_width: MX
             The pulsation duration of the current stimulation (s)
         cn_sum: MX | float
@@ -152,6 +153,9 @@ class DingModelPulseWidthFrequency(DingModelFrequency):
         -------
         The value of the derivative of each state dx/dt at the current time t
         """
+        t_stim_prev = self.all_stim
+        if self.all_stim != self.stim_time:
+            pulse_width = self.previous_stim["pulse_width"] + pulse_width
         cn_dot = self.calculate_cn_dot(cn, cn_sum, t, t_stim_prev)
         a_scale = (
             a_scale
@@ -321,15 +325,13 @@ class DingModelPulseWidthFrequency(DingModelFrequency):
 
         if model.is_approximated:
             pulse_width = None
-            stim_apparition = None
             cn_sum = controls[0]
             a_scale = controls[1]
         else:
             pulse_width = model.get_pulse_width_parameters(nlp, parameters)
-            stim_apparition = model.get_stim(nlp=nlp, parameters=parameters)
 
-            if len(pulse_width) == 1 and len(stim_apparition) != 1:
-                pulse_width = pulse_width * len(stim_apparition)
+            if len(pulse_width) == 1 and len(nlp.model.stim_time) != 1:
+                pulse_width = pulse_width * len(nlp.model.stim_time)
             cn_sum = None
             a_scale = None
 
@@ -338,7 +340,6 @@ class DingModelPulseWidthFrequency(DingModelFrequency):
                 cn=states[0],
                 f=states[1],
                 t=time,
-                t_stim_prev=stim_apparition,
                 pulse_width=pulse_width,
                 cn_sum=cn_sum,
                 a_scale=a_scale,

@@ -30,12 +30,19 @@ class DingModelPulseIntensityFrequencyWithFatigue(DingModelPulseIntensityFrequen
         self,
         model_name: str = "hmed2018_with_fatigue",
         muscle_name: str = None,
+        stim_time: list[float] = None,
+        previous_stim: dict = None,
         sum_stim_truncation: int = None,
         is_approximated: bool = False,
     ):
+        if previous_stim:
+            if len(previous_stim["time"]) != len(previous_stim["pulse_intensity"]):
+                raise ValueError("The previous_stim time and pulse_intensity must have the same length")
         super(DingModelPulseIntensityFrequencyWithFatigue, self).__init__(
             model_name=model_name,
             muscle_name=muscle_name,
+            stim_time=stim_time,
+            previous_stim=previous_stim,
             sum_stim_truncation=sum_stim_truncation,
             is_approximated=is_approximated,
         )
@@ -124,7 +131,6 @@ class DingModelPulseIntensityFrequencyWithFatigue(DingModelPulseIntensityFrequen
         tau1: MX = None,
         km: MX = None,
         t: MX = None,
-        t_stim_prev: list[MX] | list[float] = None,
         pulse_intensity: list[MX] | list[float] = None,
         cn_sum: MX = None,
         force_length_relationship: float | MX = 1,
@@ -147,8 +153,6 @@ class DingModelPulseIntensityFrequencyWithFatigue(DingModelPulseIntensityFrequen
             The value of the cross_bridges (unitless)
         t: MX
             The current time at which the dynamics is evaluated (s)
-        t_stim_prev: list[MX] | list[float]
-            The time list of the previous stimulations (s)
         pulse_intensity: list[MX] | list[float]
             The intensity of the stimulations (mA)
         cn_sum: MX | float
@@ -162,6 +166,9 @@ class DingModelPulseIntensityFrequencyWithFatigue(DingModelPulseIntensityFrequen
         -------
         The value of the derivative of each state dx/dt at the current time t
         """
+        t_stim_prev = self.all_stim
+        if self.all_stim != self.stim_time:
+            pulse_intensity = self.previous_stim["pulse_intensity"] + pulse_intensity
         cn_dot = self.calculate_cn_dot(cn, cn_sum, t, t_stim_prev, pulse_intensity)
         f_dot = self.f_dot_fun(
             cn,
@@ -269,15 +276,13 @@ class DingModelPulseIntensityFrequencyWithFatigue(DingModelPulseIntensityFrequen
 
         if model.is_approximated:
             cn_sum = controls[0]
-            stim_apparition = None
             intensity_parameters = None
         else:
             cn_sum = None
             intensity_parameters = model.get_intensity_parameters(nlp, parameters)
-            stim_apparition = model.get_stim(nlp=nlp, parameters=parameters)
 
-            if len(intensity_parameters) == 1 and len(stim_apparition) != 1:
-                intensity_parameters = intensity_parameters * len(stim_apparition)
+            if len(intensity_parameters) == 1 and len(nlp.model.stim_time) != 1:
+                intensity_parameters = intensity_parameters * len(nlp.model.stim_time)
 
         return DynamicsEvaluation(
             dxdt=dxdt_fun(
@@ -287,7 +292,6 @@ class DingModelPulseIntensityFrequencyWithFatigue(DingModelPulseIntensityFrequen
                 tau1=states[3],
                 km=states[4],
                 t=time,
-                t_stim_prev=stim_apparition,
                 pulse_intensity=intensity_parameters,
                 cn_sum=cn_sum,
                 force_length_relationship=force_length_relationship,

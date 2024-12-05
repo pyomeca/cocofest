@@ -13,8 +13,7 @@ minimum_pulse_intensity = DingModelPulseIntensityFrequencyWithFatigue.min_pulse_
     DingModelPulseIntensityFrequencyWithFatigue()
 )
 ocp = OcpFes().prepare_ocp(
-    model=DingModelPulseIntensityFrequencyWithFatigue(is_approximated=False),
-    stim_time=[0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9],
+    model=DingModelPulseIntensityFrequencyWithFatigue(is_approximated=False, stim_time=[0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]),
     final_time=1,
     pulse_intensity={
         "min": minimum_pulse_intensity,

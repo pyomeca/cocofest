@@ -39,8 +39,7 @@ class OcpFes:
     @staticmethod
     def _prepare_optimization_problem(input_dict: dict) -> dict:
 
-        (pulse_event, pulse_width, pulse_intensity, objective) = OcpFes._fill_dict(
-            input_dict["pulse_event"],
+        (pulse_width, pulse_intensity, objective) = OcpFes._fill_dict(
             input_dict["pulse_width"],
             input_dict["pulse_intensity"],
             input_dict["objective"],
@@ -50,7 +49,6 @@ class OcpFes:
             model=input_dict["model"],
             n_shooting=input_dict["n_shooting"],
             final_time=input_dict["final_time"],
-            pulse_event=pulse_event,
             pulse_width=pulse_width,
             pulse_intensity=pulse_intensity,
             objective=objective,
@@ -61,8 +59,6 @@ class OcpFes:
 
         (parameters, parameters_bounds, parameters_init, parameter_objectives) = OcpFes._build_parameters(
             model=input_dict["model"],
-            stim_time=input_dict["stim_time"],
-            pulse_event=pulse_event,
             pulse_width=pulse_width,
             pulse_intensity=pulse_intensity,
             use_sx=input_dict["use_sx"],
@@ -77,7 +73,7 @@ class OcpFes:
                 input_dict["model"],
                 input_dict["n_shooting"],
                 input_dict["final_time"],
-                input_dict["stim_time"],
+                input_dict["model"].stim_time,
                 input_dict["control_type"],
             )
             u_bounds, u_init = OcpFes._set_u_bounds(input_dict["model"])
@@ -113,9 +109,7 @@ class OcpFes:
     @staticmethod
     def prepare_ocp(
         model: FesModel = None,
-        stim_time: list = None,
         final_time: int | float = None,
-        pulse_event: dict = None,
         pulse_width: dict = None,
         pulse_intensity: dict = None,
         objective: dict = None,
@@ -131,12 +125,8 @@ class OcpFes:
         ----------
         model : FesModel
             The model type used for the OCP.
-        stim_time : list
-            All the stimulation time.
         final_time : int | float
             The final time of the OCP.
-        pulse_event : dict
-            Dictionary containing parameters related to the appearance of the pulse.
         pulse_width : dict
             Dictionary containing parameters related to the duration of the pulse.
             Optional if not using DingModelPulseWidthFrequency or DingModelPulseWidthFrequencyWithFatigue.
@@ -162,10 +152,8 @@ class OcpFes:
 
         input_dict = {
             "model": model,
-            "stim_time": stim_time,
-            "n_shooting": OcpFes.prepare_n_shooting(stim_time, final_time),
+            "n_shooting": OcpFes.prepare_n_shooting(model.stim_time, final_time),
             "final_time": final_time,
-            "pulse_event": pulse_event,
             "pulse_width": pulse_width,
             "pulse_intensity": pulse_intensity,
             "objective": objective,
@@ -220,16 +208,12 @@ class OcpFes:
         return n_shooting
 
     @staticmethod
-    def _fill_dict(pulse_event, pulse_width, pulse_intensity, objective):
+    def _fill_dict(pulse_width, pulse_intensity, objective):
         """
         This method fills the provided dictionaries with default values if they are not set.
 
         Parameters
         ----------
-        pulse_event : dict
-            Dictionary containing parameters related to the appearance of the pulse.
-            Expected keys are 'min', 'max', 'bimapping', 'frequency', 'round_down', and 'pulse_mode'.
-
         pulse_width : dict
             Dictionary containing parameters related to the duration of the pulse.
             Expected keys are 'fixed', 'min', 'max', and 'bimapping'.
@@ -244,18 +228,9 @@ class OcpFes:
 
         Returns
         -------
-        Returns four dictionaries: pulse_event, pulse_width, pulse_intensity, and objective.
+        Returns four dictionaries: pulse_width, pulse_intensity, and objective.
         Each dictionary is filled with default values for any keys that were not initially set.
         """
-        pulse_event = {} if pulse_event is None else pulse_event
-        default_pulse_event = {
-            "min": None,
-            "max": None,
-            "bimapping": False,
-            "frequency": None,
-            "round_down": False,
-            "pulse_mode": "single",
-        }
 
         pulse_width = {} if pulse_width is None else pulse_width
         default_pulse_width = {
@@ -281,19 +256,17 @@ class OcpFes:
             "custom": None,
         }
 
-        pulse_event = {**default_pulse_event, **pulse_event}
         pulse_width = {**default_pulse_width, **pulse_width}
         pulse_intensity = {**default_pulse_intensity, **pulse_intensity}
         objective = {**default_objective, **objective}
 
-        return pulse_event, pulse_width, pulse_intensity, objective
+        return pulse_width, pulse_intensity, objective
 
     @staticmethod
     def _sanity_check(
         model=None,
         n_shooting=None,
         final_time=None,
-        pulse_event=None,
         pulse_width=None,
         pulse_intensity=None,
         objective=None,
@@ -317,23 +290,6 @@ class OcpFes:
 
         if not isinstance(final_time, int | float) or final_time < 0:
             raise TypeError("final_time must be a positive int or float type")
-
-        if pulse_event["pulse_mode"] != "single":
-            raise NotImplementedError(f"Pulse mode '{pulse_event['pulse_mode']}' is not yet implemented")
-
-        if pulse_event["frequency"]:
-            if isinstance(pulse_event["frequency"], int | float):
-                if pulse_event["frequency"] <= 0:
-                    raise ValueError("frequency must be positive")
-            else:
-                raise TypeError("frequency must be int or float type")
-
-        if [pulse_event["min"], pulse_event["max"]].count(None) == 1:
-            raise ValueError("min and max time event must be both entered or none of them in order to work")
-
-        if pulse_event["bimapping"]:
-            if not isinstance(pulse_event["bimapping"], bool):
-                raise TypeError("time bimapping must be bool type")
 
         if isinstance(model, DingModelPulseWidthFrequency | DingModelPulseWidthFrequencyWithFatigue):
             if pulse_width["fixed"] is None and [pulse_width["min"], pulse_width["max"]].count(None) != 0:
@@ -483,8 +439,6 @@ class OcpFes:
     @staticmethod
     def _build_parameters(
         model,
-        stim_time,
-        pulse_event,
         pulse_width,
         pulse_intensity,
         use_sx,
@@ -494,34 +448,7 @@ class OcpFes:
         parameters_init = InitialGuessList()
         parameter_objectives = ParameterObjectiveList()
 
-        n_stim = len(stim_time)
-        parameters.add(
-            name="pulse_apparition_time",
-            function=DingModelFrequency.set_pulse_apparition_time,
-            size=len(stim_time),
-            scaling=VariableScaling("pulse_apparition_time", [1] * n_stim),
-        )
-
-        if pulse_event["min"] and pulse_event["max"]:
-            time_min_list = np.array([0] + list(np.cumsum([pulse_event["min"]] * (n_stim - 1))))
-            time_max_list = np.array([0] + list(np.cumsum([pulse_event["max"]] * (n_stim - 1))))
-            parameters_init["pulse_apparition_time"] = np.array(
-                [(time_max_list[i] + time_min_list[i]) / 2 for i in range(n_stim)]
-            )
-        else:
-            time_min_list = stim_time
-            time_max_list = stim_time
-            parameters_init["pulse_apparition_time"] = np.array(stim_time)
-
-        parameters_bounds.add(
-            "pulse_apparition_time",
-            min_bound=time_min_list,
-            max_bound=time_max_list,
-            interpolation=InterpolationType.CONSTANT,
-        )
-
-        if pulse_event["bimapping"] and pulse_event["min"] and pulse_event["max"]:
-            raise NotImplementedError("Bimapping is not yet implemented for pulse event")
+        n_stim = len(model.stim_time)
 
         if isinstance(model, DingModelPulseWidthFrequency):
             if pulse_width["bimapping"]:

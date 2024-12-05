@@ -1,7 +1,7 @@
 from typing import Callable
 import numpy as np
 
-from casadi import vertcat, MX, SX, Function, horzcat
+from casadi import vertcat, MX, SX, Function
 from bioptim import (
     BiorbdModel,
     ExternalForceSetTimeSeries,
@@ -28,6 +28,8 @@ class FesMskModel(BiorbdModel):
         name: str = None,
         biorbd_path: str = None,
         muscles_model: list[FesModel] = None,
+        stim_time: list[float] = None,
+        previous_stim: dict = None,
         activate_force_length_relationship: bool = False,
         activate_force_velocity_relationship: bool = False,
         activate_residual_torque: bool = False,
@@ -66,6 +68,11 @@ class FesMskModel(BiorbdModel):
             activate_force_velocity_relationship,
         )
         self.muscles_dynamics_model = muscles_model
+        for i in range(len(self.muscles_dynamics_model)):
+            self.muscles_dynamics_model[i].stim_time = stim_time
+            self.muscles_dynamics_model[i].previous_stim = previous_stim
+            self.muscles_dynamics_model[i].all_stim = previous_stim["time"] + stim_time if previous_stim else stim_time
+
         self.bio_stim_model = [self.bio_model] + self.muscles_dynamics_model
 
         self.activate_force_length_relationship = activate_force_length_relationship

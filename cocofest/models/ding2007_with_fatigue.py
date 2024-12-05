@@ -30,6 +30,8 @@ class DingModelPulseWidthFrequencyWithFatigue(DingModelPulseWidthFrequency):
         self,
         model_name: str = "ding_2007_with_fatigue",
         muscle_name: str = None,
+        stim_time: list[float] = None,
+        previous_stim: dict = None,
         sum_stim_truncation: int = None,
         is_approximated: bool = False,
         tauc: float = None,
@@ -45,9 +47,14 @@ class DingModelPulseWidthFrequencyWithFatigue(DingModelPulseWidthFrequency):
         alpha_km: float = None,
         tau_fat: float = None,
     ):
+        if previous_stim:
+            if len(previous_stim["time"]) != len(previous_stim["pulse_width"]):
+                raise ValueError("The previous_stim time and pulse_width must have the same length")
         super(DingModelPulseWidthFrequencyWithFatigue, self).__init__(
             model_name=model_name,
             muscle_name=muscle_name,
+            stim_time=stim_time,
+            previous_stim=previous_stim,
             sum_stim_truncation=sum_stim_truncation,
             is_approximated=is_approximated,
         )
@@ -133,7 +140,6 @@ class DingModelPulseWidthFrequencyWithFatigue(DingModelPulseWidthFrequency):
         tau1: MX = None,
         km: MX = None,
         t: MX = None,
-        t_stim_prev: list[MX] | list[float] = None,
         pulse_width: MX = None,
         cn_sum: MX = None,
         a_scale: MX = None,
@@ -157,8 +163,6 @@ class DingModelPulseWidthFrequencyWithFatigue(DingModelPulseWidthFrequency):
             The value of the cross_bridges (unitless)
         t: MX
             The current time at which the dynamics is evaluated (s)
-        t_stim_prev: list[MX] | list[float]
-            The time list of the previous stimulations (s)
         pulse_width: MX
             The time of the impulse (s)
         cn_sum: MX | float
@@ -175,6 +179,9 @@ class DingModelPulseWidthFrequencyWithFatigue(DingModelPulseWidthFrequency):
         -------
         The value of the derivative of each state dx/dt at the current time t
         """
+        t_stim_prev = self.all_stim
+        if self.all_stim != self.stim_time:
+            pulse_width = self.previous_stim["pulse_width"] + pulse_width
         cn_dot = self.calculate_cn_dot(cn, cn_sum, t, t_stim_prev)
         a_scale = (
             a_scale
@@ -295,7 +302,6 @@ class DingModelPulseWidthFrequencyWithFatigue(DingModelPulseWidthFrequency):
         if model.is_approximated:
             cn_sum = controls[0]
             a_scale = controls[1]
-            stim_apparition = None
             pulse_width = None
         else:
             pulse_width = (
@@ -304,10 +310,8 @@ class DingModelPulseWidthFrequencyWithFatigue(DingModelPulseWidthFrequency):
                 else fes_model.get_pulse_width_parameters(nlp, parameters, muscle_name=fes_model.muscle_name)
             )
 
-            stim_apparition = model.get_stim(nlp=nlp, parameters=parameters)
-
-            if len(pulse_width) == 1 and len(stim_apparition) != 1:
-                pulse_width = pulse_width * len(stim_apparition)
+            if len(pulse_width) == 1 and len(nlp.model.stim_time) != 1:
+                pulse_width = pulse_width * len(nlp.model.stim_time)
 
             cn_sum = None
             a_scale = None
@@ -320,7 +324,6 @@ class DingModelPulseWidthFrequencyWithFatigue(DingModelPulseWidthFrequency):
                 tau1=states[3],
                 km=states[4],
                 t=time,
-                t_stim_prev=stim_apparition,
                 pulse_width=pulse_width,
                 cn_sum=cn_sum,
                 a_scale=a_scale,

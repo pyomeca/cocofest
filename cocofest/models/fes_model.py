@@ -209,11 +209,3 @@ class FesModel(ABC):
 
         """
 
-    @abstractmethod
-    def set_pulse_apparition_time(self, value: list[MX]):
-        """
-
-        Returns
-        -------
-
-        """

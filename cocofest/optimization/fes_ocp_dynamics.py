@@ -41,8 +41,7 @@ class OcpFesMsk:
     @staticmethod
     def _prepare_optimization_problem(input_dict: dict) -> dict:
 
-        (pulse_event, pulse_width, pulse_intensity, objective) = OcpFes._fill_dict(
-            input_dict["pulse_event"],
+        (pulse_width, pulse_intensity, objective) = OcpFes._fill_dict(
             input_dict["pulse_width"],
             input_dict["pulse_intensity"],
             input_dict["objective"],
@@ -59,7 +58,6 @@ class OcpFesMsk:
             model=input_dict["model"],
             n_shooting=input_dict["n_shooting"],
             final_time=input_dict["final_time"],
-            pulse_event=pulse_event,
             pulse_width=pulse_width,
             pulse_intensity=pulse_intensity,
             objective=objective,
@@ -81,8 +79,6 @@ class OcpFesMsk:
             parameter_objectives,
         ) = OcpFesMsk._build_parameters(
             model=input_dict["model"],
-            stim_time=input_dict["stim_time"],
-            pulse_event=pulse_event,
             pulse_width=pulse_width,
             pulse_intensity=pulse_intensity,
             use_sx=input_dict["use_sx"],
@@ -92,7 +88,6 @@ class OcpFesMsk:
             input_dict["model"],
             input_dict["n_shooting"],
             input_dict["final_time"],
-            input_dict["stim_time"],
             input_dict["control_type"],
             msk_info["custom_constraint"],
             input_dict["external_forces"],
@@ -130,6 +125,8 @@ class OcpFesMsk:
             name=input_dict["model"].name,
             biorbd_path=input_dict["model"].biorbd_path,
             muscles_model=input_dict["model"].muscles_dynamics_model,
+            stim_time=input_dict["model"].muscles_dynamics_model[0].stim_time,
+            previous_stim=input_dict["model"].muscles_dynamics_model[0].previous_stim,
             activate_force_length_relationship=input_dict["model"].activate_force_length_relationship,
             activate_force_velocity_relationship=input_dict["model"].activate_force_velocity_relationship,
             activate_residual_torque=input_dict["model"].activate_residual_torque,
@@ -164,9 +161,7 @@ class OcpFesMsk:
     @staticmethod
     def prepare_ocp(
         model: FesMskModel = None,
-        stim_time: list = None,
         final_time: int | float = None,
-        pulse_event: dict = None,
         pulse_width: dict = None,
         pulse_intensity: dict = None,
         objective: dict = None,
@@ -185,12 +180,8 @@ class OcpFesMsk:
         ----------
         model : FesModel
             The FES model to use.
-        stim_time : list
-            The stimulation times.
         final_time : int | float
             The final time of the OCP.
-        pulse_event : dict
-            Dictionary containing parameters related to the appearance of the pulse.
             It should contain the following keys: "min", "max", "bimapping", "frequency", "round_down", "pulse_mode".
         pulse_width : dict
             Dictionary containing parameters related to the duration of the pulse.
@@ -225,10 +216,8 @@ class OcpFesMsk:
 
         input_dict = {
             "model": model,
-            "stim_time": stim_time,
-            "n_shooting": OcpFes.prepare_n_shooting(stim_time, final_time),
+            "n_shooting": OcpFes.prepare_n_shooting(model.muscles_dynamics_model[0].stim_time, final_time),
             "final_time": final_time,
-            "pulse_event": pulse_event,
             "pulse_width": pulse_width,
             "pulse_intensity": pulse_intensity,
             "objective": objective,
@@ -267,7 +256,6 @@ class OcpFesMsk:
     @staticmethod
     def prepare_ocp_for_cycling(
             model: FesMskModel = None,
-            stim_time: list = None,
             final_time: int | float = None,
             pulse_event: dict = None,
             pulse_width: dict = None,
@@ -283,10 +271,8 @@ class OcpFesMsk:
     ):
         input_dict = {
             "model": model,
-            "stim_time": stim_time,
-            "n_shooting": OcpFes.prepare_n_shooting(stim_time, final_time),
+            "n_shooting": OcpFes.prepare_n_shooting(model.muscles_dynamics_model[0].stim_time, final_time),
             "final_time": final_time,
-            "pulse_event": pulse_event,
             "pulse_width": pulse_width,
             "pulse_intensity": pulse_intensity,
             "objective": objective,
@@ -470,8 +456,6 @@ class OcpFesMsk:
     @staticmethod
     def _build_parameters(
         model: FesMskModel,
-        stim_time: list,
-        pulse_event: dict,
         pulse_width: dict,
         pulse_intensity: dict,
         use_sx: bool = True,
@@ -481,22 +465,7 @@ class OcpFesMsk:
         parameters_init = InitialGuessList()
         parameter_objectives = ParameterObjectiveList()
 
-        n_stim = len(stim_time)
-        parameters.add(
-            name="pulse_apparition_time",
-            function=DingModelFrequency.set_pulse_apparition_time,
-            size=n_stim,
-            scaling=VariableScaling("pulse_apparition_time", [1] * n_stim),
-        )
-
-        parameters_bounds.add(
-            "pulse_apparition_time",
-            min_bound=np.array(stim_time),
-            max_bound=np.array(stim_time),
-            interpolation=InterpolationType.CONSTANT,
-        )
-
-        parameters_init["pulse_apparition_time"] = np.array(stim_time)
+        n_stim = len(model.muscles_dynamics_model[0].stim_time)
 
         for i in range(len(model.muscles_dynamics_model)):
             if isinstance(model.muscles_dynamics_model[i], DingModelPulseWidthFrequency):
@@ -621,8 +590,9 @@ class OcpFesMsk:
         )
 
     @staticmethod
-    def _build_constraints(model, n_shooting, final_time, stim_time, control_type, custom_constraint=None, external_forces=None, simultaneous_cycle=1):  #, cycling=False):
+    def _build_constraints(model, n_shooting, final_time, control_type, custom_constraint=None, external_forces=None, simultaneous_cycle=1):  #, cycling=False):
         constraints = ConstraintList()
+        stim_time = model.muscles_dynamics_model[0].stim_time
 
         if model.activate_residual_torque and control_type == ControlType.LINEAR_CONTINUOUS:
             applied_node = n_shooting - 1 if external_forces else Node.END

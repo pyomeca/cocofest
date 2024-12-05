@@ -12,12 +12,14 @@ from cocofest import OcpFes, ModelMaker
 # Plus the pulsation width will be optimized between 0 and 0.0006 seconds and are not the same across the problem.
 # The flag with_fatigue is set to True by default, this will include the fatigue model
 
-model = ModelMaker.create_model("ding2007_with_fatigue", is_approximated=False)
+model = ModelMaker.create_model("ding2007_with_fatigue", is_approximated=False,
+                                stim_time=[0, 0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 0.45],
+                                previous_stim={"time": [-0.15, -0.10, -0.05],
+                                               "pulse_width": [0.0005, 0.0005, 0.0005]})
 
 minimum_pulse_width = model.pd0
 ocp = OcpFes().prepare_ocp(
     model=model,
-    stim_time=[0, 0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 0.45],
     final_time=0.5,
     pulse_width={
         "min": minimum_pulse_width,
