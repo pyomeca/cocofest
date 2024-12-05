@@ -90,6 +90,8 @@ class FesMskModel(BiorbdModel):
                 "name": self._name,
                 "biorbd_path": self.bio_model.path,
                 "muscles_model": self.muscles_dynamics_model,
+                "stim_time": self.muscles_dynamics_model[0].stim_time,
+                "previous_stim": self.muscles_dynamics_model[0].previous_stim,
                 "activate_force_length_relationship": self.activate_force_length_relationship,
                 "activate_force_velocity_relationship": self.activate_force_velocity_relationship,
                 "activate_residual_torque": self.activate_residual_torque,

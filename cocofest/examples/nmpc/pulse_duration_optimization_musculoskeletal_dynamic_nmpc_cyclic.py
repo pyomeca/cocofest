@@ -17,6 +17,7 @@ model = FesMskModel(
     name=None,
     biorbd_path="../msk_models/arm26_biceps_1dof.bioMod",
     muscles_model=[DingModelPulseWidthFrequencyWithFatigue(muscle_name="BIClong")],
+    stim_time=[0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9],
     activate_force_length_relationship=True,
     activate_force_velocity_relationship=True,
     activate_residual_torque=True,
@@ -28,7 +29,6 @@ minimum_pulse_width = DingModelPulseWidthFrequencyWithFatigue().pd0
 nmpc_fes_msk = NmpcFesMsk
 nmpc = nmpc_fes_msk.prepare_nmpc(
     model=model,
-    stim_time=[0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9],
     cycle_duration=1,
     n_cycles_to_advance=1,
     n_cycles_simultaneous=3,

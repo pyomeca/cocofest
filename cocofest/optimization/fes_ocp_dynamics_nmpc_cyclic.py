@@ -44,13 +44,10 @@ class NmpcFesMsk(MultiCyclicNonlinearModelPredictiveControl):
     @staticmethod
     def prepare_nmpc(
         model: FesMskModel = None,
-        stim_time: list = None,
-        # cycle_len: int = None,
         cycle_duration: int | float = None,
         n_cycles_simultaneous: int = None,
         n_cycles_to_advance: int = None,
         n_total_cycles: int = None,
-        pulse_event: dict = None,
         pulse_width: dict = None,
         pulse_intensity: dict = None,
         objective: dict = None,
@@ -65,13 +62,11 @@ class NmpcFesMsk(MultiCyclicNonlinearModelPredictiveControl):
 
         input_dict = {
             "model": model,
-            "stim_time": stim_time,
-            "n_shooting": OcpFes.prepare_n_shooting(stim_time, cycle_duration),
+            "n_shooting": OcpFes.prepare_n_shooting(model.muscles_dynamics_model[0].stim_time, cycle_duration),
             "final_time": cycle_duration,
             "n_cycles_simultaneous": n_cycles_simultaneous,
             "n_cycles_to_advance": n_cycles_to_advance,
             "n_total_cycles": n_total_cycles,
-            "pulse_event": pulse_event,
             "pulse_width": pulse_width,
             "pulse_intensity": pulse_intensity,
             "objective": objective,
@@ -110,12 +105,10 @@ class NmpcFesMsk(MultiCyclicNonlinearModelPredictiveControl):
     @staticmethod
     def prepare_nmpc_for_cycling(
             model: FesMskModel = None,
-            stim_time: list = None,
             cycle_duration: int | float = None,
             n_cycles_simultaneous: int = None,
             n_cycles_to_advance: int = None,
             n_total_cycles: int = None,
-            pulse_event: dict = None,
             pulse_width: dict = None,
             pulse_intensity: dict = None,
             objective: dict = None,
@@ -129,13 +122,11 @@ class NmpcFesMsk(MultiCyclicNonlinearModelPredictiveControl):
     ):
         input_dict = {
             "model": model,
-            "stim_time": stim_time,
-            "n_shooting": OcpFes.prepare_n_shooting(stim_time, cycle_duration*n_cycles_simultaneous),
+            "n_shooting": OcpFes.prepare_n_shooting(model.muscles_dynamics_model[0].stim_time, cycle_duration*n_cycles_simultaneous),
             "final_time": cycle_duration,
             "n_cycles_simultaneous": n_cycles_simultaneous,
             "n_cycles_to_advance": n_cycles_to_advance,
             "n_total_cycles": n_total_cycles,
-            "pulse_event": pulse_event,
             "pulse_width": pulse_width,
             "pulse_intensity": pulse_intensity,
             "objective": objective,
