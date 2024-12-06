@@ -10,12 +10,13 @@ from bioptim import (
 from .fes_ocp import OcpFes
 from .fes_ocp_dynamics import OcpFesMsk
 from ..models.dynamical_model import FesMskModel
+from ..models.ding2007_with_fatigue import DingModelPulseWidthFrequencyWithFatigue
 
 
 class NmpcFesMsk(MultiCyclicNonlinearModelPredictiveControl):
     def advance_window_bounds_states(self, sol, n_cycles_simultaneous=None, **extra):
         super(NmpcFesMsk, self).advance_window_bounds_states(sol)
-        # self.update_stim(sol)
+        self.update_stim(sol)
         if self.nlp[0].model.for_cycling:
             self.nlp[0].x_bounds["q"].min[-1, :] = self.nlp[0].model.bounds_from_ranges("q").min[-1] * n_cycles_simultaneous
             self.nlp[0].x_bounds["q"].max[-1, :] = self.nlp[0].model.bounds_from_ranges("q").max[-1] * n_cycles_simultaneous
@@ -31,15 +32,14 @@ class NmpcFesMsk(MultiCyclicNonlinearModelPredictiveControl):
         return True
 
     def update_stim(self, sol):
-        stimulation_time = sol.decision_parameters()["pulse_apparition_time"]
-        stim_prev = list(np.round(np.array(stimulation_time) - sol.ocp.phase_time[0], 3))
-
-        for model in self.nlp[0].model.muscles_dynamics_model:
-            self.nlp[0].model.muscles_dynamics_model[0].stim_prev = stim_prev
-            if "pulse_intensity_" + model.muscle_name in sol.parameters.keys():
-                self.nlp[0].model.muscles_dynamics_model[0].stim_pulse_intensity_prev = list(
-                    sol.parameters["pulse_intensity_" + model.muscle_name]
-                )
+        # only keep the last 10 stimulation times
+        previous_stim_time = [round(x - self.phase_time[0], 2) for x in self.nlp[0].model.muscles_dynamics_model[0].stim_time[-10:]]  # TODO fix this (keep the middle window)
+        for i in range(len(self.nlp[0].model.muscles_dynamics_model)):
+            self.nlp[0].model.muscles_dynamics_model[i].previous_stim = {} if self.nlp[0].model.muscles_dynamics_model[i].previous_stim is None else self.nlp[0].model.muscles_dynamics_model[i].previous_stim
+            self.nlp[0].model.muscles_dynamics_model[i].previous_stim["time"] = previous_stim_time
+            if isinstance(self.nlp[0].model.muscles_dynamics_model[i], DingModelPulseWidthFrequencyWithFatigue):
+                self.nlp[0].model.muscles_dynamics_model[i].previous_stim["pulse_width"] = list(sol.parameters["pulse_width_" + self.nlp[0].model.muscles_dynamics_model[i].muscle_name][-10:])
+            self.nlp[0].model.muscles_dynamics_model[i].all_stim = self.nlp[0].model.muscles_dynamics_model[i].previous_stim["time"] + self.nlp[0].model.muscles_dynamics_model[i].stim_time
 
     @staticmethod
     def prepare_nmpc(
