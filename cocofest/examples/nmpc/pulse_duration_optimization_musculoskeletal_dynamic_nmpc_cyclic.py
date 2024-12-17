@@ -89,26 +89,26 @@ sol = nmpc.solve(
 biorbd_model = biorbd.Model("../msk_models/arm26_biceps_1dof.bioMod")
 # sol.print_cost()
 
-from matplotlib import pyplot as plt
-from bioptim import SolutionMerge
+# from matplotlib import pyplot as plt
+# from bioptim import SolutionMerge
 
-solution_time = sol[1][0].decision_time(to_merge=SolutionMerge.KEYS, continuous=True)
-solution_time = [float(j) for j in solution_time]
-solution_time_full = sol[0].decision_time(to_merge=SolutionMerge.KEYS, continuous=True)
-solution_time_full = [float(j) for j in solution_time_full]
-
-plt.plot(solution_time, sol[1][0].decision_states(to_merge=SolutionMerge.NODES)["Cn_BIClong"].squeeze(), label="CN1")
-plt.plot(solution_time, sol[1][0].decision_states(to_merge=SolutionMerge.NODES)["F_BIClong"].squeeze(), label="F1")
-plt.plot(solution_time, sol[1][1].decision_states(to_merge=SolutionMerge.NODES)["Cn_BIClong"].squeeze(), label="CN2")
-plt.plot(solution_time, sol[1][1].decision_states(to_merge=SolutionMerge.NODES)["F_BIClong"].squeeze(), label="F2")
-plt.plot(solution_time_full, sol[0].decision_states(to_merge=SolutionMerge.NODES)["Cn_BIClong"].squeeze(), label="CNfull")
-plt.plot(solution_time_full, sol[0].decision_states(to_merge=SolutionMerge.NODES)["F_BIClong"].squeeze(), label="Ffull")
-plt.legend()
-plt.show()
+# solution_time = sol[1][0].decision_time(to_merge=SolutionMerge.KEYS, continuous=True)
+# solution_time = [float(j) for j in solution_time]
+# solution_time_full = sol[0].decision_time(to_merge=SolutionMerge.KEYS, continuous=True)
+# solution_time_full = [float(j) for j in solution_time_full]
+#
+# plt.plot(solution_time, sol[1][0].decision_states(to_merge=SolutionMerge.NODES)["Cn_BIClong"].squeeze(), label="CN1")
+# plt.plot(solution_time, sol[1][0].decision_states(to_merge=SolutionMerge.NODES)["F_BIClong"].squeeze(), label="F1")
+# plt.plot(solution_time, sol[1][1].decision_states(to_merge=SolutionMerge.NODES)["Cn_BIClong"].squeeze(), label="CN2")
+# plt.plot(solution_time, sol[1][1].decision_states(to_merge=SolutionMerge.NODES)["F_BIClong"].squeeze(), label="F2")
+# plt.plot(solution_time_full, sol[0].decision_states(to_merge=SolutionMerge.NODES)["Cn_BIClong"].squeeze(), label="CNfull")
+# plt.plot(solution_time_full, sol[0].decision_states(to_merge=SolutionMerge.NODES)["F_BIClong"].squeeze(), label="Ffull")
+# plt.legend()
+# plt.show()
 
 sol[1][0].graphs(show_bounds=True)
 sol[1][1].graphs(show_bounds=True)
-# sol[1][0].animate(n_frames=100)
+sol[1][0].animate(n_frames=100)
 sol[0].graphs(show_bounds=True)
 sol[0].animate(n_frames=100)
 

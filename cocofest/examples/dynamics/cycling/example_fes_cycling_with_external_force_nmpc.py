@@ -52,7 +52,8 @@ def prepare_nmpc(
         total_n_cycles: int,
         objective: dict,
 ):
-    cycle_len = OcpFes.prepare_n_shooting(stim_time, cycle_duration)
+    # cycle_len = OcpFes.prepare_n_shooting(stim_time, cycle_duration)
+    cycle_len = 20
     total_n_shooting = cycle_len * n_cycles_simultaneous
 
     # --- EXTERNAL FORCES --- #
@@ -218,13 +219,13 @@ def main():
 
     model = FesMskModel(
         name=None,
-        biorbd_path="../../msk_models/simplified_UL_Seth_pedal_aligned.bioMod",
+        biorbd_path="../../msk_models/simplified_UL_Seth_pedal_aligned_one_muscle.bioMod",
         muscles_model=[
             DingModelPulseWidthFrequencyWithFatigue(muscle_name="DeltoideusClavicle_A", is_approximated=False),
-            DingModelPulseWidthFrequencyWithFatigue(muscle_name="DeltoideusScapula_P", is_approximated=False),
-            DingModelPulseWidthFrequencyWithFatigue(muscle_name="TRIlong", is_approximated=False),
-            DingModelPulseWidthFrequencyWithFatigue(muscle_name="BIC_long", is_approximated=False),
-            DingModelPulseWidthFrequencyWithFatigue(muscle_name="BIC_brevis", is_approximated=False),
+            # DingModelPulseWidthFrequencyWithFatigue(muscle_name="DeltoideusScapula_P", is_approximated=False),
+            # DingModelPulseWidthFrequencyWithFatigue(muscle_name="TRIlong", is_approximated=False),
+            # DingModelPulseWidthFrequencyWithFatigue(muscle_name="BIC_long", is_approximated=False),
+            # DingModelPulseWidthFrequencyWithFatigue(muscle_name="BIC_brevis", is_approximated=False),
         ],
         activate_force_length_relationship=True,
         activate_force_velocity_relationship=True,
@@ -237,6 +238,7 @@ def main():
     nmpc = prepare_nmpc(
         model=model,
         stim_time=[0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9],
+        # stim_time=[0],
         pulse_width={
             "min": minimum_pulse_width,
             "max": 0.0006,
@@ -260,6 +262,8 @@ def main():
         update_functions,
         solver=Solver.IPOPT(show_online_optim=False, _max_iter=1000, show_options=dict(show_bounds=True)),
         n_cycles_simultaneous=n_cycles_simultaneous,
+        # get_all_iterations=True,
+        cyclic_options={"states": {}},
     )
 
     sol.print_cost()
