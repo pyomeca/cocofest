@@ -154,7 +154,7 @@ class DingModelPulseWidthFrequency(DingModelFrequency):
         The value of the derivative of each state dx/dt at the current time t
         """
         t_stim_prev = self.all_stim
-        if self.all_stim != self.stim_time:
+        if self.all_stim != self.stim_time and not self.is_approximated:
             pulse_width = self.previous_stim["pulse_width"] + pulse_width
         cn_dot = self.calculate_cn_dot(cn, cn_sum, t, t_stim_prev)
         a_scale = (

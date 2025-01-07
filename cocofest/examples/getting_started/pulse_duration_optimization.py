@@ -3,7 +3,7 @@ This example will do a 10 stimulation example with Ding's 2007 pulse width and f
 This ocp was build to match a force value of 200N at the end of the last node.
 """
 
-from bioptim import Solver
+from bioptim import Solver, OdeSolver
 from cocofest import OcpFes, ModelMaker
 
 # --- Build ocp --- #
@@ -29,6 +29,7 @@ ocp = OcpFes().prepare_ocp(
     objective={"end_node_tracking": 100},
     use_sx=True,
     n_threads=5,
+    ode_solver=OdeSolver.RK1(n_integration_steps=5),
 )
 
 # --- Solve the program --- #
