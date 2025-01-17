@@ -1,7 +1,7 @@
 from typing import Callable
 
 import numpy as np
-from casadi import MX, exp, vertcat, if_else
+from casadi import MX, exp, vertcat, if_else, logic_and
 
 from bioptim import (
     ConfigureProblem,
@@ -247,7 +247,12 @@ class DingModelFrequency(FesModel):
             previous_phase_time = t_stim_prev[i] - t_stim_prev[i - 1]
             ri = 1 if i == 0 else self.ri_fun(r0, previous_phase_time)  # Part of Eq n°1
             exp_time = self.exp_time_fun(t, t_stim_prev[i])  # Part of Eq n°1
-            coefficient = 1 if self.is_approximated else if_else(t_stim_prev[i] <= t, 1, 0)
+            if i > self._sum_stim_truncation and isinstance(self._sum_stim_truncation, int):
+                coefficient = 1 if self.is_approximated else if_else(logic_and(t_stim_prev[i] <= t,
+                                                                               t - t_stim_prev[i] <= self._sum_stim_truncation * (t_stim_prev[i]-t_stim_prev[i-1])),
+                                                                               1, 0)
+            else:
+                coefficient = 1 if self.is_approximated else if_else(t_stim_prev[i] <= t, 1, 0)
             sum_multiplier += ri * exp_time * lambda_i[i] * coefficient
         return sum_multiplier
 
