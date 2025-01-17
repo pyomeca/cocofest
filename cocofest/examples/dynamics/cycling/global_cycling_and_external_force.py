@@ -108,7 +108,7 @@ def prepare_ocp(
         x_init=x_init,
         u_init=u_init,
         objective_functions=objective_functions,
-        ode_solver=OdeSolver.RK1(n_integration_steps=4),
+        ode_solver=OdeSolver.RK1(n_integration_steps=20),
         n_threads=20,
         constraints=constraints,
         parameters=parameters,
@@ -320,7 +320,7 @@ def main():
             #            1, 1.1, 1.2, 1.3, 1.4, 1.5, 1.6, 1.7, 1.8, 1.9,
             #            2, 2.1, 2.2, 2.3, 2.4, 2.5, 2.6, 2.7, 2.8, 2.9],
             # stim_time=[0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9],
-            stim_time=list(np.round(np.linspace(0, 1, 34)[:-1], 3)),
+            stim_time=list(np.linspace(0, 1, 34)[:-1]),
             activate_force_length_relationship=True,
             activate_force_velocity_relationship=True,
             activate_residual_torque=True,
@@ -328,7 +328,8 @@ def main():
         )
         pulse_width = {"min": DingModelPulseWidthFrequency().pd0, "max": 0.0006, "bimapping": False, "same_for_all_muscles": False,
                        "fixed": False}
-        n_shooting = OcpFes.prepare_n_shooting(model.muscles_dynamics_model[0].stim_time, final_time)
+        # n_shooting = OcpFes.prepare_n_shooting(model.muscles_dynamics_model[0].stim_time, final_time)
+        n_shooting = 33
     else:
         raise ValueError("Dynamics type not recognized")
 
