@@ -224,7 +224,7 @@ segment wheel_rotation
         0.0    0.0    1.0    0.075
         0.0    0.0    0.0    1.0
     rotations z
-    rangesQ -4*pi 4*pi
+    rangesQ -12*pi 4*pi
 endsegment
 
 segment wheel

@@ -224,17 +224,18 @@ segment wheel_rotation
         0.0    0.0    1.0    0.075
         0.0    0.0    0.0    1.0
     rotations z
-    rangesQ -4*pi 4*pi
+    rangesQ -12*pi 4*pi
 endsegment
 
 segment wheel
     parent wheel_rotation
     RT 0 0 0 xyz $wheel_radius 0 0
-    mass 1
+    mass 0.5
     inertia
-        1 0 0
-        0 1 0
-        0 0 1
+        0.001254 0 0
+        0 0.001254 0
+        0 0 0.0025
+    com	0 0 0
     mesh 0 0 0
     mesh -1.00000000*$wheel_radius  0.000000000*$wheel_radius 0
     mesh -0.76604444*$wheel_radius -0.642787610*$wheel_radius 0
