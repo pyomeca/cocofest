@@ -247,7 +247,7 @@ class DingModelFrequency(FesModel):
             previous_phase_time = t_stim_prev[i] - t_stim_prev[i - 1]
             ri = 1 if i == 0 else self.ri_fun(r0, previous_phase_time)  # Part of Eq n°1
             exp_time = self.exp_time_fun(t, t_stim_prev[i])  # Part of Eq n°1
-            if i > self._sum_stim_truncation and isinstance(self._sum_stim_truncation, int):
+            if isinstance(self._sum_stim_truncation, int) and i > self._sum_stim_truncation:
                 coefficient = 1 if self.is_approximated else if_else(logic_and(t_stim_prev[i] <= t,
                                                                                t - t_stim_prev[i] <= self._sum_stim_truncation * (t_stim_prev[i]-t_stim_prev[i-1])),
                                                                                1, 0)
