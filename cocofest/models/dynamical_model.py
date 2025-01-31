@@ -231,6 +231,10 @@ class FesMskModel(BiorbdModel):
             ]
 
             muscle_states = vertcat(*[states[i] for i in muscle_states_idxs])
+            muscle_parameters_idxs = [
+                i for i in range(parameters.shape[0]) if muscle_model.muscle_name in str(parameters[i])
+            ]
+            muscle_parameters = vertcat(*[parameters[i] for i in muscle_parameters_idxs])
 
             muscle_idx = bio_muscle_names_at_index.index(muscle_model.muscle_name)
 
@@ -265,7 +269,7 @@ class FesMskModel(BiorbdModel):
                 time,
                 muscle_states,
                 controls,
-                parameters,
+                muscle_parameters,
                 algebraic_states,
                 numerical_data_timeseries,
                 nlp,
