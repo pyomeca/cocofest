@@ -69,7 +69,7 @@ def prepare_ocp(
                           n_shooting=n_shooting,
                           turn_number=turn_number,
                           interpolation_type=InterpolationType.EACH_FRAME,
-                          cardinal=1)
+                          cardinal=4)
     # x_bounds = set_bounds(bio_model=bio_model, x_init=x_init, n_shooting=n_shooting, interpolation_type=InterpolationType.CONSTANT)
 
     # Control path constraint
@@ -262,7 +262,7 @@ def set_bounds(model, x_init, n_shooting, turn_number, interpolation_type=Interp
         x_bounds.add(key="q", bounds=q_x_bounds, phase=0)
 
     # Modifying pedal speed bounds
-    # qdot_x_bounds.max[2] = [0, 0, 0]
+    qdot_x_bounds.max[2] = [0, 0, 0]
     # qdot_x_bounds.min[2] = [-60, -60, -60]
     x_bounds.add(key="qdot", bounds=qdot_x_bounds, phase=0)
     return x_bounds
@@ -301,7 +301,7 @@ def main():
     dynamics_type = "fes_driven"
     model_path = "../../msk_models/simplified_UL_Seth_pedal_aligned.bioMod"
     pulse_width = None
-    n_shooting = 300
+    n_shooting = 100
     final_time = 1
     if dynamics_type == "torque_driven" or dynamics_type == "muscle_driven":
         model = BiorbdModel(model_path)
@@ -346,8 +346,6 @@ def main():
     sol = ocp.solve(Solver.IPOPT(show_online_optim=False, _max_iter=10000)) #, show_options=dict(show_bounds=True)))#, show_options=dict(show_bounds=True)))
     sol.graphs(show_bounds=True)
     sol.animate(viewer="pyorerun")
-
-    # 914 iter before recuperation
 
 
 if __name__ == "__main__":
