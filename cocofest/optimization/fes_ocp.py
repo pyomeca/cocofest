@@ -114,7 +114,7 @@ class OcpFes:
         pulse_intensity: dict = None,
         objective: dict = None,
         use_sx: bool = True,
-        ode_solver: OdeSolver = OdeSolver.RK4(n_integration_steps=1),
+        ode_solver: OdeSolver = OdeSolver.RK1(n_integration_steps=10),
         control_type: ControlType = ControlType.CONSTANT,
         n_threads: int = 1,
     ):
@@ -196,15 +196,20 @@ class OcpFes:
         int
             The number of shooting points
         """
-        stim_time_str = [str(t) for t in stim_time]
-        stim_time_str = [
-            stim_time_str[i] + ".0" if len(stim_time_str[i]) == 1 else stim_time_str[i]
-            for i in range(len(stim_time_str))
-        ]
-        nb_decimal = max([len(stim_time_str[i].split(".")[1]) for i in range(len(stim_time))])
-        nb_decimal = 2 if nb_decimal < 2 else nb_decimal
-        decimal_shooting = int("1" + "0" * nb_decimal)
-        n_shooting = int(final_time * decimal_shooting)
+        step = round(stim_time[1] - stim_time[0], 4)  # Calculate the initial step size
+        if all(round(stim_time[i + 1] - stim_time[i], 4) == step for i in range(len(stim_time) - 1)):
+            n_shooting = len(stim_time)
+
+        else:
+            stim_time_str = [str(t) for t in stim_time]
+            stim_time_str = [
+                stim_time_str[i] + ".0" if len(stim_time_str[i]) == 1 else stim_time_str[i]
+                for i in range(len(stim_time_str))
+            ]
+            nb_decimal = max([len(stim_time_str[i].split(".")[1]) for i in range(len(stim_time))])
+            nb_decimal = 2 if nb_decimal < 2 else nb_decimal
+            decimal_shooting = int("1" + "0" * nb_decimal)
+            n_shooting = int(final_time * decimal_shooting)
         return n_shooting
 
     @staticmethod
