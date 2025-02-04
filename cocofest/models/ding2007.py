@@ -272,7 +272,7 @@ class DingModelPulseWidthFrequency(DingModelFrequency):
         pulse_width_parameters = []
         for j in range(parameters.shape[0]):
             if muscle_name:
-                if "pulse_width_" + muscle_name in nlp.parameters.scaled.cx[j].str():
+                if "pulse_width_" + muscle_name in parameters[j].str():
                     pulse_width_parameters.append(parameters[j])
             elif "pulse_width" in nlp.parameters.scaled.cx[j].str():
                 pulse_width_parameters.append(parameters[j])
