@@ -1,10 +1,9 @@
 """
-This example will do an optimal control program of a 100 steps tracking a hand cycling motion with a torque driven and
-a torque resistance at the handle.
+This example will do an optimal control program of a 100 steps hand cycling motion with either a torque driven /
+muscle driven / FES driven dynamics and includes a resistive torque at the handle.
 """
 
 import numpy as np
-from scipy.interpolate import interp1d
 
 from bioptim import (
     Axis,
@@ -23,22 +22,17 @@ from bioptim import (
     ObjectiveList,
     OdeSolver,
     OptimalControlProgram,
+    ParameterList,
     PhaseDynamics,
     Solver,
-    PhaseTransitionList,
-    PhaseTransitionFcn,
-    ControlType,
 )
 
 from cocofest import (
-    get_circle_coord,
-    inverse_kinematics_cycling,
-    inverse_dynamics_cycling,
-    FesMskModel,
     CustomObjective,
-    DingModelPulseWidthFrequency,
+    DingModelPulseWidthFrequencyWithFatigue,
+    FesMskModel,
+    inverse_kinematics_cycling,
     OcpFesMsk,
-    OcpFes,
 )
 
 
@@ -52,33 +46,55 @@ def prepare_ocp(
     dynamics_type: str = "torque_driven",
     use_sx: bool = True,
 ) -> OptimalControlProgram:
+    """
+    Prepare the optimal control program (OCP) with the provided configuration.
 
-    # Dynamics
+    Parameters
+    ----------
+    model: BiorbdModel | FesMskModel
+        The biomechanical model.
+    n_shooting: int
+        Number of shooting nodes.
+    final_time: int
+        Total time of the motion.
+    turn_number: int
+        Number of complete turns.
+    pedal_config: dict
+        Dictionary with pedal configuration (e.g., center and radius).
+    pulse_width: dict
+        Dictionary with pulse width parameters for FES-driven dynamics.
+    dynamics_type: str
+        Type of dynamics ("torque_driven", "muscle_driven", or "fes_driven").
+    use_sx: bool
+        Whether to use CasADi SX for symbolic computations.
+
+    Returns
+    -------
+        An OptimalControlProgram instance configured for the problem.
+    """
+    # Set external forces (e.g., resistive torque at the handle)
     numerical_time_series, external_force_set = set_external_forces(n_shooting, torque=-1)
-    dynamics = set_dynamics(model=model, numerical_time_series=numerical_time_series, dynamics_type_str=dynamics_type)
-
-    # Define objective functions
+    # Set dynamics based on the chosen dynamics type
+    dynamics = set_dynamics(model, numerical_time_series, dynamics_type_str=dynamics_type)
+    # Configure objective functions
     objective_functions = set_objective_functions(model, dynamics_type)
-
-    # Initial q guess
+    # Set initial guess for state variables
     x_init = set_x_init(n_shooting, pedal_config, turn_number)
-
-    # Path constraint
-    x_bounds = set_bounds(model=model,
-                          x_init=x_init,
-                          n_shooting=n_shooting,
-                          turn_number=turn_number,
-                          interpolation_type=InterpolationType.EACH_FRAME,
-                          cardinal=4)
-    # x_bounds = set_bounds(bio_model=bio_model, x_init=x_init, n_shooting=n_shooting, interpolation_type=InterpolationType.CONSTANT)
-
-    # Control path constraint
-    u_bounds, u_init = set_u_bounds_and_init(model, dynamics_type_str=dynamics_type)
-
-    # Constraints
+    # Define state bounds
+    x_bounds = set_state_bounds(
+        model=model,
+        x_init=x_init,
+        n_shooting=n_shooting,
+        turn_number=turn_number,
+        interpolation_type=InterpolationType.EACH_FRAME,
+        cardinal=4
+    )
+    # Define control bounds and initial guess
+    u_init, u_bounds = set_u_bounds_and_init(model, dynamics_type_str=dynamics_type)
+    # Set constraints
     constraints = set_constraints(model, n_shooting, turn_number)
 
-    # Parameters
+    # Configure FES parameters if using an FES model and pulse_width is provided
     parameters = None
     parameters_bounds = None
     parameters_init = None
@@ -95,8 +111,8 @@ def prepare_ocp(
             use_sx=use_sx,
         )
 
-    # Update model
-    model = updating_model(model=model, external_force_set=external_force_set, parameters=parameters)
+    # Update the model with external forces and parameters
+    model = update_model(model, external_force_set, parameters)
 
     return OptimalControlProgram(
         [model],
@@ -108,7 +124,7 @@ def prepare_ocp(
         x_init=x_init,
         u_init=u_init,
         objective_functions=objective_functions,
-        ode_solver=OdeSolver.RK1(n_integration_steps=20),
+        ode_solver=OdeSolver.RK1(n_integration_steps=10),
         n_threads=20,
         constraints=constraints,
         parameters=parameters,
@@ -119,7 +135,21 @@ def prepare_ocp(
     )
 
 
-def set_external_forces(n_shooting, torque):
+def set_external_forces(n_shooting: int, torque: int | float) -> tuple[dict, ExternalForceSetTimeSeries]:
+    """
+    Create an external force time series applying a constant torque.
+
+    Parameters
+    ----------
+        n_shooting: int
+            Number of shooting nodes.
+        torque: int | float
+            Torque value to be applied.
+
+    Returns
+    -------
+        A tuple with a numerical time series dictionary and the ExternalForceSetTimeSeries object.
+    """
     external_force_set = ExternalForceSetTimeSeries(nb_frames=n_shooting)
     external_force_array = np.array([0, 0, torque])
     reshape_values_array = np.tile(external_force_array[:, np.newaxis], (1, n_shooting))
@@ -128,7 +158,23 @@ def set_external_forces(n_shooting, torque):
     return numerical_time_series, external_force_set
 
 
-def updating_model(model, external_force_set, parameters=None):
+def update_model(model: BiorbdModel | FesMskModel, external_force_set: ExternalForceSetTimeSeries, parameters: ParameterList = None) -> BiorbdModel | FesMskModel:
+    """
+    Update the model with external forces and parameters if necessary.
+
+    Parameters
+    ----------
+    model: BiorbdModel | FesMskModel
+        The initial model.
+    external_force_set: ExternalForceSetTimeSeries
+        The external forces to be applied.
+    parameters: ParameterList
+        Optional parameters for the FES model.
+
+    Returns
+    -------
+    Updated model instance.
+    """
     if isinstance(model, FesMskModel):
         model = FesMskModel(
             name=model.name,
@@ -141,7 +187,6 @@ def updating_model(model, external_force_set, parameters=None):
             activate_residual_torque=model.activate_residual_torque,
             parameters=parameters,
             external_force_set=external_force_set,
-            for_cycling=True,
         )
     else:
         model = BiorbdModel(model.path, external_force_set=external_force_set)
@@ -149,7 +194,23 @@ def updating_model(model, external_force_set, parameters=None):
     return model
 
 
-def set_dynamics(model, numerical_time_series, dynamics_type_str="torque_driven"):
+def set_dynamics(model: BiorbdModel | FesMskModel, numerical_time_series: dict, dynamics_type_str: str="torque_driven")-> DynamicsList:
+    """
+    Set the dynamics of the optimal control program based on the chosen dynamics type.
+
+    Parameters
+    ----------
+    model: BiorbdModel | FesMskModel
+        The biomechanical model.
+    numerical_time_series: dict
+        External numerical data (e.g., external forces).
+    dynamics_type_str: str
+        Type of dynamics ("torque_driven", "muscle_driven", or "fes_driven").
+
+    Returns
+    -------
+        A DynamicsList configured for the problem.
+    """
     dynamics_type = (DynamicsFcn.TORQUE_DRIVEN if dynamics_type_str == "torque_driven"
                          else DynamicsFcn.MUSCLE_DRIVEN if dynamics_type_str == "muscle_driven"
                          else model.declare_model_variables if dynamics_type_str == "fes_driven"
@@ -171,32 +232,60 @@ def set_dynamics(model, numerical_time_series, dynamics_type_str="torque_driven"
     return dynamics
 
 
-def set_objective_functions(model, dynamics_type):
+def set_objective_functions(model: BiorbdModel | FesMskModel, dynamics_type: str) -> ObjectiveList:
+    """
+    Configure the objective functions for the optimal control problem.
+
+    Parameters
+    ----------
+    model: BiorbdModel | FesMskModel
+        The biomechanical model.
+    dynamics_type: str
+        The type of dynamics used.
+
+    Returns
+    -------
+    An ObjectiveList with the appropriate objectives.
+    """
     objective_functions = ObjectiveList()
     if isinstance(model, FesMskModel):
-        objective_functions.add(ObjectiveFcn.Lagrange.MINIMIZE_CONTROL, key="tau", weight=100000, quadratic=True)
-        # objective_functions.add(ObjectiveFcn.Lagrange.MINIMIZE_MARKERS_ACCELERATION, marker_index=model.marker_index("hand"), weight=100, quadratic=True)
-        # objective_functions.add(CustomObjective.minimize_overall_muscle_force_production, custom_type=ObjectiveFcn.Lagrange, weight=1, quadratic=True)
+        objective_functions.add(
+            CustomObjective.minimize_overall_muscle_force_production,
+            custom_type=ObjectiveFcn.Lagrange,
+            weight=1,
+            quadratic=True)
+        # Uncomment these following lines if muscle fatigue minimization is desired:
+        # objective_functions.add(
+        #   CustomObjective.minimize_overall_muscle_fatigue,
+        #   custom_type=ObjectiveFcn.Lagrange,
+        #   weight=1,
+        #   quadratic=True)
     else:
         control_key = "tau" if dynamics_type == "torque_driven" else "muscles"
         objective_functions.add(ObjectiveFcn.Lagrange.MINIMIZE_CONTROL, key=control_key, weight=1000, quadratic=True)
-    # if isinstance(model, BiorbdModel):
-    #     objective_functions.add(ObjectiveFcn.Lagrange.MINIMIZE_MARKERS_ACCELERATION,
-    #                             marker_index=model.marker_index("hand"), weight=100, quadratic=True)
-    # else:  # TO DO: check
-    #     objective_functions.add(ObjectiveFcn.Lagrange.MINIMIZE_MARKERS_ACCELERATION,
-    #                             marker_index=model.marker_index("hand"), weight=100, quadratic=True)
-
-    # objective_functions.add(ObjectiveFcn.Lagrange.MINIMIZE_CONTACT_FORCES, weight=1, quadratic=True)
-
     return objective_functions
 
 
-def set_x_init(n_shooting, pedal_config, turn_number):
-    x_init = InitialGuessList()
+def set_x_init(n_shooting: int, pedal_config: dict, turn_number: int) -> InitialGuessList:
+    """
+    Set the initial guess for the state variables based on inverse kinematics.
 
-    biorbd_model_path = "../../msk_models/simplified_UL_Seth_pedal_aligned_test_one_marker.bioMod"
-    # biorbd_model_path = "../../msk_models/arm26_cycling_pedal_aligned_contact_one_marker.bioMod"
+    Parameters
+    ----------
+    n_shooting: int
+        Number of shooting nodes.
+    pedal_config: dict
+        Dictionary with keys "x_center", "y_center", and "radius".
+    turn_number: int
+        Number of complete turns.
+
+    Returns
+    -------
+    An InitialGuessList for the state variables.
+    """
+    x_init = InitialGuessList()
+    # Path to the biomechanical model used for inverse kinematics
+    biorbd_model_path = "../../msk_models/simplified_UL_Seth_pedal_aligned_for_inverse_kinematics.bioMod"
     q_guess, qdot_guess, qddotguess = inverse_kinematics_cycling(
         biorbd_model_path,
         n_shooting,
@@ -207,14 +296,31 @@ def set_x_init(n_shooting, pedal_config, turn_number):
         cycling_number=turn_number
     )
     x_init.add("q", q_guess, interpolation=InterpolationType.EACH_FRAME)
+    # Optionally, add qdot initialization if needed:
     # x_init.add("qdot", qdot_guess, interpolation=InterpolationType.EACH_FRAME)
+
+    # Optional, method to get control initial guess:
     # u_guess = inverse_dynamics_cycling(biorbd_model_path, q_guess, qdot_guess, qddotguess)
     # u_init.add("tau", u_guess, interpolation=InterpolationType.EACH_FRAME)
 
     return x_init
 
 
-def set_u_bounds_and_init(bio_model, dynamics_type_str):
+def set_u_bounds_and_init(bio_model: BiorbdModel | FesMskModel, dynamics_type_str: str) -> tuple[InitialGuessList, BoundsList]:
+    """
+    Define the control bounds and initial guess for the optimal control problem.
+
+    Parameters
+    ----------
+    model: BiorbdModel | FesMskModel
+        The biomechanical model.
+    dynamics_type_str: str
+        Type of dynamics ("torque_driven" or "muscle_driven").
+
+    Returns
+    -------
+    A tuple containing the initial guess list for controls and the bounds list.
+    """
     u_bounds = BoundsList()
     u_init = InitialGuessList()
     if dynamics_type_str == "torque_driven":
@@ -228,29 +334,54 @@ def set_u_bounds_and_init(bio_model, dynamics_type_str):
         u_init.add(key="muscles",
                    initial_guess=np.array([muscle_init] * bio_model.nb_muscles),
                    phase=0)
-    if dynamics_type_str == "fes_driven":
-        u_bounds.add(key="tau", min_bound=np.array([-50, -50, -0]), max_bound=np.array([50, 50, 0]), phase=0)
 
-    return u_bounds, u_init
+    # For FES dynamic, u_bounds and u_init remains empty
+    return u_init, u_bounds
 
 
-def set_bounds(model, x_init, n_shooting, turn_number, interpolation_type=InterpolationType.CONSTANT, cardinal=4):
+def set_state_bounds(model: BiorbdModel | FesMskModel, x_init: InitialGuessList, n_shooting: int, turn_number: int, interpolation_type: InterpolationType = InterpolationType.CONSTANT, cardinal: int=4)-> BoundsList:
+    """
+    Set the bounds for the state variables.
+
+    Parameters
+    ----------
+    model: BiorbdModel | FesMskModel
+        The biomechanical model.
+    x_init: InitialGuessList
+        Initial guess for states.
+    n_shooting: int
+        Number of shooting nodes.
+    turn_number: int
+        Number of complete turns.
+    interpolation_type: InterpolationType
+        Interpolation type for the bounds.
+    cardinal: int
+        Number of cardinal nodes per turn for bounds adjustment.
+
+    Returns
+    -------
+    A BoundsList object with the defined state bounds.
+    """
     x_bounds = BoundsList()
+    # For FES models, retrieve custom bounds
     if isinstance(model, FesMskModel):
         x_bounds, _ = OcpFesMsk._set_bounds_fes(model)
 
+    # Retrieve default bounds from the model for positions and velocities
     q_x_bounds = model.bounds_from_ranges("q")
     qdot_x_bounds = model.bounds_from_ranges("qdot")
 
     if interpolation_type == InterpolationType.EACH_FRAME:
+        # Replicate bounds for each shooting node
         x_min_bound = []
         x_max_bound = []
         for i in range(q_x_bounds.min.shape[0]):
             x_min_bound.append([q_x_bounds.min[i][0]] * (n_shooting + 1))
             x_max_bound.append([q_x_bounds.max[i][0]] * (n_shooting + 1))
 
+        # Adjust bounds at cardinal nodes for a specific coordinate (e.g., index 2)
         cardinal_node_list = [i * int(n_shooting / ((n_shooting/(n_shooting/turn_number)) * cardinal)) for i in range(int((n_shooting/(n_shooting/turn_number)) * cardinal + 1))]
-        slack = 10*(np.pi/180)
+        slack = 10*(np.pi/180) # 10 degrees in radians
         for i in cardinal_node_list:
             x_min_bound[2][i] = x_init["q"].init[2][i] - slack
             x_max_bound[2][i] = x_init["q"].init[2][i] + slack
@@ -261,19 +392,34 @@ def set_bounds(model, x_init, n_shooting, turn_number, interpolation_type=Interp
     else:
         x_bounds.add(key="q", bounds=q_x_bounds, phase=0)
 
-    # Modifying pedal speed bounds
+    # Modify bounds for velocities (e.g., setting maximum pedal speed to 0 to prevent the pedal to go backward)
     qdot_x_bounds.max[2] = [0, 0, 0]
-    # qdot_x_bounds.min[2] = [-60, -60, -60]
     x_bounds.add(key="qdot", bounds=qdot_x_bounds, phase=0)
     return x_bounds
 
 
-def set_constraints(bio_model, n_shooting, turn_number):
+def set_constraints(model: BiorbdModel | FesMskModel, n_shooting: int, turn_number: int) -> ConstraintList:
+    """
+    Set constraints for the optimal control problem.
+
+    Parameters
+    ----------
+    model: BiorbdModel | FesMskModel
+        The biomechanical model.
+    n_shooting: int
+        Number of shooting nodes.
+    turn_number: int
+        Number of complete turns.
+
+    Returns
+    -------
+        A ConstraintList with the defined constraints.
+    """
     constraints = ConstraintList()
     constraints.add(
         ConstraintFcn.TRACK_MARKERS_VELOCITY,
         node=Node.START,
-        marker_index=bio_model.marker_index("wheel_center"),
+        marker_index=model.marker_index("wheel_center"),
         axes=[Axis.X, Axis.Y],
     )
 
@@ -288,62 +434,67 @@ def set_constraints(bio_model, n_shooting, turn_number):
             axes=[Axis.X, Axis.Y],
         )
 
-    # cardinal_node_list = [i * int(300 / ((300 / 100) * 2)) for i in
-    #                       range(int((300 / 100) * 2 + 1))]
-    # for i in cardinal_node_list:
-    #     constraints.add(ConstraintFcn.TRACK_STATE, key="q", index=0, node=i, target=x_init["q"].init[2][i])
-
     return constraints
 
 
 def main():
-    # --- Prepare the ocp --- #
-    dynamics_type = "fes_driven"
+    """
+    Main function to configure and solve the optimal control problem.
+    """
+    # --- Configuration --- #
+    dynamics_type = "fes_driven"  # Available options: "torque_driven", "muscle_driven", "fes_driven"
     model_path = "../../msk_models/simplified_UL_Seth_pedal_aligned.bioMod"
     pulse_width = None
     n_shooting = 100
     final_time = 1
-    if dynamics_type == "torque_driven" or dynamics_type == "muscle_driven":
+    turn_number = 1
+    pedal_config = {"x_center": 0.35, "y_center": 0.0, "radius": 0.1}
+
+    # --- Load the appropriate model --- #
+    if dynamics_type in ["torque_driven", "muscle_driven"]:
         model = BiorbdModel(model_path)
     elif dynamics_type == "fes_driven":
+        # Define muscle dynamics for the FES-driven model
+        muscles_model = [
+            DingModelPulseWidthFrequencyWithFatigue(muscle_name="DeltoideusClavicle_A", is_approximated=False, sum_stim_truncation=10),
+            DingModelPulseWidthFrequencyWithFatigue(muscle_name="DeltoideusScapula_P", is_approximated=False, sum_stim_truncation=10),
+            DingModelPulseWidthFrequencyWithFatigue(muscle_name="TRIlong", is_approximated=False, sum_stim_truncation=10),
+            DingModelPulseWidthFrequencyWithFatigue(muscle_name="BIC_long", is_approximated=False, sum_stim_truncation=10),
+            DingModelPulseWidthFrequencyWithFatigue(muscle_name="BIC_brevis", is_approximated=False, sum_stim_truncation=10),
+        ]
+        stim_time = list(np.linspace(0, 1, 34)[:-1])
         model = FesMskModel(
             name=None,
-            biorbd_path="../../msk_models/simplified_UL_Seth_pedal_aligned.bioMod",
-            muscles_model=[
-                DingModelPulseWidthFrequency(muscle_name="DeltoideusClavicle_A", is_approximated=False),
-                DingModelPulseWidthFrequency(muscle_name="DeltoideusScapula_P", is_approximated=False),
-                DingModelPulseWidthFrequency(muscle_name="TRIlong", is_approximated=False),
-                DingModelPulseWidthFrequency(muscle_name="BIC_long", is_approximated=False),
-                DingModelPulseWidthFrequency(muscle_name="BIC_brevis", is_approximated=False),
-            ],
-            # stim_time=[0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9,
-            #            1, 1.1, 1.2, 1.3, 1.4, 1.5, 1.6, 1.7, 1.8, 1.9,
-            #            2, 2.1, 2.2, 2.3, 2.4, 2.5, 2.6, 2.7, 2.8, 2.9],
-            # stim_time=[0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9],
-            stim_time=list(np.linspace(0, 1, 34)[:-1]),
+            biorbd_path=model_path,
+            muscles_model=muscles_model,
+            stim_time=stim_time,
             activate_force_length_relationship=True,
             activate_force_velocity_relationship=True,
-            activate_residual_torque=True,
-            external_force_set=None,  # External forces will be added
+            activate_residual_torque=False,
+            external_force_set=None,  # External forces will be added later
         )
-        pulse_width = {"min": DingModelPulseWidthFrequency().pd0, "max": 0.0006, "bimapping": False, "same_for_all_muscles": False,
+        pulse_width = {"min": DingModelPulseWidthFrequencyWithFatigue().pd0, "max": 0.0006, "bimapping": False, "same_for_all_muscles": False,
                        "fixed": False}
-        # n_shooting = OcpFes.prepare_n_shooting(model.muscles_dynamics_model[0].stim_time, final_time)
-        n_shooting = 33
+        # Adjust n_shooting based on the stimulation time
+        n_shooting = len(stim_time)
+
     else:
-        raise ValueError("Dynamics type not recognized")
+        raise ValueError(f"Dynamics type '{dynamics_type}' not recognized")
 
     ocp = prepare_ocp(
         model=model,
         n_shooting=n_shooting,
         final_time=final_time,
-        turn_number=1,
-        pedal_config={"x_center": 0.35, "y_center": 0, "radius": 0.1},
+        turn_number=turn_number,
+        pedal_config=pedal_config,
         pulse_width=pulse_width,
         dynamics_type=dynamics_type,
     )
+    # Add the penalty cost function plot
     ocp.add_plot_penalty(CostType.ALL)
-    sol = ocp.solve(Solver.IPOPT(show_online_optim=False, _max_iter=10000)) #, show_options=dict(show_bounds=True)))#, show_options=dict(show_bounds=True)))
+    # Solve the optimal control problem
+    sol = ocp.solve(Solver.IPOPT(show_online_optim=False, _max_iter=10000))
+    # Display graphs and animate the solution
     sol.graphs(show_bounds=True)
     sol.animate(viewer="pyorerun")
 

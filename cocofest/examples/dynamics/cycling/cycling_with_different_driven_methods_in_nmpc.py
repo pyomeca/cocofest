@@ -49,11 +49,8 @@ class MyCyclicNMPC(MultiCyclicNonlinearModelPredictiveControl):
         self.nlp[0].x_bounds["q"].min[-1, 0] = min_pedal_bound
         self.nlp[0].x_bounds["q"].max[-1, 0] = max_pedal_bound
 
-        # self.update_stim(sol)
-        # self.nlp[0].x_bounds["q"].min[-1, :] = self.nlp[0].x_init["q"].init[0, :]
-        # self.nlp[0].x_bounds["q"].min[-1, :] = self.nlp[0].model.bounds_from_ranges("q").min[-1] * n_cycles_simultaneous
-        # self.nlp[0].x_bounds["q"].max[-1, :] = [5]
-        # self.nlp[0].x_bounds["q"].max[-1, :] = self.nlp[0].model.bounds_from_ranges("q").max[-1] * n_cycles_simultaneous
+        if sol.parameters != {}:
+            self.update_stim(sol)
         return True
 
     def advance_window_initial_guess_states(self, sol, n_cycles_simultaneous=None):
@@ -64,11 +61,11 @@ class MyCyclicNMPC(MultiCyclicNonlinearModelPredictiveControl):
         return True
 
     def update_stim(self, sol):
-        # only keep the last 10 stimulation times
-        previous_stim_time = [round(x - self.phase_time[0], 2) for x in self.nlp[0].model.muscles_dynamics_model[0].stim_time[-10:]]  # TODO fix this (keep the middle window)
+        truncation_term = self.nlp[0].model.muscles_dynamics_model[0]._sum_stim_truncation
+        solution_stimulation_time = self.nlp[0].model.muscles_dynamics_model[0].stim_time[-truncation_term:]
+        previous_stim_time = [x - self.phase_time[0] for x in solution_stimulation_time]
         for i in range(len(self.nlp[0].model.muscles_dynamics_model)):
-            self.nlp[0].model.muscles_dynamics_model[i].previous_stim = {} if self.nlp[0].model.muscles_dynamics_model[i].previous_stim is None else self.nlp[0].model.muscles_dynamics_model[i].previous_stim
-            self.nlp[0].model.muscles_dynamics_model[i].previous_stim["time"] = previous_stim_time
+            self.nlp[0].model.muscles_dynamics_model[i].previous_stim = {"time": previous_stim_time}
             if isinstance(self.nlp[0].model.muscles_dynamics_model[i], DingModelPulseWidthFrequency):
                 self.nlp[0].model.muscles_dynamics_model[i].previous_stim["pulse_width"] = list(sol.parameters["pulse_width_" + self.nlp[0].model.muscles_dynamics_model[i].muscle_name][-10:])
             self.nlp[0].model.muscles_dynamics_model[i].all_stim = self.nlp[0].model.muscles_dynamics_model[i].previous_stim["time"] + self.nlp[0].model.muscles_dynamics_model[i].stim_time
@@ -224,7 +221,7 @@ def set_objective_functions(model, dynamics_type):
 def set_x_init(n_shooting, pedal_config, turn_number):
     x_init = InitialGuessList()
 
-    biorbd_model_path = "../../msk_models/simplified_UL_Seth_pedal_aligned_test_one_marker.bioMod"
+    biorbd_model_path = "../../msk_models/simplified_UL_Seth_pedal_aligned_for_inverse_kinematics.bioMod"
     q_guess, qdot_guess, qddotguess = inverse_kinematics_cycling(
         biorbd_model_path,
         n_shooting,
@@ -299,12 +296,12 @@ def set_bounds(model, x_init, n_shooting, turn_number, interpolation_type=Interp
         x_bounds.add(key="q", bounds=q_x_bounds, phase=0)
 
     # Modifying pedal speed bounds
-    # qdot_x_bounds.max[2] = [-2, -2, -2]
-    # qdot_x_bounds.min[2] = [-10, -10, -10]
     qdot_x_bounds.max[0] = [10, 10, 10]
     qdot_x_bounds.min[0] = [-10, -10, -10]
     qdot_x_bounds.max[1] = [10, 10, 10]
     qdot_x_bounds.min[1] = [-10, -10, -10]
+    # qdot_x_bounds.max[2] = [-2, -2, -2]
+    # qdot_x_bounds.min[2] = [-10, -10, -10]
     x_bounds.add(key="qdot", bounds=qdot_x_bounds, phase=0)
     return x_bounds
 
@@ -322,7 +319,6 @@ def set_constraints(bio_model, n_shooting, turn_number):
             node=i,
             axes=[Axis.X, Axis.Y],
         )
-
         constraints.add(
             ConstraintFcn.TRACK_MARKERS_VELOCITY,
             node=i,
@@ -342,7 +338,7 @@ def main():
     cycle_duration = 1
     cycle_len = 33
     n_cycles_to_advance = 1
-    n_cycles_simultaneous = 3
+    n_cycles_simultaneous = 2
     n_cycles = 3
 
     if dynamics_type == "torque_driven" or dynamics_type == "muscle_driven":
@@ -358,7 +354,7 @@ def main():
                 DingModelPulseWidthFrequencyWithFatigue(muscle_name="BIC_long", is_approximated=False, sum_stim_truncation=10),
                 DingModelPulseWidthFrequencyWithFatigue(muscle_name="BIC_brevis", is_approximated=False, sum_stim_truncation=10),
             ],
-            stim_time=list(np.linspace(0, cycle_duration*n_cycles_simultaneous, 100)[:-1]),
+            stim_time=list(np.linspace(0, cycle_duration*n_cycles_simultaneous, 67)[:-1]),
             activate_force_length_relationship=True,
             activate_force_velocity_relationship=True,
             activate_residual_torque=False,
@@ -366,7 +362,8 @@ def main():
         )
         pulse_width = {"min": DingModelPulseWidthFrequencyWithFatigue().pd0, "max": 0.0006, "bimapping": False, "same_for_all_muscles": False,
                        "fixed": False}
-        cycle_len = int(OcpFes.prepare_n_shooting(model.muscles_dynamics_model[0].stim_time, cycle_duration*n_cycles_simultaneous) / n_cycles_simultaneous)
+        # cycle_len = OcpFes.prepare_n_shooting(model.muscles_dynamics_model[0].stim_time, cycle_duration*n_cycles_simultaneous)
+        cycle_len = 66
     else:
         raise ValueError("Dynamics type not recognized")
 
@@ -377,7 +374,7 @@ def main():
         n_cycles_to_advance=n_cycles_to_advance,
         n_cycles_simultaneous=n_cycles_simultaneous,
         total_n_cycles=n_cycles,
-        turn_number=3,
+        turn_number=1,
         pedal_config={"x_center": 0.35, "y_center": 0, "radius": 0.1},
         pulse_width=pulse_width,
         dynamics_type=dynamics_type,
