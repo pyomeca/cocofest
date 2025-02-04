@@ -17,27 +17,26 @@ from bioptim import (
     ExternalForceSetTimeSeries,
     InitialGuessList,
     InterpolationType,
-    Node,
+    MultiCyclicCycleSolutions,
+    MultiCyclicNonlinearModelPredictiveControl,
     ObjectiveFcn,
     ObjectiveList,
     OdeSolver,
-    OptimalControlProgram,
     PhaseDynamics,
-    Solver,
-    MultiCyclicNonlinearModelPredictiveControl,
     SolutionMerge,
     Solution,
-    MultiCyclicCycleSolutions,
+    Solver,
 )
 
 from cocofest import (
-    inverse_kinematics_cycling,
-    FesMskModel,
-    DingModelPulseWidthFrequencyWithFatigue,
-    OcpFesMsk,
-    OcpFes,
     CustomObjective,
     DingModelPulseWidthFrequency,
+    DingModelPulseWidthFrequencyWithFatigue,
+    FesMskModel,
+    inverse_kinematics_cycling,
+    OcpFesMsk,
+
+
 )
 
 
@@ -209,7 +208,6 @@ def set_dynamics(model, numerical_time_series, dynamics_type_str="torque_driven"
 def set_objective_functions(model, dynamics_type):
     objective_functions = ObjectiveList()
     if isinstance(model, FesMskModel):
-        # objective_functions.add(ObjectiveFcn.Lagrange.MINIMIZE_CONTROL, key="tau", weight=100000, quadratic=True)
         objective_functions.add(CustomObjective.minimize_overall_muscle_force_production, custom_type=ObjectiveFcn.Lagrange, weight=1, quadratic=True)
         # objective_functions.add(CustomObjective.minimize_overall_muscle_fatigue, custom_type=ObjectiveFcn.Lagrange, weight=1, quadratic=True)
     else:
@@ -253,9 +251,6 @@ def set_u_bounds_and_init(bio_model, dynamics_type_str):
         u_init.add(key="muscles",
                    initial_guess=np.array([muscle_init] * bio_model.nb_muscles),
                    phase=0)
-    # if dynamics_type_str == "fes_driven":
-        # u_bounds.add(key="tau", min_bound=np.array([-50, -50, -0]), max_bound=np.array([50, 50, 0]), phase=0)
-
     return u_bounds, u_init
 
 
@@ -330,42 +325,55 @@ def set_constraints(bio_model, n_shooting, turn_number):
 
 
 def main():
-    # --- Prepare the ocp --- #
-    dynamics_type = "fes_driven"
+    """
+    Main function to configure and solve the optimal control problem.
+    """
+    # --- Configuration --- #
+    dynamics_type = "fes_driven"  # Available options: "torque_driven", "muscle_driven", "fes_driven"
     model_path = "../../msk_models/simplified_UL_Seth_pedal_aligned.bioMod"
     pulse_width = None
 
+    # NMPC parameters
     cycle_duration = 1
     cycle_len = 33
     n_cycles_to_advance = 1
     n_cycles_simultaneous = 2
     n_cycles = 3
 
-    if dynamics_type == "torque_driven" or dynamics_type == "muscle_driven":
+    # Bike parameters
+    turn_number = n_cycles_simultaneous
+    pedal_config = {"x_center": 0.35, "y_center": 0.0, "radius": 0.1}
+
+    # --- Load the appropriate model --- #
+    if dynamics_type in ["torque_driven", "muscle_driven"]:
         model = BiorbdModel(model_path)
     elif dynamics_type == "fes_driven":
+        # Define muscle dynamics for the FES-driven model
+        muscles_model = [
+            DingModelPulseWidthFrequencyWithFatigue(muscle_name="DeltoideusClavicle_A", is_approximated=False, sum_stim_truncation=10),
+            DingModelPulseWidthFrequencyWithFatigue(muscle_name="DeltoideusScapula_P", is_approximated=False, sum_stim_truncation=10),
+            DingModelPulseWidthFrequencyWithFatigue(muscle_name="TRIlong", is_approximated=False, sum_stim_truncation=10),
+            DingModelPulseWidthFrequencyWithFatigue(muscle_name="BIC_long", is_approximated=False, sum_stim_truncation=10),
+            DingModelPulseWidthFrequencyWithFatigue(muscle_name="BIC_brevis", is_approximated=False, sum_stim_truncation=10),
+        ]
+        stim_time = list(np.linspace(0, cycle_duration*n_cycles_simultaneous, 67)[:-1])
         model = FesMskModel(
             name=None,
-            biorbd_path="../../msk_models/simplified_UL_Seth_pedal_aligned.bioMod",
-            muscles_model=[
-                DingModelPulseWidthFrequencyWithFatigue(muscle_name="DeltoideusClavicle_A", is_approximated=False, sum_stim_truncation=10),
-                DingModelPulseWidthFrequencyWithFatigue(muscle_name="DeltoideusScapula_P", is_approximated=False, sum_stim_truncation=10),
-                DingModelPulseWidthFrequencyWithFatigue(muscle_name="TRIlong", is_approximated=False, sum_stim_truncation=10),
-                DingModelPulseWidthFrequencyWithFatigue(muscle_name="BIC_long", is_approximated=False, sum_stim_truncation=10),
-                DingModelPulseWidthFrequencyWithFatigue(muscle_name="BIC_brevis", is_approximated=False, sum_stim_truncation=10),
-            ],
-            stim_time=list(np.linspace(0, cycle_duration*n_cycles_simultaneous, 67)[:-1]),
+            biorbd_path=model_path,
+            muscles_model=muscles_model,
+            stim_time=stim_time,
             activate_force_length_relationship=True,
             activate_force_velocity_relationship=True,
             activate_residual_torque=False,
-            external_force_set=None,  # External forces will be added
+            external_force_set=None,  # External forces will be added later
         )
-        pulse_width = {"min": DingModelPulseWidthFrequencyWithFatigue().pd0, "max": 0.0006, "bimapping": False, "same_for_all_muscles": False,
+        pulse_width = {"min": DingModelPulseWidthFrequencyWithFatigue().pd0, "max": 0.0006, "bimapping": False,
+                       "same_for_all_muscles": False,
                        "fixed": False}
-        # cycle_len = OcpFes.prepare_n_shooting(model.muscles_dynamics_model[0].stim_time, cycle_duration*n_cycles_simultaneous)
-        cycle_len = 66
+        # Adjust n_shooting based on the stimulation time
+        cycle_len = len(stim_time)
     else:
-        raise ValueError("Dynamics type not recognized")
+        raise ValueError(f"Dynamics type '{dynamics_type}' not recognized")
 
     nmpc = prepare_nmpc(
         model=model,
@@ -374,8 +382,8 @@ def main():
         n_cycles_to_advance=n_cycles_to_advance,
         n_cycles_simultaneous=n_cycles_simultaneous,
         total_n_cycles=n_cycles,
-        turn_number=1,
-        pedal_config={"x_center": 0.35, "y_center": 0, "radius": 0.1},
+        turn_number=turn_number,
+        pedal_config=pedal_config,
         pulse_width=pulse_width,
         dynamics_type=dynamics_type,
     )
@@ -383,8 +391,9 @@ def main():
     def update_functions(_nmpc: MultiCyclicNonlinearModelPredictiveControl, cycle_idx: int, _sol: Solution):
         return cycle_idx < n_cycles  # True if there are still some cycle to perform
 
+    # Add the penalty cost function plot
     nmpc.add_plot_penalty(CostType.ALL)
-    # Solve the program
+    # Solve the optimal control problem
     sol = nmpc.solve(
         update_functions,
         solver=Solver.IPOPT(show_online_optim=False, _max_iter=10000, show_options=dict(show_bounds=True)),
@@ -394,6 +403,7 @@ def main():
         n_cycles_simultaneous=n_cycles_simultaneous,
     )
 
+    # Display graphs and animate the solution
     sol[1][0].graphs(show_bounds=True)
     sol[1][1].graphs(show_bounds=True)
     print(sol[1][1].constraints)
