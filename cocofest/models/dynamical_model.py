@@ -33,6 +33,7 @@ class FesMskModel(BiorbdModel):
         previous_stim: dict = None,
         activate_force_length_relationship: bool = False,
         activate_force_velocity_relationship: bool = False,
+        activate_passive_force_relationship: bool = False,
         activate_residual_torque: bool = False,
         parameters: ParameterList = None,
         external_force_set: ExternalForceSetTimeSeries = None,
@@ -52,6 +53,8 @@ class FesMskModel(BiorbdModel):
             If the force-length relationship should be activated
         activate_force_velocity_relationship: bool
             If the force-velocity relationship should be activated
+        activate_passive_force_relationship: bool
+            If the passive force relationship should be activated
         activate_residual_torque: bool
             If the residual torque should be activated
         parameters: ParameterList
@@ -77,6 +80,7 @@ class FesMskModel(BiorbdModel):
 
         self.activate_force_length_relationship = activate_force_length_relationship
         self.activate_force_velocity_relationship = activate_force_velocity_relationship
+        self.activate_passive_force_relationship = activate_passive_force_relationship
         self.activate_residual_torque = activate_residual_torque
         self.parameters_list = parameters
         self.external_forces_set = external_force_set
@@ -93,6 +97,7 @@ class FesMskModel(BiorbdModel):
                 "previous_stim": self.muscles_dynamics_model[0].previous_stim,
                 "activate_force_length_relationship": self.activate_force_length_relationship,
                 "activate_force_velocity_relationship": self.activate_force_velocity_relationship,
+                "activate_passive_force_relationship": self.activate_passive_force_relationship,
                 "activate_residual_torque": self.activate_residual_torque,
                 "parameters": self.parameters_list,
                 "external_force_set": self.external_forces_set,
