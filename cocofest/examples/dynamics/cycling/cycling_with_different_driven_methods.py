@@ -45,6 +45,7 @@ def prepare_ocp(
     pulse_width: dict,
     dynamics_type: str = "torque_driven",
     use_sx: bool = True,
+    integration_step: int = 1,
 ) -> OptimalControlProgram:
     """
     Prepare the optimal control program (OCP) with the provided configuration.
@@ -67,6 +68,8 @@ def prepare_ocp(
         Type of dynamics ("torque_driven", "muscle_driven", or "fes_driven").
     use_sx: bool
         Whether to use CasADi SX for symbolic computations.
+    integration_step: int
+        Integration step for the ODE solver.
 
     Returns
     -------
@@ -87,7 +90,7 @@ def prepare_ocp(
         n_shooting=n_shooting,
         turn_number=turn_number,
         interpolation_type=InterpolationType.EACH_FRAME,
-        cardinal=4
+        cardinal=1
     )
     # Define control bounds and initial guess
     u_init, u_bounds = set_u_bounds_and_init(model, dynamics_type_str=dynamics_type)
@@ -124,7 +127,7 @@ def prepare_ocp(
         x_init=x_init,
         u_init=u_init,
         objective_functions=objective_functions,
-        ode_solver=OdeSolver.RK1(n_integration_steps=10),
+        ode_solver=OdeSolver.RK1(n_integration_steps=integration_step),
         n_threads=20,
         constraints=constraints,
         parameters=parameters,
@@ -380,11 +383,23 @@ def set_state_bounds(model: BiorbdModel | FesMskModel, x_init: InitialGuessList,
             x_max_bound.append([q_x_bounds.max[i][0]] * (n_shooting + 1))
 
         # Adjust bounds at cardinal nodes for a specific coordinate (e.g., index 2)
-        cardinal_node_list = [i * int(n_shooting / ((n_shooting/(n_shooting/turn_number)) * cardinal)) for i in range(int((n_shooting/(n_shooting/turn_number)) * cardinal + 1))]
-        slack = 10*(np.pi/180) # 10 degrees in radians
-        for i in cardinal_node_list:
-            x_min_bound[2][i] = x_init["q"].init[2][i] - slack
-            x_max_bound[2][i] = x_init["q"].init[2][i] + slack
+        cardinal_node_list = [i * int(n_shooting / ((n_shooting / (n_shooting / turn_number)) * cardinal)) for i in
+                              range(int((n_shooting / (n_shooting / turn_number)) * cardinal + 1))]
+        slack = 10 * (np.pi / 180)
+        for i in range(len(x_min_bound[0])):
+            x_min_bound[0][i] = 0
+            x_max_bound[0][i] = 1
+            x_min_bound[1][i] = 1
+            x_min_bound[2][i] = x_init["q"].init[2][-1]
+            x_max_bound[2][i] = x_init["q"].init[2][0]
+        for i in range(len(cardinal_node_list)):
+            cardinal_index = cardinal_node_list[i]
+            x_min_bound[2][cardinal_index] = x_init["q"].init[2][cardinal_index] if i % cardinal == 0 else \
+            x_init["q"].init[2][cardinal_index] - slack
+            x_max_bound[2][cardinal_index] = x_init["q"].init[2][cardinal_index] if i % cardinal == 0 else \
+            x_init["q"].init[2][cardinal_index] + slack
+            # x_min_bound[2][cardinal_index] = x_init["q"].init[2][cardinal_index] - slack
+            # x_max_bound[2][cardinal_index] = x_init["q"].init[2][cardinal_index] + slack
 
         x_bounds.add(key="q", min_bound=x_min_bound, max_bound=x_max_bound, phase=0,
                      interpolation=InterpolationType.EACH_FRAME)
@@ -393,7 +408,12 @@ def set_state_bounds(model: BiorbdModel | FesMskModel, x_init: InitialGuessList,
         x_bounds.add(key="q", bounds=q_x_bounds, phase=0)
 
     # Modify bounds for velocities (e.g., setting maximum pedal speed to 0 to prevent the pedal to go backward)
-    qdot_x_bounds.max[2] = [0, 0, 0]
+    qdot_x_bounds.max[0] = [10, 10, 10]
+    qdot_x_bounds.min[0] = [-10, -10, -10]
+    qdot_x_bounds.max[1] = [10, 10, 10]
+    qdot_x_bounds.min[1] = [-10, -10, -10]
+    qdot_x_bounds.max[2] = [-1, -1, -1]
+    qdot_x_bounds.min[2] = [-12, -12, -12]
     x_bounds.add(key="qdot", bounds=qdot_x_bounds, phase=0)
     return x_bounds
 
@@ -416,12 +436,12 @@ def set_constraints(model: BiorbdModel | FesMskModel, n_shooting: int, turn_numb
         A ConstraintList with the defined constraints.
     """
     constraints = ConstraintList()
-    constraints.add(
-        ConstraintFcn.TRACK_MARKERS_VELOCITY,
-        node=Node.START,
-        marker_index=model.marker_index("wheel_center"),
-        axes=[Axis.X, Axis.Y],
-    )
+    # constraints.add(
+    #     ConstraintFcn.TRACK_MARKERS_VELOCITY,
+    #     node=Node.START,
+    #     marker_index=model.marker_index("wheel_center"),
+    #     axes=[Axis.X, Axis.Y],
+    # )
 
     superimpose_marker_list = [i * int(n_shooting / ((n_shooting / (n_shooting / turn_number)) * 1)) for i in
                           range(int((n_shooting / (n_shooting / turn_number)) * 1 + 1))]
@@ -431,6 +451,12 @@ def set_constraints(model: BiorbdModel | FesMskModel, n_shooting: int, turn_numb
             first_marker="wheel_center",
             second_marker="global_wheel_center",
             node=i,
+            axes=[Axis.X, Axis.Y],
+        )
+        constraints.add(
+            ConstraintFcn.TRACK_MARKERS_VELOCITY,
+            node=i,
+            marker_index=model.marker_index("wheel_center"),
             axes=[Axis.X, Axis.Y],
         )
 
@@ -445,14 +471,15 @@ def main():
     dynamics_type = "fes_driven"  # Available options: "torque_driven", "muscle_driven", "fes_driven"
     model_path = "../../msk_models/simplified_UL_Seth_pedal_aligned.bioMod"
     pulse_width = None
-    n_shooting = 100
-    final_time = 1
-    turn_number = 1
+    n_shooting = 300
+    final_time = 3
+    turn_number = 3
     pedal_config = {"x_center": 0.35, "y_center": 0.0, "radius": 0.1}
 
     # --- Load the appropriate model --- #
     if dynamics_type in ["torque_driven", "muscle_driven"]:
         model = BiorbdModel(model_path)
+        integration_step = 1
     elif dynamics_type == "fes_driven":
         # Define muscle dynamics for the FES-driven model
         muscles_model = [
@@ -462,7 +489,7 @@ def main():
             DingModelPulseWidthFrequencyWithFatigue(muscle_name="BIC_long", is_approximated=False, sum_stim_truncation=10),
             DingModelPulseWidthFrequencyWithFatigue(muscle_name="BIC_brevis", is_approximated=False, sum_stim_truncation=10),
         ]
-        stim_time = list(np.linspace(0, 1, 34)[:-1])
+        stim_time = list(np.linspace(0, 3, 100)[:-1])
         model = FesMskModel(
             name=None,
             biorbd_path=model_path,
@@ -477,7 +504,7 @@ def main():
                        "fixed": False}
         # Adjust n_shooting based on the stimulation time
         n_shooting = len(stim_time)
-
+        integration_step = 3
     else:
         raise ValueError(f"Dynamics type '{dynamics_type}' not recognized")
 
@@ -489,11 +516,13 @@ def main():
         pedal_config=pedal_config,
         pulse_width=pulse_width,
         dynamics_type=dynamics_type,
+        use_sx=False,
+        integration_step=integration_step,
     )
     # Add the penalty cost function plot
     ocp.add_plot_penalty(CostType.ALL)
     # Solve the optimal control problem
-    sol = ocp.solve(Solver.IPOPT(show_online_optim=False, _max_iter=10000))
+    sol = ocp.solve(Solver.IPOPT(show_online_optim=False, _max_iter=100000))
     # Display graphs and animate the solution
     sol.graphs(show_bounds=True)
     sol.animate(viewer="pyorerun")
