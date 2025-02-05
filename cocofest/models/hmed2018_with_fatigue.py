@@ -135,6 +135,7 @@ class DingModelPulseIntensityFrequencyWithFatigue(DingModelPulseIntensityFrequen
         cn_sum: MX = None,
         force_length_relationship: float | MX = 1,
         force_velocity_relationship: float | MX = 1,
+        passive_force_relationship: MX | float = 0,
     ) -> MX:
         """
         The system dynamics is the function that describes the models.
@@ -161,6 +162,8 @@ class DingModelPulseIntensityFrequencyWithFatigue(DingModelPulseIntensityFrequen
             The force length relationship value (unitless)
         force_velocity_relationship: MX | float
             The force velocity relationship value (unitless)
+        passive_force_relationship: MX | float
+            The passive force relationship value (unitless)
 
         Returns
         -------
@@ -178,6 +181,7 @@ class DingModelPulseIntensityFrequencyWithFatigue(DingModelPulseIntensityFrequen
             km,
             force_length_relationship=force_length_relationship,
             force_velocity_relationship=force_velocity_relationship,
+            passive_force_relationship=passive_force_relationship,
         )  # Equation n°2
         a_dot = self.a_dot_fun(a, f)  # Equation n°5
         tau1_dot = self.tau1_dot_fun(tau1, f)  # Equation n°9
@@ -241,6 +245,7 @@ class DingModelPulseIntensityFrequencyWithFatigue(DingModelPulseIntensityFrequen
         fes_model=None,
         force_length_relationship: float | MX = 1,
         force_velocity_relationship: float | MX = 1,
+        passive_force_relationship: MX | float = 0,
     ) -> DynamicsEvaluation:
         """
         Functional electrical stimulation dynamic
@@ -296,6 +301,7 @@ class DingModelPulseIntensityFrequencyWithFatigue(DingModelPulseIntensityFrequen
                 cn_sum=cn_sum,
                 force_length_relationship=force_length_relationship,
                 force_velocity_relationship=force_velocity_relationship,
+                passive_force_relationship=passive_force_relationship,
             ),
             defects=None,
         )

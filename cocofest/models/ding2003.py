@@ -160,6 +160,7 @@ class DingModelFrequency(FesModel):
         cn_sum: MX | float = None,
         force_length_relationship: MX | float = 1,
         force_velocity_relationship: MX | float = 1,
+        passive_force_relationship: MX | float = 0,
     ) -> MX:
         """
         The system dynamics is the function that describes the models.
@@ -178,6 +179,8 @@ class DingModelFrequency(FesModel):
             The force length relationship value (unitless)
         force_velocity_relationship: MX | float
             The force velocity relationship value (unitless)
+        passive_force_relationship: MX | float
+            The passive force relationship value (unitless)
 
         Returns
         -------
@@ -193,6 +196,7 @@ class DingModelFrequency(FesModel):
             self.km_rest,
             force_length_relationship=force_length_relationship,
             force_velocity_relationship=force_velocity_relationship,
+            passive_force_relationship=passive_force_relationship,
         )  # Equation n°2
         return vertcat(cn_dot, f_dot)
 
@@ -288,6 +292,7 @@ class DingModelFrequency(FesModel):
         km: MX | float,
         force_length_relationship: MX | float = 1,
         force_velocity_relationship: MX | float = 1,
+        passive_force_relationship: MX | float = 0,
     ) -> MX | float:
         """
         Parameters
@@ -306,6 +311,8 @@ class DingModelFrequency(FesModel):
             The force length relationship value (unitless)
         force_velocity_relationship: MX | float
             The force velocity relationship value (unitless)
+        passive_force_relationship: MX | float
+            The passive force relationship value (unitless)
 
         Returns
         -------
@@ -313,8 +320,9 @@ class DingModelFrequency(FesModel):
         """
         return (
             (a * (cn / (km + cn)) - (f / (tau1 + self.tau2 * (cn / (km + cn)))))
-            * force_length_relationship
+            * (force_length_relationship
             * force_velocity_relationship
+            + passive_force_relationship)
         )  # Equation n°2
 
     @staticmethod
@@ -329,6 +337,7 @@ class DingModelFrequency(FesModel):
         fes_model=None,
         force_length_relationship: MX | float = 1,
         force_velocity_relationship: MX | float = 1,
+        passive_force_relationship: MX | float = 0,
     ) -> DynamicsEvaluation:
         """
         Functional electrical stimulation dynamic
@@ -355,6 +364,8 @@ class DingModelFrequency(FesModel):
             The force length relationship value (unitless)
         force_velocity_relationship: MX | float
             The force velocity relationship value (unitless)
+        passive_force_relationship: MX | float
+            The passive force relationship value (unitless)
         Returns
         -------
         The derivative of the states in the tuple[MX] format
@@ -377,6 +388,7 @@ class DingModelFrequency(FesModel):
                 cn_sum=cn_sum,
                 force_length_relationship=force_length_relationship,
                 force_velocity_relationship=force_velocity_relationship,
+                passive_force_relationship=passive_force_relationship,
             ),
         )
 

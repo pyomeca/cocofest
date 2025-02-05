@@ -19,6 +19,7 @@ from .state_configure import StateConfigure
 from .hill_coefficients import (
     muscle_force_length_coefficient,
     muscle_force_velocity_coefficient,
+    muscle_passive_force_coefficient,
 )
 
 
@@ -129,7 +130,6 @@ class FesMskModel(BiorbdModel):
         nlp: NonLinearProgram,
         muscle_models: list[FesModel],
         state_name_list=None,
-        external_forces=None,
     ) -> DynamicsEvaluation:
         """
         The custom dynamics function that provides the derivative of the states: dxdt = f(t, x, u, p, s)
@@ -154,8 +154,6 @@ class FesMskModel(BiorbdModel):
             The list of the muscle models
         state_name_list: list[str]
             The states names list
-        external_forces: MX | SX
-            The external forces acting on the system
         Returns
         -------
         The derivative of the states in the tuple[MX | SX] format
@@ -183,9 +181,8 @@ class FesMskModel(BiorbdModel):
         dq = DynamicsFunctions.compute_qdot(nlp, q, qdot)
         total_torque = muscles_tau + tau if self.activate_residual_torque else muscles_tau
         external_forces = nlp.get_external_forces(states, controls, algebraic_states, numerical_data_timeseries)
-        with_contact = True if nlp.model.bio_model.contact_names != () else False
+        with_contact = True if nlp.model.bio_model.contact_names != () else False  # TODO: Add a better way of with_contact=True
         ddq = nlp.model.forward_dynamics(with_contact=with_contact)(q, qdot, total_torque, external_forces, parameters)  # q, qdot, tau, external_forces, parameters
-        # TODO: Add a better way of with_contact=True
         dxdt = vertcat(dxdt_muscle_list, dq, ddq)
 
         return DynamicsEvaluation(dxdt=dxdt, defects=None)
@@ -263,6 +260,19 @@ class FesMskModel(BiorbdModel):
                 "muscle_force_velocity_coeff", [Q, Qdot], [muscle_force_velocity_coeff]
             )(q, qdot)
 
+            muscle_passive_force_coeff = (
+                muscle_passive_force_coefficient(
+                    model=updatedModel,
+                    muscle=nlp.model.bio_model.model.muscle(muscle_idx),
+                    q=Q,
+                )
+                if nlp.model.activate_passive_force_relationship
+                else 0
+            )
+            muscle_passive_force_coeff = Function(
+                "muscle_passive_force_coeff", [Q, Qdot], [muscle_passive_force_coeff]
+            )(q, qdot)
+
             muscle_dxdt = muscle_model.dynamics(
                 time,
                 muscle_states,
@@ -274,6 +284,7 @@ class FesMskModel(BiorbdModel):
                 fes_model=muscle_model,
                 force_length_relationship=muscle_force_length_coeff,
                 force_velocity_relationship=muscle_force_velocity_coeff,
+                passive_force_relationship=muscle_passive_force_coeff,
             ).dxdt
 
             dxdt_muscle_list = vertcat(dxdt_muscle_list, muscle_dxdt)

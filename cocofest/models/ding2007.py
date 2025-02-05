@@ -126,6 +126,7 @@ class DingModelPulseWidthFrequency(DingModelFrequency):
         a_scale: MX = None,
         force_length_relationship: MX | float = 1,
         force_velocity_relationship: MX | float = 1,
+        passive_force_relationship: MX | float = 0,
     ) -> MX:
         """
         The system dynamics is the function that describes the models.
@@ -148,6 +149,8 @@ class DingModelPulseWidthFrequency(DingModelFrequency):
             The force length relationship value (unitless)
         force_velocity_relationship: MX | float
             The force velocity relationship value (unitless)
+        passive_force_relationship: MX | float
+            The passive force coefficient of the muscle (unitless)
 
         Returns
         -------
@@ -176,6 +179,7 @@ class DingModelPulseWidthFrequency(DingModelFrequency):
             self.km_rest,
             force_length_relationship=force_length_relationship,
             force_velocity_relationship=force_velocity_relationship,
+            passive_force_relationship=passive_force_relationship,
         )  # Equation n°2 from Ding's 2003 article
         return vertcat(cn_dot, f_dot)
 
@@ -290,6 +294,7 @@ class DingModelPulseWidthFrequency(DingModelFrequency):
         fes_model=None,
         force_length_relationship: MX | float = 1,
         force_velocity_relationship: MX | float = 1,
+        passive_force_relationship: MX | float = 0,
     ) -> DynamicsEvaluation:
         """
         Functional electrical stimulation dynamic
@@ -316,6 +321,8 @@ class DingModelPulseWidthFrequency(DingModelFrequency):
             The force length relationship value (unitless)
         force_velocity_relationship: MX | float
             The force velocity relationship value (unitless)
+        passive_force_relationship: MX | float
+            The passive force coefficient of the muscle (unitless)
         Returns
         -------
         The derivative of the states in the tuple[MX] format
@@ -345,6 +352,7 @@ class DingModelPulseWidthFrequency(DingModelFrequency):
                 a_scale=a_scale,
                 force_length_relationship=force_length_relationship,
                 force_velocity_relationship=force_velocity_relationship,
+                passive_force_relationship=passive_force_relationship
             ),
             defects=None,
         )

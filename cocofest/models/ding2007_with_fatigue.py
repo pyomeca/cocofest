@@ -145,6 +145,7 @@ class DingModelPulseWidthFrequencyWithFatigue(DingModelPulseWidthFrequency):
         a_scale: MX = None,
         force_length_relationship: MX | float = 1,
         force_velocity_relationship: MX | float = 1,
+        passive_force_relationship: MX | float = 0,
     ) -> MX:
         """
         The system dynamics is the function that describes the models.
@@ -169,11 +170,12 @@ class DingModelPulseWidthFrequencyWithFatigue(DingModelPulseWidthFrequency):
             The sum of the ca_troponin_complex (unitless)
         a_scale: MX | float
             The scaling factor (unitless)
-
         force_length_relationship: MX | float
             The force length relationship value (unitless)
         force_velocity_relationship: MX | float
             The force velocity relationship value (unitless)
+        passive_force_relationship: MX | float
+            The passive force relationship value (unitless)
 
         Returns
         -------
@@ -202,6 +204,7 @@ class DingModelPulseWidthFrequencyWithFatigue(DingModelPulseWidthFrequency):
             km,
             force_length_relationship=force_length_relationship,
             force_velocity_relationship=force_velocity_relationship,
+            passive_force_relationship=passive_force_relationship,
         )  # Equation n°2 from Ding's 2003 article
 
         a_dot = self.a_dot_fun(a, f)
@@ -266,6 +269,7 @@ class DingModelPulseWidthFrequencyWithFatigue(DingModelPulseWidthFrequency):
         fes_model=None,
         force_length_relationship: MX | float = 1,
         force_velocity_relationship: MX | float = 1,
+        passive_force_relationship: MX | float = 0,
     ) -> DynamicsEvaluation:
         """
         Functional electrical stimulation dynamic
@@ -292,6 +296,8 @@ class DingModelPulseWidthFrequencyWithFatigue(DingModelPulseWidthFrequency):
             The force length relationship value (unitless)
         force_velocity_relationship: MX | float
             The force velocity relationship value (unitless)
+        passive_force_relationship: MX | float
+            The passive force relationship value (unitless)
         Returns
         -------
         The derivative of the states in the tuple[MX] format
@@ -329,6 +335,7 @@ class DingModelPulseWidthFrequencyWithFatigue(DingModelPulseWidthFrequency):
                 a_scale=a_scale,
                 force_length_relationship=force_length_relationship,
                 force_velocity_relationship=force_velocity_relationship,
+                passive_force_relationship=passive_force_relationship
             ),
             defects=None,
         )

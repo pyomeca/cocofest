@@ -113,6 +113,7 @@ class FesModel(ABC):
         cn_sum: MX,
         force_length_relationship: MX | float,
         force_velocity_relationship: MX | float,
+        passive_force_relationship: MX | float,
     ):
         """
 
@@ -166,6 +167,7 @@ class FesModel(ABC):
         km: MX | float,
         force_length_relationship: MX | float,
         force_velocity_relationship: MX | float,
+        passive_force_relationship: MX | float,
     ):
         """
 
@@ -187,6 +189,7 @@ class FesModel(ABC):
         fes_model,
         force_length_relationship: MX | float,
         force_velocity_relationship: MX | float,
+        passive_force_relationship: MX | float,
     ):
         """
 

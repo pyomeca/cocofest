@@ -146,6 +146,7 @@ class DingModelFrequencyWithFatigue(DingModelFrequency):
         cn_sum: MX | float = None,
         force_length_relationship: MX | float = 1,
         force_velocity_relationship: MX | float = 1,
+        passive_force_relationship: MX | float = 0,
     ) -> MX:
         """
         The system dynamics is the function that describes the models.
@@ -170,6 +171,8 @@ class DingModelFrequencyWithFatigue(DingModelFrequency):
             The force length relationship value (unitless)
         force_velocity_relationship: MX | float
             The force velocity relationship value (unitless)
+        passive_force_relationship: MX | float
+            The passive force relationship value (unitless)
 
         Returns
         -------
@@ -185,6 +188,7 @@ class DingModelFrequencyWithFatigue(DingModelFrequency):
             km,
             force_length_relationship=force_length_relationship,
             force_velocity_relationship=force_velocity_relationship,
+            passive_force_relationship=passive_force_relationship,
         )  # Equation n°2
         a_dot = self.a_dot_fun(a, f)  # Equation n°5
         tau1_dot = self.tau1_dot_fun(tau1, f)  # Equation n°9
@@ -248,6 +252,7 @@ class DingModelFrequencyWithFatigue(DingModelFrequency):
         fes_model=None,
         force_length_relationship: MX | float = 1,
         force_velocity_relationship: MX | float = 1,
+        passive_force_relationship: MX | float = 0,
     ) -> DynamicsEvaluation:
         """
         Functional electrical stimulation dynamic
@@ -274,6 +279,8 @@ class DingModelFrequencyWithFatigue(DingModelFrequency):
             The force length relationship value (unitless)
         force_velocity_relationship: MX | float
             The force velocity relationship value (unitless)
+        passive_force_relationship: MX | float
+            The passive force relationship value (unitless)
         Returns
         -------
         The derivative of the states in the tuple[MX] format
@@ -299,6 +306,7 @@ class DingModelFrequencyWithFatigue(DingModelFrequency):
                 t=time,
                 force_length_relationship=force_length_relationship,
                 force_velocity_relationship=force_velocity_relationship,
+                passive_force_relationship=passive_force_relationship,
             ),
             defects=None,
         )
