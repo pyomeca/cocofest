@@ -58,6 +58,9 @@ class DingModelPulseWidthFrequency(DingModelFrequency):
         )
         self._with_fatigue = False
         self.pulse_width = None
+        self.stim_time = stim_time
+        self.previous_stim = previous_stim
+        self.all_stim = previous_stim["time"] + stim_time if previous_stim else stim_time
 
         # --- Default values --- #
         A_SCALE_DEFAULT = 4920  # Value from Ding's 2007 article (N/s)
@@ -113,6 +116,8 @@ class DingModelPulseWidthFrequency(DingModelFrequency):
                 "a_scale": self.a_scale,
                 "pd0": self.pd0,
                 "pdt": self.pdt,
+                "stim_time": self.stim_time,
+                "previous_stim": self.previous_stim,
             },
         )
 

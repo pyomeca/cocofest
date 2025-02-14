@@ -59,12 +59,15 @@ class DingModelPulseWidthFrequencyWithFatigue(DingModelPulseWidthFrequency):
             is_approximated=is_approximated,
         )
         self._with_fatigue = True
+        self.stim_time = stim_time
+        self.previous_stim = previous_stim
+        self.all_stim = previous_stim["time"] + stim_time if previous_stim else stim_time
 
         # --- Default values --- #
-        ALPHA_A_DEFAULT = -4.0 * 10e-7  # Value from Ding's experimentation [1] (s^-2)
-        ALPHA_TAU1_DEFAULT = 2.1 * 10e-5  # Value from Ding's experimentation [1] (N^-1)
+        ALPHA_A_DEFAULT = -4.0 * 10e-2  # Value from Ding's experimentation [1] (s^-2)
         TAU_FAT_DEFAULT = 127  # Value from Ding's experimentation [1] (s)
-        ALPHA_KM_DEFAULT = 1.9 * 10e-8  # Value from Ding's experimentation [1] (s^-1.N^-1)
+        ALPHA_TAU1_DEFAULT = 2.1 * 10e-6  # Value from Ding's experimentation [1] (N^-1)
+        ALPHA_KM_DEFAULT = 1.9 * 10e-6  # Value from Ding's experimentation [1] (s^-1.N^-1)
 
         # ---- Fatigue models ---- #
         self.alpha_a = ALPHA_A_DEFAULT
@@ -129,6 +132,8 @@ class DingModelPulseWidthFrequencyWithFatigue(DingModelPulseWidthFrequency):
                 "a_scale": self.a_scale,
                 "pd0": self.pd0,
                 "pdt": self.pdt,
+                "stim_time": self.stim_time,
+                "previous_stim": self.previous_stim,
             },
         )
 
@@ -189,7 +194,7 @@ class DingModelPulseWidthFrequencyWithFatigue(DingModelPulseWidthFrequency):
             a_scale
             if self.is_approximated
             else self.a_calculation(
-                a_scale=self.a_scale,
+                a_scale=a,
                 pulse_width=pulse_width,
                 t=t,
                 t_stim_prev=t_stim_prev,
