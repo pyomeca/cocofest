@@ -1,4 +1,7 @@
 import numpy as np
+from math import gcd
+from fractions import Fraction
+from functools import reduce
 
 from bioptim import (
     BoundsList,
@@ -196,20 +199,24 @@ class OcpFes:
         int
             The number of shooting points
         """
-        step = round(stim_time[1] - stim_time[0], 4)  # Calculate the initial step size
-        if all(round(stim_time[i + 1] - stim_time[i], 4) == step for i in range(len(stim_time) - 1)):
-            n_shooting = len(stim_time)
+        # Represent the final time as a Fraction for exact arithmetic.
+        T_final = Fraction(final_time).limit_denominator()
+        n_shooting = 1
 
-        else:
-            stim_time_str = [str(t) for t in stim_time]
-            stim_time_str = [
-                stim_time_str[i] + ".0" if len(stim_time_str[i]) == 1 else stim_time_str[i]
-                for i in range(len(stim_time_str))
-            ]
-            nb_decimal = max([len(stim_time_str[i].split(".")[1]) for i in range(len(stim_time))])
-            nb_decimal = 2 if nb_decimal < 2 else nb_decimal
-            decimal_shooting = int("1" + "0" * nb_decimal)
-            n_shooting = int(final_time * decimal_shooting)
+        for t in stim_time:
+            # Convert the stimulation time to an exact fraction.
+            t_frac = Fraction(t).limit_denominator()
+            # Compute the normalized time: t / final_time.
+            # This fraction is automatically reduced to the lowest terms.
+            norm = t_frac / T_final
+            # The denominator in the reduced fraction gives the requirement.
+            d = norm.denominator
+            n_shooting = n_shooting * d // gcd(n_shooting, d)
+
+        if n_shooting >= 1000:
+            print(f"Warning: The number of shooting nodes is very high n = {n_shooting}.\n"
+                   "The optimization might be long, consider using stimulation time with even spacing (common frequency).")
+
         return n_shooting
 
     @staticmethod
