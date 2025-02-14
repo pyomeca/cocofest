@@ -53,7 +53,7 @@ class IvpFes:
             model (FesModel type), stim_time (list), pulse_width (float type), pulse_intensity (int | float type), pulse_mode (str type), frequency (int | float type), round_down (bool type)
         ivp_parameters: dict
             The parameters for the ivp problem including :
-            final_time (int | float type), ode_solver (OdeSolver type), use_sx (bool type), n_threads (int type)
+            final_time (int | float type), ode_solver (OdeSolver type), n_threads (int type)
         """
 
         self._fill_fes_dict(fes_parameters)
@@ -61,8 +61,8 @@ class IvpFes:
         self.dictionaries_check()
 
         self.model = self.fes_parameters["model"]
-        self.n_stim = len(self.fes_parameters["stim_time"])
-        self.stim_time = self.fes_parameters["stim_time"]
+        self.stim_time = self.model.stim_time
+        self.n_stim = len(self.stim_time)
         self.pulse_width = self.fes_parameters["pulse_width"]
         self.pulse_intensity = self.fes_parameters["pulse_intensity"]
 
@@ -76,24 +76,9 @@ class IvpFes:
         self.pulse_mode = self.fes_parameters["pulse_mode"]
         self._pulse_mode_settings()
 
-        parameters = ParameterList(use_sx=self.ivp_parameters["use_sx"])
+        parameters = ParameterList(use_sx=False)
         parameters_init = InitialGuessList()
         parameters_bounds = BoundsList()
-
-        parameters.add(
-            name="pulse_apparition_time",
-            function=DingModelFrequency.set_pulse_apparition_time,
-            size=self.n_stim,
-            scaling=VariableScaling("pulse_apparition_time", [1] * self.n_stim),
-        )
-
-        parameters_init["pulse_apparition_time"] = np.array(self.stim_time)
-        parameters_bounds.add(
-            "pulse_apparition_time",
-            min_bound=np.array(self.stim_time),
-            max_bound=np.array(self.stim_time),
-            interpolation=InterpolationType.CONSTANT,
-        )
 
         if isinstance(
             self.model,
@@ -158,7 +143,7 @@ class IvpFes:
         ) = self.build_initial_guess_from_ocp(self)
 
         self.ode_solver = self.ivp_parameters["ode_solver"]
-        self.use_sx = self.ivp_parameters["use_sx"]
+        self.use_sx = False
         self.n_threads = self.ivp_parameters["n_threads"]
 
         self.fake_ocp = self._prepare_fake_ocp()
@@ -185,8 +170,7 @@ class IvpFes:
     def _fill_ivp_dict(self, ivp_parameters):
         default_ivp_dict = {
             "final_time": None,
-            "ode_solver": OdeSolver.RK4(n_integration_steps=1),
-            "use_sx": True,
+            "ode_solver": OdeSolver.RK1(n_integration_steps=5),
             "n_threads": 1,
         }
 
@@ -281,9 +265,6 @@ class IvpFes:
         ):
             raise ValueError("ode_solver must be a OdeSolver type")
 
-        if not isinstance(self.ivp_parameters["use_sx"], bool):
-            raise ValueError("use_sx must be a bool type")
-
         if not isinstance(self.ivp_parameters["n_threads"], int):
             raise ValueError("n_thread must be a int type")
 
@@ -321,7 +302,7 @@ class IvpFes:
             phase_time=self.final_time,
             ode_solver=self.ode_solver,
             control_type=ControlType.CONSTANT,
-            use_sx=self.use_sx,
+            use_sx=False,
             parameters=self.parameters,
             parameter_init=self.parameters_init,
             parameter_bounds=self.parameters_bounds,
@@ -394,7 +375,7 @@ class IvpFes:
            model, pulse_width, pulse_intensity, pulse_mode, frequency, round_down
         ivp_parameters: dict
            The parameters for the ivp problem including :
-           final_time, ode_solver, use_sx, n_threads
+           final_time, ode_solver, n_threads
         """
 
         frequency = fes_parameters["frequency"]
@@ -441,7 +422,7 @@ class IvpFes:
            model, n_stim, pulse_width, pulse_intensity, pulse_mode
         ivp_parameters: dict
            The parameters for the ivp problem including :
-           final_time, ode_solver, use_sx, n_threads
+           final_time, ode_solver, n_threads
         """
 
         n_stim = fes_parameters["n_stim"]
