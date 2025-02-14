@@ -47,10 +47,10 @@ class DingModelFrequencyWithFatigue(DingModelFrequency):
         self.is_approximated = is_approximated
 
         # --- Default values --- #
-        ALPHA_A_DEFAULT = -4.0 * 10e-7  # Value from Ding's experimentation [1] (s^-2)
-        ALPHA_TAU1_DEFAULT = 2.1 * 10e-5  # Value from Ding's experimentation [1] (N^-1)
+        ALPHA_A_DEFAULT = -4.0 * 10e-2  # Value from Ding's experimentation [1] (s^-2)
         TAU_FAT_DEFAULT = 127  # Value from Ding's experimentation [1] (s)
-        ALPHA_KM_DEFAULT = 1.9 * 10e-8  # Value from Ding's experimentation [1] (s^-1.N^-1)
+        ALPHA_TAU1_DEFAULT = 2.1 * 10e-6  # Value from Ding's experimentation [1] (N^-1)
+        ALPHA_KM_DEFAULT = 1.9 * 10e-6  # Value from Ding's experimentation [1] (s^-1.N^-1)
 
         # ---- Fatigue models ---- #
         self.alpha_a = ALPHA_A_DEFAULT
@@ -160,7 +160,7 @@ class DingModelFrequencyWithFatigue(DingModelFrequency):
         a: MX
             The value of the scaling factor (unitless)
         tau1: MX
-            The value of the time_state_force_no_cross_bridge (ms)
+            The value of the time_state_force_no_cross_bridge (s)
         km: MX
             The value of the cross_bridges (unitless)
         t: MX
@@ -215,13 +215,13 @@ class DingModelFrequencyWithFatigue(DingModelFrequency):
         Parameters
         ----------
         tau1: MX
-            The previous step value of time_state_force_no_cross_bridge (ms)
+            The previous step value of time_state_force_no_cross_bridge (s)
         f: MX
             The previous step value of force (N)
 
         Returns
         -------
-        The value of the derivative time_state_force_no_cross_bridge (ms)
+        The value of the derivative time_state_force_no_cross_bridge (s)
         """
         return -(tau1 - self.tau1_rest) / self.tau_fat + self.alpha_tau1 * f  # Equation n°9
 
@@ -287,13 +287,10 @@ class DingModelFrequencyWithFatigue(DingModelFrequency):
         """
         model = fes_model if fes_model else nlp.model
         dxdt_fun = model.system_dynamics
-        # stim_apparition = None
         cn_sum = None
 
         if model.is_approximated:
             cn_sum = controls[0]
-        # else:
-        #     stim_apparition = model.get_stim(nlp=nlp, parameters=parameters)
 
         return DynamicsEvaluation(
             dxdt=dxdt_fun(

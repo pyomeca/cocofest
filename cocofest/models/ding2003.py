@@ -205,9 +205,9 @@ class DingModelFrequency(FesModel):
         Parameters
         ----------
         t: MX
-            The current time at which the dynamics is evaluated (ms)
+            The current time at which the dynamics is evaluated (s)
         t_stim_i: MX
-            Time when the stimulation i occurred (ms)
+            Time when the stimulation i occurred (s)
 
         Returns
         -------
@@ -222,7 +222,7 @@ class DingModelFrequency(FesModel):
         r0: MX | float
             Mathematical term characterizing the magnitude of enhancement in CN from the following stimuli (unitless)
         time_between_stim: MX
-            Time between the last stimulation i and the current stimulation i (ms)
+            Time between the last stimulation i and the current stimulation i (s)
 
         Returns
         -------
@@ -237,9 +237,9 @@ class DingModelFrequency(FesModel):
         r0: MX | float
             Mathematical term characterizing the magnitude of enhancement in CN from the following stimuli (unitless)
         t: MX
-            The current time at which the dynamics is evaluated (ms)
+            The current time at which the dynamics is evaluated (s)
         t_stim_prev: list[MX]
-            The time list of the previous stimulations (ms)
+            The time list of the previous stimulations (s)
 
         Returns
         -------
@@ -304,7 +304,7 @@ class DingModelFrequency(FesModel):
         a: MX | float
             The previous step value of scaling factor (unitless)
         tau1: MX | float
-            The previous step value of time_state_force_no_cross_bridge (ms)
+            The previous step value of time_state_force_no_cross_bridge (s)
         km: MX | float
             The previous step value of cross_bridges (unitless)
         force_length_relationship: MX | float
@@ -372,13 +372,10 @@ class DingModelFrequency(FesModel):
         """
         model = fes_model if fes_model else nlp.model
         dxdt_fun = model.system_dynamics
-        stim_apparition = None
         cn_sum = None
 
         if model.is_approximated:
             cn_sum = controls[0]
-        else:
-            stim_apparition = model.get_stim(nlp=nlp, parameters=parameters)
 
         return DynamicsEvaluation(
             dxdt=dxdt_fun(
