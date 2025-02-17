@@ -633,7 +633,9 @@ class OcpFes:
         )
 
         for i in range(len(variable_bound_list)):
-            if variable_bound_list[i] == "Cn" or variable_bound_list[i] == "F":
+            if variable_bound_list[i] == "Cn":
+                max_bounds[i] = 2
+            if variable_bound_list[i] == "F":
                 max_bounds[i] = 1000
             elif variable_bound_list[i] == "Tau1" or variable_bound_list[i] == "Km":
                 max_bounds[i] = 1

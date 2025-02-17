@@ -1,24 +1,39 @@
-import matplotlib.pyplot as plt
-from cocofest import IvpFes, ModelMaker
+"""
+This example was build to explain of to integrate a solution and has no objectives nor parameter to optimize.
+The uncommented model used is the DingModelFrequencyWithFatigue, but you can change it to any other model.
+The model is integrated for 300 seconds and the stimulation will be on for 1 second at 33 Hz and of for a second.
+The effect of the fatigue will be visible and the force state result will decrease over time.
+"""
+from cocofest import (IvpFes,
+                      DingModelFrequencyWithFatigue,
+                      DingModelPulseIntensityFrequencyWithFatigue,
+                      DingModelPulseWidthFrequencyWithFatigue,
+                      FES_plot)
+import numpy as np
+from bioptim import OdeSolver
 
-# --- Build ocp --- #
-# This problem was build to be integrated and has no objectives nor parameter to optimize.
-model = ModelMaker.create_model("ding2003_with_fatigue", is_approximated=False)  # Can not approximate this model in ivp
-fes_parameters = {
-    "model": model,
-    "stim_time": [0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9],
-}
-ivp_parameters = {"final_time": 1, "use_sx": True}
+# --- Set stimulation time apparition --- #
+final_time = 300
+stim_time = [val for start in range(0, final_time, 2) for val in np.linspace(start, start + 1, 34)[:-1]]
 
-ivp = IvpFes(fes_parameters, ivp_parameters)
+# --- Set Ding2003 model --- #
+model = DingModelFrequencyWithFatigue(stim_time=stim_time, sum_stim_truncation=10)
+fes_parameters = {"model": model}
+
+# --- Set Ding2007 model --- #
+# model = DingModelPulseWidthFrequencyWithFatigue(stim_time=stim_time, sum_stim_truncation=10)
+# fes_parameters = {"model": model, "pulse_width": 0.0003}
+
+# --- Set Hmed2018 model --- #
+# model = DingModelPulseIntensityFrequencyWithFatigue(stim_time=stim_time, sum_stim_truncation=10)
+# fes_parameters = {"model": model, "pulse_intensity": 50}
+
+# --- Build ivp --- #
+ivp_parameters = {"final_time": final_time, "ode_solver": OdeSolver.RK1(n_integration_steps=10)}
+ivp = IvpFes(fes_parameters=fes_parameters, ivp_parameters=ivp_parameters)
 
 result, time = ivp.integrate()
+result["time"] = time
 
 # Plotting the force state result
-plt.title("Force state result")
-
-plt.plot(time, result["F"][0], color="blue", label="force")
-plt.xlabel("time (s)")
-plt.ylabel("force (N)")
-plt.legend()
-plt.show()
+FES_plot(data=result).plot(title="FES model integration")

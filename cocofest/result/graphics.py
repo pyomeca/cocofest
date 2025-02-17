@@ -1,12 +1,28 @@
-from bioptim import Solution, SolutionMerge
+from bioptim import Solution, SolutionMerge, InterpolationType
 import matplotlib.pyplot as plt
 import numpy as np
 from ..models.ding2007 import DingModelPulseWidthFrequency
-from ..models.ding2007_with_fatigue import DingModelPulseWidthFrequencyWithFatigue
-from ..models.hill_coefficients import muscle_force_length_coefficient, muscle_force_velocity_coefficient
+from ..models.dynamical_model import FesMskModel
 
 
 class FES_plot:
+    def __init__(self, data: Solution | dict):
+        self.data = data
+
+    def plot(self, title: str = None, show_stim: bool = False, show_bounds: bool = False):
+        if isinstance(self.data, Solution):
+            if isinstance(self.data.ocp.nlp[0].model, FesMskModel):
+                self.msk_plot(title, show_stim, show_bounds)
+            else:
+                self.ocp_plot(title, show_stim, show_bounds)
+
+        elif isinstance(self.data, dict):
+            if show_stim or show_bounds:
+                raise ValueError("Cannot show stim or bounds with data dictionary type")
+            self.ivp_plot(title)
+        else:
+            raise ValueError("Data must be a Solution or a dictionary")
+
     def get_data(self, solution: Solution):
         states = solution.stepwise_states(to_merge=SolutionMerge.NODES)
         controls = solution.stepwise_controls(to_merge=SolutionMerge.NODES)
@@ -30,15 +46,38 @@ class FES_plot:
         return bounds
 
     def get_bounds(self, solution: Solution):
-        cn_bounds = solution.ocp.nlp[0].x_bounds["Cn"].min[0], solution.ocp.nlp[0].x_bounds["Cn"].max[0]
-        force_bounds = solution.ocp.nlp[0].x_bounds["F"].min[0], solution.ocp.nlp[0].x_bounds["F"].max[0]
-        bounds = {"cn": cn_bounds, "force": force_bounds}
-        if solution.ocp.nlp[0].model._with_fatigue:
-            a_bounds = solution.ocp.nlp[0].x_bounds["A"].min[0], solution.ocp.nlp[0].x_bounds["A"].max[0]
-            tau1_bounds = solution.ocp.nlp[0].x_bounds["Tau1"].min[0], solution.ocp.nlp[0].x_bounds["Tau1"].max[0]
-            km_bounds = solution.ocp.nlp[0].x_bounds["Km"].min[0], solution.ocp.nlp[0].x_bounds["Km"].max[0]
-            bounds = {"cn": cn_bounds, "force": force_bounds, "a": a_bounds, "tau1": tau1_bounds, "km": km_bounds}
-        return bounds
+        if solution.ocp.nlp[0].x_bounds.type == InterpolationType.CONSTANT_WITH_FIRST_AND_LAST_DIFFERENT:
+            solution_bounds = solution.ocp.nlp[0].x_bounds
+            cn_bounds = [list(solution_bounds["Cn"].min[0]), list(solution_bounds["Cn"].max[0])]
+            force_bounds = [list(solution_bounds["F"].min[0]), list(solution_bounds["F"].max[0])]
+            bounds = {"cn": cn_bounds, "force": force_bounds}
+            if solution.ocp.nlp[0].model._with_fatigue:
+                a_bounds = [list(solution_bounds["A"].min[0]), list(solution_bounds["A"].max[0])]
+                tau1_bounds = [list(solution_bounds["Tau1"].min[0]), list(solution_bounds["Tau1"].max[0])]
+                km_bounds = [list(solution_bounds["Km"].min[0]), list(solution_bounds["Km"].max[0])]
+                bounds = {"cn": cn_bounds, "force": force_bounds, "a": a_bounds, "tau1": tau1_bounds, "km": km_bounds}
+
+            temp_time = solution.decision_time(to_merge=SolutionMerge.NODES).T[0]
+            bound_time = [temp_time[0], temp_time[1], temp_time[-1]]
+
+        elif solution.ocp.nlp[0].x_bounds.type == InterpolationType.EACH_FRAME:
+            solution_bounds = solution.ocp.nlp[0].x_bounds
+            cn_bounds = [list(solution_bounds["Cn"].min[0]), list(solution_bounds["Cn"].max[0])]
+            force_bounds = [list(solution_bounds["F"].min[0]), list(solution_bounds["F"].max[0])]
+            bounds = {"cn": cn_bounds, "force": force_bounds}
+
+            if solution.ocp.nlp[0].model._with_fatigue:
+                a_bounds = [list(solution_bounds["A"].min[0]), list(solution_bounds["A"].max[0])]
+                tau1_bounds = [list(solution_bounds["Tau1"].min[0]), list(solution_bounds["Tau1"].max[0])]
+                km_bounds = [list(solution_bounds["Km"].min[0]), list(solution_bounds["Km"].max[0])]
+                bounds = {"cn": cn_bounds, "force": force_bounds, "a": a_bounds, "tau1": tau1_bounds, "km": km_bounds}
+
+            bound_time = solution.decision_time(to_merge=SolutionMerge.NODES).T[0]
+
+        else:
+            raise NotImplementedError("Bounds type not implemented")
+
+        return bounds, bound_time
 
     def axes_settings(self, axes_list):
         for i in range(len(axes_list)):
@@ -111,30 +150,105 @@ class FES_plot:
         self.axes_settings([twin_ax])
         return twin_ax, line
 
-    def ocp_plot(self, solution: Solution, title: str = None, show_stim: bool = True, show_bounds: bool = True):
-        self.solution = solution
-        if isinstance(self.solution, Solution):
-            states = solution.decision_states(to_merge=SolutionMerge.NODES)
-            cn = states["Cn"]
-            force = states["F"]
-            if self.solution.ocp.nlp[0].model._with_fatigue:
-                a = states["A"]
-                km = states["Km"]
-                tau1 = states["Tau1"]
-            time = solution.decision_time(to_merge=SolutionMerge.NODES).T[0]
+    def ocp_plot(self, title: str = None, show_stim: bool = True, show_bounds: bool = True):
+        solution = self.data
+        states = solution.stepwise_states(to_merge=SolutionMerge.NODES)
+        time = solution.stepwise_time(to_merge=SolutionMerge.NODES).T[0]
+        bounds, bounds_time = self.get_bounds(solution) if show_bounds else None, None
+        stim_time = solution.ocp.nlp[0].model.stim_time if show_stim else None
 
-            bounds = self.get_bounds(solution) if show_bounds else None
-        return True
+        # Extract data from solution
+        cn = states["Cn"][0]
+        force = states["F"][0]
+        if solution.ocp.nlp[0].model._with_fatigue:
+            a = states["A"][0]
+            km = states["Km"][0]
+            tau1 = states["Tau1"][0]
 
-    def ivp_plot(self, result: dict, time: np.array, title: str = None):
+        fatigue_model_used = solution.ocp.nlp[0].model._with_fatigue
+        # Create subplots
+        nrows = 2 if fatigue_model_used else 1
+        fig, axs = plt.subplots(nrows, 1, figsize=(12, 9))
+
+        if nrows == 1:
+            axs = [axs]
+
+        # --- Force Model --- #
+        ax1 = axs[0]
+        # Plot Cn
+        line_cn, = ax1.plot(time, cn, color="royalblue", label="Cn", lw=2)
+        ax1.set_ylabel("Cn (-)", fontsize=12, color="royalblue")
+        ax1.set_xlabel("Time (s)", fontsize=12)
+        ax1.set_title("Force model", fontsize=14, fontweight="bold")
+        ax1.tick_params(axis='y', colors="royalblue")
+        ax1.grid(True, linestyle="--", alpha=0.7)
+
+        # Create twin for Force
+        ax1_force, line_force = self.create_twin_axes(
+            ax1, time, force, label="Force",
+            color="darkred", lw=3,
+            ylabel="Force (N)", tick_color="darkred"
+        )
+
+        if show_stim:
+            for stim in stim_time:
+                ax1.axvline(stim, color="goldenrod", linestyle="--", lw=1)
+            offset = 0.01 * (stim_time[-1] - stim_time[0]) / (stim_time[-1] - stim_time[0])
+            ax1.text(stim_time[0]-offset, 0, "Stimulation", rotation=90, color="goldenrod", fontsize=10)
+        if show_bounds:
+            ax1.fill_between(bounds_time, bounds["cn"][0], bounds["cn"][1], color="royalblue", alpha=0.2)
+            ax1_force.fill_between(bounds_time, bounds["force"][0], bounds["force"][1], color="darkred", alpha=0.2)
+
+        # Combine legends from ax1 and its twin
+        lines = [line_cn, line_force]
+        labels = [line.get_label() for line in lines]
+        ax1.legend(lines, labels, fontsize=10, fancybox=True, shadow=True)
+
+        # --- Fatigue Model --- #
+        if fatigue_model_used:
+            ax2 = axs[1]
+            # Plot A on ax2
+            line_a, = ax2.plot(time, a, color="forestgreen", label="A", lw=3)
+            ax2.set_ylabel("A (-)", fontsize=12, color="forestgreen")
+            ax2.set_xlabel("Time (s)", fontsize=12)
+            ax2.set_title("Fatigue model", fontsize=14, fontweight="bold")
+            ax2.tick_params(axis='y', colors="forestgreen")
+            ax2.grid(True, linestyle="--", alpha=0.7)
+
+            # Create twin for Km and Tau1
+            ax2_twin = ax2.twinx()
+            ax2_twin.spines["left"].set_color("crimson")
+            ax2_twin.yaxis.set_label_position('left')
+            ax2_twin.yaxis.set_ticks_position('left')
+            line_km, = ax2_twin.plot(time, km, color="crimson", label="Km", lw=3)
+            line_tau1, = ax2_twin.plot(time, tau1, color="purple", label="Tau1", lw=3)
+            ax2_twin.set_ylabel("Km (-) & Tau1 (s)", fontsize=12, color="crimson")
+            ax2_twin.tick_params(axis='y', colors="crimson")
+            self.axes_settings([ax2_twin])
+
+            # Combine legends for the fatigue model subplot
+            lines2 = [line_a, line_km, line_tau1]
+            labels2 = [line.get_label() for line in lines2]
+            ax2.legend(lines2, labels2, fontsize=10, fancybox=True, shadow=True)
+
+            if show_bounds:
+                ax2.fill_between(bounds_time, bounds["a"][0], bounds["a"][1], color="forestgreen", alpha=0.2)
+                ax2_twin.fill_between(bounds_time, bounds["km"][0], bounds["km"][1], color="crimson", alpha=0.2)
+                ax2_twin.fill_between(bounds_time, bounds["tau1"][0], bounds["tau1"][1], color="purple", alpha=0.2)
+
+        fig.suptitle(title, fontsize=16, fontweight="bold")
+        plt.tight_layout(rect=(0, 0, 1, 0.96))
+        plt.show()
+
+    def ivp_plot(self, title: str = None):
         """
         Plot the force and (optionally) fatigue models.
 
         Parameters:
-            result (dict): Dictionary containing keys "Cn", "F" and optionally "A", "Km", "Tau1".
-            time (np.array): Array of time points.
             title (str, optional): Title for the figure.
         """
+        result = self.data
+        time = result["time"]
         # Extract data from result
         cn = result["Cn"][0]
         force = result["F"][0]
@@ -205,8 +319,8 @@ class FES_plot:
         plt.tight_layout(rect=(0, 0, 1, 0.96))
         plt.show()
 
-    def msk_plot(self, solution: Solution, title: str = None, show_stim: bool = True, show_bounds: bool = True):
-        self.solution = solution
+    def msk_plot(self, title: str = None, show_stim: bool = True, show_bounds: bool = True):
+        solution = self.data
         self.force_keys = [key for key in solution.stepwise_states().keys() if key.startswith("F_")]
         q, qdot, tau, force, time = self.get_data(solution)
         bounds = self.get_msk_bounds(solution) if show_bounds else None
