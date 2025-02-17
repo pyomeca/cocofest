@@ -4,7 +4,7 @@ such as functional electro stimulation
 """
 
 import numpy as np
-from casadi import MX, SX, sum1, horzcat
+from casadi import MX, SX, sum1, horzcat, vertcat
 
 from bioptim import PenaltyController
 from .fourier_approx import FourierSeries
@@ -111,7 +111,7 @@ class CustomObjective:
         The sum of each force
         """
         muscle_name_list = controller.model.bio_model.muscle_names
-        muscle_force = horzcat(
+        muscle_force = vertcat(
             *[controller.states["F_" + muscle_name_list[x]].cx for x in range(len(muscle_name_list))]
         )
-        return sum1(muscle_force)
+        return muscle_force
