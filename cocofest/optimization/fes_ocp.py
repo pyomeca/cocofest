@@ -26,6 +26,7 @@ from ..fourier_approx import FourierSeries
 from ..models.fes_model import FesModel
 from ..models.dynamical_model import FesMskModel
 from ..models.ding2003 import DingModelFrequency
+from ..models.ding2003_with_fatigue import DingModelFrequencyWithFatigue
 from ..models.ding2007 import DingModelPulseWidthFrequency
 from ..models.ding2007_with_fatigue import DingModelPulseWidthFrequencyWithFatigue
 from ..models.hmed2018 import DingModelPulseIntensityFrequency
@@ -68,21 +69,22 @@ class OcpFes:
         )
         OcpFes.update_model_param(input_dict["model"], parameters)
 
-        dynamics = OcpFes._declare_dynamics(input_dict["model"])
-        x_bounds, x_init = OcpFes._set_bounds(input_dict["model"])
+        numerical_data_time_series = OcpFes.set_all_stim_time_for_numerical_data_time_series(input_dict["model"],
+                                                                                             input_dict["n_shooting"],
+                                                                                             input_dict["final_time"])
 
-        if input_dict["model"].is_approximated:
-            constraints = OcpFes._build_constraints(
-                input_dict["model"],
-                input_dict["n_shooting"],
-                input_dict["final_time"],
-                input_dict["model"].stim_time,
-                input_dict["control_type"],
-            )
-            u_bounds, u_init = OcpFes._set_u_bounds(input_dict["model"])
-        else:
-            constraints = ConstraintList()
-            u_bounds, u_init = BoundsList(), InitialGuessList()
+        dynamics = OcpFes._declare_dynamics(input_dict["model"], numerical_data_time_series)
+        x_bounds, x_init = OcpFes._set_bounds(input_dict["model"])
+        u_bounds, u_init = OcpFes._set_u_bounds(input_dict["model"])
+
+        constraints = OcpFes._build_constraints(
+            input_dict["model"],
+            input_dict["n_shooting"],
+            input_dict["final_time"],
+            input_dict["model"].stim_time,
+            input_dict["control_type"],
+            pulse_width["bimapping"],
+        )
 
         objective_functions = OcpFes._set_objective(input_dict["n_shooting"], objective)
 
@@ -560,53 +562,63 @@ class OcpFes:
         return (parameters, parameters_bounds, parameters_init, parameter_objectives)
 
     @staticmethod
-    def _build_constraints(model, n_shooting, final_time, stim_time, control_type):
+    def _build_constraints(model, n_shooting, final_time, stim_time, control_type, bimapped_parameters=False):
         constraints = ConstraintList()
 
-        time_vector = np.linspace(0, final_time, n_shooting + 1)
-        stim_at_node = [np.where(stim_time[i] <= time_vector)[0][0] for i in range(len(stim_time))]
-        additional_nodes = 1 if control_type == ControlType.LINEAR_CONTINUOUS else 0
-        if model._sum_stim_truncation:
-            max_stim_to_keep = model._sum_stim_truncation
-        else:
-            max_stim_to_keep = 10000000
-
-        index_sup = 0
-        index_inf = 0
-
-        for i in range(n_shooting + additional_nodes):
-            if i in stim_at_node:
-                index_sup += 1
-                if index_sup >= max_stim_to_keep:
-                    index_inf = index_sup - max_stim_to_keep
-
-            constraints.add(
-                CustomConstraint.cn_sum,
-                node=i,
-                stim_time=stim_time[index_inf:index_sup],
-            )
-
         if isinstance(model, DingModelPulseWidthFrequency):
-            index = 0
-            for i in range(n_shooting + additional_nodes):
-                if i in stim_at_node and i != 0:
-                    index += 1
+            for i in range(n_shooting):
                 constraints.add(
-                    CustomConstraint.a_calculation,
+                    CustomConstraint.last_pulse_width,
+                    last_stim_index=i if not bimapped_parameters else 0,
                     node=i,
-                    last_stim_index=index,
                 )
+
+        if model.is_approximated:
+            time_vector = np.linspace(0, final_time, n_shooting + 1)
+            stim_at_node = [np.where(stim_time[i] <= time_vector)[0][0] for i in range(len(stim_time))]
+            additional_nodes = 1 if control_type == ControlType.LINEAR_CONTINUOUS else 0
+            if model._sum_stim_truncation:
+                max_stim_to_keep = model._sum_stim_truncation
+            else:
+                max_stim_to_keep = 10000000
+
+            index_sup = 0
+            index_inf = 0
+
+            for i in range(n_shooting + additional_nodes):
+                if i in stim_at_node:
+                    index_sup += 1
+                    if index_sup >= max_stim_to_keep:
+                        index_inf = index_sup - max_stim_to_keep
+
+                constraints.add(
+                    CustomConstraint.cn_sum,
+                    node=i,
+                    stim_time=stim_time[index_inf:index_sup],
+                )
+
+            if isinstance(model, DingModelPulseWidthFrequency):
+                index = 0
+                for i in range(n_shooting + additional_nodes):
+                    if i in stim_at_node and i != 0:
+                        index += 1
+                    constraints.add(
+                        CustomConstraint.a_calculation,
+                        node=i,
+                        last_stim_index=index,
+                    )
 
         return constraints
 
     @staticmethod
-    def _declare_dynamics(model):
+    def _declare_dynamics(model, numerical_data_timeseries=None):
         dynamics = DynamicsList()
         dynamics.add(
             model.declare_ding_variables,
             dynamic_function=model.dynamics,
             expand_dynamics=True,
             phase_dynamics=PhaseDynamics.SHARED_DURING_THE_PHASE,
+            numerical_data_timeseries=numerical_data_timeseries,
         )
         return dynamics
 
@@ -663,13 +675,13 @@ class OcpFes:
     def _set_u_bounds(model):
         # Controls bounds
         u_bounds = BoundsList()
-
         # Controls initial guess
         u_init = InitialGuessList()
-        u_init.add(key="Cn_sum", initial_guess=[0], phase=0)
-        if isinstance(model, DingModelPulseWidthFrequency):
-            u_init.add(key="A_calculation", initial_guess=[0], phase=0)
-
+        u_init.add(key="last_pulse_width", initial_guess=[0], phase=0)
+        if model.is_approximated:
+            u_init.add(key="Cn_sum", initial_guess=[0], phase=0)
+            if isinstance(model, DingModelPulseWidthFrequency):
+                u_init.add(key="A_calculation", initial_guess=[0], phase=0)
         return u_bounds, u_init
 
     @staticmethod
@@ -722,3 +734,38 @@ class OcpFes:
                 param_scaling = parameters[param_key].scaling.scaling
                 param_reduced = parameters[param_key].cx
                 parameters[param_key].function(model, param_reduced * param_scaling, **parameters[param_key].kwargs)
+
+    @staticmethod
+    def set_all_stim_time_for_numerical_data_time_series(model, n_shooting, final_time):
+        truncation = model._sum_stim_truncation
+        # --- Set the previous stim time for the numerical data time series (mandatory to avoid nan values) --- #
+        while len(model.previous_stim["time"]) < truncation:
+            model.previous_stim["time"].insert(0, -10000000)
+            if isinstance(model, DingModelPulseWidthFrequency):
+                model.previous_stim["pulse_width"].insert(0, 0.0003)
+            if isinstance(model, DingModelPulseIntensityFrequency):
+                model.previous_stim["pulse_intensity"].insert(0, 50)
+
+        model.all_stim = model.previous_stim["time"] + model.stim_time
+        stim_time = np.array(model.all_stim)
+        dt = final_time / n_shooting
+
+        # For each node (n_shooting+1 total), find the last index where stim_time <= node_time.
+        node_idx = [np.where(stim_time <= i * dt)[0][-1] for i in range(n_shooting + 1)]
+
+        # For each node, extract the stim times up to that node, then keep only the last 'truncated' values.
+        stim_time_list = [
+            list(stim_time[:idx + 1][-truncation:])
+            for idx in node_idx
+        ]
+
+        # --- Create a correct numerical_data_time_series shape array from the stim_time_list --- #
+        reshaped_array = np.full((n_shooting+1, truncation), np.nan)
+        for i in range(len(stim_time_list)):
+            reshaped_array[i] = np.array(stim_time_list[i])
+
+        # --- Reshape the array to obtain the desired final shape --- #
+        temp_result = reshaped_array[:, np.newaxis, :]
+        stim_time_array = np.transpose(temp_result, (2, 1, 0))
+
+        return {"stim_time": stim_time_array}

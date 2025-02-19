@@ -143,6 +143,7 @@ class DingModelFrequencyWithFatigue(DingModelFrequency):
         tau1: MX = None,
         km: MX = None,
         t: MX = None,
+        t_stim_prev: MX | float = None,
         cn_sum: MX | float = None,
         force_length_relationship: MX | float = 1,
         force_velocity_relationship: MX | float = 1,
@@ -165,6 +166,8 @@ class DingModelFrequencyWithFatigue(DingModelFrequency):
             The value of the cross_bridges (unitless)
         t: MX
             The current time at which the dynamics is evaluated (s)
+        t_stim_prev: MX | float
+            The previous time at which the stimulation was applied (s)
         cn_sum: MX | float
             The sum of the ca_troponin_complex (unitless)
         force_length_relationship: MX | float
@@ -178,7 +181,6 @@ class DingModelFrequencyWithFatigue(DingModelFrequency):
         -------
         The value of the derivative of each state dx/dt at the current time t
         """
-        t_stim_prev = self.all_stim
         cn_dot = self.calculate_cn_dot(cn, cn_sum, t, t_stim_prev)
         f_dot = self.f_dot_fun(
             cn,
@@ -301,6 +303,7 @@ class DingModelFrequencyWithFatigue(DingModelFrequency):
                 km=states[4],
                 cn_sum=cn_sum,
                 t=time,
+                t_stim_prev=numerical_timeseries,
                 force_length_relationship=force_length_relationship,
                 force_velocity_relationship=force_velocity_relationship,
                 passive_force_relationship=passive_force_relationship,
@@ -327,6 +330,7 @@ class DingModelFrequencyWithFatigue(DingModelFrequency):
             A list of values to pass to the dynamics at each node. Experimental external forces should be included here.
         """
         StateConfigure().configure_all_fes_model_states(ocp, nlp, fes_model=self)
+        StateConfigure().configure_last_pulse_width(ocp, nlp)
         if self.is_approximated:
             StateConfigure().configure_cn_sum(ocp, nlp)
         ConfigureProblem.configure_dynamics_function(ocp, nlp, dyn_func=self.dynamics)

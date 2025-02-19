@@ -46,7 +46,7 @@ class DingModelFrequency(FesModel):
         self.is_approximated = is_approximated
         self.pulse_apparition_time = None
         self.stim_time = stim_time
-        self.previous_stim = previous_stim
+        self.previous_stim = previous_stim if previous_stim else {"time": []}
         self.all_stim = self.previous_stim["time"] + self.stim_time if self.previous_stim else self.stim_time
 
         # --- Default values --- #
@@ -157,6 +157,7 @@ class DingModelFrequency(FesModel):
         cn: MX,
         f: MX,
         t: MX = None,
+        t_stim_prev: list[MX] = None,
         cn_sum: MX | float = None,
         force_length_relationship: MX | float = 1,
         force_velocity_relationship: MX | float = 1,
@@ -173,6 +174,8 @@ class DingModelFrequency(FesModel):
             The value of the force (N)
         t: MX
             The current time at which the dynamics is evaluated (s)
+        t_stim_prev: list[MX]
+            The time list of the previous stimulations (s)
         cn_sum: MX | float
             The sum of the ca_troponin_complex (unitless)
         force_length_relationship: MX | float
@@ -186,7 +189,6 @@ class DingModelFrequency(FesModel):
         -------
         The value of the derivative of each state dx/dt at the current time t
         """
-        t_stim_prev = self.all_stim
         cn_dot = self.calculate_cn_dot(cn, cn_sum, t, t_stim_prev)
         f_dot = self.f_dot_fun(
             cn,
@@ -247,17 +249,11 @@ class DingModelFrequency(FesModel):
         """
         sum_multiplier = 0
 
-        for i in range(len(t_stim_prev)):
+        for i in range(t_stim_prev.shape[0]):
             previous_phase_time = t_stim_prev[i] - t_stim_prev[i - 1]
             ri = 1 if i == 0 else self.ri_fun(r0, previous_phase_time)  # Part of Eq n°1
             exp_time = self.exp_time_fun(t, t_stim_prev[i])  # Part of Eq n°1
-            if isinstance(self._sum_stim_truncation, int) and i > self._sum_stim_truncation:
-                coefficient = 1 if self.is_approximated else if_else(logic_and(t_stim_prev[i] <= t,
-                                                                               t - t_stim_prev[i] <= self._sum_stim_truncation * (t_stim_prev[i]-t_stim_prev[i-1])),
-                                                                               1, 0)
-            else:
-                coefficient = 1 if self.is_approximated else if_else(t_stim_prev[i] <= t, 1, 0)
-            sum_multiplier += ri * exp_time * lambda_i[i] * coefficient
+            sum_multiplier += ri * exp_time * lambda_i[i]
         return sum_multiplier
 
     def cn_dot_fun(self, cn: MX, cn_sum: MX) -> MX | float:
@@ -279,7 +275,7 @@ class DingModelFrequency(FesModel):
             return self.cn_dot_fun(cn=cn, cn_sum=cn_sum)
         else:
             cn_sum = self.cn_sum_fun(
-                self.get_r0(self.km_rest), t, t_stim_prev, self.get_lambda_i(len(t_stim_prev), pulse_intensity)
+                self.get_r0(self.km_rest), t, t_stim_prev, self.get_lambda_i(t_stim_prev.shape[0], pulse_intensity)
             )
             return self.cn_dot_fun(cn, cn_sum)
 
@@ -382,6 +378,7 @@ class DingModelFrequency(FesModel):
                 cn=states[0],
                 f=states[1],
                 t=time,
+                t_stim_prev=numerical_timeseries,
                 cn_sum=cn_sum,
                 force_length_relationship=force_length_relationship,
                 force_velocity_relationship=force_velocity_relationship,
@@ -408,6 +405,7 @@ class DingModelFrequency(FesModel):
             A list of values to pass to the dynamics at each node. Experimental external forces should be included here.
         """
         StateConfigure().configure_all_fes_model_states(ocp, nlp, fes_model=self)
+        StateConfigure().configure_last_pulse_width(ocp, nlp)
         if self.is_approximated:
             StateConfigure().configure_cn_sum(ocp, nlp)
         ConfigureProblem.configure_dynamics_function(ocp, nlp, dyn_func=self.dynamics)

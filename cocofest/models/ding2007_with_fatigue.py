@@ -60,8 +60,6 @@ class DingModelPulseWidthFrequencyWithFatigue(DingModelPulseWidthFrequency):
         )
         self._with_fatigue = True
         self.stim_time = stim_time
-        self.previous_stim = previous_stim
-        self.all_stim = previous_stim["time"] + stim_time if previous_stim else stim_time
 
         # --- Default values --- #
         ALPHA_A_DEFAULT = -4.0 * 10e-2  # Value from Ding's experimentation [1] (s^-2)
@@ -145,6 +143,7 @@ class DingModelPulseWidthFrequencyWithFatigue(DingModelPulseWidthFrequency):
         tau1: MX = None,
         km: MX = None,
         t: MX = None,
+        t_stim_prev: MX = None,
         pulse_width: MX = None,
         cn_sum: MX = None,
         a_scale: MX = None,
@@ -169,6 +168,8 @@ class DingModelPulseWidthFrequencyWithFatigue(DingModelPulseWidthFrequency):
             The value of the cross_bridges (unitless)
         t: MX
             The current time at which the dynamics is evaluated (s)
+        t_stim_prev: MX
+            The time of the previous stimulation (s)
         pulse_width: MX
             The time of the impulse (s)
         cn_sum: MX | float
@@ -186,9 +187,6 @@ class DingModelPulseWidthFrequencyWithFatigue(DingModelPulseWidthFrequency):
         -------
         The value of the derivative of each state dx/dt at the current time t
         """
-        t_stim_prev = self.all_stim
-        if self.all_stim != self.stim_time and not self.is_approximated:
-            pulse_width = self.previous_stim["pulse_width"] + pulse_width
         cn_dot = self.calculate_cn_dot(cn, cn_sum, t, t_stim_prev)
         a_scale = (
             a_scale
@@ -196,8 +194,6 @@ class DingModelPulseWidthFrequencyWithFatigue(DingModelPulseWidthFrequency):
             else self.a_calculation(
                 a_scale=a,
                 pulse_width=pulse_width,
-                t=t,
-                t_stim_prev=t_stim_prev,
             )
         )
 
@@ -310,22 +306,11 @@ class DingModelPulseWidthFrequencyWithFatigue(DingModelPulseWidthFrequency):
         model = fes_model if fes_model else nlp.model
         dxdt_fun = model.system_dynamics
 
+        cn_sum = None
+        a_scale = None
         if model.is_approximated:
-            cn_sum = controls[0]
-            a_scale = controls[1]
-            pulse_width = None
-        else:
-            pulse_width = (
-                model.get_pulse_width_parameters(nlp, parameters)
-                if fes_model is None
-                else fes_model.get_pulse_width_parameters(nlp, parameters, muscle_name=fes_model.muscle_name)
-            )
-
-            if len(pulse_width) == 1 and len(nlp.model.stim_time) != 1:
-                pulse_width = pulse_width * len(nlp.model.stim_time)
-
-            cn_sum = None
-            a_scale = None
+            cn_sum = controls[1]
+            a_scale = controls[2]
 
         return DynamicsEvaluation(
             dxdt=dxdt_fun(
@@ -335,7 +320,8 @@ class DingModelPulseWidthFrequencyWithFatigue(DingModelPulseWidthFrequency):
                 tau1=states[3],
                 km=states[4],
                 t=time,
-                pulse_width=pulse_width,
+                t_stim_prev=numerical_timeseries,
+                pulse_width=controls[0],
                 cn_sum=cn_sum,
                 a_scale=a_scale,
                 force_length_relationship=force_length_relationship,
@@ -364,6 +350,7 @@ class DingModelPulseWidthFrequencyWithFatigue(DingModelPulseWidthFrequency):
             A list of values to pass to the dynamics at each node. Experimental external forces should be included here.
         """
         StateConfigure().configure_all_fes_model_states(ocp, nlp, fes_model=self)
+        StateConfigure().configure_last_pulse_width(ocp, nlp)
         if self.is_approximated:
             StateConfigure().configure_cn_sum(ocp, nlp)
             StateConfigure().configure_a_calculation(ocp, nlp)
