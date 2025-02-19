@@ -17,12 +17,12 @@ final_time = 300
 stim_time = [val for start in range(0, final_time, 2) for val in np.linspace(start, start + 1, 34)[:-1]]
 
 # --- Set Ding2003 model --- #
-model = DingModelFrequencyWithFatigue(stim_time=stim_time, sum_stim_truncation=10)
-fes_parameters = {"model": model}
+# model = DingModelFrequencyWithFatigue(stim_time=stim_time, sum_stim_truncation=10)
+# fes_parameters = {"model": model}
 
 # --- Set Ding2007 model --- #
-# model = DingModelPulseWidthFrequencyWithFatigue(stim_time=stim_time, sum_stim_truncation=10)
-# fes_parameters = {"model": model, "pulse_width": 0.0003}
+model = DingModelPulseWidthFrequencyWithFatigue(stim_time=stim_time, sum_stim_truncation=10)
+fes_parameters = {"model": model, "pulse_width": 0.0003}
 
 # --- Set Hmed2018 model --- #
 # model = DingModelPulseIntensityFrequencyWithFatigue(stim_time=stim_time, sum_stim_truncation=10)
