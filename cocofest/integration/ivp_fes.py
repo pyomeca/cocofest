@@ -80,11 +80,14 @@ class IvpFes:
         parameters_init = InitialGuessList()
         parameters_bounds = BoundsList()
 
+        self.controls_keys = None
         if isinstance(
             self.model,
             DingModelPulseWidthFrequency | DingModelPulseWidthFrequencyWithFatigue,
         ):
+            self.controls_keys = "last_pulse_width"
             if isinstance(self.pulse_width, int | float):
+                self.bimapping = True
                 parameters_init["pulse_width"] = np.array([self.pulse_width] * self.n_stim)
                 parameters_bounds.add(
                     "pulse_width",
@@ -93,6 +96,7 @@ class IvpFes:
                     interpolation=InterpolationType.CONSTANT,
                 )
             else:
+                self.bimapping = False
                 parameters_init["pulse_width"] = np.array(self.pulse_width)
                 parameters_bounds.add(
                     "pulse_width",
@@ -116,9 +120,11 @@ class IvpFes:
             DingModelPulseIntensityFrequency | DingModelPulseIntensityFrequencyWithFatigue,
         ):
             if isinstance(self.pulse_intensity, int | float):
+                self.bimapping = True
                 parameters_init["pulse_intensity"] = np.array([self.pulse_intensity] * self.n_stim)
 
             else:
+                self.bimapping = False
                 parameters_init["pulse_intensity"] = np.array(self.pulse_intensity)
 
             parameters.add(
@@ -134,13 +140,25 @@ class IvpFes:
         self.parameters = parameters
         self.parameters_init = parameters_init
         self.parameters_bounds = parameters_bounds
-        self._declare_dynamics()
+        numerical_data_time_series, stim_idx_at_node_list = OcpFes.set_all_stim_time_for_numerical_data_time_series(
+            self.model,
+            self.n_shooting,
+            self.final_time)
+        self._declare_dynamics(numerical_data_time_series)
         (
             self.x_init,
             self.u_init,
             self.p_init,
             self.s_init,
         ) = self.build_initial_guess_from_ocp(self)
+        self.constraints = OcpFes._build_constraints(
+            self.model,
+            self.n_shooting,
+            self.final_time,
+            stim_idx_at_node_list,
+            ControlType.CONSTANT,
+            self.bimapping,
+        )
 
         self.ode_solver = self.ivp_parameters["ode_solver"]
         self.use_sx = False
@@ -300,6 +318,11 @@ class IvpFes:
             dynamics=self.dynamics,
             n_shooting=self.n_shooting,
             phase_time=self.final_time,
+            constraints=self.constraints,
+            # x_bounds=self.x_bounds,
+            # u_bounds=self.u_bounds,
+            x_init=self.x_init,
+            u_init=self.u_init,
             ode_solver=self.ode_solver,
             control_type=ControlType.CONSTANT,
             use_sx=False,
@@ -329,7 +352,8 @@ class IvpFes:
             duplicated_times=duplicated_times,
         )
 
-    def _declare_dynamics(self):
+    def _declare_dynamics(self, numerical_data_time_series=None):
+
         self.dynamics = DynamicsList()
         self.dynamics.add(
             self.model.declare_ding_variables,
@@ -338,6 +362,7 @@ class IvpFes:
             expand_continuity=False,
             phase=0,
             phase_dynamics=PhaseDynamics.SHARED_DURING_THE_PHASE,
+            numerical_data_timeseries=numerical_data_time_series,
         )
 
     def build_initial_guess_from_ocp(self, ocp):
@@ -351,6 +376,10 @@ class IvpFes:
 
         for j in range(len(self.model.name_dof)):
             x.add(ocp.model.name_dof[j], ocp.model.standard_rest_values()[j], phase=0)
+
+        for key in ocp.parameters.keys():
+            u.add(ocp.controls_keys, initial_guess=[ocp.parameters_init[key].init[0][0]], phase=0)
+
         if len(ocp.parameters) != 0:
             for key in ocp.parameters.keys():
                 p.add(key=key, initial_guess=ocp.parameters_init[key])
