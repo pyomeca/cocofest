@@ -96,3 +96,7 @@ class CustomConstraint:
             pdt=pdt,
         )
         return controller.controls["A_calculation"].cx - a_calculation
+
+    @staticmethod
+    def last_pulse_width(controller: PenaltyController, last_stim_index: int) -> MX | SX:
+        return controller.parameters["pulse_width"].cx[last_stim_index] - controller.controls["last_pulse_width"].cx
