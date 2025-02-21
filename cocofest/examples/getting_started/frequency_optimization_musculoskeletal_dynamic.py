@@ -1,29 +1,30 @@
 """
 This example will do a 10 stimulation example with Ding's 2003 frequency model.
 This ocp was build to produce a elbow motion from 5 to 120 degrees.
-The stimulation frequency will be optimized between 10 and 100 Hz to satisfy the flexion and minimizing required
-elbow torque control.
+The stimulation frequency is fixed at 10 Hz and the elbow torque control is optimized to satisfy the flexion.
 """
 
 import numpy as np
 
 from cocofest import DingModelFrequencyWithFatigue, OcpFesMsk, FesMskModel
 
+from bioptim import OdeSolver
+
 
 model = FesMskModel(
     name=None,
     biorbd_path="../msk_models/arm26_biceps_1dof.bioMod",
     muscles_model=[DingModelFrequencyWithFatigue(muscle_name="BIClong")],
+    stim_time=list(np.linspace(0, 1, 11)[:-1]),
     activate_force_length_relationship=True,
     activate_force_velocity_relationship=True,
+    activate_passive_force_relationship=True,
     activate_residual_torque=True,
 )
 
 ocp = OcpFesMsk.prepare_ocp(
     model=model,
-    stim_time=list(np.round(np.linspace(0, 1, 11)[:-1], 2)),
     final_time=1,
-    pulse_event={"min": 0.01, "max": 0.1, "bimapping": True},
     objective={"minimize_residual_torque": True},
     msk_info={
         "with_residual_torque": True,
@@ -32,8 +33,9 @@ ocp = OcpFesMsk.prepare_ocp(
     },
     use_sx=True,
     n_threads=5,
+    ode_solver=OdeSolver.RK4(n_integration_steps=10),
 )
 
 sol = ocp.solve()
-sol.animate()
+sol.animate(viewer="pyorerun", n_frames=1000)
 sol.graphs(show_bounds=False)

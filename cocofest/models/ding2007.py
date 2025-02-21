@@ -1,7 +1,7 @@
 from typing import Callable
 
 import numpy as np
-from casadi import MX, vertcat, exp, if_else
+from casadi import MX, vertcat, exp
 
 from bioptim import (
     ConfigureProblem,
@@ -34,7 +34,6 @@ class DingModelPulseWidthFrequency(DingModelFrequency):
         stim_time: list[float] = None,
         previous_stim: dict = None,
         sum_stim_truncation: int = None,
-        is_approximated: bool = False,
         tauc: float = None,
         a_rest: float = None,
         tau1_rest: float = None,
@@ -54,13 +53,11 @@ class DingModelPulseWidthFrequency(DingModelFrequency):
             stim_time=stim_time,
             previous_stim=previous_stim,
             sum_stim_truncation=sum_stim_truncation,
-            is_approximated=is_approximated,
         )
         self._with_fatigue = False
         self.pulse_width = None
+        self.previous_stim = previous_stim if previous_stim else {"time": []}
         self.stim_time = stim_time
-        self.previous_stim = previous_stim if previous_stim else {"time": [], "pulse_width": []}
-        self.all_stim = previous_stim["time"] + stim_time if previous_stim else stim_time
 
         # --- Default values --- #
         A_SCALE_DEFAULT = 4920  # Value from Ding's 2007 article (N/s)
@@ -128,8 +125,6 @@ class DingModelPulseWidthFrequency(DingModelFrequency):
         t: MX = None,
         t_stim_prev: list[float] | list[MX] = None,
         pulse_width: MX = None,
-        cn_sum: MX = None,
-        a_scale: MX = None,
         force_length_relationship: MX | float = 1,
         force_velocity_relationship: MX | float = 1,
         passive_force_relationship: MX | float = 0,
@@ -149,10 +144,6 @@ class DingModelPulseWidthFrequency(DingModelFrequency):
             The time list of the previous stimulations (s)
         pulse_width: MX
             The pulsation duration of the current stimulation (s)
-        cn_sum: MX | float
-            The sum of the ca_troponin_complex (unitless)
-        a_scale: MX | float
-            The scaling factor of the current stimulation (unitless)
         force_length_relationship: MX | float
             The force length relationship value (unitless)
         force_velocity_relationship: MX | float
@@ -164,16 +155,8 @@ class DingModelPulseWidthFrequency(DingModelFrequency):
         -------
         The value of the derivative of each state dx/dt at the current time t
         """
-        cn_dot = self.calculate_cn_dot(cn, cn_sum, t, t_stim_prev)
-        a_scale = (
-            a_scale
-            if self.is_approximated
-            else self.a_calculation(
-                a_scale=self.a_scale,
-                pulse_width=pulse_width,
-            )
-        )
-
+        cn_dot = self.calculate_cn_dot(cn, t, t_stim_prev)
+        a_scale = self.a_calculation(a_scale=self.a_scale, pulse_width=pulse_width)
         f_dot = self.f_dot_fun(
             cn,
             f,
@@ -241,34 +224,6 @@ class DingModelPulseWidthFrequency(DingModelFrequency):
         self.pulse_width = value
 
     @staticmethod
-    def get_pulse_width_parameters(nlp, parameters: ParameterList, muscle_name: str = None) -> list[MX]:
-        """
-        Get the nlp list of pulse_width parameters
-
-        Parameters
-        ----------
-        nlp: NonLinearProgram
-            A reference to the phase
-        parameters: ParameterList
-            The nlp list parameter
-        muscle_name: str
-            The muscle name
-
-        Returns
-        -------
-        The list of list of pulse_width parameters
-        """
-
-        pulse_width_parameters = []
-        for j in range(parameters.shape[0]):
-            if muscle_name:
-                if "pulse_width_" + muscle_name in parameters[j].str():
-                    pulse_width_parameters.append(parameters[j])
-            elif "pulse_width" in nlp.parameters.scaled.cx[j].str():
-                pulse_width_parameters.append(parameters[j])
-        return pulse_width_parameters
-
-    @staticmethod
     def dynamics(
         time: MX,
         states: MX,
@@ -316,12 +271,6 @@ class DingModelPulseWidthFrequency(DingModelFrequency):
         model = fes_model if fes_model else nlp.model
         dxdt_fun = model.system_dynamics
 
-        cn_sum = None
-        a_scale = None
-        if model.is_approximated:
-            cn_sum = controls[0]
-            a_scale = controls[1]
-
         return DynamicsEvaluation(
             dxdt=dxdt_fun(
                 cn=states[0],
@@ -329,8 +278,6 @@ class DingModelPulseWidthFrequency(DingModelFrequency):
                 t=time,
                 t_stim_prev=numerical_timeseries,
                 pulse_width=controls[0],
-                cn_sum=cn_sum,
-                a_scale=a_scale,
                 force_length_relationship=force_length_relationship,
                 force_velocity_relationship=force_velocity_relationship,
                 passive_force_relationship=passive_force_relationship
@@ -358,7 +305,4 @@ class DingModelPulseWidthFrequency(DingModelFrequency):
         """
         StateConfigure().configure_all_fes_model_states(ocp, nlp, fes_model=self)
         StateConfigure().configure_last_pulse_width(ocp, nlp)
-        if self.is_approximated:
-            StateConfigure().configure_cn_sum(ocp, nlp)
-            StateConfigure().configure_a_calculation(ocp, nlp)
         ConfigureProblem.configure_dynamics_function(ocp, nlp, dyn_func=self.dynamics)

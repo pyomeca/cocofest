@@ -33,7 +33,7 @@ class DingModelPulseWidthFrequencyForceParameterIdentification(DingModelFrequenc
         final_time: float = 1,
         objective: dict = None,
         use_sx: bool = True,
-        ode_solver: OdeSolver = OdeSolver.RK4(n_integration_steps=1),
+        ode_solver: OdeSolver.RK1 | OdeSolver.RK2 | OdeSolver.RK4 = OdeSolver.RK4(n_integration_steps=10),
         n_threads: int = 1,
         control_type: ControlType = ControlType.CONSTANT,
         **kwargs,

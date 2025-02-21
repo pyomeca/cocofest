@@ -22,12 +22,11 @@ force_tracking = [time, force]
 # This ocp was build to track a force curve along the problem.
 # The stimulation won't be optimized and is already set to one pulse every 0.1 seconds (n_stim/final_time).
 # Plus the pulsation intensity will be optimized between 0 and 130 mA and are not the same across the problem.
-model = ModelMaker.create_model("hmed2018", is_approximated=True)
+model = ModelMaker.create_model("hmed2018", stim_time=list(np.linspace(0, 1, 34)[:-1]))
 minimum_pulse_intensity = model.min_pulse_intensity()
 
 ocp = OcpFes().prepare_ocp(
     model=model,
-    stim_time=list(np.round(np.linspace(0, 1, 31)[:-1], 3)),
     final_time=1,
     pulse_intensity={
         "min": minimum_pulse_intensity,
@@ -41,6 +40,15 @@ ocp = OcpFes().prepare_ocp(
 
 # --- Solve the program --- #
 sol = ocp.solve()
+controls = sol.stepwise_controls(to_merge=SolutionMerge.NODES)
+time = sol.decision_time(to_merge=SolutionMerge.NODES).T[0]
+for i in range(controls["pulse_intensity"].shape[0]):
+    plt.plot(time[:-1], controls["pulse_intensity"][i], label="stimulation intensity_"+str(i))
+plt.legend()
+plt.show()
+
+parameters = sol.parameters
+print(parameters["pulse_intensity"])
 
 # --- Show the optimization results --- #
 sol.graphs()

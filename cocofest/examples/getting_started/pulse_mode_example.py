@@ -1,5 +1,5 @@
 """
-This example will do a 10 stimulation example using doublets and triplets.
+This example will do a 10 stimulation example using singlet, doublets and triplets.
 The example model is the Ding2003 frequency model.
 """
 
@@ -11,11 +11,10 @@ from cocofest import IvpFes, ModelMaker
 # This example shows how to create a problem with single pulses.
 # The stimulation won't be optimized.
 final_time = 1
-model = ModelMaker.create_model("ding_2003_with_fatigue", is_approximated=False)
+model = ModelMaker.create_model("ding2003_with_fatigue", stim_time=[0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9])
 fes_parameters = {
     "model": model,
     "pulse_mode": "single",
-    "stim_time": [0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9],
 }
 ivp_parameters = {"final_time": final_time, "use_sx": True}
 

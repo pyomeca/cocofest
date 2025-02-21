@@ -4,6 +4,7 @@ This ocp was build to produce a elbow motion from 5 to 120 degrees.
 The stimulation frequency will be optimized between 10 and 100 Hz and pulse intensity between minimal sensitivity
 threshold and 130mA to satisfy the flexion and minimizing required elbow torque control.
 """
+import numpy as np
 
 from cocofest import DingModelPulseIntensityFrequencyWithFatigue, OcpFesMsk, FesMskModel
 
@@ -15,14 +16,15 @@ minimum_pulse_intensity = DingModelPulseIntensityFrequencyWithFatigue.min_pulse_
 model = FesMskModel(
     biorbd_path="../msk_models/arm26_biceps_1dof.bioMod",
     muscles_model=[DingModelPulseIntensityFrequencyWithFatigue(muscle_name="BIClong")],
+    stim_time=np.linspace(0, 1, 34)[:-1].tolist(),
     activate_force_length_relationship=True,
     activate_force_velocity_relationship=True,
+    activate_passive_force_relationship=True,
     activate_residual_torque=True,
 )
 
 ocp = OcpFesMsk.prepare_ocp(
     model=model,
-    stim_time=[0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9],
     final_time=1,
     pulse_intensity={"min": minimum_pulse_intensity, "max": 130, "bimapping": False},
     objective={"minimize_residual_torque": True},
@@ -34,5 +36,5 @@ ocp = OcpFesMsk.prepare_ocp(
 )
 
 sol = ocp.solve()
-sol.animate()
+sol.animate(viewer="pyorerun", n_frames=1000)
 sol.graphs(show_bounds=False)

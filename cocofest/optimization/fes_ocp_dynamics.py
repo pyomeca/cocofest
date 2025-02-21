@@ -4,7 +4,6 @@ from bioptim import (
     BoundsList,
     ConstraintList,
     ControlType,
-    ConstraintFcn,
     DynamicsList,
     ExternalForceSetTimeSeries,
     InitialGuessList,
@@ -51,8 +50,6 @@ class OcpFesMsk:
             model=input_dict["model"],
             n_shooting=input_dict["n_shooting"],
             final_time=input_dict["final_time"],
-            pulse_width=pulse_width,
-            pulse_intensity=pulse_intensity,
             objective=objective,
             use_sx=input_dict["use_sx"],
             ode_solver=input_dict["ode_solver"],
@@ -72,19 +69,8 @@ class OcpFesMsk:
             parameter_objectives,
         ) = OcpFesMsk._build_parameters(
             model=input_dict["model"],
-            pulse_width=pulse_width,
             pulse_intensity=pulse_intensity,
             use_sx=input_dict["use_sx"],
-        )
-
-        constraints = OcpFesMsk._build_constraints(
-            input_dict["model"],
-            input_dict["n_shooting"],
-            input_dict["final_time"],
-            input_dict["control_type"],
-            msk_info["custom_constraint"],
-            input_dict["external_forces"],
-            input_dict["n_cycles_simultaneous"] if "n_cycles_simultaneous" in input_dict.keys() else 1,
         )
 
         if input_dict["external_forces"]:
@@ -93,6 +79,15 @@ class OcpFesMsk:
         else:
             numerical_time_series, with_contact, external_force_set = None, False, None
 
+        numerical_data_time_series, stim_idx_at_node_list = input_dict["model"].muscles_dynamics_model[0].get_numerical_data_time_series(
+            input_dict["n_shooting"],
+            input_dict["final_time"])
+
+        if numerical_time_series:
+            numerical_time_series.update(numerical_data_time_series)
+        else:
+            numerical_time_series = numerical_data_time_series
+
         dynamics = OcpFesMsk._declare_dynamics(input_dict["model"], numerical_time_series=numerical_time_series, with_contact=with_contact)
 
         x_bounds, x_init = OcpFesMsk._set_bounds_fes(input_dict["model"])
@@ -100,6 +95,12 @@ class OcpFesMsk:
 
         u_bounds, u_init = OcpFesMsk._set_u_bounds_fes(input_dict["model"])
         u_bounds, u_init = OcpFesMsk._set_u_bounds_msk(u_bounds, u_init, input_dict["model"], msk_info["with_residual_torque"])
+
+        constraints = OcpFesMsk._build_constraints(
+            input_dict["model"],
+            input_dict["n_shooting"],
+            stim_idx_at_node_list
+        )
 
         muscle_force_key = [
             "F_" + input_dict["model"].muscles_dynamics_model[i].muscle_name
@@ -294,9 +295,9 @@ class OcpFesMsk:
 
     @staticmethod
     def _prepare_numerical_time_series(input_dict):
-
-        total_n_shooting = input_dict["n_shooting"] * input_dict["n_cycles_simultaneous"]
-        total_external_forces_frame = input_dict["n_total_cycles"] * input_dict["n_shooting"] if input_dict["n_total_cycles"] >= input_dict["n_cycles_simultaneous"] else total_n_shooting
+        n_cycles_simultaneous = input_dict["n_cycles_simultaneous"] if "n_cycles_simultaneous" in input_dict.keys() else 1
+        total_n_shooting = input_dict["n_shooting"] * n_cycles_simultaneous
+        total_external_forces_frame = input_dict["n_total_cycles"] * input_dict["n_shooting"] if input_dict["n_total_cycles"] >= n_cycles_simultaneous else total_n_shooting
         external_force_set = ExternalForceSetTimeSeries(nb_frames=total_external_forces_frame)
 
         external_force_array = np.array(input_dict["external_forces"]["torque"])
@@ -327,7 +328,6 @@ class OcpFesMsk:
     @staticmethod
     def _build_parameters(
         model: FesMskModel,
-        pulse_width: dict,
         pulse_intensity: dict,
         use_sx: bool = True,
     ):
@@ -339,61 +339,6 @@ class OcpFesMsk:
         n_stim = len(model.muscles_dynamics_model[0].stim_time)
 
         for i in range(len(model.muscles_dynamics_model)):
-            if isinstance(model.muscles_dynamics_model[i], DingModelPulseWidthFrequency):
-                if pulse_width["bimapping"]:
-                    n_stim = 1
-                parameter_name = (
-                    "pulse_width"
-                    if pulse_width["same_for_all_muscles"]
-                    else "pulse_width" + "_" + model.muscles_dynamics_model[i].muscle_name
-                )
-                if pulse_width["fixed"]:  # TODO : ADD SEVERAL INDIVIDUAL FIXED pulse width FOR EACH MUSCLE
-                    if (pulse_width["same_for_all_muscles"] and i == 0) or not pulse_width["same_for_all_muscles"]:
-                        parameters.add(
-                            name=parameter_name,
-                            function=DingModelPulseWidthFrequency.set_impulse_width,
-                            size=n_stim,
-                            scaling=VariableScaling(parameter_name, [1] * n_stim),
-                        )
-                        if isinstance(pulse_width["fixed"], list):
-                            parameters_bounds.add(
-                                parameter_name,
-                                min_bound=np.array(pulse_width["fixed"]),
-                                max_bound=np.array(pulse_width["fixed"]),
-                                interpolation=InterpolationType.CONSTANT,
-                            )
-                            parameters_init.add(
-                                key=parameter_name,
-                                initial_guess=np.array(pulse_width["fixed"]),
-                            )
-                        else:
-                            parameters_bounds.add(
-                                parameter_name,
-                                min_bound=np.array([pulse_width["fixed"]] * n_stim),
-                                max_bound=np.array([pulse_width["fixed"]] * n_stim),
-                                interpolation=InterpolationType.CONSTANT,
-                            )
-                            parameters_init[parameter_name] = np.array([pulse_width["fixed"]] * n_stim)
-
-                elif (
-                    pulse_width["min"] and pulse_width["max"]
-                ):  # TODO : ADD SEVERAL MIN MAX pulse width FOR EACH MUSCLE
-                    if (pulse_width["same_for_all_muscles"] and i == 0) or not pulse_width["same_for_all_muscles"]:
-                        parameters_bounds.add(
-                            parameter_name,
-                            min_bound=[pulse_width["min"]],
-                            max_bound=[pulse_width["max"]],
-                            interpolation=InterpolationType.CONSTANT,
-                        )
-                        pulse_width_avg = (pulse_width["max"] + pulse_width["min"]) / 2
-                        parameters_init[parameter_name] = np.array([pulse_width_avg] * n_stim)
-                        parameters.add(
-                            name=parameter_name,
-                            function=DingModelPulseWidthFrequency.set_impulse_width,
-                            size=n_stim,
-                            scaling=VariableScaling(parameter_name, [1] * n_stim),
-                        )
-
             if isinstance(model.muscles_dynamics_model[i], DingModelPulseIntensityFrequency):
                 if pulse_intensity["bimapping"]:
                     n_stim = 1
@@ -461,54 +406,25 @@ class OcpFesMsk:
         )
 
     @staticmethod
-    def _build_constraints(model, n_shooting, final_time, control_type, custom_constraint=None, external_forces=None, simultaneous_cycle=1):
+    def _build_constraints(models, n_shooting, stim_idx_at_node_list,  custom_constraint=None):
         constraints = ConstraintList()
-        stim_time = model.muscles_dynamics_model[0].stim_time
+        if isinstance(models.muscles_dynamics_model[0], DingModelPulseIntensityFrequency):
+            for model in models.muscles_dynamics_model:
+                for i in range(n_shooting):
 
-        if model.activate_residual_torque and control_type == ControlType.LINEAR_CONTINUOUS:
-            applied_node = n_shooting - 1 if external_forces else Node.END
-            constraints.add(
-                ConstraintFcn.TRACK_CONTROL,
-                node=applied_node,
-                key="tau",
-                target=np.zeros(model.nb_tau),
-            )
+                    # last_stim_idx = stim_idx_at_node_list[i][-1] - model._sum_stim_truncation
+                    # bimapped_parameters_idx = bimapped_parameters_idx_list[i] if bimapped_for_nmpc else \
+                    # bimapped_parameters_idx_list[0]
 
-        if model.muscles_dynamics_model[0].is_approximated:
-            time_vector = np.linspace(0, final_time*simultaneous_cycle, n_shooting*simultaneous_cycle + 1)
-            stim_at_node = [np.where(stim_time[i] <= time_vector)[0][0] for i in range(len(stim_time))]
-            additional_node = 1 if control_type == ControlType.LINEAR_CONTINUOUS else 0
-
-            for i in range(len(model.muscles_dynamics_model)):
-                if model.muscles_dynamics_model[i]._sum_stim_truncation:
-                    max_stim_to_keep = model.muscles_dynamics_model[i]._sum_stim_truncation
-                else:
-                    max_stim_to_keep = 10000000
-
-                index_sup = 0
-                index_inf = 0
-                for j in range(n_shooting + additional_node):
-                    if j in stim_at_node:
-                        index_sup += 1
+                    last_stim_idx = stim_idx_at_node_list[i][-1]
 
                     constraints.add(
-                        CustomConstraint.cn_sum,
-                        node=j,
-                        stim_time=stim_time[index_inf:index_sup],
-                        model_idx=i,
+                        CustomConstraint.pulse_intensity_sliding_window_constraint,
+                        # last_stim_index=last_stim_idx if not bimapped_parameters else bimapped_parameters_idx,
+                        last_stim_idx=last_stim_idx,
+                        muscle_name=model.muscle_name,
+                        node=i,
                     )
-
-                if isinstance(model.muscles_dynamics_model[i], DingModelPulseWidthFrequency):
-                    index = 0
-                    for j in range(n_shooting + additional_node):
-                        if j in stim_at_node and j != 0:
-                            index += 1
-                        constraints.add(
-                            CustomConstraint.a_calculation_msk,
-                            node=j,
-                            last_stim_index=index,
-                            model_idx=i,
-                        )
 
         if custom_constraint:
             for i in range(len(custom_constraint)):
@@ -618,18 +534,12 @@ class OcpFesMsk:
     def _set_u_bounds_fes(bio_models):
         u_bounds = BoundsList()  # Controls bounds
         u_init = InitialGuessList()  # Controls initial guess
-
-        if bio_models.muscles_dynamics_model[0].is_approximated:
-            for i in range(len(bio_models.muscles_dynamics_model)):
-                u_init.add(key="Cn_sum_" + bio_models.muscles_dynamics_model[i].muscle_name, initial_guess=[0], phase=0)
-
-            for i in range(len(bio_models.muscles_dynamics_model)):
-                if isinstance(bio_models.muscles_dynamics_model[i], DingModelPulseWidthFrequency):
-                    u_init.add(
-                        key="A_calculation_" + bio_models.muscles_dynamics_model[i].muscle_name,
-                        initial_guess=[0],
-                        phase=0,
-                    )
+        models = bio_models.muscles_dynamics_model
+        if isinstance(models[0], DingModelPulseWidthFrequency):
+            for model in models:
+                key = "last_pulse_width_" + str(model.muscle_name)
+                u_init.add(key=key, initial_guess=[0], phase=0)
+                u_bounds.add(key=key, min_bound=[model.pd0], max_bound=[0.0006], phase=0)
 
         return u_bounds, u_init
 
@@ -642,6 +552,20 @@ class OcpFesMsk:
                 key="tau", min_bound=tau_min, max_bound=tau_max, phase=0, interpolation=InterpolationType.CONSTANT
             )
             u_init.add(key="tau", initial_guess=tau_init, phase=0)
+
+        models = bio_models.muscles_dynamics_model
+        if isinstance(models[0], DingModelPulseWidthFrequency):
+            for model in models:
+                key = "last_pulse_width_" + str(model.muscle_name)
+                u_init.add(key=key, initial_guess=[0], phase=0)
+                u_bounds.add(key=key, min_bound=[model.pd0], max_bound=[0.0006], phase=0)
+
+        if isinstance(models[0], DingModelPulseIntensityFrequency):
+            for model in models:
+                key = "pulse_intensity_" + str(model.muscle_name)
+                u_init.add(key=key, initial_guess=[0]*model._sum_stim_truncation, phase=0)
+                u_bounds.add(key=key, min_bound=[model.min_pulse_intensity()]*model._sum_stim_truncation, max_bound=[130]*model._sum_stim_truncation, phase=0)
+
         return u_bounds, u_init
 
     @staticmethod

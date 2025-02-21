@@ -15,6 +15,8 @@ from bioptim import (
 
 from ..models.fes_model import FesModel
 from ..models.ding2003 import DingModelFrequency
+from ..models.ding2007 import DingModelPulseWidthFrequency
+from ..models.hmed2018 import DingModelPulseIntensityFrequency
 from .state_configure import StateConfigure
 from .hill_coefficients import (
     muscle_force_length_coefficient,
@@ -72,9 +74,9 @@ class FesMskModel(BiorbdModel):
         )
         self.muscles_dynamics_model = muscles_model
         for i in range(len(self.muscles_dynamics_model)):
-            self.muscles_dynamics_model[i].stim_time = stim_time
-            self.muscles_dynamics_model[i].previous_stim = previous_stim
-            self.muscles_dynamics_model[i].all_stim = previous_stim["time"] + stim_time if previous_stim else stim_time
+            self.muscles_dynamics_model[i].stim_time = stim_time if stim_time else self.muscles_dynamics_model[i].stim_time
+            self.muscles_dynamics_model[i].previous_stim = previous_stim if previous_stim else self.muscles_dynamics_model[i].previous_stim
+            self.muscles_dynamics_model[i].all_stim = self.muscles_dynamics_model[i].previous_stim["time"] + stim_time
 
         self.bio_stim_model = [self.bio_model] + self.muscles_dynamics_model
 
@@ -231,10 +233,20 @@ class FesMskModel(BiorbdModel):
             ]
 
             muscle_states = vertcat(*[states[i] for i in muscle_states_idxs])
+
             muscle_parameters_idxs = [
                 i for i in range(parameters.shape[0]) if muscle_model.muscle_name in str(parameters[i])
             ]
             muscle_parameters = vertcat(*[parameters[i] for i in muscle_parameters_idxs])
+
+            muscle_controls = controls
+            muscle_control_idxs = [
+                i for i in range(controls.shape[0]) if muscle_model.muscle_name in str(controls[i])
+            ]
+            if isinstance(muscle_model, DingModelPulseWidthFrequency):
+                muscle_controls = controls[muscle_control_idxs[0]]
+            if isinstance(muscle_model, DingModelPulseIntensityFrequency):
+                muscle_controls = controls[muscle_control_idxs]
 
             muscle_idx = bio_muscle_names_at_index.index(muscle_model.muscle_name)
 
@@ -278,13 +290,15 @@ class FesMskModel(BiorbdModel):
                 "muscle_passive_force_coeff", [Q, Qdot], [muscle_passive_force_coeff]
             )(q, qdot)
 
+            external_force_in_numerical_data_timeseries = True if "external_force" in str(numerical_data_timeseries) else False
+            fes_numerical_data_timeseries = numerical_data_timeseries[3:numerical_data_timeseries.shape[0]] if external_force_in_numerical_data_timeseries else numerical_data_timeseries
             muscle_dxdt = muscle_model.dynamics(
                 time,
                 muscle_states,
-                controls,
+                muscle_controls,
                 muscle_parameters,
                 algebraic_states,
-                numerical_data_timeseries,
+                fes_numerical_data_timeseries,
                 nlp,
                 fes_model=muscle_model,
                 force_length_relationship=muscle_force_length_coeff,
@@ -375,7 +389,7 @@ class FesMskModel(BiorbdModel):
         tau = tau + nlp.model.passive_joint_torque()(q, qdot, nlp.parameters.cx) if with_passive_torque else tau
         tau = tau + nlp.model.ligament_joint_torque()(q, qdot, nlp.parameters.cx) if with_ligament else tau
 
-        external_forces = nlp.get_external_forces(states, controls, algebraic_states, numerical_timeseries)
+        external_forces = nlp.get_external_forces(states, controls, algebraic_states, numerical_timeseries[0:3])
 
         return nlp.model.contact_forces()(q, qdot, tau, external_forces, nlp.parameters.cx)
 
@@ -406,9 +420,10 @@ class FesMskModel(BiorbdModel):
         ConfigureProblem.configure_qdot(ocp, nlp, as_states=True, as_controls=False)
         state_name_list.append("qdot")
         for muscle_model in self.muscles_dynamics_model:
-            if muscle_model.is_approximated:
-                StateConfigure().configure_cn_sum(ocp, nlp, muscle_name=str(muscle_model.muscle_name))
-                StateConfigure().configure_a_calculation(ocp, nlp, muscle_name=str(muscle_model.muscle_name))
+            if isinstance(muscle_model, DingModelPulseWidthFrequency):
+                StateConfigure().configure_last_pulse_width(ocp, nlp, muscle_name=str(muscle_model.muscle_name))
+            if isinstance(muscle_model, DingModelPulseIntensityFrequency):
+                StateConfigure().configure_pulse_intensity(ocp, nlp, muscle_name=str(muscle_model.muscle_name), truncation=muscle_model._sum_stim_truncation)
         if self.activate_residual_torque:
             ConfigureProblem.configure_tau(ocp, nlp, as_states=False, as_controls=True)
 

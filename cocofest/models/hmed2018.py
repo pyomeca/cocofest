@@ -33,8 +33,7 @@ class DingModelPulseIntensityFrequency(DingModelFrequency):
         muscle_name: str = None,
         stim_time: list[float] = None,
         previous_stim: dict = None,
-        sum_stim_truncation: int = None,
-        is_approximated: bool = False,
+        sum_stim_truncation: int = 20,
     ):
         if previous_stim:
             if len(previous_stim["time"]) != len(previous_stim["pulse_intensity"]):
@@ -45,10 +44,10 @@ class DingModelPulseIntensityFrequency(DingModelFrequency):
             stim_time=stim_time,
             previous_stim=previous_stim,
             sum_stim_truncation=sum_stim_truncation,
-            is_approximated=is_approximated,
         )
         self._with_fatigue = False
         self.stim_pulse_intensity_prev = []
+        self.previous_stim = previous_stim if previous_stim else {"time": [], "pulse_intensity": []}
 
         # --- Default values ---#
         AR_DEFAULT = 0.586  # (-) Translation of axis coordinates.
@@ -122,8 +121,8 @@ class DingModelPulseIntensityFrequency(DingModelFrequency):
         cn: MX,
         f: MX,
         t: MX = None,
+        t_stim_prev: MX | float = None,
         pulse_intensity: list[MX] | list[float] = None,
-        cn_sum: MX = None,
         force_length_relationship: MX | float = 1,
         force_velocity_relationship: MX | float = 1,
         passive_force_relationship: MX | float = 0,
@@ -139,10 +138,10 @@ class DingModelPulseIntensityFrequency(DingModelFrequency):
             The value of the force (N)
         t: MX
             The current time at which the dynamics is evaluated (s)
+        t_stim_prev: MX | float
+            The previous stimulation time (s)
         pulse_intensity: list[MX] | list[float]
             The pulsation intensity of the current stimulation (mA)
-        cn_sum: MX | float
-            The sum of the ca_troponin_complex (unitless)
         force_length_relationship: MX | float
             The force length relationship value (unitless)
         force_velocity_relationship: MX | float
@@ -154,10 +153,7 @@ class DingModelPulseIntensityFrequency(DingModelFrequency):
         -------
         The value of the derivative of each state dx/dt at the current time t
         """
-        t_stim_prev = self.all_stim
-        if self.all_stim != self.stim_time:
-            pulse_intensity = self.previous_stim["pulse_intensity"] + pulse_intensity
-        cn_dot = self.calculate_cn_dot(cn, cn_sum, t, t_stim_prev, pulse_intensity)
+        cn_dot = self.calculate_cn_dot(cn, t, t_stim_prev, pulse_intensity)
         f_dot = self.f_dot_fun(
             cn,
             f,
@@ -268,23 +264,13 @@ class DingModelPulseIntensityFrequency(DingModelFrequency):
         model = fes_model if fes_model else nlp.model
         dxdt_fun = model.system_dynamics
 
-        if model.is_approximated:
-            cn_sum = controls[0]
-            intensity_parameters = None
-        else:
-            cn_sum = None
-            intensity_parameters = model.get_intensity_parameters(nlp, parameters)
-
-            if len(intensity_parameters) == 1 and len(nlp.model.stim_time) != 1:
-                intensity_parameters = intensity_parameters * len(nlp.model.stim_time)
-
         return DynamicsEvaluation(
             dxdt=dxdt_fun(
                 cn=states[0],
                 f=states[1],
                 t=time,
-                pulse_intensity=intensity_parameters,
-                cn_sum=cn_sum,
+                t_stim_prev=numerical_timeseries,
+                pulse_intensity=controls,
                 force_length_relationship=force_length_relationship,
                 force_velocity_relationship=force_velocity_relationship,
                 passive_force_relationship=passive_force_relationship,
@@ -311,8 +297,7 @@ class DingModelPulseIntensityFrequency(DingModelFrequency):
             A list of values to pass to the dynamics at each node. Experimental external forces should be included here.
         """
         StateConfigure().configure_all_fes_model_states(ocp, nlp, fes_model=self)
-        if self.is_approximated:
-            StateConfigure().configure_cn_sum(ocp, nlp)
+        StateConfigure().configure_pulse_intensity(ocp, nlp, truncation=self._sum_stim_truncation)
         ConfigureProblem.configure_dynamics_function(ocp, nlp, dyn_func=self.dynamics)
 
     def min_pulse_intensity(self):
@@ -324,30 +309,8 @@ class DingModelPulseIntensityFrequency(DingModelFrequency):
         """
         return (np.arctanh(-self.cr) / self.bs) + self.Is
 
-    @staticmethod
-    def get_intensity_parameters(nlp, parameters: ParameterList, muscle_name: str = None) -> list[MX]:
-        """
-        Get the nlp list of intensity parameters
-
-        Parameters
-        ----------
-        nlp: NonLinearProgram
-            A reference to the phase
-        parameters: ParameterList
-            The nlp list parameter
-        muscle_name: str
-            The muscle name
-
-        Returns
-        -------
-        The list of intensity parameters
-        """
-        intensity_parameters = []
-        for j in range(parameters.shape[0]):
-            if muscle_name:
-                if "pulse_intensity_" + muscle_name in nlp.parameters.scaled.cx[j].str():
-                    intensity_parameters.append(parameters[j])
-            elif "pulse_intensity" in nlp.parameters.scaled.cx[j].str():
-                intensity_parameters.append(parameters[j])
-
-        return intensity_parameters
+    def _get_additional_previous_stim_time(self):
+        while len(self.previous_stim["time"]) < self._sum_stim_truncation:
+            self.previous_stim["time"].insert(0, -10000000)
+            self.previous_stim["pulse_intensity"].insert(0, 50)
+        return self.previous_stim

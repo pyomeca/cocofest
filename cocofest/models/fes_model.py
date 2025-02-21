@@ -6,6 +6,9 @@ from bioptim import NonLinearProgram, OptimalControlProgram
 
 
 class FesModel(ABC):
+    def __init__(self):
+        self.stim_time = None
+
     @abstractmethod
     def set_a_rest(self, model, a_rest: MX | float):
         """
@@ -205,6 +208,15 @@ class FesModel(ABC):
         nlp: NonLinearProgram,
         numerical_data_timeseries: dict[str, np.ndarray] = None,
     ):
+        """
+
+        Returns
+        -------
+
+        """
+
+    @abstractmethod
+    def get_numerical_data_time_series(self, total_cycle_len, total_cycle_duration):
         """
 
         Returns
