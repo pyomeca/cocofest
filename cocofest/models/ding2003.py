@@ -35,19 +35,17 @@ class DingModelFrequency(FesModel):
         muscle_name: str = None,
         stim_time: list[float] = None,
         previous_stim: dict = None,
-        sum_stim_truncation: int = None,
-        is_approximated: bool = False,
+        sum_stim_truncation: int = 20,
     ):
         super().__init__()
         self._model_name = model_name
         self._muscle_name = muscle_name
         self._sum_stim_truncation = sum_stim_truncation
         self._with_fatigue = False
-        self.is_approximated = is_approximated
         self.pulse_apparition_time = None
-        self.stim_time = stim_time
+        self.stim_time = stim_time if stim_time else []
         self.previous_stim = previous_stim if previous_stim else {"time": []}
-        self.all_stim = self.previous_stim["time"] + self.stim_time if self.previous_stim else self.stim_time
+        self.all_stim = self.previous_stim["time"] + self.stim_time
 
         # --- Default values --- #
         TAUC_DEFAULT = 0.020  # Value from Ding's experimentation [1] (s)
@@ -158,7 +156,6 @@ class DingModelFrequency(FesModel):
         f: MX,
         t: MX = None,
         t_stim_prev: list[MX] = None,
-        cn_sum: MX | float = None,
         force_length_relationship: MX | float = 1,
         force_velocity_relationship: MX | float = 1,
         passive_force_relationship: MX | float = 0,
@@ -176,8 +173,6 @@ class DingModelFrequency(FesModel):
             The current time at which the dynamics is evaluated (s)
         t_stim_prev: list[MX]
             The time list of the previous stimulations (s)
-        cn_sum: MX | float
-            The sum of the ca_troponin_complex (unitless)
         force_length_relationship: MX | float
             The force length relationship value (unitless)
         force_velocity_relationship: MX | float
@@ -189,7 +184,7 @@ class DingModelFrequency(FesModel):
         -------
         The value of the derivative of each state dx/dt at the current time t
         """
-        cn_dot = self.calculate_cn_dot(cn, cn_sum, t, t_stim_prev)
+        cn_dot = self.calculate_cn_dot(cn, t, t_stim_prev)
         f_dot = self.f_dot_fun(
             cn,
             f,
@@ -270,14 +265,11 @@ class DingModelFrequency(FesModel):
 
         return (1 / self.tauc) * cn_sum - (cn / self.tauc)  # Equation n°1
 
-    def calculate_cn_dot(self, cn, cn_sum, t, t_stim_prev, pulse_intensity=1):
-        if self.is_approximated:
-            return self.cn_dot_fun(cn=cn, cn_sum=cn_sum)
-        else:
-            cn_sum = self.cn_sum_fun(
-                self.get_r0(self.km_rest), t, t_stim_prev, self.get_lambda_i(t_stim_prev.shape[0], pulse_intensity)
-            )
-            return self.cn_dot_fun(cn, cn_sum)
+    def calculate_cn_dot(self, cn, t, t_stim_prev, pulse_intensity=1):
+        cn_sum = self.cn_sum_fun(
+            self.get_r0(self.km_rest), t, t_stim_prev, self.get_lambda_i(t_stim_prev.shape[0], pulse_intensity)
+        )
+        return self.cn_dot_fun(cn, cn_sum)
 
     def f_dot_fun(
         self,
@@ -368,10 +360,6 @@ class DingModelFrequency(FesModel):
         """
         model = fes_model if fes_model else nlp.model
         dxdt_fun = model.system_dynamics
-        cn_sum = None
-
-        if model.is_approximated:
-            cn_sum = controls[0]
 
         return DynamicsEvaluation(
             dxdt=dxdt_fun(
@@ -379,7 +367,6 @@ class DingModelFrequency(FesModel):
                 f=states[1],
                 t=time,
                 t_stim_prev=numerical_timeseries,
-                cn_sum=cn_sum,
                 force_length_relationship=force_length_relationship,
                 force_velocity_relationship=force_velocity_relationship,
                 passive_force_relationship=passive_force_relationship,
@@ -405,7 +392,45 @@ class DingModelFrequency(FesModel):
             A list of values to pass to the dynamics at each node. Experimental external forces should be included here.
         """
         StateConfigure().configure_all_fes_model_states(ocp, nlp, fes_model=self)
-        StateConfigure().configure_last_pulse_width(ocp, nlp)
-        if self.is_approximated:
-            StateConfigure().configure_cn_sum(ocp, nlp)
         ConfigureProblem.configure_dynamics_function(ocp, nlp, dyn_func=self.dynamics)
+
+    def _get_additional_previous_stim_time(self):
+        while len(self.previous_stim["time"]) < self._sum_stim_truncation:
+            self.previous_stim["time"].insert(0, -10000000)
+        return self.previous_stim
+
+    def get_numerical_data_time_series(self, n_shooting, final_time, all_stim_time=None):
+        truncation = self._sum_stim_truncation
+        # --- Set the previous stim time for the numerical data time series (mandatory to avoid nan values) --- #
+        self.previous_stim = self._get_additional_previous_stim_time()
+        stim_time = all_stim_time if all_stim_time else self.stim_time  # all_stim_time is used for problem reconstruction in NMPC
+        self.all_stim = self.previous_stim["time"] + stim_time
+        stim_time = np.array(self.all_stim)
+        dt = final_time / n_shooting
+
+        # For each node (n_shooting+1 total), find the last index where stim_time <= node_time.
+        node_idx = [np.where(stim_time <= i * dt)[0][-1] for i in range(n_shooting + 1)]
+
+        # For each node, extract the stim times up to that node, then keep only the last 'truncated' values.
+        stim_time_list = [
+            list(stim_time[:idx + 1][-truncation:])
+            for idx in node_idx
+        ]
+
+        node_list = list(range(n_shooting + 1))
+        node_idx = list(np.array(node_idx) - truncation)
+        stim_idx_at_node_list = [
+            list(node_list[:idx+1][-truncation:])
+            for idx in node_idx
+        ]
+
+        # --- Create a correct numerical_data_time_series shape array from the stim_time_list --- #
+        reshaped_array = np.full((n_shooting + 1, truncation), np.nan)
+        for i in range(len(stim_time_list)):
+            reshaped_array[i] = np.array(stim_time_list[i])
+
+        # --- Reshape the array to obtain the desired final shape --- #
+        temp_result = reshaped_array[:, np.newaxis, :]
+        stim_time_array = np.transpose(temp_result, (2, 1, 0))
+
+        return {"stim_time": stim_time_array}, stim_idx_at_node_list

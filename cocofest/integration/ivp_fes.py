@@ -72,93 +72,36 @@ class IvpFes:
         self.final_time = self.ivp_parameters["final_time"]
         self.n_shooting = OcpFes.prepare_n_shooting(self.stim_time, self.final_time)
 
-        self.dt = np.array([self.final_time / self.n_shooting])
         self.pulse_mode = self.fes_parameters["pulse_mode"]
-        self._pulse_mode_settings()
+        self._pulse_mode_settings()  # Update stim_time and n_stim, n_shooting can also be updated depending on the mode
+        self.dt = np.array([self.final_time / self.n_shooting])
 
         parameters = ParameterList(use_sx=False)
         parameters_init = InitialGuessList()
         parameters_bounds = BoundsList()
 
         self.controls_keys = None
-        if isinstance(
-            self.model,
-            DingModelPulseWidthFrequency | DingModelPulseWidthFrequencyWithFatigue,
-        ):
-            self.controls_keys = "last_pulse_width"
-            if isinstance(self.pulse_width, int | float):
-                self.bimapping = True
-                parameters_init["pulse_width"] = np.array([self.pulse_width] * self.n_stim)
-                parameters_bounds.add(
-                    "pulse_width",
-                    min_bound=np.array([self.pulse_width]),
-                    max_bound=np.array([self.pulse_width]),
-                    interpolation=InterpolationType.CONSTANT,
-                )
-            else:
-                self.bimapping = False
-                parameters_init["pulse_width"] = np.array(self.pulse_width)
-                parameters_bounds.add(
-                    "pulse_width",
-                    min_bound=np.array(self.pulse_width),
-                    max_bound=np.array(self.pulse_width),
-                    interpolation=InterpolationType.CONSTANT,
-                )
-
-            parameters.add(
-                name="pulse_width",
-                function=DingModelPulseWidthFrequency.set_impulse_width,
-                size=self.n_stim,
-                scaling=VariableScaling("pulse_width", [1] * self.n_stim),
-            )
-
-            if parameters_init["pulse_width"].shape[0] != self.n_stim:
-                raise ValueError("pulse_width list must have the same length as n_stim")
-
-        if isinstance(
-            self.model,
-            DingModelPulseIntensityFrequency | DingModelPulseIntensityFrequencyWithFatigue,
-        ):
-            if isinstance(self.pulse_intensity, int | float):
-                self.bimapping = True
-                parameters_init["pulse_intensity"] = np.array([self.pulse_intensity] * self.n_stim)
-
-            else:
-                self.bimapping = False
-                parameters_init["pulse_intensity"] = np.array(self.pulse_intensity)
-
-            parameters.add(
-                name="pulse_intensity",
-                function=DingModelPulseIntensityFrequency.set_impulse_intensity,
-                size=self.n_stim,
-                scaling=VariableScaling("pulse_intensity", [1] * self.n_stim),
-            )
-
-            if parameters_init["pulse_intensity"].shape[0] != self.n_stim:
-                raise ValueError("pulse_intensity list must have the same length as n_stim")
+        if isinstance(self.model, DingModelPulseWidthFrequency):
+            self.controls_keys = ["last_pulse_width"]
+        if isinstance(self.model, DingModelPulseIntensityFrequency):
+            self.controls_keys = ["pulse_intensity"]
 
         self.parameters = parameters
         self.parameters_init = parameters_init
         self.parameters_bounds = parameters_bounds
-        numerical_data_time_series, stim_idx_at_node_list = OcpFes.set_all_stim_time_for_numerical_data_time_series(
-            self.model,
+
+        numerical_data_time_series, stim_idx_at_node_list = self.model.get_numerical_data_time_series(
             self.n_shooting,
             self.final_time)
+
         self._declare_dynamics(numerical_data_time_series)
+
         (
             self.x_init,
             self.u_init,
             self.p_init,
             self.s_init,
-        ) = self.build_initial_guess_from_ocp(self)
-        self.constraints = OcpFes._build_constraints(
-            self.model,
-            self.n_shooting,
-            self.final_time,
-            stim_idx_at_node_list,
-            ControlType.CONSTANT,
-            self.bimapping,
-        )
+        ) = self.build_initial_guess_from_ocp(self, stim_idx_at_node_list=stim_idx_at_node_list)
 
         self.ode_solver = self.ivp_parameters["ode_solver"]
         self.use_sx = False
@@ -188,7 +131,7 @@ class IvpFes:
     def _fill_ivp_dict(self, ivp_parameters):
         default_ivp_dict = {
             "final_time": None,
-            "ode_solver": OdeSolver.RK1(n_integration_steps=5),
+            "ode_solver": OdeSolver.RK4(n_integration_steps=10),
             "n_threads": 1,
         }
 
@@ -294,7 +237,9 @@ class IvpFes:
             stim_time_doublet = [round(stim_time + doublet_step, 3) for stim_time in self.stim_time]
             self.stim_time = self.stim_time + stim_time_doublet
             self.stim_time.sort()
+            self.model.stim_time = self.stim_time
             self.n_stim = len(self.stim_time)
+            self.n_shooting = OcpFes.prepare_n_shooting(self.stim_time, self.final_time)
 
         elif self.pulse_mode == "triplet":
             doublet_step = 0.005
@@ -303,7 +248,9 @@ class IvpFes:
             stim_time_triplet = [round(stim_time + triplet_step, 3) for stim_time in self.stim_time]
             self.stim_time = self.stim_time + stim_time_doublet + stim_time_triplet
             self.stim_time.sort()
+            self.model.stim_time = self.stim_time
             self.n_stim = len(self.stim_time)
+            self.n_shooting = OcpFes.prepare_n_shooting(self.stim_time, self.final_time)
 
         else:
             raise ValueError("Pulse mode not yet implemented")
@@ -318,9 +265,6 @@ class IvpFes:
             dynamics=self.dynamics,
             n_shooting=self.n_shooting,
             phase_time=self.final_time,
-            constraints=self.constraints,
-            # x_bounds=self.x_bounds,
-            # u_bounds=self.u_bounds,
             x_init=self.x_init,
             u_init=self.u_init,
             ode_solver=self.ode_solver,
@@ -365,7 +309,7 @@ class IvpFes:
             numerical_data_timeseries=numerical_data_time_series,
         )
 
-    def build_initial_guess_from_ocp(self, ocp):
+    def build_initial_guess_from_ocp(self, ocp, stim_idx_at_node_list=None):
         """
         Build a state, control, parameters and stochastic initial guesses for each phases from a given ocp
         """
@@ -377,8 +321,34 @@ class IvpFes:
         for j in range(len(self.model.name_dof)):
             x.add(ocp.model.name_dof[j], ocp.model.standard_rest_values()[j], phase=0)
 
-        for key in ocp.parameters.keys():
-            u.add(ocp.controls_keys, initial_guess=[ocp.parameters_init[key].init[0][0]], phase=0)
+        if ocp.controls_keys:
+            for key in ocp.controls_keys:
+                if "pulse_intensity" in ocp.controls_keys:
+                    if isinstance(self.pulse_intensity, list) and len(self.pulse_intensity) != 1:
+                        initial_guess_list = [
+                            [
+                                self.pulse_intensity[stim_idx_at_node_list[j - i][j - i]]
+                                if i < j + 1
+                                else self.pulse_intensity[stim_idx_at_node_list[i][0]]
+                                for i in range(self.n_shooting)
+                            ]
+                            for j in range(self.model._sum_stim_truncation)
+                        ]
+
+                    else:
+                        pi = self.pulse_intensity[0] if isinstance(self.pulse_intensity, list) else self.pulse_width
+                        initial_guess_list = [[pi] * self.model._sum_stim_truncation] * self.n_shooting
+
+                    u.add(key, initial_guess=initial_guess_list, phase=0, interpolation=InterpolationType.EACH_FRAME)
+
+                if "last_pulse_width" in ocp.controls_keys:
+                    if isinstance(self.pulse_width, list) and len(self.pulse_width) != 1:
+                        last_stim_idx = [stim_idx_at_node_list[i][-1] for i in range(len(stim_idx_at_node_list)-1)]
+                        initial_guess = [self.pulse_width[last_stim_idx[i]] for i in range(len(last_stim_idx))]
+                    else:
+                        pw = self.pulse_width[0] if isinstance(self.pulse_width, list) else self.pulse_width
+                        initial_guess = [pw] * self.n_shooting
+                    u.add(key, initial_guess=[initial_guess], phase=0, interpolation=InterpolationType.EACH_FRAME)
 
         if len(ocp.parameters) != 0:
             for key in ocp.parameters.keys():

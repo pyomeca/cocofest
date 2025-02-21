@@ -33,7 +33,7 @@ class DingModelFrequencyForceParameterIdentification(ParameterIdentification):
         final_time: float = 1,
         objective: dict = None,
         use_sx: bool = True,
-        ode_solver: OdeSolver = OdeSolver.RK4(n_integration_steps=1),
+        ode_solver: OdeSolver.RK1 | OdeSolver.RK2 | OdeSolver.RK4 = OdeSolver.RK4(n_integration_steps=10),
         n_threads: int = 1,
         control_type: ControlType = ControlType.CONSTANT,
         **kwargs,
@@ -342,7 +342,6 @@ class DingModelFrequencyForceParameterIdentification(ParameterIdentification):
         # --- Building force ocp --- #
         self.force_ocp = OcpFesId.prepare_ocp(
             model=self.model,
-            stim_time=list(np.round(stim, 3)),
             final_time_phase=self.final_time,
             key_parameter_to_identify=self.key_parameter_to_identify,
             additional_key_settings=self.additional_key_settings,
@@ -418,7 +417,7 @@ class DingModelFrequencyForceParameterIdentification(ParameterIdentification):
 
         print(f"OCP creation time : {time_package.time() - start_time} seconds")
 
-        self.force_identification_result = self.force_ocp.solve(Solver.IPOPT(_max_iter=1000))
+        self.force_identification_result = self.force_ocp.solve(Solver.IPOPT(_max_iter=10000))
 
         identified_parameters = {}
         for key in self.key_parameter_to_identify:

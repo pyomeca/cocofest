@@ -2,7 +2,6 @@ import numpy as np
 
 from bioptim import (
     BoundsList,
-    ConstraintList,
     ControlType,
     InitialGuessList,
     InterpolationType,
@@ -20,11 +19,9 @@ from bioptim import (
 
 from ..models.fes_model import FesModel
 
-from ..models.ding2003 import DingModelFrequency
 from ..models.ding2007 import DingModelPulseWidthFrequency
 from ..models.hmed2018 import DingModelPulseIntensityFrequency
 from ..optimization.fes_ocp import OcpFes
-from ..custom_constraints import CustomConstraint
 
 
 class OcpFesId(OcpFes):
@@ -35,7 +32,6 @@ class OcpFesId(OcpFes):
     def prepare_ocp(
         model: FesModel = None,
         final_time: float | int = None,
-        stim_time: list = None,
         pulse_width: dict = None,
         pulse_intensity: dict = None,
         objective: dict = None,
@@ -44,7 +40,7 @@ class OcpFesId(OcpFes):
         custom_objective: list[Objective] = None,
         discontinuity_in_ocp: list = None,
         use_sx: bool = True,
-        ode_solver: OdeSolver = OdeSolver.RK4(n_integration_steps=1),
+        ode_solver: OdeSolver.RK1 | OdeSolver.RK2 | OdeSolver.RK4 = OdeSolver.RK4(n_integration_steps=10),
         n_threads: int = 1,
         control_type: ControlType = ControlType.CONSTANT,
         **kwargs,
@@ -75,20 +71,16 @@ class OcpFesId(OcpFes):
             The number of thread to use while solving (multi-threading if > 1)
         """
         (
-            pulse_event,
             pulse_width,
             pulse_intensity,
             temp_objective,
-        ) = OcpFes._fill_dict({}, pulse_width, pulse_intensity, {})
+        ) = OcpFes._fill_dict(pulse_width, pulse_intensity, {})
 
-        n_shooting = OcpFes.prepare_n_shooting(stim_time, final_time)
+        n_shooting = OcpFes.prepare_n_shooting(model.stim_time, final_time)
         OcpFesId._sanity_check(
             model=model,
             n_shooting=n_shooting,
             final_time=final_time,
-            pulse_event=pulse_event,
-            pulse_width=pulse_width,
-            pulse_intensity=pulse_intensity,
             objective=temp_objective,
             use_sx=use_sx,
             ode_solver=ode_solver,
@@ -103,21 +95,19 @@ class OcpFesId(OcpFes):
             pulse_intensity=pulse_intensity,
         )
 
-        n_stim = len(stim_time)
-
         parameters, parameters_bounds, parameters_init = OcpFesId._set_parameters(
-            n_stim=n_stim,
-            stim_apparition_time=stim_time,
             parameter_to_identify=key_parameter_to_identify,
             parameter_setting=additional_key_settings,
-            pulse_width=pulse_width,
-            pulse_intensity=pulse_intensity,
             use_sx=use_sx,
         )
 
         OcpFesId.update_model_param(model, parameters)
 
-        dynamics = OcpFesId._declare_dynamics(model=model)
+        numerical_data_time_series, stim_idx_at_node_list = model.get_numerical_data_time_series(
+            n_shooting,
+            final_time)
+
+        dynamics = OcpFesId._declare_dynamics(model=model, numerical_data_timeseries=numerical_data_time_series)
         x_bounds, x_init = OcpFesId._set_bounds(
             model=model,
             force_tracking=objective["force_tracking"],
@@ -125,20 +115,8 @@ class OcpFesId(OcpFes):
         )
         objective_functions = OcpFesId._set_objective(model=model, objective=objective)
 
-        if model.is_approximated:
-            constraints = OcpFesId._build_constraints(
-                model=model,
-                n_shooting=n_shooting,
-                final_time=final_time,
-                stim_time=stim_time,
-                control_type=control_type,
-            )
-            u_bounds, u_init = OcpFesId._set_u_bounds(model=model)
-        else:
-            constraints = ConstraintList()
-            u_bounds, u_init = None, None
-
-        # phase_transitions = OcpFesId._set_phase_transition(discontinuity_in_ocp)
+        control_value = pulse_width["fixed"] if isinstance(model, DingModelPulseWidthFrequency) else pulse_intensity["fixed"] if isinstance(model, DingModelPulseIntensityFrequency) else None
+        u_bounds, u_init = OcpFesId._set_u_bounds(model=model, control_value=control_value, stim_idx_at_node_list=stim_idx_at_node_list, n_shooting=n_shooting)
 
         return OptimalControlProgram(
             bio_model=[model],
@@ -150,14 +128,12 @@ class OcpFesId(OcpFes):
             u_init=u_init,
             u_bounds=u_bounds,
             objective_functions=objective_functions,
-            constraints=constraints,
             ode_solver=ode_solver,
             control_type=control_type,
             use_sx=use_sx,
             parameters=parameters,
             parameter_bounds=parameters_bounds,
             parameter_init=parameters_init,
-            # phase_transitions=phase_transitions,
             n_threads=n_threads,
         )
 
@@ -287,33 +263,13 @@ class OcpFesId(OcpFes):
 
     @staticmethod
     def _set_parameters(
-        n_stim,
-        stim_apparition_time,
         parameter_to_identify,
         parameter_setting,
         use_sx,
-        pulse_width: dict = None,
-        pulse_intensity: dict = None,
     ):
         parameters = ParameterList(use_sx=use_sx)
         parameters_bounds = BoundsList()
         parameters_init = InitialGuessList()
-
-        parameters.add(
-            name="pulse_apparition_time",
-            function=DingModelFrequency.set_pulse_apparition_time,
-            size=n_stim,
-            scaling=VariableScaling("pulse_apparition_time", [1] * n_stim),
-        )
-
-        parameters_init["pulse_apparition_time"] = np.array(stim_apparition_time)
-
-        parameters_bounds.add(
-            "pulse_apparition_time",
-            min_bound=stim_apparition_time,
-            max_bound=stim_apparition_time,
-            interpolation=InterpolationType.CONSTANT,
-        )
 
         for i in range(len(parameter_to_identify)):
             parameters.add(
@@ -336,103 +292,7 @@ class OcpFesId(OcpFes):
                 initial_guess=np.array([parameter_setting[parameter_to_identify[i]]["initial_guess"]]),
             )
 
-        if pulse_width["fixed"]:
-            parameters.add(
-                name="pulse_width",
-                function=DingModelPulseWidthFrequency.set_impulse_width,
-                size=n_stim,
-                scaling=VariableScaling("pulse_width", [1] * n_stim),
-            )
-            if isinstance(pulse_width["fixed"], list):
-                parameters_bounds.add(
-                    "pulse_width",
-                    min_bound=np.array(pulse_width["fixed"]),
-                    max_bound=np.array(pulse_width["fixed"]),
-                    interpolation=InterpolationType.CONSTANT,
-                )
-                parameters_init.add(key="pulse_width", initial_guess=np.array(pulse_width["fixed"]))
-            else:
-                parameters_bounds.add(
-                    "pulse_width",
-                    min_bound=np.array([pulse_width["fixed"]] * n_stim),
-                    max_bound=np.array([pulse_width["fixed"]] * n_stim),
-                    interpolation=InterpolationType.CONSTANT,
-                )
-                parameters_init.add(
-                    key="pulse_width",
-                    initial_guess=np.array([pulse_width] * n_stim),
-                )
-
-        if pulse_intensity["fixed"]:
-            parameters.add(
-                name="pulse_intensity",
-                function=DingModelPulseIntensityFrequency.set_impulse_intensity,
-                size=n_stim,
-                scaling=VariableScaling("pulse_intensity", [1] * n_stim),
-            )
-            if isinstance(pulse_intensity["fixed"], list):
-                parameters_bounds.add(
-                    "pulse_intensity",
-                    min_bound=np.array(pulse_intensity["fixed"]),
-                    max_bound=np.array(pulse_intensity["fixed"]),
-                    interpolation=InterpolationType.CONSTANT,
-                )
-                parameters_init.add(key="pulse_intensity", initial_guess=np.array(pulse_intensity["fixed"]))
-            else:
-                parameters_bounds.add(
-                    "pulse_intensity",
-                    min_bound=np.array([pulse_intensity["fixed"]] * n_stim),
-                    max_bound=np.array([pulse_intensity["fixed"]] * n_stim),
-                    interpolation=InterpolationType.CONSTANT,
-                )
-                parameters_init.add(
-                    key="pulse_intensity",
-                    initial_guess=np.array([pulse_intensity["fixed"]] * n_stim),
-                )
-
         return parameters, parameters_bounds, parameters_init
-
-    @staticmethod
-    def _build_constraints(model, n_shooting, final_time, stim_time, control_type):
-        constraints = ConstraintList()
-
-        time_vector = np.linspace(0, final_time, n_shooting + 1)
-        stim_at_node = [np.where(stim_time[i] <= time_vector)[0][0] for i in range(len(stim_time))]
-        additional_nodes = 1 if control_type == ControlType.LINEAR_CONTINUOUS else 0
-        if model._sum_stim_truncation:
-            max_stim_to_keep = model._sum_stim_truncation
-        else:
-            max_stim_to_keep = 10000000
-
-        index_sup = 0
-        index_inf = 0
-        stim_index = []
-        for i in range(n_shooting + additional_nodes):
-            if i in stim_at_node:
-                index_sup += 1
-                if index_sup >= max_stim_to_keep:
-                    index_inf = index_sup - max_stim_to_keep
-                stim_index = [i for i in range(index_inf, index_sup)]
-
-            constraints.add(
-                CustomConstraint.cn_sum_identification,
-                node=i,
-                stim_time=stim_time[index_inf:index_sup],
-                stim_index=stim_index,
-            )
-
-        if isinstance(model, DingModelPulseWidthFrequency):
-            index_sup = 0
-            for i in range(n_shooting + additional_nodes):
-                if i in stim_at_node and i != 0:
-                    index_sup += 1
-                constraints.add(
-                    CustomConstraint.a_calculation_identification,
-                    node=i,
-                    last_stim_index=index_sup,
-                )
-
-        return constraints
 
     @staticmethod
     def _set_phase_transition(discontinuity_in_ocp):
@@ -444,3 +304,44 @@ class OcpFesId(OcpFes):
                     phase_pre_idx=discontinuity_in_ocp[i] - 1,
                 )
         return phase_transitions
+
+    @staticmethod
+    def _set_u_bounds(model, control_value: list, stim_idx_at_node_list: list, n_shooting: int):
+        # Controls bounds
+        u_bounds = BoundsList()
+        # Controls initial guess
+        u_init = InitialGuessList()
+        if isinstance(model, DingModelPulseWidthFrequency):
+            if len(control_value) != 1:
+                last_stim_idx = [stim_idx_at_node_list[i][-1] for i in range(len(stim_idx_at_node_list) - 1)]
+                control_bounds = [control_value[last_stim_idx[i]] for i in range(len(last_stim_idx))]
+            else:
+                control_bounds = [control_value] * n_shooting
+            u_init.add(key="last_pulse_width", initial_guess=[0], phase=0)
+            u_bounds.add(
+                "last_pulse_width",
+                min_bound=np.array([control_bounds]),
+                max_bound=np.array([control_bounds]),
+                interpolation=InterpolationType.EACH_FRAME,
+            )
+
+        if isinstance(model, DingModelPulseIntensityFrequency):
+            control_list = [
+                [
+                    control_value[stim_idx_at_node_list[j - i][j - i]]
+                    if i < j + 1
+                    else control_value[stim_idx_at_node_list[i][0]]
+                    for i in range(n_shooting)
+                ]
+                for j in range(model._sum_stim_truncation)
+            ]
+
+            u_init.add(key="pulse_intensity", initial_guess=np.array(control_list)[:,0], phase=0)
+            u_bounds.add(
+                "pulse_intensity",
+                min_bound=np.array(control_list),
+                max_bound=np.array(control_list),
+                interpolation=InterpolationType.EACH_FRAME,
+            )
+
+        return u_bounds, u_init

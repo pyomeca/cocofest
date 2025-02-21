@@ -13,20 +13,21 @@ import numpy as np
 from bioptim import OdeSolver
 
 # --- Set stimulation time apparition --- #
-final_time = 300
+final_time = 3
 stim_time = [val for start in range(0, final_time, 2) for val in np.linspace(start, start + 1, 34)[:-1]]
 
 # --- Set Ding2003 model --- #
-# model = DingModelFrequencyWithFatigue(stim_time=stim_time, sum_stim_truncation=10)
-# fes_parameters = {"model": model}
+model = DingModelFrequencyWithFatigue(stim_time=stim_time, sum_stim_truncation=10)
+fes_parameters = {"model": model}
 
 # --- Set Ding2007 model --- #
-model = DingModelPulseWidthFrequencyWithFatigue(stim_time=stim_time, sum_stim_truncation=10)
-fes_parameters = {"model": model, "pulse_width": 0.0003}
+# model = DingModelPulseWidthFrequencyWithFatigue(stim_time=stim_time, sum_stim_truncation=10)
+# fes_parameters = {"model": model, "pulse_width": 0.0003}
 
 # --- Set Hmed2018 model --- #
+# pulse_intensity = np.random.randint(20, 130, len(stim_time)).tolist()
 # model = DingModelPulseIntensityFrequencyWithFatigue(stim_time=stim_time, sum_stim_truncation=10)
-# fes_parameters = {"model": model, "pulse_intensity": 50}
+# fes_parameters = {"model": model, "pulse_intensity": pulse_intensity}
 
 # --- Build ivp --- #
 ivp_parameters = {"final_time": final_time, "ode_solver": OdeSolver.RK1(n_integration_steps=10)}

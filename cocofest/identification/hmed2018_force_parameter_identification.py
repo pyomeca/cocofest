@@ -1,7 +1,7 @@
 import time as time_package
 import numpy as np
 
-from bioptim import Solver, Objective, OdeSolver, ControlType
+from bioptim import Solver, Objective, OdeSolver, ControlType, SolutionMerge
 from ..models.hmed2018 import DingModelPulseIntensityFrequency
 from ..identification.ding2003_force_parameter_identification import (
     DingModelFrequencyForceParameterIdentification,
@@ -33,7 +33,7 @@ class DingModelPulseIntensityFrequencyForceParameterIdentification(DingModelFreq
         final_time: float = 1,
         custom_objective: list[Objective] = None,
         use_sx: bool = True,
-        ode_solver: OdeSolver = OdeSolver.RK4(n_integration_steps=1),
+        ode_solver: OdeSolver.RK1 | OdeSolver.RK2 | OdeSolver.RK4 = OdeSolver.RK4(n_integration_steps=10),
         n_threads: int = 1,
         control_type: ControlType = ControlType.CONSTANT,
         **kwargs,
@@ -282,7 +282,7 @@ class DingModelPulseIntensityFrequencyForceParameterIdentification(DingModelFreq
 
         self.force_identification_result = self.force_ocp.solve(
             Solver.IPOPT()
-        )  # _hessian_approximation="limited-memory"
+        )
 
         initial_guess = {}
         for key in self.key_parameter_to_identify:
@@ -316,6 +316,8 @@ class DingModelPulseIntensityFrequencyForceParameterIdentification(DingModelFreq
         stim = None
         time = None
         force = None
+        pulse_intensity = None
+        discontinuity = None
 
         if self.force_model_identification_method == "full":
             time, stim, force, discontinuity = full_data_extraction(self.data_path)
@@ -359,8 +361,11 @@ class DingModelPulseIntensityFrequencyForceParameterIdentification(DingModelFreq
         print(f"OCP creation time : {time_package.time() - start_time} seconds")
 
         self.force_identification_result = self.force_ocp.solve(Solver.IPOPT(_max_iter=100000))
+
         identified_parameters = {}
         for key in self.key_parameter_to_identify:
             identified_parameters[key] = self.force_identification_result.parameters[key][0]
+        identified_parameters["time"] = self.force_identification_result.stepwise_time(to_merge=[SolutionMerge.NODES]).T[0]
+        identified_parameters["force"] = self.force_identification_result.stepwise_states(to_merge=[SolutionMerge.NODES])["F"][0]
 
         return identified_parameters

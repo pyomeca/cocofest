@@ -9,7 +9,7 @@ import os
 import matplotlib.pyplot as plt
 import numpy as np
 
-from bioptim import SolutionMerge
+from bioptim import SolutionMerge, OdeSolver
 
 from cocofest import (
     DingModelPulseWidthFrequency,
@@ -21,11 +21,11 @@ from cocofest.identification.identification_method import full_data_extraction
 
 
 # --- Setting simulation parameters --- #
-stim_time = np.round(np.linspace(0, 1, 11)[:-1], 2)
+stim_time = np.linspace(0, 1, 11)[:-1].tolist()
 pulse_width = np.random.uniform(0.0002, 0.0006, 10).tolist()
 
 final_time = 2
-ivp_model = ModelMaker.create_model("ding2007", is_approximated=False)
+ivp_model = ModelMaker.create_model("ding2007", stim_time=stim_time, sum_stim_truncation=10)
 fes_parameters = {"model": ivp_model, "stim_time": stim_time, "pulse_width": pulse_width}
 ivp_parameters = {"final_time": final_time, "use_sx": True}
 
@@ -37,7 +37,7 @@ ivp = IvpFes(fes_parameters, ivp_parameters)
 result, time = ivp.integrate()
 
 # Adding noise to the force
-noise = np.random.normal(0, 5, len(result["F"][0]))
+noise = np.random.normal(0, 0.5, len(result["F"][0]))
 force = result["F"][0] + noise
 
 # Saving the data in a pickle file
@@ -48,7 +48,7 @@ with open(pickle_file_name, "wb") as file:
     pickle.dump(dictionary, file)
 
 # --- Identifying the model parameters --- #
-ocp_model = DingModelPulseWidthFrequency()
+ocp_model = DingModelPulseWidthFrequency(stim_time=stim_time, sum_stim_truncation=10)
 ocp = DingModelPulseWidthFrequencyForceParameterIdentification(
     model=ocp_model,
     data_path=[pickle_file_name],
@@ -59,10 +59,12 @@ ocp = DingModelPulseWidthFrequencyForceParameterIdentification(
     final_time=final_time,
     use_sx=True,
     n_threads=6,
+    ode_solver=OdeSolver.RK4(n_integration_steps=10),
 )
 
 identified_parameters = ocp.force_model_identification()
-force_ocp = ocp.force_identification_result.decision_states(to_merge=SolutionMerge.NODES)["F"][0]
+force_ocp = ocp.force_identification_result.stepwise_states(to_merge=SolutionMerge.NODES)["F"][0]
+time_ocp = ocp.force_identification_result.stepwise_time(to_merge=SolutionMerge.NODES).T[0]
 print(identified_parameters)
 
 (
@@ -84,7 +86,7 @@ result_dict = {
 # Plotting the identification result
 plt.title("Force state result")
 plt.plot(pickle_time_data, pickle_muscle_data, "-.", color="blue", label="simulated")
-plt.plot(pickle_time_data, force_ocp, color="red", label="identified")
+plt.plot(time_ocp, force_ocp, color="red", label="identified")
 
 plt.xlabel("time (s)")
 plt.ylabel("force (N)")

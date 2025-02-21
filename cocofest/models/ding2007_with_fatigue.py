@@ -32,8 +32,7 @@ class DingModelPulseWidthFrequencyWithFatigue(DingModelPulseWidthFrequency):
         muscle_name: str = None,
         stim_time: list[float] = None,
         previous_stim: dict = None,
-        sum_stim_truncation: int = None,
-        is_approximated: bool = False,
+        sum_stim_truncation: int = 20,
         tauc: float = None,
         a_rest: float = None,
         tau1_rest: float = None,
@@ -47,16 +46,12 @@ class DingModelPulseWidthFrequencyWithFatigue(DingModelPulseWidthFrequency):
         alpha_km: float = None,
         tau_fat: float = None,
     ):
-        if previous_stim:
-            if len(previous_stim["time"]) != len(previous_stim["pulse_width"]):
-                raise ValueError("The previous_stim time and pulse_width must have the same length")
         super(DingModelPulseWidthFrequencyWithFatigue, self).__init__(
             model_name=model_name,
             muscle_name=muscle_name,
             stim_time=stim_time,
             previous_stim=previous_stim,
             sum_stim_truncation=sum_stim_truncation,
-            is_approximated=is_approximated,
         )
         self._with_fatigue = True
         self.stim_time = stim_time
@@ -145,8 +140,6 @@ class DingModelPulseWidthFrequencyWithFatigue(DingModelPulseWidthFrequency):
         t: MX = None,
         t_stim_prev: MX = None,
         pulse_width: MX = None,
-        cn_sum: MX = None,
-        a_scale: MX = None,
         force_length_relationship: MX | float = 1,
         force_velocity_relationship: MX | float = 1,
         passive_force_relationship: MX | float = 0,
@@ -172,10 +165,6 @@ class DingModelPulseWidthFrequencyWithFatigue(DingModelPulseWidthFrequency):
             The time of the previous stimulation (s)
         pulse_width: MX
             The time of the impulse (s)
-        cn_sum: MX | float
-            The sum of the ca_troponin_complex (unitless)
-        a_scale: MX | float
-            The scaling factor (unitless)
         force_length_relationship: MX | float
             The force length relationship value (unitless)
         force_velocity_relationship: MX | float
@@ -187,15 +176,8 @@ class DingModelPulseWidthFrequencyWithFatigue(DingModelPulseWidthFrequency):
         -------
         The value of the derivative of each state dx/dt at the current time t
         """
-        cn_dot = self.calculate_cn_dot(cn, cn_sum, t, t_stim_prev)
-        a_scale = (
-            a_scale
-            if self.is_approximated
-            else self.a_calculation(
-                a_scale=a,
-                pulse_width=pulse_width,
-            )
-        )
+        cn_dot = self.calculate_cn_dot(cn, t, t_stim_prev)
+        a_scale = self.a_calculation(a_scale=a, pulse_width=pulse_width)
 
         f_dot = self.f_dot_fun(
             cn,
@@ -306,12 +288,6 @@ class DingModelPulseWidthFrequencyWithFatigue(DingModelPulseWidthFrequency):
         model = fes_model if fes_model else nlp.model
         dxdt_fun = model.system_dynamics
 
-        cn_sum = None
-        a_scale = None
-        if model.is_approximated:
-            cn_sum = controls[1]
-            a_scale = controls[2]
-
         return DynamicsEvaluation(
             dxdt=dxdt_fun(
                 cn=states[0],
@@ -322,8 +298,6 @@ class DingModelPulseWidthFrequencyWithFatigue(DingModelPulseWidthFrequency):
                 t=time,
                 t_stim_prev=numerical_timeseries,
                 pulse_width=controls[0],
-                cn_sum=cn_sum,
-                a_scale=a_scale,
                 force_length_relationship=force_length_relationship,
                 force_velocity_relationship=force_velocity_relationship,
                 passive_force_relationship=passive_force_relationship
@@ -351,7 +325,4 @@ class DingModelPulseWidthFrequencyWithFatigue(DingModelPulseWidthFrequency):
         """
         StateConfigure().configure_all_fes_model_states(ocp, nlp, fes_model=self)
         StateConfigure().configure_last_pulse_width(ocp, nlp)
-        if self.is_approximated:
-            StateConfigure().configure_cn_sum(ocp, nlp)
-            StateConfigure().configure_a_calculation(ocp, nlp)
         ConfigureProblem.configure_dynamics_function(ocp, nlp, dyn_func=self.dynamics)
