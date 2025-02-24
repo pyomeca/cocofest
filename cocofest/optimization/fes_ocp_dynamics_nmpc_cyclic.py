@@ -18,8 +18,12 @@ class NmpcFesMsk(MultiCyclicNonlinearModelPredictiveControl):
         super(NmpcFesMsk, self).advance_window_bounds_states(sol)
         self.update_stim(sol)
         if self.nlp[0].model.for_cycling:
-            self.nlp[0].x_bounds["q"].min[-1, :] = self.nlp[0].model.bounds_from_ranges("q").min[-1] * n_cycles_simultaneous
-            self.nlp[0].x_bounds["q"].max[-1, :] = self.nlp[0].model.bounds_from_ranges("q").max[-1] * n_cycles_simultaneous
+            self.nlp[0].x_bounds["q"].min[-1, :] = (
+                self.nlp[0].model.bounds_from_ranges("q").min[-1] * n_cycles_simultaneous
+            )
+            self.nlp[0].x_bounds["q"].max[-1, :] = (
+                self.nlp[0].model.bounds_from_ranges("q").max[-1] * n_cycles_simultaneous
+            )
         return True
 
     def advance_window_initial_guess_states(self, sol, n_cycles_simultaneous=None):
@@ -33,13 +37,24 @@ class NmpcFesMsk(MultiCyclicNonlinearModelPredictiveControl):
 
     def update_stim(self, sol):
         # only keep the last 10 stimulation times
-        previous_stim_time = [round(x - self.phase_time[0], 2) for x in self.nlp[0].model.muscles_dynamics_model[0].stim_time[-10:]]  # TODO fix this (keep the middle window)
+        previous_stim_time = [
+            round(x - self.phase_time[0], 2) for x in self.nlp[0].model.muscles_dynamics_model[0].stim_time[-10:]
+        ]  # TODO fix this (keep the middle window)
         for i in range(len(self.nlp[0].model.muscles_dynamics_model)):
-            self.nlp[0].model.muscles_dynamics_model[i].previous_stim = {} if self.nlp[0].model.muscles_dynamics_model[i].previous_stim is None else self.nlp[0].model.muscles_dynamics_model[i].previous_stim
+            self.nlp[0].model.muscles_dynamics_model[i].previous_stim = (
+                {}
+                if self.nlp[0].model.muscles_dynamics_model[i].previous_stim is None
+                else self.nlp[0].model.muscles_dynamics_model[i].previous_stim
+            )
             self.nlp[0].model.muscles_dynamics_model[i].previous_stim["time"] = previous_stim_time
             if isinstance(self.nlp[0].model.muscles_dynamics_model[i], DingModelPulseWidthFrequencyWithFatigue):
-                self.nlp[0].model.muscles_dynamics_model[i].previous_stim["pulse_width"] = list(sol.parameters["pulse_width_" + self.nlp[0].model.muscles_dynamics_model[i].muscle_name][-10:])
-            self.nlp[0].model.muscles_dynamics_model[i].all_stim = self.nlp[0].model.muscles_dynamics_model[i].previous_stim["time"] + self.nlp[0].model.muscles_dynamics_model[i].stim_time
+                self.nlp[0].model.muscles_dynamics_model[i].previous_stim["pulse_width"] = list(
+                    sol.parameters["pulse_width_" + self.nlp[0].model.muscles_dynamics_model[i].muscle_name][-10:]
+                )
+            self.nlp[0].model.muscles_dynamics_model[i].all_stim = (
+                self.nlp[0].model.muscles_dynamics_model[i].previous_stim["time"]
+                + self.nlp[0].model.muscles_dynamics_model[i].stim_time
+            )
 
     @staticmethod
     def prepare_nmpc(
@@ -104,25 +119,27 @@ class NmpcFesMsk(MultiCyclicNonlinearModelPredictiveControl):
 
     @staticmethod
     def prepare_nmpc_for_cycling(
-            model: FesMskModel = None,
-            cycle_duration: int | float = None,
-            n_cycles_simultaneous: int = None,
-            n_cycles_to_advance: int = None,
-            n_total_cycles: int = None,
-            pulse_width: dict = None,
-            pulse_intensity: dict = None,
-            objective: dict = None,
-            msk_info: dict = None,
-            external_forces: dict = None,
-            initial_guess_warm_start: bool = False,
-            use_sx: bool = True,
-            ode_solver: OdeSolver = OdeSolver.RK4(n_integration_steps=1),
-            control_type: ControlType = ControlType.CONSTANT,
-            n_threads: int = 1,
+        model: FesMskModel = None,
+        cycle_duration: int | float = None,
+        n_cycles_simultaneous: int = None,
+        n_cycles_to_advance: int = None,
+        n_total_cycles: int = None,
+        pulse_width: dict = None,
+        pulse_intensity: dict = None,
+        objective: dict = None,
+        msk_info: dict = None,
+        external_forces: dict = None,
+        initial_guess_warm_start: bool = False,
+        use_sx: bool = True,
+        ode_solver: OdeSolver = OdeSolver.RK4(n_integration_steps=1),
+        control_type: ControlType = ControlType.CONSTANT,
+        n_threads: int = 1,
     ):
         input_dict = {
             "model": model,
-            "n_shooting": OcpFes.prepare_n_shooting(model.muscles_dynamics_model[0].stim_time, cycle_duration*n_cycles_simultaneous),
+            "n_shooting": OcpFes.prepare_n_shooting(
+                model.muscles_dynamics_model[0].stim_time, cycle_duration * n_cycles_simultaneous
+            ),
             "final_time": cycle_duration,
             "n_cycles_simultaneous": n_cycles_simultaneous,
             "n_cycles_to_advance": n_cycles_to_advance,
@@ -140,8 +157,9 @@ class NmpcFesMsk(MultiCyclicNonlinearModelPredictiveControl):
         }
 
         optimization_dict = OcpFesMsk._prepare_optimization_problem(input_dict)
-        optimization_dict_for_cycling = OcpFesMsk._prepare_optimization_problem_for_cycling(optimization_dict,
-                                                                                            input_dict)
+        optimization_dict_for_cycling = OcpFesMsk._prepare_optimization_problem_for_cycling(
+            optimization_dict, input_dict
+        )
 
         return NmpcFesMsk(
             bio_model=[optimization_dict["model"]],

@@ -6,6 +6,7 @@ No optimization will be done on the stimulation, the frequency is fixed to 1Hz.
 
 from cocofest import OcpFes, ModelMaker
 
+
 def prepare_ocp():
     # --- Build ocp --- #
     # This ocp was build to match a force value of 270N at the end of the last node.
@@ -18,6 +19,7 @@ def prepare_ocp():
         use_sx=True,
     )
 
+
 def main():
     ocp = prepare_ocp()
     sol = ocp.solve()
@@ -28,4 +30,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
