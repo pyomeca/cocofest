@@ -6,6 +6,6 @@ __pycache__/
 .pytest_cache
 
 
-cocofest/examples/data/debug.py
+examples/data/debug.py
 
 external/bioptim

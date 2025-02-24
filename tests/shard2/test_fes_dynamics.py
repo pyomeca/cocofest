@@ -4,8 +4,6 @@ import os
 
 import numpy as np
 from bioptim import (
-    ObjectiveFcn,
-    ObjectiveList,
     Solver,
     SolutionMerge,
 )
@@ -17,7 +15,7 @@ from cocofest import (
     FesMskModel,
 )
 
-from cocofest.examples.msk_models import init as ocp_module
+from examples.msk_models import init as ocp_module
 
 biomodel_folder = os.path.dirname(ocp_module.__file__)
 biorbd_model_path = biomodel_folder + "/arm26_biceps_triceps.bioMod"
