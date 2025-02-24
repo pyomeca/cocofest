@@ -74,6 +74,8 @@ def prepare_ocp(
         Type of dynamics ("torque_driven", "muscle_driven", or "fes_driven").
     use_sx: bool
         Whether to use CasADi SX for symbolic computations.
+    integration_step: int
+        Integration step for the ODE solver.
 
     Returns
     -------
@@ -514,6 +516,7 @@ def main():
     # --- Load the appropriate model --- #
     if dynamics_type in ["torque_driven", "muscle_driven"]:
         model = BiorbdModel(model_path)
+        integration_step = 1
     elif dynamics_type == "fes_driven":
         # Define muscle dynamics for the FES-driven model
         muscles_model = [

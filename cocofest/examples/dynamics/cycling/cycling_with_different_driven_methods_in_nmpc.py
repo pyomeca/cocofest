@@ -148,9 +148,9 @@ def prepare_nmpc(
         parameter_bounds=parameters_bounds,
         parameter_init=parameters_init,
         parameter_objectives=parameter_objectives,
-        ode_solver=OdeSolver.RK1(n_integration_steps=3),
+        ode_solver=OdeSolver.RK1(n_integration_steps=1),
         n_threads=20,
-        use_sx=True,
+        use_sx=False,
     )
 
 
@@ -295,8 +295,8 @@ def set_bounds(model, x_init, n_shooting, turn_number, interpolation_type=Interp
     qdot_x_bounds.min[0] = [-10, -10, -10]
     qdot_x_bounds.max[1] = [10, 10, 10]
     qdot_x_bounds.min[1] = [-10, -10, -10]
-    # qdot_x_bounds.max[2] = [-2, -2, -2]
-    # qdot_x_bounds.min[2] = [-10, -10, -10]
+    qdot_x_bounds.max[2] = [-2, -2, -2]
+    qdot_x_bounds.min[2] = [-12, -12, -12]
     x_bounds.add(key="qdot", bounds=qdot_x_bounds, phase=0)
     return x_bounds
 
@@ -329,15 +329,15 @@ def main():
     Main function to configure and solve the optimal control problem.
     """
     # --- Configuration --- #
-    dynamics_type = "fes_driven"  # Available options: "torque_driven", "muscle_driven", "fes_driven"
+    dynamics_type = "torque_driven"  # Available options: "torque_driven", "muscle_driven", "fes_driven"
     model_path = "../../msk_models/simplified_UL_Seth_pedal_aligned.bioMod"
     pulse_width = None
 
     # NMPC parameters
     cycle_duration = 1
-    cycle_len = 33
+    cycle_len = 100
     n_cycles_to_advance = 1
-    n_cycles_simultaneous = 2
+    n_cycles_simultaneous = 3
     n_cycles = 3
 
     # Bike parameters
