@@ -93,25 +93,25 @@ def inverse_kinematics_cycling(
 
     model = biorbd.Model(model_path)
 
-    z = model.markers(np.array([0]*model.nbQ()))[0].to_array()[2]
-    if z != model.markers(np.array([np.pi / 2]*model.nbQ()))[0].to_array()[2]:
+    z = model.markers(np.array([0] * model.nbQ()))[0].to_array()[2]
+    if z != model.markers(np.array([np.pi / 2] * model.nbQ()))[0].to_array()[2]:
         print("The model not strictly 2d. Warm start not optimal.")
 
-    f = interp1d(np.linspace(0, -360 * cycling_number, 360 * cycling_number + 1),
-                 np.linspace(0, -360 * cycling_number, 360 * cycling_number + 1), kind="linear")
-    x_new = f(np.linspace(0, -360 * cycling_number, n_shooting+1))
+    f = interp1d(
+        np.linspace(0, -360 * cycling_number, 360 * cycling_number + 1),
+        np.linspace(0, -360 * cycling_number, 360 * cycling_number + 1),
+        kind="linear",
+    )
+    x_new = f(np.linspace(0, -360 * cycling_number, n_shooting + 1))
     x_new_rad = np.deg2rad(x_new)
 
-    x_y_z_coord = np.array(
-        [
-            get_circle_coord(theta, x_center, y_center, radius)
-            for theta in x_new_rad
-        ]
-    ).T
+    x_y_z_coord = np.array([get_circle_coord(theta, x_center, y_center, radius) for theta in x_new_rad]).T
 
-    target_q_hand = x_y_z_coord.reshape((3, 1, n_shooting+1))  # Hand marker_target
+    target_q_hand = x_y_z_coord.reshape((3, 1, n_shooting + 1))  # Hand marker_target
     wheel_center_x_y_z_coord = np.array([x_center, y_center, z])
-    target_q_wheel_center = np.tile(wheel_center_x_y_z_coord[:, np.newaxis, np.newaxis], (1, 1, n_shooting+1))  # Wheel marker_target
+    target_q_wheel_center = np.tile(
+        wheel_center_x_y_z_coord[:, np.newaxis, np.newaxis], (1, 1, n_shooting + 1)
+    )  # Wheel marker_target
     target_q = np.concatenate((target_q_hand, target_q_wheel_center), axis=1)
     ik = biorbd.InverseKinematics(model, target_q)
     ik_q = ik.solve(method=ik_method)

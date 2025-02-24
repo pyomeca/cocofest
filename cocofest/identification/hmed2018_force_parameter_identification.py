@@ -280,9 +280,7 @@ class DingModelPulseIntensityFrequencyForceParameterIdentification(DingModelFreq
             control_type=self.control_type,
         )
 
-        self.force_identification_result = self.force_ocp.solve(
-            Solver.IPOPT()
-        )
+        self.force_identification_result = self.force_ocp.solve(Solver.IPOPT())
 
         initial_guess = {}
         for key in self.key_parameter_to_identify:
@@ -365,7 +363,11 @@ class DingModelPulseIntensityFrequencyForceParameterIdentification(DingModelFreq
         identified_parameters = {}
         for key in self.key_parameter_to_identify:
             identified_parameters[key] = self.force_identification_result.parameters[key][0]
-        identified_parameters["time"] = self.force_identification_result.stepwise_time(to_merge=[SolutionMerge.NODES]).T[0]
-        identified_parameters["force"] = self.force_identification_result.stepwise_states(to_merge=[SolutionMerge.NODES])["F"][0]
+        identified_parameters["time"] = self.force_identification_result.stepwise_time(
+            to_merge=[SolutionMerge.NODES]
+        ).T[0]
+        identified_parameters["force"] = self.force_identification_result.stepwise_states(
+            to_merge=[SolutionMerge.NODES]
+        )["F"][0]
 
         return identified_parameters

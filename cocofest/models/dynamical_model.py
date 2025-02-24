@@ -74,8 +74,12 @@ class FesMskModel(BiorbdModel):
         )
         self.muscles_dynamics_model = muscles_model
         for i in range(len(self.muscles_dynamics_model)):
-            self.muscles_dynamics_model[i].stim_time = stim_time if stim_time else self.muscles_dynamics_model[i].stim_time
-            self.muscles_dynamics_model[i].previous_stim = previous_stim if previous_stim else self.muscles_dynamics_model[i].previous_stim
+            self.muscles_dynamics_model[i].stim_time = (
+                stim_time if stim_time else self.muscles_dynamics_model[i].stim_time
+            )
+            self.muscles_dynamics_model[i].previous_stim = (
+                previous_stim if previous_stim else self.muscles_dynamics_model[i].previous_stim
+            )
             self.muscles_dynamics_model[i].all_stim = self.muscles_dynamics_model[i].previous_stim["time"] + stim_time
 
         self.bio_stim_model = [self.bio_model] + self.muscles_dynamics_model
@@ -188,8 +192,12 @@ class FesMskModel(BiorbdModel):
         dq = DynamicsFunctions.compute_qdot(nlp, q, qdot)
         total_torque = muscles_tau + tau if self.activate_residual_torque else muscles_tau
         external_forces = nlp.get_external_forces(states, controls, algebraic_states, numerical_data_timeseries)
-        with_contact = True if nlp.model.bio_model.contact_names != () else False  # TODO: Add a better way of with_contact=True
-        ddq = nlp.model.forward_dynamics(with_contact=with_contact)(q, qdot, total_torque, external_forces, parameters)  # q, qdot, tau, external_forces, parameters
+        with_contact = (
+            True if nlp.model.bio_model.contact_names != () else False
+        )  # TODO: Add a better way of with_contact=True
+        ddq = nlp.model.forward_dynamics(with_contact=with_contact)(
+            q, qdot, total_torque, external_forces, parameters
+        )  # q, qdot, tau, external_forces, parameters
         dxdt = vertcat(dxdt_muscle_list, dq, ddq)
 
         return DynamicsEvaluation(dxdt=dxdt, defects=None)
@@ -240,9 +248,7 @@ class FesMskModel(BiorbdModel):
             muscle_parameters = vertcat(*[parameters[i] for i in muscle_parameters_idxs])
 
             muscle_controls = controls
-            muscle_control_idxs = [
-                i for i in range(controls.shape[0]) if muscle_model.muscle_name in str(controls[i])
-            ]
+            muscle_control_idxs = [i for i in range(controls.shape[0]) if muscle_model.muscle_name in str(controls[i])]
             if isinstance(muscle_model, DingModelPulseWidthFrequency):
                 muscle_controls = controls[muscle_control_idxs[0]]
             if isinstance(muscle_model, DingModelPulseIntensityFrequency):
@@ -290,8 +296,14 @@ class FesMskModel(BiorbdModel):
                 "muscle_passive_force_coeff", [Q, Qdot], [muscle_passive_force_coeff]
             )(q, qdot)
 
-            external_force_in_numerical_data_timeseries = True if "external_force" in str(numerical_data_timeseries) else False
-            fes_numerical_data_timeseries = numerical_data_timeseries[3:numerical_data_timeseries.shape[0]] if external_force_in_numerical_data_timeseries else numerical_data_timeseries
+            external_force_in_numerical_data_timeseries = (
+                True if "external_force" in str(numerical_data_timeseries) else False
+            )
+            fes_numerical_data_timeseries = (
+                numerical_data_timeseries[3 : numerical_data_timeseries.shape[0]]
+                if external_force_in_numerical_data_timeseries
+                else numerical_data_timeseries
+            )
             muscle_dxdt = muscle_model.dynamics(
                 time,
                 muscle_states,
@@ -423,7 +435,9 @@ class FesMskModel(BiorbdModel):
             if isinstance(muscle_model, DingModelPulseWidthFrequency):
                 StateConfigure().configure_last_pulse_width(ocp, nlp, muscle_name=str(muscle_model.muscle_name))
             if isinstance(muscle_model, DingModelPulseIntensityFrequency):
-                StateConfigure().configure_pulse_intensity(ocp, nlp, muscle_name=str(muscle_model.muscle_name), truncation=muscle_model._sum_stim_truncation)
+                StateConfigure().configure_pulse_intensity(
+                    ocp, nlp, muscle_name=str(muscle_model.muscle_name), truncation=muscle_model._sum_stim_truncation
+                )
         if self.activate_residual_torque:
             ConfigureProblem.configure_tau(ocp, nlp, as_states=False, as_controls=True)
 

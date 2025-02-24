@@ -103,9 +103,7 @@ class OcpFesId(OcpFes):
 
         OcpFesId.update_model_param(model, parameters)
 
-        numerical_data_time_series, stim_idx_at_node_list = model.get_numerical_data_time_series(
-            n_shooting,
-            final_time)
+        numerical_data_time_series, stim_idx_at_node_list = model.get_numerical_data_time_series(n_shooting, final_time)
 
         dynamics = OcpFesId._declare_dynamics(model=model, numerical_data_timeseries=numerical_data_time_series)
         x_bounds, x_init = OcpFesId._set_bounds(
@@ -115,8 +113,14 @@ class OcpFesId(OcpFes):
         )
         objective_functions = OcpFesId._set_objective(model=model, objective=objective)
 
-        control_value = pulse_width["fixed"] if isinstance(model, DingModelPulseWidthFrequency) else pulse_intensity["fixed"] if isinstance(model, DingModelPulseIntensityFrequency) else None
-        u_bounds, u_init = OcpFesId._set_u_bounds(model=model, control_value=control_value, stim_idx_at_node_list=stim_idx_at_node_list, n_shooting=n_shooting)
+        control_value = (
+            pulse_width["fixed"]
+            if isinstance(model, DingModelPulseWidthFrequency)
+            else pulse_intensity["fixed"] if isinstance(model, DingModelPulseIntensityFrequency) else None
+        )
+        u_bounds, u_init = OcpFesId._set_u_bounds(
+            model=model, control_value=control_value, stim_idx_at_node_list=stim_idx_at_node_list, n_shooting=n_shooting
+        )
 
         return OptimalControlProgram(
             bio_model=[model],
@@ -328,15 +332,17 @@ class OcpFesId(OcpFes):
         if isinstance(model, DingModelPulseIntensityFrequency):
             control_list = [
                 [
-                    control_value[stim_idx_at_node_list[j - i][j - i]]
-                    if i < j + 1
-                    else control_value[stim_idx_at_node_list[i][0]]
+                    (
+                        control_value[stim_idx_at_node_list[j - i][j - i]]
+                        if i < j + 1
+                        else control_value[stim_idx_at_node_list[i][0]]
+                    )
                     for i in range(n_shooting)
                 ]
                 for j in range(model._sum_stim_truncation)
             ]
 
-            u_init.add(key="pulse_intensity", initial_guess=np.array(control_list)[:,0], phase=0)
+            u_init.add(key="pulse_intensity", initial_guess=np.array(control_list)[:, 0], phase=0)
             u_bounds.add(
                 "pulse_intensity",
                 min_bound=np.array(control_list),

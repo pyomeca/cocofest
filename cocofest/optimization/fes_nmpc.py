@@ -30,15 +30,16 @@ class FesNmpc(MultiCyclicNonlinearModelPredictiveControl):
         self.first_run = True
 
     def initialize_frames_and_parameters(self, stim_time):
-        for i in range(self.n_cycles_simultaneous-1):
+        for i in range(self.n_cycles_simultaneous - 1):
             self.initial_guess_frames.extend(
-                list(range((self.n_cycles_to_advance + i) * self.cycle_len, self.n_cycles * self.cycle_len)))
+                list(range((self.n_cycles_to_advance + i) * self.cycle_len, self.n_cycles * self.cycle_len))
+            )
         self.initial_guess_frames.append(self.n_cycles * self.cycle_len)
 
-        for i in range(self.n_cycles_simultaneous-1):
+        for i in range(self.n_cycles_simultaneous - 1):
             self.initial_guess_param_index.extend(
-                list(range((int(len(stim_time) / self.n_cycles) * (1 + i)),
-                           len(stim_time))))
+                list(range((int(len(stim_time) / self.n_cycles) * (1 + i)), len(stim_time)))
+            )
 
     def advance_window_bounds_states(self, sol, n_cycles_simultaneous=None, **extra):
         super(FesNmpc, self).advance_window_bounds_states(sol)
@@ -71,13 +72,13 @@ class FesNmpc(MultiCyclicNonlinearModelPredictiveControl):
         previous_stim_time = [x - self.phase_time[0] for x in solution_stimulation_time]
         previous_stim = {"time": previous_stim_time}
         new_model = DingModelPulseWidthFrequencyWithFatigue(
-            previous_stim=previous_stim,
-            stim_time=self.nlp[0].model.stim_time,
-            sum_stim_truncation=truncation_term
+            previous_stim=previous_stim, stim_time=self.nlp[0].model.stim_time, sum_stim_truncation=truncation_term
         )
 
         if self.first_run:
-            self.nlp[0].numerical_data_timeseries, _ = new_model.get_numerical_data_time_series(self.n_shooting, self.phase_time[0])
+            self.nlp[0].numerical_data_timeseries, _ = new_model.get_numerical_data_time_series(
+                self.n_shooting, self.phase_time[0]
+            )
             self.first_run = False
 
         self.nlp[0].model = new_model
@@ -102,7 +103,11 @@ class FesNmpc(MultiCyclicNonlinearModelPredictiveControl):
         p_init = InitialGuessList()
         stimulation_per_cycle = int(len(self.nlp[0].model.stim_time) / self.n_cycles)
         for key in self.nlp[0].parameters.keys():
-            combined_parameters = [[parameters[i][key][0]] * stimulation_per_cycle for i in range(len(parameters))] if self.bimapped_param else [list(parameter[key][:stimulation_per_cycle]) for parameter in parameters]
+            combined_parameters = (
+                [[parameters[i][key][0]] * stimulation_per_cycle for i in range(len(parameters))]
+                if self.bimapped_param
+                else [list(parameter[key][:stimulation_per_cycle]) for parameter in parameters]
+            )
             combined_parameters = [val for sublist in combined_parameters for val in sublist]
             p_init[key] = combined_parameters
 
@@ -138,19 +143,20 @@ class FesNmpc(MultiCyclicNonlinearModelPredictiveControl):
         stim_time = [val for sublist in stim_time for val in sublist]
 
         combined_model = DingModelPulseWidthFrequencyWithFatigue(
-            stim_time=stim_time,
-            sum_stim_truncation=self.nlp[0].model._sum_stim_truncation
+            stim_time=stim_time, sum_stim_truncation=self.nlp[0].model._sum_stim_truncation
         )
         return combined_model
 
-    def solve_fes_nmpc(self,
-              update_functions,
-              solver: Solver,
-              total_cycles: int,
-              cycle_solutions: MultiCyclicCycleSolutions,
-              get_all_iterations: bool = True,
-              cyclic_options: dict = None,
-              max_consecutive_failing: int = 3):
+    def solve_fes_nmpc(
+        self,
+        update_functions,
+        solver: Solver,
+        total_cycles: int,
+        cycle_solutions: MultiCyclicCycleSolutions,
+        get_all_iterations: bool = True,
+        cyclic_options: dict = None,
+        max_consecutive_failing: int = 3,
+    ):
 
         sol = self.solve(
             update_functions,
@@ -167,15 +173,20 @@ class FesNmpc(MultiCyclicNonlinearModelPredictiveControl):
         stim_time = self.nlp[0].model.stim_time
         step = stim_time[1] - stim_time[0]
         stim_interval = int(1 / step) + 1
-        all_stim_time = [val for start in range(0, total_nmpc_duration, 2) for val in
-                         np.linspace(start, start + 1, stim_interval)[:-1]]
-        total_nmpc_shooting_len = int(OcpFes.prepare_n_shooting(model.stim_time,
-                                                                self.cycle_duration * self.n_cycles_simultaneous) / self.n_cycles_simultaneous * total_cycles)
+        all_stim_time = [
+            val
+            for start in range(0, total_nmpc_duration, 2)
+            for val in np.linspace(start, start + 1, stim_interval)[:-1]
+        ]
+        total_nmpc_shooting_len = int(
+            OcpFes.prepare_n_shooting(model.stim_time, self.cycle_duration * self.n_cycles_simultaneous)
+            / self.n_cycles_simultaneous
+            * total_cycles
+        )
 
         numerical_data_time_series, stim_idx_at_node_list = model.get_numerical_data_time_series(
-            total_nmpc_shooting_len,
-            total_nmpc_duration,
-            all_stim_time)
+            total_nmpc_shooting_len, total_nmpc_duration, all_stim_time
+        )
         sol[0].ocp.nlp[0].numerical_data_timeseries = numerical_data_time_series
 
         return sol

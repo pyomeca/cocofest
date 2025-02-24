@@ -91,7 +91,9 @@ def annotate_parameters(ax, identified_params, default_model, start_x=0.7, y_sta
     for i, key in enumerate(identified_params.keys()):
         y = y_start - i * y_step
         ax.annotate(f"{key} :", xy=(start_x, y), xycoords="axes fraction", color="black")
-        ax.annotate(f"{round(identified_params[key], 5)}", xy=(start_x + 0.08, y), xycoords="axes fraction", color="red")
+        ax.annotate(
+            f"{round(identified_params[key], 5)}", xy=(start_x + 0.08, y), xycoords="axes fraction", color="red"
+        )
         ax.annotate(f"{getattr(default_model, key)}", xy=(start_x + 0.15, y), xycoords="axes fraction", color="blue")
 
 
@@ -104,7 +106,9 @@ def main():
     pickle_file = "../data/temp_identification_simulation.pkl"
 
     # Simulate data and save it
-    sim_data = simulate_data(n_stim, final_time, pulse_intensity_values=pulse_intensity_values, n_integration_steps=integration_steps)
+    sim_data = simulate_data(
+        n_stim, final_time, pulse_intensity_values=pulse_intensity_values, n_integration_steps=integration_steps
+    )
     save_simulation(sim_data, pickle_file)
 
     # Run identification and extract parameters of interest

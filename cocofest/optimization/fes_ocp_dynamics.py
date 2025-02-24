@@ -75,32 +75,36 @@ class OcpFesMsk:
 
         if input_dict["external_forces"]:
             input_dict["n_total_cycles"] = input_dict["n_total_cycles"] if "n_total_cycles" in input_dict.keys() else 1
-            numerical_time_series, with_contact, external_force_set = OcpFesMsk._prepare_numerical_time_series(input_dict)
+            numerical_time_series, with_contact, external_force_set = OcpFesMsk._prepare_numerical_time_series(
+                input_dict
+            )
         else:
             numerical_time_series, with_contact, external_force_set = None, False, None
 
-        numerical_data_time_series, stim_idx_at_node_list = input_dict["model"].muscles_dynamics_model[0].get_numerical_data_time_series(
-            input_dict["n_shooting"],
-            input_dict["final_time"])
+        numerical_data_time_series, stim_idx_at_node_list = (
+            input_dict["model"]
+            .muscles_dynamics_model[0]
+            .get_numerical_data_time_series(input_dict["n_shooting"], input_dict["final_time"])
+        )
 
         if numerical_time_series:
             numerical_time_series.update(numerical_data_time_series)
         else:
             numerical_time_series = numerical_data_time_series
 
-        dynamics = OcpFesMsk._declare_dynamics(input_dict["model"], numerical_time_series=numerical_time_series, with_contact=with_contact)
+        dynamics = OcpFesMsk._declare_dynamics(
+            input_dict["model"], numerical_time_series=numerical_time_series, with_contact=with_contact
+        )
 
         x_bounds, x_init = OcpFesMsk._set_bounds_fes(input_dict["model"])
         x_bounds, x_init = OcpFesMsk._set_bounds_msk(x_bounds, x_init, input_dict["model"], msk_info)
 
         u_bounds, u_init = OcpFesMsk._set_u_bounds_fes(input_dict["model"])
-        u_bounds, u_init = OcpFesMsk._set_u_bounds_msk(u_bounds, u_init, input_dict["model"], msk_info["with_residual_torque"])
-
-        constraints = OcpFesMsk._build_constraints(
-            input_dict["model"],
-            input_dict["n_shooting"],
-            stim_idx_at_node_list
+        u_bounds, u_init = OcpFesMsk._set_u_bounds_msk(
+            u_bounds, u_init, input_dict["model"], msk_info["with_residual_torque"]
         )
+
+        constraints = OcpFesMsk._build_constraints(input_dict["model"], input_dict["n_shooting"], stim_idx_at_node_list)
 
         muscle_force_key = [
             "F_" + input_dict["model"].muscles_dynamics_model[i].muscle_name
@@ -295,18 +299,29 @@ class OcpFesMsk:
 
     @staticmethod
     def _prepare_numerical_time_series(input_dict):
-        n_cycles_simultaneous = input_dict["n_cycles_simultaneous"] if "n_cycles_simultaneous" in input_dict.keys() else 1
+        n_cycles_simultaneous = (
+            input_dict["n_cycles_simultaneous"] if "n_cycles_simultaneous" in input_dict.keys() else 1
+        )
         total_n_shooting = input_dict["n_shooting"] * n_cycles_simultaneous
-        total_external_forces_frame = input_dict["n_total_cycles"] * input_dict["n_shooting"] if input_dict["n_total_cycles"] >= n_cycles_simultaneous else total_n_shooting
+        total_external_forces_frame = (
+            input_dict["n_total_cycles"] * input_dict["n_shooting"]
+            if input_dict["n_total_cycles"] >= n_cycles_simultaneous
+            else total_n_shooting
+        )
         external_force_set = ExternalForceSetTimeSeries(nb_frames=total_external_forces_frame)
 
         external_force_array = np.array(input_dict["external_forces"]["torque"])
         reshape_values_array = np.tile(external_force_array[:, np.newaxis], (1, total_external_forces_frame))
-        external_force_set.add_torque(segment=input_dict["external_forces"]["Segment_application"],
-                                      values=reshape_values_array)
+        external_force_set.add_torque(
+            segment=input_dict["external_forces"]["Segment_application"], values=reshape_values_array
+        )
 
         numerical_time_series = {"external_forces": external_force_set.to_numerical_time_series()}
-        with_contact = input_dict["external_forces"]["with_contact"] if "with_contact" in input_dict["external_forces"].keys() else False
+        with_contact = (
+            input_dict["external_forces"]["with_contact"]
+            if "with_contact" in input_dict["external_forces"].keys()
+            else False
+        )
 
         return numerical_time_series, with_contact, external_force_set
 
@@ -406,7 +421,7 @@ class OcpFesMsk:
         )
 
     @staticmethod
-    def _build_constraints(models, n_shooting, stim_idx_at_node_list,  custom_constraint=None):
+    def _build_constraints(models, n_shooting, stim_idx_at_node_list, custom_constraint=None):
         constraints = ConstraintList()
         if isinstance(models.muscles_dynamics_model[0], DingModelPulseIntensityFrequency):
             for model in models.muscles_dynamics_model:
@@ -563,8 +578,13 @@ class OcpFesMsk:
         if isinstance(models[0], DingModelPulseIntensityFrequency):
             for model in models:
                 key = "pulse_intensity_" + str(model.muscle_name)
-                u_init.add(key=key, initial_guess=[0]*model._sum_stim_truncation, phase=0)
-                u_bounds.add(key=key, min_bound=[model.min_pulse_intensity()]*model._sum_stim_truncation, max_bound=[130]*model._sum_stim_truncation, phase=0)
+                u_init.add(key=key, initial_guess=[0] * model._sum_stim_truncation, phase=0)
+                u_bounds.add(
+                    key=key,
+                    min_bound=[model.min_pulse_intensity()] * model._sum_stim_truncation,
+                    max_bound=[130] * model._sum_stim_truncation,
+                    phase=0,
+                )
 
         return u_bounds, u_init
 

@@ -306,11 +306,8 @@ class DingModelFrequency(FesModel):
         -------
         The value of the derivative force (N)
         """
-        return (
-            (a * (cn / (km + cn)) - (f / (tau1 + self.tau2 * (cn / (km + cn)))))
-            * (force_length_relationship
-            * force_velocity_relationship
-            + passive_force_relationship)
+        return (a * (cn / (km + cn)) - (f / (tau1 + self.tau2 * (cn / (km + cn))))) * (
+            force_length_relationship * force_velocity_relationship + passive_force_relationship
         )  # Equation n°2
 
     @staticmethod
@@ -403,7 +400,9 @@ class DingModelFrequency(FesModel):
         truncation = self._sum_stim_truncation
         # --- Set the previous stim time for the numerical data time series (mandatory to avoid nan values) --- #
         self.previous_stim = self._get_additional_previous_stim_time()
-        stim_time = all_stim_time if all_stim_time else self.stim_time  # all_stim_time is used for problem reconstruction in NMPC
+        stim_time = (
+            all_stim_time if all_stim_time else self.stim_time
+        )  # all_stim_time is used for problem reconstruction in NMPC
         self.all_stim = self.previous_stim["time"] + stim_time
         stim_time = np.array(self.all_stim)
         dt = final_time / n_shooting
@@ -412,17 +411,11 @@ class DingModelFrequency(FesModel):
         node_idx = [np.where(stim_time <= i * dt)[0][-1] for i in range(n_shooting + 1)]
 
         # For each node, extract the stim times up to that node, then keep only the last 'truncated' values.
-        stim_time_list = [
-            list(stim_time[:idx + 1][-truncation:])
-            for idx in node_idx
-        ]
+        stim_time_list = [list(stim_time[: idx + 1][-truncation:]) for idx in node_idx]
 
         node_list = list(range(n_shooting + 1))
         node_idx = list(np.array(node_idx) - truncation)
-        stim_idx_at_node_list = [
-            list(node_list[:idx+1][-truncation:])
-            for idx in node_idx
-        ]
+        stim_idx_at_node_list = [list(node_list[: idx + 1][-truncation:]) for idx in node_idx]
 
         # --- Create a correct numerical_data_time_series shape array from the stim_time_list --- #
         reshaped_array = np.full((n_shooting + 1, truncation), np.nan)

@@ -4,6 +4,7 @@ This ocp was build to produce an elbow motion from 5 to 120 degrees.
 The stimulation frequency is fixed at 33hz and the pulse width is optimized to satisfy the flexion while minimizing
 elbow residual torque control.
 """
+
 import numpy as np
 
 from bioptim import Solver, OdeSolver
@@ -24,7 +25,11 @@ def prepare_ocp(stim_time: list, final_time: float, external_force: bool):
     )
 
     minimum_pulse_width = DingModelPulseWidthFrequencyWithFatigue().pd0
-    resistive_torque = {"Segment_application": "r_ulna_radius_hand", "torque": np.array([0, 0, -1]), "with_contact": False}
+    resistive_torque = {
+        "Segment_application": "r_ulna_radius_hand",
+        "torque": np.array([0, 0, -1]),
+        "with_contact": False,
+    }
     ocp = OcpFesMsk.prepare_ocp(
         model=model,
         final_time=final_time,
@@ -50,7 +55,11 @@ def prepare_ocp(stim_time: list, final_time: float, external_force: bool):
 
 if __name__ == "__main__":
     simulation_ending_time = 1
-    ocp = prepare_ocp(stim_time=list(np.linspace(0, simulation_ending_time, 34)[:-1]), final_time=simulation_ending_time, external_force=True)
+    ocp = prepare_ocp(
+        stim_time=list(np.linspace(0, simulation_ending_time, 34)[:-1]),
+        final_time=simulation_ending_time,
+        external_force=True,
+    )
     sol = ocp.solve(Solver.IPOPT(show_online_optim=False, _max_iter=2000))
     sol.animate(viewer="pyorerun", n_frames=1000)
     sol.graphs(show_bounds=False)

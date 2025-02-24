@@ -62,13 +62,17 @@ class OcpFes:
         )
 
         numerical_data_time_series, stim_idx_at_node_list = input_dict["model"].get_numerical_data_time_series(
-                                                                                             input_dict["n_shooting"],
-                                                                                             input_dict["final_time"])
+            input_dict["n_shooting"], input_dict["final_time"]
+        )
 
         dynamics = OcpFes._declare_dynamics(input_dict["model"], numerical_data_time_series)
         x_bounds, x_init = OcpFes._set_bounds(input_dict["model"])
 
-        max_bound = pulse_width["max"] if isinstance(input_dict["model"], DingModelPulseWidthFrequency) else pulse_intensity["max"] if isinstance(input_dict["model"], DingModelPulseIntensityFrequency) else None
+        max_bound = (
+            pulse_width["max"]
+            if isinstance(input_dict["model"], DingModelPulseWidthFrequency)
+            else pulse_intensity["max"] if isinstance(input_dict["model"], DingModelPulseIntensityFrequency) else None
+        )
         u_bounds, u_init = OcpFes._set_u_bounds(input_dict["model"], max_bound=max_bound)
 
         objective_functions = OcpFes._set_objective(input_dict["n_shooting"], objective)
@@ -76,10 +80,10 @@ class OcpFes:
         constraints = ConstraintList()
         if isinstance(input_dict["model"], DingModelPulseIntensityFrequency):
             constraints = OcpFes._build_constraints(
-                    input_dict["model"],
-                    input_dict["n_shooting"],
-                    stim_idx_at_node_list,
-                )
+                input_dict["model"],
+                input_dict["n_shooting"],
+                stim_idx_at_node_list,
+            )
             OcpFes.update_model_param(input_dict["model"], parameters)
 
         optimization_dict = {
@@ -210,8 +214,10 @@ class OcpFes:
             n_shooting = n_shooting * d // gcd(n_shooting, d)
 
         if n_shooting >= 1000:
-            print(f"Warning: The number of shooting nodes is very high n = {n_shooting}.\n"
-                   "The optimization might be long, consider using stimulation time with even spacing (common frequency).")
+            print(
+                f"Warning: The number of shooting nodes is very high n = {n_shooting}.\n"
+                "The optimization might be long, consider using stimulation time with even spacing (common frequency)."
+            )
 
         return n_shooting
 
@@ -503,14 +509,16 @@ class OcpFes:
             min_pulse_width = model.pd0 if isinstance(model.pd0, int | float) else 0
             u_bounds.add(
                 "last_pulse_width",
-                min_bound=np.array([[min_pulse_width]*3]),
-                max_bound=np.array([[max_bound]*3]),
+                min_bound=np.array([[min_pulse_width] * 3]),
+                max_bound=np.array([[max_bound] * 3]),
                 interpolation=InterpolationType.CONSTANT_WITH_FIRST_AND_LAST_DIFFERENT,
             )
 
         if isinstance(model, DingModelPulseIntensityFrequency):
             u_init.add(key="pulse_intensity", initial_guess=[0] * model._sum_stim_truncation, phase=0)
-            min_pulse_intensity = model.min_pulse_intensity() if isinstance(model.min_pulse_intensity(), int | float) else 0
+            min_pulse_intensity = (
+                model.min_pulse_intensity() if isinstance(model.min_pulse_intensity(), int | float) else 0
+            )
             u_bounds.add(
                 "pulse_intensity",
                 min_bound=[min_pulse_intensity] * model._sum_stim_truncation,

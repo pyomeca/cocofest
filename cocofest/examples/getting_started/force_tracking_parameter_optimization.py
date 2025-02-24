@@ -43,7 +43,7 @@ sol = ocp.solve()
 controls = sol.stepwise_controls(to_merge=SolutionMerge.NODES)
 time = sol.decision_time(to_merge=SolutionMerge.NODES).T[0]
 for i in range(controls["pulse_intensity"].shape[0]):
-    plt.plot(time[:-1], controls["pulse_intensity"][i], label="stimulation intensity_"+str(i))
+    plt.plot(time[:-1], controls["pulse_intensity"][i], label="stimulation intensity_" + str(i))
 plt.legend()
 plt.show()
 

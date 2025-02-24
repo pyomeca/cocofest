@@ -4,11 +4,14 @@ The uncommented model used is the DingModelFrequencyWithFatigue, but you can cha
 The model is integrated for 300 seconds and the stimulation will be on for 1 second at 33 Hz and of for a second.
 The effect of the fatigue will be visible and the force state result will decrease over time.
 """
-from cocofest import (IvpFes,
-                      DingModelFrequencyWithFatigue,
-                      DingModelPulseIntensityFrequencyWithFatigue,
-                      DingModelPulseWidthFrequencyWithFatigue,
-                      FES_plot)
+
+from cocofest import (
+    IvpFes,
+    DingModelFrequencyWithFatigue,
+    DingModelPulseIntensityFrequencyWithFatigue,
+    DingModelPulseWidthFrequencyWithFatigue,
+    FES_plot,
+)
 import numpy as np
 from bioptim import OdeSolver
 

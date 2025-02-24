@@ -45,8 +45,9 @@ def prepare_nmpc(
     total_cycle_duration = cycle_duration * n_cycles_simultaneous
     cycle_len = int(total_cycle_len / n_cycles_simultaneous)
 
-    numerical_data_time_series, stim_idx_at_node_list = model.get_numerical_data_time_series(total_cycle_len,
-                                                                                             total_cycle_duration)
+    numerical_data_time_series, stim_idx_at_node_list = model.get_numerical_data_time_series(
+        total_cycle_len, total_cycle_duration
+    )
 
     dynamics = OcpFes._declare_dynamics(model, numerical_data_time_series)
 
@@ -59,18 +60,14 @@ def prepare_nmpc(
         stim_idx_at_node_list,
     )
 
-    stim_interval = int(1 / (model.stim_time[1]-model.stim_time[0]))
+    stim_interval = int(1 / (model.stim_time[1] - model.stim_time[0]))
     constraints_node_list = [stim_interval * (1 + 2 * i) for i in range(total_cycle_len // (2 * stim_interval))]
     for i in constraints_node_list:
         constraints.add(ConstraintFcn.TRACK_STATE, key="F", node=i, min_bound=200, max_bound=210)
 
     # Define objective functions
     objective_functions = ObjectiveList()
-    objective_functions.add(
-        ObjectiveFcn.Lagrange.MINIMIZE_STATE,
-        key="F",
-        weight=1,
-        quadratic=True)
+    objective_functions.add(ObjectiveFcn.Lagrange.MINIMIZE_STATE, key="F", weight=1, quadratic=True)
 
     # objective_functions.add(
     #     ObjectiveFcn.Lagrange.MINIMIZE_STATE,
@@ -119,7 +116,11 @@ def main():
     # --- Set stimulation time apparition --- #
     stimulation_frequency = 33  # Stimulation frequency in Hz
     final_time = cycle_duration * n_cycles_simultaneous
-    stim_time = [val for start in range(0, final_time, 2) for val in np.linspace(start, start + 1, stimulation_frequency + 1)[:-1]]
+    stim_time = [
+        val
+        for start in range(0, final_time, 2)
+        for val in np.linspace(start, start + 1, stimulation_frequency + 1)[:-1]
+    ]
 
     # --- Build FES model --- #
     fes_model = DingModelPulseWidthFrequencyWithFatigue(stim_time=stim_time, sum_stim_truncation=10)

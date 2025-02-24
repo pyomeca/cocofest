@@ -91,8 +91,8 @@ class IvpFes:
         self.parameters_bounds = parameters_bounds
 
         numerical_data_time_series, stim_idx_at_node_list = self.model.get_numerical_data_time_series(
-            self.n_shooting,
-            self.final_time)
+            self.n_shooting, self.final_time
+        )
 
         self._declare_dynamics(numerical_data_time_series)
 
@@ -327,9 +327,11 @@ class IvpFes:
                     if isinstance(self.pulse_intensity, list) and len(self.pulse_intensity) != 1:
                         initial_guess_list = [
                             [
-                                self.pulse_intensity[stim_idx_at_node_list[j - i][j - i]]
-                                if i < j + 1
-                                else self.pulse_intensity[stim_idx_at_node_list[i][0]]
+                                (
+                                    self.pulse_intensity[stim_idx_at_node_list[j - i][j - i]]
+                                    if i < j + 1
+                                    else self.pulse_intensity[stim_idx_at_node_list[i][0]]
+                                )
                                 for i in range(self.n_shooting)
                             ]
                             for j in range(self.model._sum_stim_truncation)
@@ -343,7 +345,7 @@ class IvpFes:
 
                 if "last_pulse_width" in ocp.controls_keys:
                     if isinstance(self.pulse_width, list) and len(self.pulse_width) != 1:
-                        last_stim_idx = [stim_idx_at_node_list[i][-1] for i in range(len(stim_idx_at_node_list)-1)]
+                        last_stim_idx = [stim_idx_at_node_list[i][-1] for i in range(len(stim_idx_at_node_list) - 1)]
                         initial_guess = [self.pulse_width[last_stim_idx[i]] for i in range(len(last_stim_idx))]
                     else:
                         pw = self.pulse_width[0] if isinstance(self.pulse_width, list) else self.pulse_width
