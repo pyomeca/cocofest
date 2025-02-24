@@ -2,6 +2,7 @@
 This example will do a 10 stimulation example with Ding's 2003 frequency model associated to Hmed's 2018 work.
 This ocp was build to match a force value of 200N at the end of the last node.
 """
+
 import numpy as np
 from bioptim import OdeSolver
 from cocofest import DingModelPulseIntensityFrequencyWithFatigue, OcpFes

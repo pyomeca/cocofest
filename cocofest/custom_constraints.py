@@ -99,7 +99,9 @@ class CustomConstraint:
         return controller.controls["A_calculation"].cx - a_calculation
 
     @staticmethod
-    def pulse_intensity_sliding_window_constraint(controller: PenaltyController, last_stim_idx: int, muscle_name: str = "") -> MX | SX:
+    def pulse_intensity_sliding_window_constraint(
+        controller: PenaltyController, last_stim_idx: int, muscle_name: str = ""
+    ) -> MX | SX:
         key = "pulse_intensity" + "_" + str(muscle_name) if muscle_name else "pulse_intensity"
         parameters = [controller.parameters[key].cx[i] for i in range(last_stim_idx + 1)]
         if isinstance(controller.model, FesMskModel):

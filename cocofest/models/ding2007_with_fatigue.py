@@ -300,7 +300,7 @@ class DingModelPulseWidthFrequencyWithFatigue(DingModelPulseWidthFrequency):
                 pulse_width=controls[0],
                 force_length_relationship=force_length_relationship,
                 force_velocity_relationship=force_velocity_relationship,
-                passive_force_relationship=passive_force_relationship
+                passive_force_relationship=passive_force_relationship,
             ),
             defects=None,
         )

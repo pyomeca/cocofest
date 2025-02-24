@@ -4,6 +4,7 @@ This ocp was build to produce a elbow motion from 5 to 120 degrees.
 The stimulation frequency will be optimized between 10 and 100 Hz and pulse intensity between minimal sensitivity
 threshold and 130mA to satisfy the flexion and minimizing required elbow torque control.
 """
+
 import numpy as np
 
 from cocofest import DingModelPulseIntensityFrequencyWithFatigue, OcpFesMsk, FesMskModel
