@@ -4,9 +4,17 @@ This ocp was build to produce a elbow motion from 5 to 120 degrees.
 The pulse width between minimal sensitivity threshold and 600us to satisfy the flexion and minimizing required elbow
 torque control.
 """
+
 import numpy as np
 import biorbd
-from bioptim import Solver, MultiCyclicNonlinearModelPredictiveControl, Solution, ObjectiveList, ObjectiveFcn, MultiCyclicCycleSolutions
+from bioptim import (
+    Solver,
+    MultiCyclicNonlinearModelPredictiveControl,
+    Solution,
+    ObjectiveList,
+    ObjectiveFcn,
+    MultiCyclicCycleSolutions,
+)
 from cocofest import (
     DingModelPulseWidthFrequencyWithFatigue,
     NmpcFesMsk,
@@ -15,9 +23,40 @@ from cocofest import (
 
 model = FesMskModel(
     name=None,
-    biorbd_path="../msk_models/arm26_biceps_1dof.bioMod",
+    biorbd_path="../model_msk/arm26_biceps_1dof.bioMod",
     muscles_model=[DingModelPulseWidthFrequencyWithFatigue(muscle_name="BIClong")],
-    stim_time=[0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1, 1.1, 1.2, 1.3, 1.4, 1.5, 1.6, 1.7, 1.8, 1.9, 2, 2.1, 2.2, 2.3, 2.4, 2.5, 2.6, 2.7, 2.8, 2.9],
+    stim_time=[
+        0,
+        0.1,
+        0.2,
+        0.3,
+        0.4,
+        0.5,
+        0.6,
+        0.7,
+        0.8,
+        0.9,
+        1,
+        1.1,
+        1.2,
+        1.3,
+        1.4,
+        1.5,
+        1.6,
+        1.7,
+        1.8,
+        1.9,
+        2,
+        2.1,
+        2.2,
+        2.3,
+        2.4,
+        2.5,
+        2.6,
+        2.7,
+        2.8,
+        2.9,
+    ],
     activate_force_length_relationship=True,
     activate_force_velocity_relationship=True,
     activate_residual_torque=True,
@@ -61,8 +100,7 @@ nmpc = nmpc_fes_msk.prepare_nmpc(
         "max": 0.0006,
         "bimapping": False,
     },
-    objective={"minimize_residual_torque": True,
-               "custom": objective_functions},
+    objective={"minimize_residual_torque": True, "custom": objective_functions},
     msk_info={
         # "bound_type": "start_end",
         # "bound_data": [[5], [120]],
@@ -86,7 +124,7 @@ sol = nmpc.solve(
     cyclic_options={"states": {}},
 )
 
-biorbd_model = biorbd.Model("../msk_models/arm26_biceps_1dof.bioMod")
+biorbd_model = biorbd.Model("../model_msk/arm26_biceps_1dof.bioMod")
 # sol.print_cost()
 
 # from matplotlib import pyplot as plt

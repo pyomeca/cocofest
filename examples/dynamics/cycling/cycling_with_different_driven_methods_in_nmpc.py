@@ -2,6 +2,7 @@
 This example will do an optimal control program of a 100 steps tracking a hand cycling motion with a torque driven and
 a torque resistance at the handle.
 """
+
 import matplotlib.pyplot as plt
 import numpy as np
 
@@ -35,8 +36,6 @@ from cocofest import (
     FesMskModel,
     inverse_kinematics_cycling,
     OcpFesMsk,
-
-
 )
 
 
@@ -66,8 +65,13 @@ class MyCyclicNMPC(MultiCyclicNonlinearModelPredictiveControl):
         for i in range(len(self.nlp[0].model.muscles_dynamics_model)):
             self.nlp[0].model.muscles_dynamics_model[i].previous_stim = {"time": previous_stim_time}
             if isinstance(self.nlp[0].model.muscles_dynamics_model[i], DingModelPulseWidthFrequency):
-                self.nlp[0].model.muscles_dynamics_model[i].previous_stim["pulse_width"] = list(sol.parameters["pulse_width_" + self.nlp[0].model.muscles_dynamics_model[i].muscle_name][-10:])
-            self.nlp[0].model.muscles_dynamics_model[i].all_stim = self.nlp[0].model.muscles_dynamics_model[i].previous_stim["time"] + self.nlp[0].model.muscles_dynamics_model[i].stim_time
+                self.nlp[0].model.muscles_dynamics_model[i].previous_stim["pulse_width"] = list(
+                    sol.parameters["pulse_width_" + self.nlp[0].model.muscles_dynamics_model[i].muscle_name][-10:]
+                )
+            self.nlp[0].model.muscles_dynamics_model[i].all_stim = (
+                self.nlp[0].model.muscles_dynamics_model[i].previous_stim["time"]
+                + self.nlp[0].model.muscles_dynamics_model[i].stim_time
+            )
 
 
 def prepare_nmpc(
@@ -87,7 +91,9 @@ def prepare_nmpc(
     total_n_shooting = cycle_len * n_cycles_simultaneous
 
     # Dynamics
-    total_external_forces_frame = total_n_cycles * cycle_len if total_n_cycles >= n_cycles_simultaneous else total_n_shooting
+    total_external_forces_frame = (
+        total_n_cycles * cycle_len if total_n_cycles >= n_cycles_simultaneous else total_n_shooting
+    )
     numerical_time_series, external_force_set = set_external_forces(total_external_forces_frame, torque=-1)
     dynamics = set_dynamics(model=model, numerical_time_series=numerical_time_series, dynamics_type_str=dynamics_type)
 
@@ -98,12 +104,14 @@ def prepare_nmpc(
     x_init = set_x_init(total_n_shooting, pedal_config, turn_number)
 
     # Path constraint
-    x_bounds = set_bounds(model=model,
-                          x_init=x_init,
-                          n_shooting=total_n_shooting,
-                          turn_number=turn_number,
-                          interpolation_type=InterpolationType.EACH_FRAME,
-                          cardinal=1)
+    x_bounds = set_bounds(
+        model=model,
+        x_init=x_init,
+        n_shooting=total_n_shooting,
+        turn_number=turn_number,
+        interpolation_type=InterpolationType.EACH_FRAME,
+        cardinal=1,
+    )
 
     # Control path constraint
     u_bounds, u_init = set_u_bounds_and_init(model, dynamics_type_str=dynamics_type)
@@ -117,11 +125,12 @@ def prepare_nmpc(
     parameters_init = None
     parameter_objectives = None
     if isinstance(model, FesMskModel) and isinstance(pulse_width, dict):
-        (parameters,
-         parameters_bounds,
-         parameters_init,
-         parameter_objectives,
-         ) = OcpFesMsk._build_parameters(
+        (
+            parameters,
+            parameters_bounds,
+            parameters_init,
+            parameter_objectives,
+        ) = OcpFesMsk._build_parameters(
             model=model,
             pulse_width=pulse_width,
             pulse_intensity=None,
@@ -184,17 +193,24 @@ def updating_model(model, external_force_set, parameters=None):
 
 
 def set_dynamics(model, numerical_time_series, dynamics_type_str="torque_driven"):
-    dynamics_type = (DynamicsFcn.TORQUE_DRIVEN if dynamics_type_str == "torque_driven"
-                         else DynamicsFcn.MUSCLE_DRIVEN if dynamics_type_str == "muscle_driven"
-                         else model.declare_model_variables if dynamics_type_str == "fes_driven"
-                         else None)
+    dynamics_type = (
+        DynamicsFcn.TORQUE_DRIVEN
+        if dynamics_type_str == "torque_driven"
+        else (
+            DynamicsFcn.MUSCLE_DRIVEN
+            if dynamics_type_str == "muscle_driven"
+            else model.declare_model_variables if dynamics_type_str == "fes_driven" else None
+        )
+    )
     if dynamics_type is None:
         raise ValueError("Dynamics type not recognized")
 
     dynamics = DynamicsList()
     dynamics.add(
         dynamics_type=dynamics_type,
-        dynamic_function=None if dynamics_type in (DynamicsFcn.TORQUE_DRIVEN, DynamicsFcn.MUSCLE_DRIVEN) else model.muscle_dynamic,
+        dynamic_function=(
+            None if dynamics_type in (DynamicsFcn.TORQUE_DRIVEN, DynamicsFcn.MUSCLE_DRIVEN) else model.muscle_dynamic
+        ),
         expand_dynamics=True,
         expand_continuity=False,
         phase_dynamics=PhaseDynamics.SHARED_DURING_THE_PHASE,
@@ -208,7 +224,12 @@ def set_dynamics(model, numerical_time_series, dynamics_type_str="torque_driven"
 def set_objective_functions(model, dynamics_type):
     objective_functions = ObjectiveList()
     if isinstance(model, FesMskModel):
-        objective_functions.add(CustomObjective.minimize_overall_muscle_force_production, custom_type=ObjectiveFcn.Lagrange, weight=1, quadratic=True)
+        objective_functions.add(
+            CustomObjective.minimize_overall_muscle_force_production,
+            custom_type=ObjectiveFcn.Lagrange,
+            weight=1,
+            quadratic=True,
+        )
         # objective_functions.add(CustomObjective.minimize_overall_muscle_fatigue, custom_type=ObjectiveFcn.Lagrange, weight=1, quadratic=True)
     else:
         control_key = "tau" if dynamics_type == "torque_driven" else "muscles"
@@ -227,7 +248,7 @@ def set_x_init(n_shooting, pedal_config, turn_number):
         y_center=pedal_config["y_center"],
         radius=pedal_config["radius"],
         ik_method="lm",
-        cycling_number=turn_number
+        cycling_number=turn_number,
     )
     x_init.add("q", q_guess, interpolation=InterpolationType.EACH_FRAME)
     # x_init.add("qdot", qdot_guess, interpolation=InterpolationType.EACH_FRAME)
@@ -244,13 +265,13 @@ def set_u_bounds_and_init(bio_model, dynamics_type_str):
         u_bounds.add(key="tau", min_bound=np.array([-50, -50, -0]), max_bound=np.array([50, 50, 0]), phase=0)
     elif dynamics_type_str == "muscle_driven":
         muscle_min, muscle_max, muscle_init = 0.0, 1.0, 0.5
-        u_bounds.add(key="muscles",
-                     min_bound=np.array([muscle_min] * bio_model.nb_muscles),
-                     max_bound=np.array([muscle_max] * bio_model.nb_muscles),
-                     phase=0)
-        u_init.add(key="muscles",
-                   initial_guess=np.array([muscle_init] * bio_model.nb_muscles),
-                   phase=0)
+        u_bounds.add(
+            key="muscles",
+            min_bound=np.array([muscle_min] * bio_model.nb_muscles),
+            max_bound=np.array([muscle_max] * bio_model.nb_muscles),
+            phase=0,
+        )
+        u_init.add(key="muscles", initial_guess=np.array([muscle_init] * bio_model.nb_muscles), phase=0)
     return u_bounds, u_init
 
 
@@ -269,8 +290,11 @@ def set_bounds(model, x_init, n_shooting, turn_number, interpolation_type=Interp
             x_min_bound.append([q_x_bounds.min[i][0]] * (n_shooting + 1))
             x_max_bound.append([q_x_bounds.max[i][0]] * (n_shooting + 1))
 
-        cardinal_node_list = [i * int(n_shooting / ((n_shooting/(n_shooting/turn_number)) * cardinal)) for i in range(int((n_shooting/(n_shooting/turn_number)) * cardinal + 1))]
-        slack = 10*(np.pi/180)
+        cardinal_node_list = [
+            i * int(n_shooting / ((n_shooting / (n_shooting / turn_number)) * cardinal))
+            for i in range(int((n_shooting / (n_shooting / turn_number)) * cardinal + 1))
+        ]
+        slack = 10 * (np.pi / 180)
         for i in range(len(x_min_bound[0])):
             x_min_bound[0][i] = 0
             x_max_bound[0][i] = 1
@@ -279,13 +303,22 @@ def set_bounds(model, x_init, n_shooting, turn_number, interpolation_type=Interp
             x_max_bound[2][i] = x_init["q"].init[2][0]
         for i in range(len(cardinal_node_list)):
             cardinal_index = cardinal_node_list[i]
-            x_min_bound[2][cardinal_index] = x_init["q"].init[2][cardinal_index] if i % cardinal == 0 else x_init["q"].init[2][cardinal_index] - slack
-            x_max_bound[2][cardinal_index] = x_init["q"].init[2][cardinal_index] if i % cardinal == 0 else x_init["q"].init[2][cardinal_index] + slack
+            x_min_bound[2][cardinal_index] = (
+                x_init["q"].init[2][cardinal_index]
+                if i % cardinal == 0
+                else x_init["q"].init[2][cardinal_index] - slack
+            )
+            x_max_bound[2][cardinal_index] = (
+                x_init["q"].init[2][cardinal_index]
+                if i % cardinal == 0
+                else x_init["q"].init[2][cardinal_index] + slack
+            )
             # x_min_bound[2][cardinal_index] = x_init["q"].init[2][cardinal_index] - slack
             # x_max_bound[2][cardinal_index] = x_init["q"].init[2][cardinal_index] + slack
 
-        x_bounds.add(key="q", min_bound=x_min_bound, max_bound=x_max_bound, phase=0,
-                     interpolation=InterpolationType.EACH_FRAME)
+        x_bounds.add(
+            key="q", min_bound=x_min_bound, max_bound=x_max_bound, phase=0, interpolation=InterpolationType.EACH_FRAME
+        )
 
     else:
         x_bounds.add(key="q", bounds=q_x_bounds, phase=0)
@@ -303,8 +336,10 @@ def set_bounds(model, x_init, n_shooting, turn_number, interpolation_type=Interp
 
 def set_constraints(bio_model, n_shooting, turn_number):
     constraints = ConstraintList()
-    superimpose_marker_list = [i * int(n_shooting / ((n_shooting / (n_shooting / turn_number)) * 1)) for i in
-                          range(int((n_shooting / (n_shooting / turn_number)) * 1 + 1))]
+    superimpose_marker_list = [
+        i * int(n_shooting / ((n_shooting / (n_shooting / turn_number)) * 1))
+        for i in range(int((n_shooting / (n_shooting / turn_number)) * 1 + 1))
+    ]
 
     for i in superimpose_marker_list:
         constraints.add(
@@ -350,13 +385,23 @@ def main():
     elif dynamics_type == "fes_driven":
         # Define muscle dynamics for the FES-driven model
         muscles_model = [
-            DingModelPulseWidthFrequencyWithFatigue(muscle_name="DeltoideusClavicle_A", is_approximated=False, sum_stim_truncation=10),
-            DingModelPulseWidthFrequencyWithFatigue(muscle_name="DeltoideusScapula_P", is_approximated=False, sum_stim_truncation=10),
-            DingModelPulseWidthFrequencyWithFatigue(muscle_name="TRIlong", is_approximated=False, sum_stim_truncation=10),
-            DingModelPulseWidthFrequencyWithFatigue(muscle_name="BIC_long", is_approximated=False, sum_stim_truncation=10),
-            DingModelPulseWidthFrequencyWithFatigue(muscle_name="BIC_brevis", is_approximated=False, sum_stim_truncation=10),
+            DingModelPulseWidthFrequencyWithFatigue(
+                muscle_name="DeltoideusClavicle_A", is_approximated=False, sum_stim_truncation=10
+            ),
+            DingModelPulseWidthFrequencyWithFatigue(
+                muscle_name="DeltoideusScapula_P", is_approximated=False, sum_stim_truncation=10
+            ),
+            DingModelPulseWidthFrequencyWithFatigue(
+                muscle_name="TRIlong", is_approximated=False, sum_stim_truncation=10
+            ),
+            DingModelPulseWidthFrequencyWithFatigue(
+                muscle_name="BIC_long", is_approximated=False, sum_stim_truncation=10
+            ),
+            DingModelPulseWidthFrequencyWithFatigue(
+                muscle_name="BIC_brevis", is_approximated=False, sum_stim_truncation=10
+            ),
         ]
-        stim_time = list(np.linspace(0, cycle_duration*n_cycles_simultaneous, 67)[:-1])
+        stim_time = list(np.linspace(0, cycle_duration * n_cycles_simultaneous, 67)[:-1])
         model = FesMskModel(
             name=None,
             biorbd_path=model_path,
@@ -367,9 +412,13 @@ def main():
             activate_residual_torque=False,
             external_force_set=None,  # External forces will be added later
         )
-        pulse_width = {"min": DingModelPulseWidthFrequencyWithFatigue().pd0, "max": 0.0006, "bimapping": False,
-                       "same_for_all_muscles": False,
-                       "fixed": False}
+        pulse_width = {
+            "min": DingModelPulseWidthFrequencyWithFatigue().pd0,
+            "max": 0.0006,
+            "bimapping": False,
+            "same_for_all_muscles": False,
+            "fixed": False,
+        }
         # Adjust n_shooting based on the stimulation time
         cycle_len = len(stim_time)
     else:
