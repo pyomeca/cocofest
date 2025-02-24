@@ -114,7 +114,7 @@ def main():
     cycle_duration = 2  # Duration of a cycle in seconds
     n_cycles_simultaneous = 3  # Number of cycles to solve simultaneously
     n_cycles_to_advance = 1  # Number of cycles to advance at each iteration
-    n_cycles = 20  # Number of total cycles to perform
+    n_cycles = 5  # Number of total cycles to perform
 
     # --- Set stimulation time apparition --- #
     stimulation_frequency = 33  # Stimulation frequency in Hz
@@ -142,6 +142,7 @@ def main():
     sol = nmpc.solve_fes_nmpc(
         update_functions,
         solver=Solver.IPOPT(show_online_optim=False, _max_iter=1000, show_options=dict(show_bounds=True)),
+        total_cycles=n_cycles,
         cycle_solutions=MultiCyclicCycleSolutions.ALL_CYCLES,
         get_all_iterations=True,
         cyclic_options={"states": {}},

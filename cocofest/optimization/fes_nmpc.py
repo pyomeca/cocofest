@@ -146,6 +146,7 @@ class FesNmpc(MultiCyclicNonlinearModelPredictiveControl):
     def solve_fes_nmpc(self,
               update_functions,
               solver: Solver,
+              total_cycles: int,
               cycle_solutions: MultiCyclicCycleSolutions,
               get_all_iterations: bool = True,
               cyclic_options: dict = None,
@@ -162,14 +163,14 @@ class FesNmpc(MultiCyclicNonlinearModelPredictiveControl):
         )
         model = self.nlp[0].model
 
-        total_nmpc_duration = self.cycle_duration * self.n_cycles
+        total_nmpc_duration = self.cycle_duration * total_cycles
         stim_time = self.nlp[0].model.stim_time
         step = stim_time[1] - stim_time[0]
         stim_interval = int(1 / step) + 1
         all_stim_time = [val for start in range(0, total_nmpc_duration, 2) for val in
                          np.linspace(start, start + 1, stim_interval)[:-1]]
         total_nmpc_shooting_len = int(OcpFes.prepare_n_shooting(model.stim_time,
-                                                                self.cycle_duration * self.n_cycles_simultaneous) / self.n_cycles_simultaneous * self.n_cycles)
+                                                                self.cycle_duration * self.n_cycles_simultaneous) / self.n_cycles_simultaneous * total_cycles)
 
         numerical_data_time_series, stim_idx_at_node_list = model.get_numerical_data_time_series(
             total_nmpc_shooting_len,
