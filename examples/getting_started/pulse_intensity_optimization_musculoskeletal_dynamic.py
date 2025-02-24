@@ -10,32 +10,36 @@ import numpy as np
 from cocofest import DingModelPulseIntensityFrequencyWithFatigue, OcpFesMsk, FesMskModel
 
 
-minimum_pulse_intensity = DingModelPulseIntensityFrequencyWithFatigue.min_pulse_intensity(
-    DingModelPulseIntensityFrequencyWithFatigue()
-)
+def prepare_ocp():
+    model = FesMskModel(
+        biorbd_path="../msk_models/arm26_biceps_1dof.bioMod",
+        muscles_model=[DingModelPulseIntensityFrequencyWithFatigue(muscle_name="BIClong")],
+        stim_time=np.linspace(0, 1, 34)[:-1].tolist(),
+        activate_force_length_relationship=True,
+        activate_force_velocity_relationship=True,
+        activate_passive_force_relationship=True,
+        activate_residual_torque=True,
+    )
 
-model = FesMskModel(
-    biorbd_path="../msk_models/arm26_biceps_1dof.bioMod",
-    muscles_model=[DingModelPulseIntensityFrequencyWithFatigue(muscle_name="BIClong")],
-    stim_time=np.linspace(0, 1, 34)[:-1].tolist(),
-    activate_force_length_relationship=True,
-    activate_force_velocity_relationship=True,
-    activate_passive_force_relationship=True,
-    activate_residual_torque=True,
-)
+    return OcpFesMsk.prepare_ocp(
+        model=model,
+        final_time=1,
+        pulse_intensity={"min": model.muscles_dynamics_model[0].min_pulse_intensity(), "max": 130, "bimapping": False},
+        objective={"minimize_residual_torque": True},
+        msk_info={
+            "with_residual_torque": True,
+            "bound_type": "start_end",
+            "bound_data": [[5], [120]],
+        },
+    )
 
-ocp = OcpFesMsk.prepare_ocp(
-    model=model,
-    final_time=1,
-    pulse_intensity={"min": minimum_pulse_intensity, "max": 130, "bimapping": False},
-    objective={"minimize_residual_torque": True},
-    msk_info={
-        "with_residual_torque": True,
-        "bound_type": "start_end",
-        "bound_data": [[5], [120]],
-    },
-)
 
-sol = ocp.solve()
-sol.animate(viewer="pyorerun", n_frames=1000)
-sol.graphs(show_bounds=False)
+def main():
+    ocp = prepare_ocp()
+    sol = ocp.solve()
+    sol.animate(viewer="pyorerun", n_frames=1000)
+    sol.graphs(show_bounds=False)
+
+
+if __name__ == "__main__":
+    main()

@@ -11,31 +11,41 @@ from cocofest import DingModelFrequencyWithFatigue, OcpFesMsk, FesMskModel
 from bioptim import OdeSolver
 
 
-model = FesMskModel(
-    name=None,
-    biorbd_path="../msk_models/arm26_biceps_1dof.bioMod",
-    muscles_model=[DingModelFrequencyWithFatigue(muscle_name="BIClong")],
-    stim_time=list(np.linspace(0, 1, 11)[:-1]),
-    activate_force_length_relationship=True,
-    activate_force_velocity_relationship=True,
-    activate_passive_force_relationship=True,
-    activate_residual_torque=True,
-)
+def prepare_ocp():
+    model = FesMskModel(
+        name=None,
+        biorbd_path="../msk_models/arm26_biceps_1dof.bioMod",
+        muscles_model=[DingModelFrequencyWithFatigue(muscle_name="BIClong")],
+        stim_time=list(np.linspace(0, 1, 11)[:-1]),
+        activate_force_length_relationship=True,
+        activate_force_velocity_relationship=True,
+        activate_passive_force_relationship=True,
+        activate_residual_torque=True,
+    )
 
-ocp = OcpFesMsk.prepare_ocp(
-    model=model,
-    final_time=1,
-    objective={"minimize_residual_torque": True},
-    msk_info={
-        "with_residual_torque": True,
-        "bound_type": "start_end",
-        "bound_data": [[5], [120]],
-    },
-    use_sx=True,
-    n_threads=5,
-    ode_solver=OdeSolver.RK4(n_integration_steps=10),
-)
+    return OcpFesMsk.prepare_ocp(
+        model=model,
+        final_time=1,
+        objective={"minimize_residual_torque": True},
+        msk_info={
+            "with_residual_torque": True,
+            "bound_type": "start_end",
+            "bound_data": [[5], [120]],
+        },
+        use_sx=True,
+        n_threads=5,
+        ode_solver=OdeSolver.RK4(n_integration_steps=10),
+    )
 
-sol = ocp.solve()
-sol.animate(viewer="pyorerun", n_frames=1000)
-sol.graphs(show_bounds=False)
+
+def main():
+    ocp = prepare_ocp()
+
+    sol = ocp.solve()
+
+    sol.animate(viewer="pyorerun", n_frames=1000)
+    sol.graphs(show_bounds=False)
+
+
+if __name__ == "__main__":
+    main()

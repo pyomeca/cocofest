@@ -40,6 +40,8 @@ def prepare_nmpc(
     n_cycles_simultaneous: int,
     max_pulse_width: float,
     use_sx: bool = False,
+    minimize_force: bool = True,
+    minimize_fatigue: bool = False,
 ):
     total_cycle_len = OcpFes.prepare_n_shooting(model.stim_time, cycle_duration * n_cycles_simultaneous)
     total_cycle_duration = cycle_duration * n_cycles_simultaneous
@@ -67,13 +69,12 @@ def prepare_nmpc(
 
     # Define objective functions
     objective_functions = ObjectiveList()
-    objective_functions.add(ObjectiveFcn.Lagrange.MINIMIZE_STATE, key="F", weight=1, quadratic=True)
 
-    # objective_functions.add(
-    #     ObjectiveFcn.Lagrange.MINIMIZE_STATE,
-    #     key="A",
-    #     weight=-1,
-    #     quadratic=True)
+    if minimize_force:
+        objective_functions.add(ObjectiveFcn.Lagrange.MINIMIZE_STATE, key="F", weight=1, quadratic=True)
+
+    if minimize_fatigue:
+        objective_functions.add(ObjectiveFcn.Lagrange.MINIMIZE_STATE, key="A", weight=-1, quadratic=True)
 
     parameters = ParameterList(use_sx=use_sx)
     parameters_bounds = BoundsList()
@@ -131,6 +132,8 @@ def main():
         n_cycles_to_advance=n_cycles_to_advance,
         n_cycles_simultaneous=n_cycles_simultaneous,
         max_pulse_width=0.0006,
+        minimize_force=True,
+        minimize_fatigue=False,
         use_sx=False,
     )
 

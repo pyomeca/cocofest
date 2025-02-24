@@ -15,30 +15,36 @@ from cocofest import (
 import numpy as np
 from bioptim import OdeSolver
 
-# --- Set stimulation time apparition --- #
-final_time = 3
-stim_time = [val for start in range(0, final_time, 2) for val in np.linspace(start, start + 1, 34)[:-1]]
 
-# --- Set Ding2003 model --- #
-# model = DingModelFrequencyWithFatigue(stim_time=stim_time, sum_stim_truncation=10)
-# fes_parameters = {"model": model}
+def main(model_name="Ding2003"):
+    # --- Set stimulation time apparition --- #
+    final_time = 3
+    stim_time = [val for start in range(0, final_time, 2) for val in np.linspace(start, start + 1, 34)[:-1]]
 
-# --- Set Ding2007 model --- #
-# pulse_width = np.random.uniform(0.00019, 0.0006, len(stim_time)).tolist()
-# model = DingModelPulseWidthFrequencyWithFatigue(stim_time=stim_time, sum_stim_truncation=10)
-# fes_parameters = {"model": model, "pulse_width": pulse_width}
+    if model_name == "Ding2003":
+        model = DingModelFrequencyWithFatigue(stim_time=stim_time, sum_stim_truncation=10)
+        fes_parameters = {"model": model}
 
-# --- Set Hmed2018 model --- #
-pulse_intensity = np.random.randint(20, 130, len(stim_time)).tolist()
-model = DingModelPulseIntensityFrequencyWithFatigue(stim_time=stim_time, sum_stim_truncation=10)
-fes_parameters = {"model": model, "pulse_intensity": pulse_intensity}
+    if model_name == "Ding2007":
+        pulse_width = np.random.uniform(0.00019, 0.0006, len(stim_time)).tolist()
+        model = DingModelPulseWidthFrequencyWithFatigue(stim_time=stim_time, sum_stim_truncation=10)
+        fes_parameters = {"model": model, "pulse_width": pulse_width}
 
-# --- Build ivp --- #
-ivp_parameters = {"final_time": final_time, "ode_solver": OdeSolver.RK1(n_integration_steps=10)}
-ivp = IvpFes(fes_parameters=fes_parameters, ivp_parameters=ivp_parameters)
+    if model_name == "Hmed2018":
+        pulse_intensity = np.random.randint(20, 130, len(stim_time)).tolist()
+        model = DingModelPulseIntensityFrequencyWithFatigue(stim_time=stim_time, sum_stim_truncation=10)
+        fes_parameters = {"model": model, "pulse_intensity": pulse_intensity}
 
-result, time = ivp.integrate()
-result["time"] = time
+    # --- Build ivp --- #
+    ivp_parameters = {"final_time": final_time, "ode_solver": OdeSolver.RK1(n_integration_steps=10)}
+    ivp = IvpFes(fes_parameters=fes_parameters, ivp_parameters=ivp_parameters)
 
-# Plotting the force state result
-FES_plot(data=result).plot(title="FES model integration")
+    result, time = ivp.integrate()
+    result["time"] = time
+
+    # Plotting the force state result
+    FES_plot(data=result).plot(title="FES model integration")
+
+
+if __name__ == "__main__":
+    main()

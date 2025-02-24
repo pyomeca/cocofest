@@ -30,7 +30,7 @@ def prepare_ocp(stim_time: list, final_time: float, external_force: bool):
         "torque": np.array([0, 0, -1]),
         "with_contact": False,
     }
-    ocp = OcpFesMsk.prepare_ocp(
+    return OcpFesMsk.prepare_ocp(
         model=model,
         final_time=final_time,
         pulse_width={
@@ -50,16 +50,20 @@ def prepare_ocp(stim_time: list, final_time: float, external_force: bool):
         external_forces=resistive_torque if external_force else None,
     )
 
-    return ocp
 
-
-if __name__ == "__main__":
+def main():
     simulation_ending_time = 1
     ocp = prepare_ocp(
         stim_time=list(np.linspace(0, simulation_ending_time, 34)[:-1]),
         final_time=simulation_ending_time,
         external_force=True,
     )
+
     sol = ocp.solve(Solver.IPOPT(show_online_optim=False, _max_iter=2000))
-    sol.animate(viewer="pyorerun", n_frames=1000)
+
+    sol.animate(viewer="pyorerun")
     sol.graphs(show_bounds=False)
+
+
+if __name__ == "__main__":
+    main()
