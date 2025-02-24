@@ -405,10 +405,10 @@ class DingModelFrequency(FesModel):
         )  # all_stim_time is used for problem reconstruction in NMPC
         self.all_stim = self.previous_stim["time"] + stim_time
         stim_time = np.array(self.all_stim)
-        dt = final_time / n_shooting
+        dt = round(final_time / n_shooting, 8)
 
         # For each node (n_shooting+1 total), find the last index where stim_time <= node_time.
-        node_idx = [np.where(stim_time <= i * dt)[0][-1] for i in range(n_shooting + 1)]
+        node_idx = [np.where(np.round(stim_time, 8) <= i * dt)[0][-1] for i in range(n_shooting + 1)]
 
         # For each node, extract the stim times up to that node, then keep only the last 'truncated' values.
         stim_time_list = [list(stim_time[: idx + 1][-truncation:]) for idx in node_idx]

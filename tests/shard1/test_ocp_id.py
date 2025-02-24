@@ -18,7 +18,6 @@ from cocofest import (
     DingModelPulseIntensityFrequencyForceParameterIdentification,
     DingModelPulseWidthFrequencyForceParameterIdentification,
 )
-from cocofest.examples.sandbox.ns import stim_time
 
 force_at_node = [
     0.0,
