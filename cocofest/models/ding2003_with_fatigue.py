@@ -34,7 +34,6 @@ class DingModelFrequencyWithFatigue(DingModelFrequency):
         stim_time: list[float] = None,
         previous_stim: dict = None,
         sum_stim_truncation: int = 20,
-        is_approximated: bool = False,
     ):
         super().__init__(
             model_name=model_name,
@@ -44,7 +43,6 @@ class DingModelFrequencyWithFatigue(DingModelFrequency):
             sum_stim_truncation=sum_stim_truncation,
         )
         self._with_fatigue = True
-        self.is_approximated = is_approximated
 
         # --- Default values --- #
         ALPHA_A_DEFAULT = -4.0 * 10e-2  # Value from Ding's experimentation [1] (s^-2)

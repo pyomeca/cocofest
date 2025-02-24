@@ -33,7 +33,7 @@ class DingModelPulseWidthFrequency(DingModelFrequency):
         muscle_name: str = None,
         stim_time: list[float] = None,
         previous_stim: dict = None,
-        sum_stim_truncation: int = None,
+        sum_stim_truncation: int = 20,
         tauc: float = None,
         a_rest: float = None,
         tau1_rest: float = None,

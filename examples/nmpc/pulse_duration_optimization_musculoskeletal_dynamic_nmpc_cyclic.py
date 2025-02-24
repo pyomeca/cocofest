@@ -16,10 +16,31 @@ from bioptim import (
     MultiCyclicCycleSolutions,
 )
 from cocofest import (
-    DingModelPulseWidthFrequencyWithFatigue,
+    # DingModelPulseWidthFrequencyWithFatigue,
+    DingModelPulseWidthFrequency,
     NmpcFesMsk,
     FesMskModel,
 )
+
+
+# def minimize_overshooting angle(controller: PenaltyController) -> MX:
+#     """
+#     Minimize the overall muscle force production.
+#
+#     Parameters
+#     ----------
+#     controller: PenaltyController
+#         The penalty node elements
+#
+#     Returns
+#     -------
+#     The sum of each force
+#     """
+#     muscle_name_list = controller.model.bio_model.muscle_names
+#     muscle_force = horzcat(
+#         *[controller.states["F_" + muscle_name_list[x]].cx for x in range(len(muscle_name_list))]
+#     )
+#     return sum1(muscle_force)
 
 model = FesMskModel(
     name=None,
@@ -63,31 +84,73 @@ model = FesMskModel(
     external_force_set=None,
 )
 
-minimum_pulse_width = DingModelPulseWidthFrequencyWithFatigue().pd0
+minimum_pulse_width = DingModelPulseWidthFrequency().pd0
 
 objective_functions = ObjectiveList()
-for i in [0, 100]:
-    objective_functions.add(
-        ObjectiveFcn.Mayer.MINIMIZE_STATE,
-        key="q",
-        weight=100000,
+constraints = ConstraintList()
+for i in [0, 100, 200, 300]:
+    constraints.add(
+        ConstraintFcn.TRACK_STATE,
         index=[0],
         target=np.array([[3.14 / (180 / 5)]]).T,
-        node=i,
-        phase=0,
-        quadratic=True,
-    )
-for i in [50]:
-    objective_functions.add(
-        ObjectiveFcn.Mayer.MINIMIZE_STATE,
         key="q",
-        weight=100000,
+        node=i,
+    )
+for i in [50, 150, 250]:
+    constraints.add(
+        ConstraintFcn.TRACK_STATE,
         index=[0],
         target=np.array([[3.14 / (180 / 120)]]).T,
+        key="q",
         node=i,
-        phase=0,
-        quadratic=True,
     )
+
+# objective_functions.add(
+#         ObjectiveFcn.Mayer.MINIMIZE_STATE,
+#         key="q",
+#         weight=100000,
+#         index=[0],
+#         target=np.array([[3.14 / (180 / 5)]]).T,
+#         node=i,
+#         phase=0,
+#         quadratic=True,
+#     )
+
+
+#
+# for i in [0, 100]:
+#     objective_functions.add(
+#         ObjectiveFcn.Mayer.MINIMIZE_STATE,
+#         key="q",
+#         weight=100000,
+#         index=[0],
+#         target=np.array([[3.14 / (180 / 5)]]).T,
+#         node=i,
+#         phase=0,
+#         quadratic=True,
+#     )
+# for i in [50]:
+#     objective_functions.add(
+#         ObjectiveFcn.Mayer.MINIMIZE_STATE,
+#         key="q",
+#         weight=100000,
+#         index=[0],
+#         target=np.array([[3.14 / (180 / 120)]]).T,
+#         node=i,
+#         phase=0,
+#         quadratic=True,
+#     )
+
+# objective_functions.add(
+#     ObjectiveFcn.Mayer.MINIMIZE_STATE,
+#     key="q",
+#     weight=100000,
+#     index=[0],
+#     target=np.array([np.linspace(0, 3.14, 301).T]),
+#     node=Node.ALL,
+#     phase=0,
+#     quadratic=True,
+# )
 
 nmpc_fes_msk = NmpcFesMsk
 nmpc = nmpc_fes_msk.prepare_nmpc(
@@ -105,6 +168,7 @@ nmpc = nmpc_fes_msk.prepare_nmpc(
         # "bound_type": "start_end",
         # "bound_data": [[5], [120]],
         "with_residual_torque": True,
+        "custom_constraint": constraints,
     },
     use_sx=False,
 )
@@ -146,9 +210,9 @@ biorbd_model = biorbd.Model("../model_msk/arm26_biceps_1dof.bioMod")
 
 sol[1][0].graphs(show_bounds=True)
 sol[1][1].graphs(show_bounds=True)
-sol[1][0].animate(n_frames=100)
 sol[0].graphs(show_bounds=True)
 sol[0].animate(n_frames=100)
+
 
 # sol.graphs(show_bounds=True)
 # sol.animate(n_frames=200, show_tracked_markers=True)

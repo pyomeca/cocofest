@@ -12,6 +12,7 @@ from bioptim import (
     ConstraintFcn,
     ConstraintList,
     Solver,
+    OdeSolver,
 )
 
 from cocofest import (
@@ -19,6 +20,7 @@ from cocofest import (
     OcpFesMsk,
     SolutionToPickle,
     FesMskModel,
+    FES_plot,
 )
 
 # Scaling alpha_a and a_scale parameters for each muscle proportionally to the muscle PCSA and fiber type 2 proportion
@@ -87,14 +89,13 @@ constraint.add(
     first_marker="COM_hand",
     second_marker="reaching_target",
     phase=0,
-    node=650,
+    node=40,
     axes=[Axis.X, Axis.Y],
 )
 
 for i in range(len(pickle_file_list)):
     ocp = OcpFesMsk.prepare_ocp(
         model=model,
-        stim_time=stim_time,
         final_time=1.5,
         pulse_width={
             "min": minimum_pulse_width,
@@ -112,10 +113,14 @@ for i in range(len(pickle_file_list)):
             "custom_constraint": constraint,
         },
         use_sx=False,
+        n_threads=5,
+        ode_solver=OdeSolver.RK1(n_integration_steps=5),
     )
 
     sol = ocp.solve(Solver.IPOPT(_max_iter=10000))
-    SolutionToPickle(sol, "pulse_width_" + pickle_file_list[i], "result_file/").pickle()
+    # SolutionToPickle(sol, "pulse_width_" + pickle_file_list[i], "result_file/").pickle()
+    # sol.graphs()
+    FES_plot().msk_plot(sol, title="reaching task")
 
 # [1] Dahmane, R., Djordjevič, S., Šimunič, B., & Valenčič, V. (2005).
 # Spatial fiber type distribution in normal human muscle: histochemical and tensiomyographical evaluation.
