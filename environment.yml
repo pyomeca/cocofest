@@ -8,3 +8,4 @@ dependencies:
 - python-graphviz
 - pyqtgraph
 - pyorerun
+- rerun-sdk=0.21.0
