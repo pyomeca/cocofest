@@ -43,7 +43,7 @@ minimum_pulse_intensity = DingModelPulseIntensityFrequencyWithFatigue.min_pulse_
 )
 model = FesMskModel(
     name=None,
-    biorbd_path="../msk_models/arm26_biceps_1dof.bioMod",
+    biorbd_path="../model_msk/arm26_biceps_1dof.bioMod",
     muscles_model=[DingModelPulseIntensityFrequencyWithFatigue(muscle_name="BIClong")],
     activate_force_length_relationship=True,
     activate_force_velocity_relationship=True,

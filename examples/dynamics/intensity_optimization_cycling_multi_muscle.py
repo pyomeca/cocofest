@@ -22,7 +22,7 @@ minimum_pulse_intensity = DingModelPulseIntensityFrequency.min_pulse_intensity(D
 
 model = FesMskModel(
     name=None,
-    biorbd_path="../msk_models/arm26.bioMod",
+    biorbd_path="../model_msk/arm26.bioMod",
     muscles_model=[
         DingModelPulseIntensityFrequency(muscle_name="BIClong"),
         DingModelPulseIntensityFrequency(muscle_name="BICshort"),

@@ -219,7 +219,7 @@ def set_objective_functions(model, dynamics_type):
 def set_x_init(n_shooting, pedal_config, turn_number):
     x_init = InitialGuessList()
 
-    biorbd_model_path = "../../msk_models/simplified_UL_Seth_pedal_aligned_for_inverse_kinematics.bioMod"
+    biorbd_model_path = "../../model_msk/simplified_UL_Seth_pedal_aligned_for_inverse_kinematics.bioMod"
     q_guess, qdot_guess, qddotguess = inverse_kinematics_cycling(
         biorbd_model_path,
         n_shooting,
@@ -330,7 +330,7 @@ def main():
     """
     # --- Configuration --- #
     dynamics_type = "torque_driven"  # Available options: "torque_driven", "muscle_driven", "fes_driven"
-    model_path = "../../msk_models/simplified_UL_Seth_pedal_aligned.bioMod"
+    model_path = "../../model_msk/simplified_UL_Seth_pedal_aligned.bioMod"
     pulse_width = None
 
     # NMPC parameters

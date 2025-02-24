@@ -14,7 +14,7 @@ from bioptim import OdeSolver
 def prepare_ocp():
     model = FesMskModel(
         name=None,
-        biorbd_path="../msk_models/arm26_biceps_1dof.bioMod",
+        biorbd_path="../model_msk/arm26_biceps_1dof.bioMod",
         muscles_model=[DingModelFrequencyWithFatigue(muscle_name="BIClong")],
         stim_time=list(np.linspace(0, 1, 11)[:-1]),
         activate_force_length_relationship=True,

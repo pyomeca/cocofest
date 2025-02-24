@@ -32,7 +32,7 @@ BIC_brevis_model.alpha_a = -4.0 * 10e-1
 
 model = FesMskModel(
     name=None,
-    biorbd_path="../msk_models/simplified_UL_Seth.bioMod",
+    biorbd_path="../model_msk/simplified_UL_Seth.bioMod",
     muscles_model=[
         DeltoideusClavicle_A_model,
         DeltoideusScapula_P_model,
@@ -90,5 +90,5 @@ if __name__ == "__main__":
         for i in range(len(sol[1]))
     ]
 
-    biorbd_model = biorbd.Model("../msk_models/simplified_UL_Seth_full_mesh.bioMod")
+    biorbd_model = biorbd.Model("../model_msk/simplified_UL_Seth_full_mesh.bioMod")
     PickleAnimate("results/cycling_fes_driven_nmpc_full_fatigue.pkl").animate(model=biorbd_model)

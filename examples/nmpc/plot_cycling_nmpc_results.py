@@ -391,8 +391,8 @@ plt.show()
 
 
 # --- Pyorerun animation --- #
-biorbd_model = biorbd.Model("../msk_models/simplified_UL_Seth_full_mesh.bioMod")
+biorbd_model = biorbd.Model("../model_msk/simplified_UL_Seth_full_mesh.bioMod")
 PickleAnimate("results/cycling_fes_driven_nmpc_full_force.pkl").animate(model=biorbd_model)
 
-biorbd_model = biorbd.Model("../msk_models/simplified_UL_Seth_full_mesh.bioMod")
+biorbd_model = biorbd.Model("../model_msk/simplified_UL_Seth_full_mesh.bioMod")
 PickleAnimate("results/cycling_fes_driven_nmpc_full_fatigue.pkl").animate(model=biorbd_model)

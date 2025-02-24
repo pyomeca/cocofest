@@ -26,7 +26,7 @@ objective_functions.add(
 minimum_pulse_width = DingModelPulseWidthFrequencyWithFatigue().pd0
 model = FesMskModel(
     name=None,
-    biorbd_path="../../msk_models/arm26_biceps_triceps.bioMod",
+    biorbd_path="../../model_msk/arm26_biceps_triceps.bioMod",
     muscles_model=[
         DingModelPulseWidthFrequencyWithFatigue(muscle_name="BIClong"),
         DingModelPulseWidthFrequencyWithFatigue(muscle_name="TRIlong"),

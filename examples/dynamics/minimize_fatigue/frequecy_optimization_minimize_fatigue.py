@@ -27,7 +27,7 @@ objective_functions.add(
 
 model = FesMskModel(
     name=None,
-    biorbd_path="../../msk_models/arm26_biceps_triceps.bioMod",
+    biorbd_path="../../model_msk/arm26_biceps_triceps.bioMod",
     muscles_model=[
         DingModelFrequencyWithFatigue(muscle_name="BIClong"),
         DingModelFrequencyWithFatigue(muscle_name="TRIlong"),

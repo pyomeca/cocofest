@@ -15,7 +15,7 @@ from cocofest import (
     FesMskModel,
 )
 
-from examples.msk_models import init as ocp_module
+from examples.model_msk import init as ocp_module
 
 biomodel_folder = os.path.dirname(ocp_module.__file__)
 biorbd_model_path = biomodel_folder + "/arm26_biceps_triceps.bioMod"

@@ -304,7 +304,7 @@ def set_x_init(n_shooting: int, pedal_config: dict, turn_number: int) -> Initial
     """
     x_init = InitialGuessList()
     # Path to the biomechanical model used for inverse kinematics
-    biorbd_model_path = "../../msk_models/simplified_UL_Seth_pedal_aligned_for_inverse_kinematics.bioMod"
+    biorbd_model_path = "../../model_msk/simplified_UL_Seth_pedal_aligned_for_inverse_kinematics.bioMod"
     q_guess, qdot_guess, qddotguess = inverse_kinematics_cycling(
         biorbd_model_path,
         n_shooting,
@@ -506,7 +506,7 @@ def main():
     # --- Configuration --- #
     dynamics_type = "fes_driven"  # Available options: "torque_driven", "muscle_driven", "fes_driven"
     # dynamics_type = "torque_driven"
-    model_path = "../../msk_models/simplified_UL_Seth_pedal_aligned.bioMod"
+    model_path = "../../model_msk/simplified_UL_Seth_pedal_aligned.bioMod"
     pulse_width = None
     final_time = 1
     n_shooting = 100 * final_time

@@ -11,7 +11,7 @@ from cocofest import DingModelFrequencyWithFatigue, OcpFesMsk, FesMskModel
 
 model = FesMskModel(
     name=None,
-    biorbd_path="../msk_models/arm26_biceps.bioMod",
+    biorbd_path="../model_msk/arm26_biceps.bioMod",
     muscles_model=[DingModelFrequencyWithFatigue(muscle_name="BIClong")],
     activate_force_length_relationship=True,
     activate_force_velocity_relationship=True,

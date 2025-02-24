@@ -12,7 +12,7 @@ from cocofest import DingModelPulseIntensityFrequencyWithFatigue, OcpFesMsk, Fes
 
 def prepare_ocp():
     model = FesMskModel(
-        biorbd_path="../msk_models/arm26_biceps_1dof.bioMod",
+        biorbd_path="../model_msk/arm26_biceps_1dof.bioMod",
         muscles_model=[DingModelPulseIntensityFrequencyWithFatigue(muscle_name="BIClong")],
         stim_time=np.linspace(0, 1, 34)[:-1].tolist(),
         activate_force_length_relationship=True,

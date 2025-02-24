@@ -69,7 +69,7 @@ for i in range(len(fes_muscle_models)):
 
 model = FesMskModel(
     name=None,
-    biorbd_path="../../msk_models/arm26.bioMod",
+    biorbd_path="../../model_msk/arm26.bioMod",
     muscles_model=fes_muscle_models,
     activate_force_length_relationship=True,
     activate_force_velocity_relationship=True,
