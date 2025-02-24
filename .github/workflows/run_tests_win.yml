@@ -55,12 +55,14 @@ jobs:
 
       - name: Archive coverage report
         id: archive
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: coverage${{ matrix.shard }}
           path: |
             coverage.xml
             .coverage
+          if-no-files-found: error
+          include-hidden-files: true
 
   merge-coverage:
     needs: build
@@ -88,6 +90,7 @@ jobs:
       - name: Print mamba info
         run: |
           conda info
+          conda list
 
       - name: Install bioptim on Windows
         run: |
