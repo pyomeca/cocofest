@@ -30,7 +30,6 @@ jobs:
       - name: Setup environment
         uses: conda-incubator/setup-miniconda@v2
         with:
-          miniforge-variant: Mambaforge
           miniforge-version: latest
           use-mamba: true
           activate-environment: cocofest
@@ -38,8 +37,8 @@ jobs:
 
       - name: Print mamba info
         run: |
-          mamba info
-          mamba list
+          conda info
+          conda list
 
       - name: Install bioptim on Windows
         run: |
@@ -49,7 +48,7 @@ jobs:
           cd ..
 
       - name: Install extra dependencies
-        run: mamba install pytest-cov black pytest pytest-cov codecov packaging -cconda-forge
+        run: conda install pytest-cov black pytest pytest-cov codecov packaging -cconda-forge
 
       - name: Run tests with code coverage
         run: pytest -v --color=yes --cov-report term-missing --cov=cocofest --cov-report=xml:coverage.xml tests/shard${{ matrix.shard }}
@@ -81,7 +80,6 @@ jobs:
       - name: Setup environment
         uses: conda-incubator/setup-miniconda@v2
         with:
-          miniforge-variant: Mambaforge
           miniforge-version: latest
           use-mamba: true
           activate-environment: cocofest
@@ -89,7 +87,7 @@ jobs:
 
       - name: Print mamba info
         run: |
-          mamba info
+          conda info
 
       - name: Install bioptim on Windows
         run: |
