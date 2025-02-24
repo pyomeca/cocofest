@@ -8,7 +8,6 @@ from bioptim import (
     DynamicsEvaluation,
     NonLinearProgram,
     OptimalControlProgram,
-    ParameterList,
 )
 from .ding2003 import DingModelFrequency
 from .state_configure import StateConfigure
