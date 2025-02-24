@@ -327,11 +327,9 @@ class IvpFes:
                     if isinstance(self.pulse_intensity, list) and len(self.pulse_intensity) != 1:
                         initial_guess_list = [
                             [
-                                (
-                                    self.pulse_intensity[stim_idx_at_node_list[j - i][j - i]]
-                                    if i < j + 1
-                                    else self.pulse_intensity[stim_idx_at_node_list[i][0]]
-                                )
+                                self.pulse_intensity[stim_idx_at_node_list[i][0]]
+                                if i < self.n_shooting - j
+                                else self.pulse_intensity[stim_idx_at_node_list[i][(i - (self.n_shooting - j)) + 1]]
                                 for i in range(self.n_shooting)
                             ]
                             for j in range(self.model._sum_stim_truncation)

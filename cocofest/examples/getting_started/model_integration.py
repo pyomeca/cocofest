@@ -20,17 +20,18 @@ final_time = 3
 stim_time = [val for start in range(0, final_time, 2) for val in np.linspace(start, start + 1, 34)[:-1]]
 
 # --- Set Ding2003 model --- #
-model = DingModelFrequencyWithFatigue(stim_time=stim_time, sum_stim_truncation=10)
-fes_parameters = {"model": model}
+# model = DingModelFrequencyWithFatigue(stim_time=stim_time, sum_stim_truncation=10)
+# fes_parameters = {"model": model}
 
 # --- Set Ding2007 model --- #
+# pulse_width = np.random.uniform(0.00019, 0.0006, len(stim_time)).tolist()
 # model = DingModelPulseWidthFrequencyWithFatigue(stim_time=stim_time, sum_stim_truncation=10)
-# fes_parameters = {"model": model, "pulse_width": 0.0003}
+# fes_parameters = {"model": model, "pulse_width": pulse_width}
 
 # --- Set Hmed2018 model --- #
-# pulse_intensity = np.random.randint(20, 130, len(stim_time)).tolist()
-# model = DingModelPulseIntensityFrequencyWithFatigue(stim_time=stim_time, sum_stim_truncation=10)
-# fes_parameters = {"model": model, "pulse_intensity": pulse_intensity}
+pulse_intensity = np.random.randint(20, 130, len(stim_time)).tolist()
+model = DingModelPulseIntensityFrequencyWithFatigue(stim_time=stim_time, sum_stim_truncation=10)
+fes_parameters = {"model": model, "pulse_intensity": pulse_intensity}
 
 # --- Build ivp --- #
 ivp_parameters = {"final_time": final_time, "ode_solver": OdeSolver.RK1(n_integration_steps=10)}
