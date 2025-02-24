@@ -105,8 +105,8 @@ class OcpFesId(OcpFes):
 
         numerical_data_time_series, stim_idx_at_node_list = model.get_numerical_data_time_series(n_shooting, final_time)
 
-        dynamics = OcpFesId._declare_dynamics(model=model, numerical_data_timeseries=numerical_data_time_series)
-        x_bounds, x_init = OcpFesId._set_bounds(
+        dynamics = OcpFesId.declare_dynamics(model=model, numerical_data_timeseries=numerical_data_time_series)
+        x_bounds, x_init = OcpFesId.set_x_bounds(
             model=model,
             force_tracking=objective["force_tracking"],
             discontinuity_in_ocp=discontinuity_in_ocp,
@@ -118,7 +118,7 @@ class OcpFesId(OcpFes):
             if isinstance(model, DingModelPulseWidthFrequency)
             else pulse_intensity["fixed"] if isinstance(model, DingModelPulseIntensityFrequency) else None
         )
-        u_bounds, u_init = OcpFesId._set_u_bounds(
+        u_bounds, u_init = OcpFesId.set_u_bounds(
             model=model, control_value=control_value, stim_idx_at_node_list=stim_idx_at_node_list, n_shooting=n_shooting
         )
 
@@ -179,7 +179,7 @@ class OcpFesId(OcpFes):
                 )
 
     @staticmethod
-    def _set_bounds(
+    def set_x_bounds(
         model: FesModel = None,
         force_tracking=None,
         discontinuity_in_ocp=None,
@@ -310,7 +310,7 @@ class OcpFesId(OcpFes):
         return phase_transitions
 
     @staticmethod
-    def _set_u_bounds(model, control_value: list, stim_idx_at_node_list: list, n_shooting: int):
+    def set_u_bounds(model, control_value: list, stim_idx_at_node_list: list, n_shooting: int):
         # Controls bounds
         u_bounds = BoundsList()
         # Controls initial guess
@@ -339,7 +339,7 @@ class OcpFesId(OcpFes):
                     )
                     for i in range(n_shooting)
                 ]
-                for j in range(model._sum_stim_truncation)
+                for j in range(model.sum_stim_truncation)
             ]
 
             u_init.add(key="pulse_intensity", initial_guess=np.array(control_list)[:, 0], phase=0)

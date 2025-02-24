@@ -1,4 +1,6 @@
 from typing import Callable
+from math import gcd
+from fractions import Fraction
 
 import numpy as np
 from casadi import MX, exp, vertcat
@@ -40,7 +42,7 @@ class DingModelFrequency(FesModel):
         super().__init__()
         self._model_name = model_name
         self._muscle_name = muscle_name
-        self._sum_stim_truncation = sum_stim_truncation
+        self.sum_stim_truncation = sum_stim_truncation
         self._with_fatigue = False
         self.pulse_apparition_time = None
         self.stim_time = stim_time if stim_time else []
@@ -392,12 +394,12 @@ class DingModelFrequency(FesModel):
         ConfigureProblem.configure_dynamics_function(ocp, nlp, dyn_func=self.dynamics)
 
     def _get_additional_previous_stim_time(self):
-        while len(self.previous_stim["time"]) < self._sum_stim_truncation:
+        while len(self.previous_stim["time"]) < self.sum_stim_truncation:
             self.previous_stim["time"].insert(0, -10000000)
         return self.previous_stim
 
     def get_numerical_data_time_series(self, n_shooting, final_time, all_stim_time=None):
-        truncation = self._sum_stim_truncation
+        truncation = self.sum_stim_truncation
         # --- Set the previous stim time for the numerical data time series (mandatory to avoid nan values) --- #
         self.previous_stim = self._get_additional_previous_stim_time()
         stim_time = (
@@ -427,3 +429,31 @@ class DingModelFrequency(FesModel):
         stim_time_array = np.transpose(temp_result, (2, 1, 0))
 
         return {"stim_time": stim_time_array}, stim_idx_at_node_list
+
+    def get_n_shooting(self, final_time: float) -> int:
+        """
+        Prepare the n_shooting for the ocp in order to have a time step that is a multiple of the stimulation time.
+
+        Returns
+        -------
+        int
+            The number of shooting points
+        """
+        # Represent the final time as a Fraction for exact arithmetic.
+        T_final = Fraction(final_time).limit_denominator()
+        n_shooting = 1
+
+        for t in self.stim_time:
+
+            t_frac = Fraction(t).limit_denominator()  # Convert the stimulation time to an exact fraction.
+            norm = t_frac / T_final  # Compute the normalized time: t / final_time.
+            d = norm.denominator  # The denominator in the reduced fraction gives the requirement.
+            n_shooting = n_shooting * d // gcd(n_shooting, d)
+
+        if n_shooting >= 1000:
+            print(
+                f"Warning: The number of shooting nodes is very high n = {n_shooting}.\n"
+                "The optimization might be long, consider using stimulation time with even spacing (common frequency)."
+            )
+
+        return n_shooting

@@ -436,7 +436,7 @@ class FesMskModel(BiorbdModel):
                 StateConfigure().configure_last_pulse_width(ocp, nlp, muscle_name=str(muscle_model.muscle_name))
             if isinstance(muscle_model, DingModelPulseIntensityFrequency):
                 StateConfigure().configure_pulse_intensity(
-                    ocp, nlp, muscle_name=str(muscle_model.muscle_name), truncation=muscle_model._sum_stim_truncation
+                    ocp, nlp, muscle_name=str(muscle_model.muscle_name), truncation=muscle_model.sum_stim_truncation
                 )
         if self.activate_residual_torque:
             ConfigureProblem.configure_tau(ocp, nlp, as_states=False, as_controls=True)

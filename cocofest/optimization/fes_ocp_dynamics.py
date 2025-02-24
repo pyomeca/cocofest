@@ -578,11 +578,11 @@ class OcpFesMsk:
         if isinstance(models[0], DingModelPulseIntensityFrequency):
             for model in models:
                 key = "pulse_intensity_" + str(model.muscle_name)
-                u_init.add(key=key, initial_guess=[0] * model._sum_stim_truncation, phase=0)
+                u_init.add(key=key, initial_guess=[0] * model.sum_stim_truncation, phase=0)
                 u_bounds.add(
                     key=key,
-                    min_bound=[model.min_pulse_intensity()] * model._sum_stim_truncation,
-                    max_bound=[130] * model._sum_stim_truncation,
+                    min_bound=[model.min_pulse_intensity()] * model.sum_stim_truncation,
+                    max_bound=[130] * model.sum_stim_truncation,
                     phase=0,
                 )
 

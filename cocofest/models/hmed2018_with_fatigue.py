@@ -312,5 +312,5 @@ class DingModelPulseIntensityFrequencyWithFatigue(DingModelPulseIntensityFrequen
             A list of values to pass to the dynamics at each node. Experimental external forces should be included here.
         """
         StateConfigure().configure_all_fes_model_states(ocp, nlp, fes_model=self)
-        StateConfigure().configure_pulse_intensity(ocp, nlp, truncation=self._sum_stim_truncation)
+        StateConfigure().configure_pulse_intensity(ocp, nlp, truncation=self.sum_stim_truncation)
         ConfigureProblem.configure_dynamics_function(ocp, nlp, dyn_func=self.dynamics)

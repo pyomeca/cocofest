@@ -67,7 +67,7 @@ class FesNmpc(MultiCyclicNonlinearModelPredictiveControl):
                 self.parameter_init[key].init[:, :] = reshaped_parameter[self.initial_guess_param_index, :]
 
     def update_stim(self):
-        truncation_term = self.nlp[0].model._sum_stim_truncation
+        truncation_term = self.nlp[0].model.sum_stim_truncation
         solution_stimulation_time = self.nlp[0].model.stim_time[-truncation_term:]
         previous_stim_time = [x - self.phase_time[0] for x in solution_stimulation_time]
         previous_stim = {"time": previous_stim_time}
@@ -143,7 +143,7 @@ class FesNmpc(MultiCyclicNonlinearModelPredictiveControl):
         stim_time = [val for sublist in stim_time for val in sublist]
 
         combined_model = DingModelPulseWidthFrequencyWithFatigue(
-            stim_time=stim_time, sum_stim_truncation=self.nlp[0].model._sum_stim_truncation
+            stim_time=stim_time, sum_stim_truncation=self.nlp[0].model.sum_stim_truncation
         )
         return combined_model
 

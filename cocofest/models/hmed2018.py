@@ -296,7 +296,7 @@ class DingModelPulseIntensityFrequency(DingModelFrequency):
             A list of values to pass to the dynamics at each node. Experimental external forces should be included here.
         """
         StateConfigure().configure_all_fes_model_states(ocp, nlp, fes_model=self)
-        StateConfigure().configure_pulse_intensity(ocp, nlp, truncation=self._sum_stim_truncation)
+        StateConfigure().configure_pulse_intensity(ocp, nlp, truncation=self.sum_stim_truncation)
         ConfigureProblem.configure_dynamics_function(ocp, nlp, dyn_func=self.dynamics)
 
     def min_pulse_intensity(self):
@@ -309,7 +309,7 @@ class DingModelPulseIntensityFrequency(DingModelFrequency):
         return (np.arctanh(-self.cr) / self.bs) + self.Is
 
     def _get_additional_previous_stim_time(self):
-        while len(self.previous_stim["time"]) < self._sum_stim_truncation:
+        while len(self.previous_stim["time"]) < self.sum_stim_truncation:
             self.previous_stim["time"].insert(0, -10000000)
             self.previous_stim["pulse_intensity"].insert(0, 50)
         return self.previous_stim

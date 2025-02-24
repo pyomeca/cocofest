@@ -334,12 +334,12 @@ class IvpFes:
                                 )
                                 for i in range(self.n_shooting)
                             ]
-                            for j in range(self.model._sum_stim_truncation)
+                            for j in range(self.model.sum_stim_truncation)
                         ]
 
                     else:
                         pi = self.pulse_intensity[0] if isinstance(self.pulse_intensity, list) else self.pulse_width
-                        initial_guess_list = [[pi] * self.model._sum_stim_truncation] * self.n_shooting
+                        initial_guess_list = [[pi] * self.model.sum_stim_truncation] * self.n_shooting
 
                     u.add(key, initial_guess=initial_guess_list, phase=0, interpolation=InterpolationType.EACH_FRAME)
 

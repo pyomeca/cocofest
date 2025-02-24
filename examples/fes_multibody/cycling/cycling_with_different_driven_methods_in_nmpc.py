@@ -59,7 +59,7 @@ class MyCyclicNMPC(MultiCyclicNonlinearModelPredictiveControl):
         return True
 
     def update_stim(self, sol):
-        truncation_term = self.nlp[0].model.muscles_dynamics_model[0]._sum_stim_truncation
+        truncation_term = self.nlp[0].model.muscles_dynamics_model[0].sum_stim_truncation
         solution_stimulation_time = self.nlp[0].model.muscles_dynamics_model[0].stim_time[-truncation_term:]
         previous_stim_time = [x - self.phase_time[0] for x in solution_stimulation_time]
         for i in range(len(self.nlp[0].model.muscles_dynamics_model)):

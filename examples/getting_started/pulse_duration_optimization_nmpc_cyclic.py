@@ -51,12 +51,12 @@ def prepare_nmpc(
         total_cycle_len, total_cycle_duration
     )
 
-    dynamics = OcpFes._declare_dynamics(model, numerical_data_time_series)
+    dynamics = OcpFes.declare_dynamics(model, numerical_data_time_series)
 
-    x_bounds, x_init = OcpFes._set_bounds(model)
-    u_bounds, u_init = OcpFes._set_u_bounds(model, max_pulse_width)
+    x_bounds, x_init = OcpFes.set_x_bounds(model)
+    u_bounds, u_init = OcpFes.set_u_bounds(model, max_pulse_width)
 
-    constraints = OcpFes._build_constraints(
+    constraints = OcpFes.set_constraints(
         model,
         total_cycle_len,
         stim_idx_at_node_list,
