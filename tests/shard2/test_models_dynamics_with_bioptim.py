@@ -10,7 +10,6 @@ from cocofest import (
     OcpFes,
 )
 
-# Force and time data coming form examples/data/hand_cycling_force.bio file
 force = np.array(
     [
         0,

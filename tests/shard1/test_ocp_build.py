@@ -8,7 +8,6 @@ from cocofest import OcpFes, ModelMaker
 
 from bioptim import ObjectiveFcn, ObjectiveList, Node
 
-# Force and time data coming form examples/data/hand_cycling_force.bio file
 force = np.array(
     [
         0,
@@ -240,9 +239,7 @@ minimum_pulse_intensity = hmed2018.min_pulse_intensity()
 
 
 @pytest.mark.parametrize(
-    "model,"
-    " pulse_width_max,"
-    " pulse_intensity_max,",
+    "model," " pulse_width_max," " pulse_intensity_max,",
     [
         (ding2003, None, None),
         (
@@ -308,6 +305,7 @@ def test_ocp_building(
         },
         use_sx=use_sx,
     )
+
 
 #
 # def test_all_ocp_fes_errors():
