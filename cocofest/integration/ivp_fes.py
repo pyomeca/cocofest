@@ -70,7 +70,7 @@ class IvpFes:
         self.parameters = None
 
         self.final_time = self.ivp_parameters["final_time"]
-        self.n_shooting = OcpFes.prepare_n_shooting(self.stim_time, self.final_time)
+        self.n_shooting = self.model.get_n_shooting(self.final_time)
 
         self.pulse_mode = self.fes_parameters["pulse_mode"]
         self._pulse_mode_settings()  # Update stim_time and n_stim, n_shooting can also be updated depending on the mode
