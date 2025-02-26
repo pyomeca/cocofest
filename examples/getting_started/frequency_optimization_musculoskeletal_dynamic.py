@@ -8,10 +8,64 @@ import numpy as np
 
 from cocofest import DingModelFrequencyWithFatigue, OcpFesMsk, FesMskModel
 
-from bioptim import OdeSolver
+from bioptim import OdeSolver, ObjectiveList, ObjectiveFcn, OptimalControlProgram, ControlType
 
 
-def prepare_ocp():
+def prepare_ocp(model, final_time: float, resistive_torque, msk_info):
+    muscle_model = model.muscles_dynamics_model[0]
+    n_shooting = muscle_model.get_n_shooting(final_time=final_time)
+    numerical_time_series, external_force_set = OcpFesMsk.get_numerical_time_series_for_external_forces(
+        n_shooting, resistive_torque
+    )
+    numerical_data_time_series, stim_idx_at_node_list = muscle_model.get_numerical_data_time_series(
+        n_shooting, final_time
+    )
+    numerical_time_series.update(numerical_data_time_series)
+
+    dynamics = OcpFesMsk.declare_dynamics(
+        model, numerical_time_series=numerical_time_series, with_contact=resistive_torque["with_contact"]
+    )
+
+    # --- Set initial guesses and bounds for states and controls --- #
+    x_bounds, x_init = OcpFesMsk.set_x_bounds(model, msk_info)
+    u_bounds, u_init = OcpFesMsk.set_u_bounds(model, with_residual_torque=msk_info["with_residual_torque"])
+
+    # --- Set objective functions --- #
+    objective_functions = ObjectiveList()
+    objective_functions.add(ObjectiveFcn.Lagrange.MINIMIZE_CONTROL, key="tau", weight=1, quadratic=True)
+
+    # rebuilding model for the OCP
+    model = FesMskModel(
+        name=model.name,
+        biorbd_path=model.biorbd_path,
+        muscles_model=model.muscles_dynamics_model,
+        stim_time=model.muscles_dynamics_model[0].stim_time,
+        previous_stim=model.muscles_dynamics_model[0].previous_stim,
+        activate_force_length_relationship=model.activate_force_length_relationship,
+        activate_force_velocity_relationship=model.activate_force_velocity_relationship,
+        activate_residual_torque=model.activate_residual_torque,
+        external_force_set=external_force_set,
+    )
+
+    return OptimalControlProgram(
+        bio_model=[model],
+        dynamics=dynamics,
+        n_shooting=n_shooting,
+        phase_time=final_time,
+        objective_functions=objective_functions,
+        x_init=x_init,
+        x_bounds=x_bounds,
+        u_init=u_init,
+        u_bounds=u_bounds,
+        control_type=ControlType.CONSTANT,
+        use_sx=True,
+        ode_solver=OdeSolver.RK4(n_integration_steps=10),
+        n_threads=20,
+    )
+
+
+def main():
+    simulation_ending_time = 1
     model = FesMskModel(
         name=None,
         biorbd_path="../model_msk/arm26_biceps_1dof.bioMod",
@@ -23,24 +77,21 @@ def prepare_ocp():
         activate_residual_torque=True,
     )
 
-    return OcpFesMsk.prepare_ocp(
-        model=model,
-        final_time=1,
-        objective={"minimize_residual_torque": True},
-        msk_info={
-            "with_residual_torque": True,
-            "bound_type": "start_end",
-            "bound_data": [[5], [120]],
-        },
-        use_sx=True,
-        n_threads=5,
-        ode_solver=OdeSolver.RK4(n_integration_steps=10),
+    resistive_torque = {
+        "Segment_application": "r_ulna_radius_hand",
+        "torque": np.array([0, 0, -1]),
+        "with_contact": False,
+    }
+
+    msk_info = {
+        "bound_type": "start_end",
+        "bound_data": [[5], [120]],
+        "with_residual_torque": True,
+    }
+
+    ocp = prepare_ocp(
+        model=model, final_time=simulation_ending_time, resistive_torque=resistive_torque, msk_info=msk_info
     )
-
-
-def main():
-    ocp = prepare_ocp()
-
     sol = ocp.solve()
 
     sol.animate(viewer="pyorerun", n_frames=1000)
