@@ -7,13 +7,7 @@ from ..identification.ding2003_force_parameter_identification import (
     DingModelFrequencyForceParameterIdentification,
 )
 from ..optimization.fes_ocp import OcpFes
-from ..optimization.fes_identification_ocp import OcpFesId
-from .identification_method import (
-    full_data_extraction,
-    average_data_extraction,
-    sparse_data_extraction,
-    force_at_node_in_ocp,
-)
+from ..optimization.fes_id_ocp import OcpFesId
 
 
 class DingModelPulseWidthFrequencyForceParameterIdentification(DingModelFrequencyForceParameterIdentification):

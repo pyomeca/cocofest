@@ -6,13 +6,7 @@ from bioptim import Solver, OdeSolver, ControlType
 from ..optimization.fes_ocp import OcpFes
 from ..models.fes_model import FesModel
 from ..models.ding2003 import DingModelFrequency
-from ..optimization.fes_identification_ocp import OcpFesId
-from .identification_method import (
-    full_data_extraction,
-    average_data_extraction,
-    sparse_data_extraction,
-    force_at_node_in_ocp,
-)
+from ..optimization.fes_id_ocp import OcpFesId
 from .identification_abstract_class import ParameterIdentification
 
 
@@ -104,7 +98,8 @@ class DingModelFrequencyForceParameterIdentification(ParameterIdentification):
         self.control_type = control_type
         self.kwargs = kwargs
 
-    def _set_default_values(self, model):
+    @staticmethod
+    def set_default_values(model):
         """
         This method is used to set the default values for the identified parameters (initial guesses, bounds, scaling and
         function).

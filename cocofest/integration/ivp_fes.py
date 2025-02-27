@@ -325,18 +325,14 @@ class IvpFes:
             for key in ocp.controls_keys:
                 if "pulse_intensity" in ocp.controls_keys:
                     if isinstance(self.pulse_intensity, list) and len(self.pulse_intensity) != 1:
-                        initial_guess_list = [
-                            [
-                                (
-                                    self.pulse_intensity[stim_idx_at_node_list[i][0]]
-                                    if i < self.n_shooting - j
-                                    else self.pulse_intensity[stim_idx_at_node_list[i][(i - (self.n_shooting - j)) + 1]]
-                                )
-                                for i in range(self.n_shooting)
-                            ]
-                            for j in range(self.model.sum_stim_truncation)
+                        padded = [
+                            [self.pulse_intensity[stim_idx_at_node_list[i][0]]]
+                            * (self.model.sum_stim_truncation - len(stim_idx_at_node_list[i]))
+                            + [self.pulse_intensity[idx] for idx in stim_idx_at_node_list[i]]
+                            for i in range(self.n_shooting)
                         ]
 
+                        initial_guess_list = [list(row) for row in zip(*padded)]
                     else:
                         pi = self.pulse_intensity[0] if isinstance(self.pulse_intensity, list) else self.pulse_width
                         initial_guess_list = [[pi] * self.model.sum_stim_truncation] * self.n_shooting

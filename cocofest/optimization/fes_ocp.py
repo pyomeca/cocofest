@@ -217,3 +217,11 @@ class OcpFes:
         )[np.newaxis, :]
 
         return force_to_track
+
+    @staticmethod
+    def update_model_param(model, parameters):
+        for param_key in parameters:
+            if parameters[param_key].function:
+                param_scaling = parameters[param_key].scaling.scaling
+                param_reduced = parameters[param_key].cx
+                parameters[param_key].function(model, param_reduced * param_scaling, **parameters[param_key].kwargs)

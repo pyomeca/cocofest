@@ -2,277 +2,197 @@ import pickle
 import numpy as np
 
 
-def full_data_extraction(model_data_path):
-    """
-    Extracts full data from the provided path.
+class DataExtraction:
+    @staticmethod
+    def flatten(nested_list):
+        """Flatten a list of lists."""
+        return [item for sublist in nested_list for item in sublist]
 
-    Parameters
-    ----------
-    model_data_path : list
-        List of paths to the data files.
+    @staticmethod
+    def apply_offset(self, time_list, offset):
+        """Apply a cumulative offset to a list of time values."""
+        return [t + offset for t in time_list]
 
-    Returns
-    -------
-    tuple
-        A tuple containing the time data, stim apparition time, muscle data, and discontinuity phase list.
-    """
+    @staticmethod
+    def load_and_adjust(file_path):
+        """
+        Load data from file and adjust stimulation and time data so that they start at zero.
 
-    global_model_muscle_data = []
-    global_model_stim_apparition_time = []
-    global_model_time_data = []
-
-    discontinuity_phase_list = []
-    for i in range(len(model_data_path)):
-        with open(model_data_path[i], "rb") as f:
+        Returns:
+            adjusted_time_data (list of lists): The time data with each row shifted if needed.
+            adjusted_stim_times (list): The stimulation times shifted to start at 0.
+            force_data (list): The muscle force data.
+            raw_data (dict): The full data dictionary (for additional processing if needed).
+        """
+        with open(file_path, "rb") as f:
             data = pickle.load(f)
-        model_data = data["force"]
+        stim_times = data["stim_time"]
+        # Adjust times if the first stimulation time is not zero
+        if stim_times[0] != 0:
+            adjusted_stim_times = [t - stim_times[0] for t in stim_times]
+            adjusted_time_data = [[t - stim_times[0] for t in row] for row in data["time"]]
+        else:
+            adjusted_stim_times = stim_times
+            adjusted_time_data = data["time"]
+        return adjusted_time_data, adjusted_stim_times, data["force"], data
 
-        # Arranging the data to have the beginning time starting at 0 second for all data
-        model_stim_apparition_time = (
-            data["stim_time"]
-            if data["stim_time"][0] == 0
-            else [stim_time - data["stim_time"][0] for stim_time in data["stim_time"]]
-        )
+    @staticmethod
+    def compute_stim_frequency(stim_times, multiplier=1.5):
+        """
+        Compute stimulation frequency based on valid intervals.
 
-        model_time_data = (
-            data["time"]
-            if data["stim_time"][0] == 0
-            else [[(time - data["stim_time"][0]) for time in row] for row in data["time"]]
-        )
+        A valid interval is one that is less than multiplier times the first interval.
+        """
+        if len(stim_times) < 2:
+            return None
+        threshold = stim_times[1] - stim_times[0]
+        valid_intervals = [
+            stim_times[j] - stim_times[j - 1]
+            for j in range(1, len(stim_times))
+            if (stim_times[j] - stim_times[j - 1]) < threshold * multiplier
+        ]
+        return round(1 / np.mean(valid_intervals), 0)
 
-        # model_data = [item for sublist in model_data for item in sublist]
-        # model_time_data = [item for sublist in model_time_data for item in sublist]
+    @staticmethod
+    def average_force_curves(force_data):
+        """
+        Average a list of force curves by truncating to the smallest length.
 
-        # Indexing the current data time on the previous one to ensure time continuity
-        if i != 0:
-            discontinuity_phase_list.append(
-                len(global_model_stim_apparition_time[-1])
-                if discontinuity_phase_list == []
-                else discontinuity_phase_list[-1] + len(global_model_stim_apparition_time[-1])
-            )
+        Returns:
+            avg_force (list): The averaged force curve.
+            smallest_length (int): The length to which curves were truncated.
+        """
+        smallest_length = min(len(curve) for curve in force_data)
+        avg_force = np.mean([curve[:smallest_length] for curve in force_data], axis=0).tolist()
+        return avg_force, smallest_length
 
-            model_stim_apparition_time = [
-                stim_time + global_model_time_data[i - 1][-1] for stim_time in model_stim_apparition_time
-            ]
+    def full_data_extraction(self, data_path):
+        """
+        Extracts full data from a list of file paths.
 
-            model_time_data = [(time + global_model_time_data[i - 1][-1]) for time in model_time_data]
-            model_stim_apparition_time = [
-                (time + global_model_time_data[i - 1][-1]) for time in model_stim_apparition_time
-            ]
+        For each file, the function:
+          - Loads and adjusts the stimulation times and time data.
+          - Offsets the times to ensure continuity across files.
+          - Collects raw force data.
 
-        # Storing data into global lists
-        global_model_muscle_data.append(model_data)
-        global_model_stim_apparition_time.append(model_stim_apparition_time)
-        global_model_time_data.append(model_time_data)
-    # Expending global lists
-    global_model_muscle_data = [item for sublist in global_model_muscle_data for item in sublist]
-    global_model_stim_apparition_time = [item for sublist in global_model_stim_apparition_time for item in sublist]
-    global_model_time_data = [item for sublist in global_model_time_data for item in sublist]
-    return (
-        global_model_time_data,
-        global_model_stim_apparition_time,
-        global_model_muscle_data,
-        discontinuity_phase_list,
-    )
+        Returns
+        -------
+        tuple
+            (all_time_data, all_stim_times, all_force_data, discontinuity_phase_list)
+        """
+        all_force_data = []
+        all_stim_times = []
+        all_time_data = []
+        discontinuity_phase_list = []
 
+        cumulative_time_offset = 0
+        cumulative_stim_count = 0
 
-def average_data_extraction(model_data_path):
-    """
-    Extracts average data from the provided path.
+        for idx, file_path in enumerate(data_path):
+            adj_time_data, adj_stim_times, force_data, _ = self.load_and_adjust(file_path)
+            flat_time = self.flatten(adj_time_data)
 
-    Parameters
-    ----------
-    model_data_path : list
-        List of paths to the data files.
+            # If not the first file, apply the cumulative offset and record discontinuity
+            if idx > 0:
+                discontinuity_phase_list.append(cumulative_stim_count)
+                flat_time = self.apply_offset(flat_time, cumulative_time_offset)
+                adj_stim_times = self.apply_offset(adj_stim_times, cumulative_time_offset)
 
-    Returns
-    -------
-    tuple
-        A tuple containing the time data, stim apparition time, muscle data, and discontinuity phase list.
-    """
+            if flat_time:
+                cumulative_time_offset = flat_time[-1]
+            cumulative_stim_count += len(adj_stim_times)
 
-    global_model_muscle_data = []
-    global_model_stim_apparition_time = []
-    global_model_time_data = []
+            all_force_data.extend(force_data)
+            all_stim_times.extend(adj_stim_times)
+            all_time_data.extend(flat_time)
 
-    discontinuity_phase_list = []
-    for i in range(len(model_data_path)):
-        with open(model_data_path[i], "rb") as f:
-            data = pickle.load(f)
-        model_data = data["force"]
+        return all_time_data, all_stim_times, all_force_data, discontinuity_phase_list
 
-        temp_stimulation_instant = []
-        stim_threshold = data["stim_time"][1] - data["stim_time"][0]
-        for j in range(1, len(data["stim_time"])):
-            stim_interval = data["stim_time"][j] - data["stim_time"][j - 1]
-            if stim_interval < stim_threshold * 1.5:
-                temp_stimulation_instant.append(data["stim_time"][j] - data["stim_time"][j - 1])
-        stimulation_temp_frequency = round(1 / np.mean(temp_stimulation_instant), 0)
+    def average_data_extraction(self, model_data_paths, train_duration):
+        """
+        Extracts averaged data from a list of file paths.
 
-        model_time_data = (
-            data["time"]
-            if data["stim_time"][0] == 0
-            else [[(time - data["stim_time"][0]) for time in row] for row in data["time"]]
-        )
+        For each file, the function:
+          - Loads and adjusts time data.
+          - Computes stimulation frequency based on stimulation intervals.
+          - Averages the force curves.
+          - Generates an evenly spaced stimulation timeline.
+          - Offsets times to ensure continuity across files.
 
-        # Average on each force curve
-        smallest_list = 0
-        for j in range(len(model_data)):
-            if j == 0:
-                smallest_list = len(model_data[j])
-            if len(model_data[j]) < smallest_list:
-                smallest_list = len(model_data[j])
+        Parameters
+        ----------
+        model_data_paths : list of str
+            Paths to the data files.
+        train_duration : float
+            Duration used to compute the number of points for the stimulation timeline.
 
-        model_data = np.mean([row[:smallest_list] for row in model_data], axis=0).tolist()
-        model_time_data = [item for sublist in model_time_data for item in sublist]
+        Returns
+        -------
+        tuple
+            (all_time_data, all_stim_times, all_force_data, discontinuity_phase_list)
+        """
+        all_force_data = []
+        all_stim_times = []
+        all_time_data = []
+        discontinuity_phase_list = []
 
-        model_time_data = model_time_data[:smallest_list]
-        train_width = 1
+        cumulative_time_offset = 0
+        cumulative_stim_count = 0
 
-        average_stim_apparition = np.linspace(0, train_width, int(stimulation_temp_frequency * train_duration) + 1)[:-1]
-        average_stim_apparition = [time for time in average_stim_apparition]
-        if i == len(model_data_path) - 1:
-            average_stim_apparition = np.append(average_stim_apparition, model_time_data[-1]).tolist()
+        for idx, file_path in enumerate(model_data_paths):
+            adj_time_data, adj_stim_times, force_data, raw_data = self.load_and_adjust(file_path)
+            flat_time = self.flatten(adj_time_data)
 
-        # Indexing the current data time on the previous one to ensure time continuity
-        if i != 0:
-            discontinuity_phase_list.append(
-                len(global_model_stim_apparition_time[-1])
-                if discontinuity_phase_list == []
-                else discontinuity_phase_list[-1] + len(global_model_stim_apparition_time[-1])
-            )
+            # Compute stimulation frequency and average the force curves
+            frequency = self.compute_stim_frequency(adj_stim_times)
+            avg_force, smallest_length = self.average_force_curves(force_data)
 
-            model_time_data = [(time + global_model_time_data[i - 1][-1]) for time in model_time_data]
-            average_stim_apparition = [(time + global_model_time_data[i - 1][-1]) for time in average_stim_apparition]
+            # Truncate time data to match the averaged force curve length
+            flat_time = flat_time[:smallest_length]
 
-        # Storing data into global lists
-        global_model_muscle_data.append(model_data)
-        global_model_stim_apparition_time.append(average_stim_apparition)
-        global_model_time_data.append(model_time_data)
+            # Generate stimulation instants based on computed frequency
+            train_width = 1  # Assumed constant train width
+            num_points = int(frequency * train_duration)
+            stim_instants = np.linspace(0, train_width, num_points + 1)[:-1].tolist()
+            if idx == len(model_data_paths) - 1 and flat_time:
+                stim_instants.append(flat_time[-1])
 
-    # Expending global lists
-    global_model_muscle_data = [item for sublist in global_model_muscle_data for item in sublist]
-    global_model_stim_apparition_time = [item for sublist in global_model_stim_apparition_time for item in sublist]
-    global_model_time_data = [item for sublist in global_model_time_data for item in sublist]
-    return (
-        global_model_time_data,
-        global_model_stim_apparition_time,
-        global_model_muscle_data,
-        discontinuity_phase_list,
-    )
+            # Apply cumulative offset for continuity
+            if idx > 0:
+                discontinuity_phase_list.append(cumulative_stim_count)
+                flat_time = self.apply_offset(flat_time, cumulative_time_offset)
+                stim_instants = self.apply_offset(stim_instants, cumulative_time_offset)
 
+            if flat_time:
+                cumulative_time_offset = flat_time[-1]
+            cumulative_stim_count += len(stim_instants)
 
-def sparse_data_extraction(model_data_path, force_curve_number=5):
-    """
-    Extracts sparse data from the provided path.
+            all_force_data.extend(avg_force)
+            all_stim_times.extend(stim_instants)
+            all_time_data.extend(flat_time)
 
-    Parameters
-    ----------
-    model_data_path : list
-        List of paths to the data files.
-    force_curve_number : int
-        Number of force curves to extract, by default 5.
+        return all_time_data, all_stim_times, all_force_data, discontinuity_phase_list
 
-    Returns
-    -------
-    tuple
-        A tuple containing the time data, stim apparition time, muscle data, and discontinuity phase list.
-    """
+    @staticmethod
+    def force_at_node_in_ocp(time, force, n_shooting, final_time):
+        """
+        Interpolates the force at each node in the optimal control problem (OCP).
 
-    raise NotImplementedError("This method has not been tested yet")
+        Parameters
+        ----------
+        time : list
+            List of time data.
+        force : list
+            List of force data.
+        n_shooting : int
+            List of number of shooting points for each phase.
 
-    # global_model_muscle_data = []
-    # global_model_stim_apparition_time = []
-    # global_model_time_data = []
-    #
-    # discontinuity_phase_list = []
-    # for i in range(len(model_data_path)):
-    #     with open(model_data_path[i], "rb") as f:
-    #         data = pickle.load(f)
-    #     model_data = data["force"]
-    #
-    #     # Arranging the data to have the beginning time starting at 0 second for all data
-    #     model_stim_apparition_time = (
-    #         data["stim_time"]
-    #         if data["stim_time"][0] == 0
-    #         else [stim_time - data["stim_time"][0] for stim_time in data["stim_time"]]
-    #     )
-    #
-    #     model_time_data = (
-    #         data["time"]
-    #         if data["stim_time"][0] == 0
-    #         else [[(time - data["stim_time"][0]) for time in row] for row in data["time"]]
-    #     )
-    #
-    #     # TODO : check this part
-    #     model_data = model_data[0:force_curve_number] + model_data[:-force_curve_number]
-    #     model_time_data = model_time_data[0:force_curve_number] + model_time_data[:-force_curve_number]
-    #
-    #     # TODO correct this part
-    #     model_stim_apparition_time = (
-    #         model_stim_apparition_time[0:force_curve_number] + model_stim_apparition_time[:-force_curve_number]
-    #     )
-    #
-    #     model_data = [item for sublist in model_data for item in sublist]
-    #     model_time_data = [item for sublist in model_time_data for item in sublist]
-    #
-    #     # Indexing the current data time on the previous one to ensure time continuity
-    #     if i != 0:
-    #         discontinuity_phase_list.append(
-    #             len(global_model_stim_apparition_time[-1]) - 1
-    #             if discontinuity_phase_list == []
-    #             else discontinuity_phase_list[-1] + len(global_model_stim_apparition_time[-1])
-    #         )
-    #
-    #         model_stim_apparition_time = [
-    #             stim_time + global_model_time_data[i - 1][-1] for stim_time in model_stim_apparition_time
-    #         ]
-    #
-    #         model_time_data = [(time + global_model_time_data[i - 1][-1]) for time in model_time_data]
-    #         model_stim_apparition_time = [
-    #             (time + global_model_time_data[i - 1][-1]) for time in model_stim_apparition_time
-    #         ]
-    #
-    #     # Storing data into global lists
-    #     global_model_muscle_data.append(model_data)
-    #     global_model_stim_apparition_time.append(model_stim_apparition_time)
-    #     global_model_time_data.append(model_time_data)
-    # # Expending global lists
-    # global_model_muscle_data = [item for sublist in global_model_muscle_data for item in sublist]
-    # global_model_stim_apparition_time = [item for sublist in global_model_stim_apparition_time for item in sublist]
-    # global_model_time_data = [item for sublist in global_model_time_data for item in sublist]
-    #
-    # return (
-    #     global_model_time_data,
-    #     global_model_stim_apparition_time,
-    #     global_model_muscle_data,
-    #     discontinuity_phase_list,
-    # )
+        Returns
+        -------
+        list
+            List of force at each node in the OCP.
+        """
 
-
-def force_at_node_in_ocp(time, force, n_shooting, final_time, sparse=None):
-    """
-    Interpolates the force at each node in the optimal control problem (OCP).
-
-    Parameters
-    ----------
-    time : list
-        List of time data.
-    force : list
-        List of force data.
-    n_shooting : int
-        List of number of shooting points for each phase.
-    sparse : int, optional
-        Number of sparse points, by default None.
-
-    Returns
-    -------
-    list
-        List of force at each node in the OCP.
-    """
-
-    temp_time = np.linspace(0, final_time, n_shooting + 1)
-    force_at_node = list(np.interp(temp_time, time, force))
-    # if sparse:  # TODO check this part
-    #     force_at_node = force_at_node[0:sparse] + force_at_node[:-sparse]
-    return force_at_node
+        temp_time = np.linspace(0, final_time, n_shooting + 1)
+        force_at_node = list(np.interp(temp_time, time, force))
+        return force_at_node
