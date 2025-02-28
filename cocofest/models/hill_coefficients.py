@@ -121,6 +121,5 @@ def muscle_passive_force_coefficient(model, muscle, q):
     norm_length = muscle_length / muscle_optimal_length
 
     m_FpCE = (exp(kpe * (norm_length - 1) / e0) - 1) / (exp(kpe) - 1)
-    m_FpCE = m_FpCE if m_FpCE > 0 else 0
 
     return m_FpCE

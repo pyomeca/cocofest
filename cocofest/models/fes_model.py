@@ -223,3 +223,12 @@ class FesModel(ABC):
         -------
 
         """
+
+    @abstractmethod
+    def get_n_shooting(self, final_time):
+        """
+
+        Returns
+        -------
+
+        """
