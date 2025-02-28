@@ -239,7 +239,8 @@ class IvpFes:
             self.stim_time.sort()
             self.model.stim_time = self.stim_time
             self.n_stim = len(self.stim_time)
-            self.n_shooting = OcpFes.prepare_n_shooting(self.stim_time, self.final_time)
+            self.model.stim_time = self.stim_time
+            self.n_shooting = self.model.get_n_shooting(self.final_time)
 
         elif self.pulse_mode == "triplet":
             doublet_step = 0.005
@@ -250,7 +251,8 @@ class IvpFes:
             self.stim_time.sort()
             self.model.stim_time = self.stim_time
             self.n_stim = len(self.stim_time)
-            self.n_shooting = OcpFes.prepare_n_shooting(self.stim_time, self.final_time)
+            self.model.stim_time = self.stim_time
+            self.n_shooting = self.model.get_n_shooting(self.final_time)
 
         else:
             raise ValueError("Pulse mode not yet implemented")
