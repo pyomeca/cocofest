@@ -16,7 +16,6 @@ def simulate_data(model, final_time: int, pulse_intensity_values: list, n_integr
     Simulate the data using the pulse intensity method.
     Returns a dictionary with time, force, stim_time, and pulse_intensity.
     """
-    # Create stimulation times and model
     stim_time = model.stim_time
 
     fes_parameters = {"model": model, "pulse_intensity": pulse_intensity_values}
@@ -27,7 +26,6 @@ def simulate_data(model, final_time: int, pulse_intensity_values: list, n_integr
     }
     ivp = IvpFes(fes_parameters, ivp_parameters)
 
-    # Integrate to simulate the force response
     result, time = ivp.integrate()
     data = {
         "time": time,
@@ -41,7 +39,6 @@ def simulate_data(model, final_time: int, pulse_intensity_values: list, n_integr
 def extract_identified_parameters(identified, keys):
     """
     For each parameter in keys, use the identified value if available;
-    otherwise fall back to the default from DingModelPulseIntensityFrequency.
     Returns a dictionary mapping parameter names to their values.
     """
     return {key: identified.parameters[key][0] for key in keys}
@@ -126,10 +123,11 @@ def prepare_ocp(
 
 def main():
     # Parameters for simulation and identification
-    n_stim = 33
-    final_time = 2
+    n_stim = 99
+    final_time = 6
     integration_steps = 10
-    stim_time = list(np.linspace(0, 1, n_stim + 1)[:-1])
+    stim_time = [val for start in range(0, final_time, 2) for val in np.linspace(start, start + 1, 34)[:-1]]
+
     model = ModelMaker.create_model("hmed2018", stim_time=stim_time, sum_stim_truncation=10)
     pulse_intensity_values = list(np.random.randint(40, 130, n_stim))
 
@@ -155,7 +153,6 @@ def main():
     )
     sol = ocp.solve()
 
-    # Run identification and extract parameters of interest
     param_keys = ["a_rest", "km_rest", "tau1_rest", "tau2", "ar", "bs", "Is", "cr"]
     identified_params = extract_identified_parameters(sol, param_keys)
 

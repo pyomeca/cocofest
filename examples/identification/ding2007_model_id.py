@@ -1,43 +1,30 @@
 """
-This example demonstrates the way of identifying the Ding 2003 model parameter using noisy simulated data.
-First we integrate the model with a given parameter set. Then we add noise to the previously calculated force output.
-Finally, we use the noisy data to identify the model parameters. It is possible to lock a_rest to an arbitrary value but
-you need to remove it from the key_parameter_to_identify.
+This example demonstrates the way of identifying the Ding 2007 model parameter using simulated data.
+First we integrate the model with a given parameter set.
+Finally, we use the data to identify the model parameters.
 """
 
 import matplotlib.pyplot as plt
 import numpy as np
 
-from bioptim import (
-    OdeSolver,
-    OptimalControlProgram,
-    ObjectiveFcn,
-    Node,
-    ControlType,
-    BoundsList,
-    InitialGuessList,
-    ObjectiveList,
-    SolutionMerge,
-)
+from bioptim import SolutionMerge, OdeSolver, OptimalControlProgram, ObjectiveFcn, Node, ControlType, ObjectiveList
 
 from cocofest import (
-    DingModelFrequency,
+    DingModelPulseWidthFrequency,
     IvpFes,
-    OcpFesId,
     ModelMaker,
+    OcpFesId,
 )
 from cocofest.identification.identification_method import DataExtraction
 
 
-def simulate_data(model, final_time: int, n_integration_steps):
+def simulate_data(model, final_time: int, pulse_width_values: list, n_integration_steps):
     """
-    Simulate the data using the pulse intensity method.
-    Returns a dictionary with time, force, stim_time, and pulse_intensity.
+    Returns a dictionary with time, force, stim_time, and pulse_width.
     """
-    # Create stimulation times and model
     stim_time = model.stim_time
 
-    fes_parameters = {"model": model}
+    fes_parameters = {"model": model, "pulse_width": pulse_width_values}
     ivp_parameters = {
         "final_time": final_time,
         "use_sx": True,
@@ -45,20 +32,19 @@ def simulate_data(model, final_time: int, n_integration_steps):
     }
     ivp = IvpFes(fes_parameters, ivp_parameters)
 
-    # Integrate to simulate the force response
     result, time = ivp.integrate()
     data = {
         "time": time,
         "force": result["F"][0],
         "stim_time": stim_time,
+        "pulse_width": pulse_width_values,
     }
     return data
 
 
 def extract_identified_parameters(identified, keys):
     """
-    For each parameter in keys, use the identified value if available;
-    otherwise fall back to the default from DingModelPulseIntensityFrequency.
+    For each parameter in keys, use the identified value if available.
     Returns a dictionary mapping parameter names to their values.
     """
     return {key: identified.parameters[key][0] for key in keys}
@@ -81,6 +67,7 @@ def annotate_parameters(ax, identified_params, default_model, start_x=0.7, y_sta
 def prepare_ocp(
     model,
     final_time,
+    pulse_width_values,
     simulated_data,
     key_parameter_to_identify,
 ):
@@ -96,7 +83,12 @@ def prepare_ocp(
         model=model,
         force_tracking=force_at_node,
     )
-    u_bounds, u_init = BoundsList(), InitialGuessList()
+    u_bounds, u_init = OcpFesId.set_u_bounds(
+        model=model,
+        control_value=pulse_width_values,
+        stim_idx_at_node_list=stim_idx_at_node_list,
+        n_shooting=n_shooting,
+    )
 
     objective_functions = ObjectiveList()
     objective_functions.add(
@@ -141,25 +133,37 @@ def main():
     final_time = 2
     integration_steps = 10
     stim_time = list(np.linspace(0, 1, n_stim + 1)[:-1])
-    model = ModelMaker.create_model("ding2003", stim_time=stim_time, sum_stim_truncation=10)
+    model = ModelMaker.create_model("ding2007", stim_time=stim_time, sum_stim_truncation=10)
+    pulse_width_values = list(np.random.uniform(0.0002, 0.0006, n_stim))
 
-    sim_data = simulate_data(model, final_time, n_integration_steps=integration_steps)
+    sim_data = simulate_data(
+        model, final_time, pulse_width_values=pulse_width_values, n_integration_steps=integration_steps
+    )
 
     ocp = prepare_ocp(
         model,
         final_time,
+        pulse_width_values,
         simulated_data=sim_data,
         key_parameter_to_identify=[
-            "a_rest",
             "km_rest",
             "tau1_rest",
             "tau2",
+            "pd0",
+            "pdt",
+            "a_scale",
         ],
     )
     sol = ocp.solve()
 
-    # Run identification and extract parameters of interest
-    param_keys = ["a_rest", "km_rest", "tau1_rest", "tau2"]
+    param_keys = [
+        "km_rest",
+        "tau1_rest",
+        "tau2",
+        "pd0",
+        "pdt",
+        "a_scale",
+    ]
     identified_params = extract_identified_parameters(sol, param_keys)
 
     print("Identified parameters:")
@@ -179,7 +183,7 @@ def main():
     ax.set_xlabel("time (s)")
     ax.set_ylabel("force (N)")
 
-    default_model = DingModelFrequency()
+    default_model = DingModelPulseWidthFrequency()
     annotate_parameters(ax, identified_params, default_model)
 
     ax.legend()

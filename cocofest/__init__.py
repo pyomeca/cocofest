@@ -10,22 +10,14 @@ from .models.hmed2018_with_fatigue import DingModelPulseIntensityFrequencyWithFa
 from .models.dynamical_model import FesMskModel
 from .models.model_maker import ModelMaker
 from .optimization.fes_ocp import OcpFes
-from .optimization.fes_identification_ocp import OcpFesId
+from .optimization.fes_id_ocp import OcpFesId
 from .optimization.fes_ocp_dynamics import OcpFesMsk
 from .optimization.fes_nmpc import FesNmpc
 from .optimization.fes_ocp_nmpc_cyclic import NmpcFes
 from .optimization.fes_ocp_dynamics_nmpc_cyclic import NmpcFesMsk
 from .integration.ivp_fes import IvpFes
 from .fourier_approx import FourierSeries
-from .identification.ding2003_force_parameter_identification import (
-    DingModelFrequencyForceParameterIdentification,
-)
-from .identification.ding2007_force_parameter_identification import (
-    DingModelPulseWidthFrequencyForceParameterIdentification,
-)
-from .identification.hmed2018_force_parameter_identification import (
-    DingModelPulseIntensityFrequencyForceParameterIdentification,
-)
+
 from .dynamics.inverse_kinematics_and_dynamics import (
     get_circle_coord,
     inverse_kinematics_cycling,

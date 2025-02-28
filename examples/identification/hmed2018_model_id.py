@@ -16,7 +16,6 @@ def simulate_data(model, final_time: int, pulse_intensity_values: list, n_integr
     Simulate the data using the pulse intensity method.
     Returns a dictionary with time, force, stim_time, and pulse_intensity.
     """
-    # Create stimulation times and model
     stim_time = model.stim_time
 
     fes_parameters = {"model": model, "pulse_intensity": pulse_intensity_values}
@@ -27,7 +26,6 @@ def simulate_data(model, final_time: int, pulse_intensity_values: list, n_integr
     }
     ivp = IvpFes(fes_parameters, ivp_parameters)
 
-    # Integrate to simulate the force response
     result, time = ivp.integrate()
     data = {
         "time": time,
@@ -40,8 +38,7 @@ def simulate_data(model, final_time: int, pulse_intensity_values: list, n_integr
 
 def extract_identified_parameters(identified, keys):
     """
-    For each parameter in keys, use the identified value if available;
-    otherwise fall back to the default from DingModelPulseIntensityFrequency.
+    For each parameter in keys, use the identified value if available.
     Returns a dictionary mapping parameter names to their values.
     """
     return {key: identified.parameters[key][0] for key in keys}
@@ -155,7 +152,6 @@ def main():
     )
     sol = ocp.solve()
 
-    # Run identification and extract parameters of interest
     param_keys = ["a_rest", "km_rest", "tau1_rest", "tau2", "ar", "bs", "Is", "cr"]
     identified_params = extract_identified_parameters(sol, param_keys)
 
