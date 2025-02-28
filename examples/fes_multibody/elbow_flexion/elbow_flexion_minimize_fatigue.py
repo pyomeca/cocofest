@@ -117,15 +117,9 @@ def main():
     # --- Define the fes model --- #
     fes_model_type = "ding2007_with_fatigue"
     stim_time = list(np.linspace(0, 1, 11))[:-1]
-    biceps = ModelMaker.create_model(
-        fes_model_type,
-        muscle_name="BIClong",
-        stim_time=stim_time,
-    )
+    biceps = ModelMaker.create_model(fes_model_type, muscle_name="BIClong", stim_time=stim_time, sum_stim_truncation=10)
     triceps = ModelMaker.create_model(
-        fes_model_type,
-        muscle_name="TRIlong",
-        stim_time=stim_time,
+        fes_model_type, muscle_name="TRIlong", stim_time=stim_time, sum_stim_truncation=10
     )
     max_bound = (
         0.0006

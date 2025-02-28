@@ -11,10 +11,11 @@ from bioptim import (
     VariableScaling,
     Solution,
     Solver,
+    BiorbdModel,
 )
 
-from .fes_ocp import OcpFes
 from ..models.ding2007_with_fatigue import DingModelPulseWidthFrequencyWithFatigue
+from ..models.dynamical_model import FesMskModel
 
 
 class FesNmpc(MultiCyclicNonlinearModelPredictiveControl):
@@ -23,11 +24,20 @@ class FesNmpc(MultiCyclicNonlinearModelPredictiveControl):
         self.all_models = []
         self.cycle_duration = kwargs["cycle_duration"]
         self.n_cycles_simultaneous = kwargs["n_cycles_simultaneous"]
-        self.bimapped_param = True if self.parameters.shape == self.n_cycles_simultaneous else False
+
         self.initial_guess_param_index = []
         self.initial_guess_frames = []
-        self.initialize_frames_and_parameters(kwargs["bio_model"].stim_time)
+
+        model = kwargs["bio_model"][0] if isinstance(kwargs["bio_model"], list) else kwargs["bio_model"]
+        if isinstance(model, FesMskModel):
+            muscle_model = model.muscles_dynamics_model[0]
+        else:
+            muscle_model = model
+
+        stim_time = [] if isinstance(kwargs["bio_model"], BiorbdModel) else muscle_model.stim_time
+        self.initialize_frames_and_parameters(stim_time)
         self.first_run = True
+        self.use_sx = kwargs["use_sx"]
 
     def initialize_frames_and_parameters(self, stim_time):
         for i in range(self.n_cycles_simultaneous - 1):
@@ -66,15 +76,19 @@ class FesNmpc(MultiCyclicNonlinearModelPredictiveControl):
             else:
                 self.parameter_init[key].init[:, :] = reshaped_parameter[self.initial_guess_param_index, :]
 
+    @staticmethod
+    def build_new_model(model, previous_stim):
+        new_model = DingModelPulseWidthFrequencyWithFatigue(
+            previous_stim=previous_stim, stim_time=model.stim_time, sum_stim_truncation=model.sum_stim_truncation
+        )
+        return new_model
+
     def update_stim(self):
         truncation_term = self.nlp[0].model.sum_stim_truncation
         solution_stimulation_time = self.nlp[0].model.stim_time[-truncation_term:]
         previous_stim_time = [x - self.phase_time[0] for x in solution_stimulation_time]
         previous_stim = {"time": previous_stim_time}
-        new_model = DingModelPulseWidthFrequencyWithFatigue(
-            previous_stim=previous_stim, stim_time=self.nlp[0].model.stim_time, sum_stim_truncation=truncation_term
-        )
-
+        new_model = self.build_new_model(model=self.nlp[0].model, previous_stim=previous_stim)
         if self.first_run:
             self.nlp[0].numerical_data_timeseries, _ = new_model.get_numerical_data_time_series(
                 self.n_shooting, self.phase_time[0]

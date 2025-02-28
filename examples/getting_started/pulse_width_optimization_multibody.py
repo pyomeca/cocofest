@@ -38,7 +38,7 @@ def prepare_ocp(model: FesMskModel, final_time: float, external_force: dict, msk
     dynamics = OcpFesMsk.declare_dynamics(model, numerical_time_series=numerical_time_series, with_contact=False)
 
     x_bounds, x_init = OcpFesMsk.set_x_bounds(model, msk_info)
-    u_bounds, u_init = OcpFesMsk.set_u_bounds(model, msk_info["with_residual_torque"])
+    u_bounds, u_init = OcpFesMsk.set_u_bounds(model, msk_info["with_residual_torque"], max_bound=0.0006)
 
     objective_functions = ObjectiveList()
     objective_functions.add(
@@ -72,7 +72,7 @@ def main():
     model = FesMskModel(
         name=None,
         biorbd_path="../model_msk/arm26_biceps_1dof.bioMod",
-        muscles_model=[DingModelPulseWidthFrequencyWithFatigue(muscle_name="BIClong")],
+        muscles_model=[DingModelPulseWidthFrequencyWithFatigue(muscle_name="BIClong", sum_stim_truncation=10)],
         stim_time=list(np.linspace(0, simulation_ending_time, 34)[:-1]),
         activate_force_length_relationship=True,
         activate_force_velocity_relationship=True,

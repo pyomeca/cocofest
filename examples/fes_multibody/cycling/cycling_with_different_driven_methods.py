@@ -26,7 +26,6 @@ from bioptim import (
     ParameterList,
     PhaseDynamics,
     Solver,
-    ParameterObjectiveList,
 )
 
 from cocofest import (
@@ -36,110 +35,8 @@ from cocofest import (
     inverse_kinematics_cycling,
     OcpFesMsk,
     FES_plot,
-    OcpFes,
     DingModelPulseWidthFrequency,
 )
-
-
-def prepare_ocp(
-    model: BiorbdModel | FesMskModel,
-    n_shooting: int,
-    final_time: int,
-    turn_number: int,
-    pedal_config: dict,
-    pulse_width: dict,
-    dynamics_type: str = "torque_driven",
-    use_sx: bool = True,
-    control_type: ControlType = ControlType.CONSTANT,
-    integration_step: int = 1,
-) -> OptimalControlProgram:
-    """
-    Prepare the optimal control program (OCP) with the provided configuration.
-
-    Parameters
-    ----------
-    model: BiorbdModel | FesMskModel
-        The biomechanical model.
-    n_shooting: int
-        Number of shooting nodes.
-    final_time: int
-        Total time of the motion.
-    turn_number: int
-        Number of complete turns.
-    pedal_config: dict
-        Dictionary with pedal configuration (e.g., center and radius).
-    pulse_width: dict
-        Dictionary with pulse width parameters for FES-driven dynamics.
-    dynamics_type: str
-        Type of dynamics ("torque_driven", "muscle_driven", or "fes_driven").
-    use_sx: bool
-        Whether to use CasADi SX for symbolic computations.
-    integration_step: int
-        Integration step for the ODE solver.
-
-    Returns
-    -------
-        An OptimalControlProgram instance configured for the problem.
-    """
-    # Set external forces (e.g., resistive torque at the handle)
-    numerical_time_series, external_force_set = set_external_forces(n_shooting, torque=-1)
-
-    # Set stimulation time in numerical_data_time_series
-    if isinstance(model, FesMskModel):
-        numerical_data_time_series, stim_idx_at_node_list = model.muscles_dynamics_model[
-            0
-        ].get_numerical_data_time_series(n_shooting, final_time)
-        numerical_time_series.update(numerical_data_time_series)
-
-    # Set dynamics based on the chosen dynamics type
-    dynamics = set_dynamics(model, numerical_time_series, dynamics_type_str=dynamics_type)
-    # Configure objective functions
-    objective_functions = set_objective_functions(model, dynamics_type)
-    # Set initial guess for state variables
-    x_init = set_x_init(n_shooting, pedal_config, turn_number)
-    # Define state bounds
-    x_bounds = set_state_bounds(
-        model=model,
-        x_init=x_init,
-        n_shooting=n_shooting,
-        turn_number=turn_number,
-        interpolation_type=InterpolationType.EACH_FRAME,
-        cardinal=2,
-    )
-    # Define control bounds and initial guess
-    u_init, u_bounds = set_u_bounds_and_init(model, dynamics_type_str=dynamics_type)
-
-    # Set constraints
-    constraints = set_constraints(model, n_shooting, turn_number)
-
-    parameters = ParameterList(use_sx=use_sx)
-    parameters_bounds = BoundsList()
-    parameters_init = InitialGuessList()
-    parameter_objectives = ParameterObjectiveList()
-
-    # Update the model with external forces and parameters
-    model = update_model(model, external_force_set, parameters)
-
-    return OptimalControlProgram(
-        [model],
-        dynamics,
-        n_shooting,
-        final_time,
-        x_bounds=x_bounds,
-        u_bounds=u_bounds,
-        x_init=x_init,
-        u_init=u_init,
-        objective_functions=objective_functions,
-        ode_solver=OdeSolver.RK4(n_integration_steps=integration_step),
-        n_threads=20,
-        constraints=constraints,
-        parameters=parameters,
-        parameter_bounds=parameters_bounds,
-        parameter_init=parameters_init,
-        parameter_objectives=parameter_objectives,
-        use_sx=use_sx,
-        control_type=control_type,
-    )
 
 
 def set_external_forces(n_shooting: int, torque: int | float) -> tuple[dict, ExternalForceSetTimeSeries]:
@@ -398,7 +295,7 @@ def set_state_bounds(
     x_bounds = BoundsList()
     # For FES models, retrieve custom bounds
     if isinstance(model, FesMskModel):
-        x_bounds, _ = OcpFesMsk._set_bounds_fes(model)
+        x_bounds, _ = OcpFesMsk.set_x_bounds_fes(model)
 
     # Retrieve default bounds from the model for positions and velocities
     q_x_bounds = model.bounds_from_ranges("q")
@@ -436,8 +333,6 @@ def set_state_bounds(
                 if i % cardinal == 0
                 else x_init["q"].init[2][cardinal_index] + slack
             )
-            # x_min_bound[2][cardinal_index] = x_init["q"].init[2][cardinal_index] - slack
-            # x_max_bound[2][cardinal_index] = x_init["q"].init[2][cardinal_index] + slack
 
         x_bounds.add(
             key="q", min_bound=x_min_bound, max_bound=x_max_bound, phase=0, interpolation=InterpolationType.EACH_FRAME
@@ -452,8 +347,6 @@ def set_state_bounds(
     qdot_x_bounds.max[1] = [10, 10, 10]
     qdot_x_bounds.min[1] = [-10, -10, -10]
     qdot_x_bounds.max[2] = [-1, -1, -1]
-    # qdot_x_bounds.max[2] = [0, 0, 0]
-    # qdot_x_bounds.min[2] = [-14, -14, -14]
     x_bounds.add(key="qdot", bounds=qdot_x_bounds, phase=0)
     return x_bounds
 
@@ -499,16 +392,106 @@ def set_constraints(model: BiorbdModel | FesMskModel, n_shooting: int, turn_numb
     return constraints
 
 
+def prepare_ocp(
+    model: BiorbdModel | FesMskModel,
+    n_shooting: int,
+    final_time: int,
+    turn_number: int,
+    pedal_config: dict,
+    dynamics_type: str = "torque_driven",
+    use_sx: bool = True,
+    integration_step: int = 1,
+) -> OptimalControlProgram:
+    """
+    Prepare the optimal control program (OCP) with the provided configuration.
+
+    Parameters
+    ----------
+    model: BiorbdModel | FesMskModel
+        The biomechanical model.
+    n_shooting: int
+        Number of shooting nodes.
+    final_time: int
+        Total time of the motion.
+    turn_number: int
+        Number of complete turns.
+    pedal_config: dict
+        Dictionary with pedal configuration (e.g., center and radius).
+    dynamics_type: str
+        Type of dynamics ("torque_driven", "muscle_driven", or "fes_driven").
+    use_sx: bool
+        Whether to use CasADi SX for symbolic computations.
+    integration_step: int
+        Integration step for the ODE solver.
+
+    Returns
+    -------
+        An OptimalControlProgram instance configured for the problem.
+    """
+    # Set external forces (e.g., resistive torque at the handle)
+    numerical_time_series, external_force_set = set_external_forces(n_shooting, torque=-1)
+
+    # Set stimulation time in numerical_data_time_series
+    if isinstance(model, FesMskModel):
+        numerical_data_time_series, stim_idx_at_node_list = model.muscles_dynamics_model[
+            0
+        ].get_numerical_data_time_series(n_shooting, final_time)
+        numerical_time_series.update(numerical_data_time_series)
+
+    # Set dynamics based on the chosen dynamics type
+    dynamics = set_dynamics(model, numerical_time_series, dynamics_type_str=dynamics_type)
+
+    # Configure objective functions
+    objective_functions = set_objective_functions(model, dynamics_type)
+
+    # Set initial guess for state variables
+    x_init = set_x_init(n_shooting, pedal_config, turn_number)
+
+    # Define state bounds
+    x_bounds = set_state_bounds(
+        model=model,
+        x_init=x_init,
+        n_shooting=n_shooting,
+        turn_number=turn_number,
+        interpolation_type=InterpolationType.EACH_FRAME,
+        cardinal=2,
+    )
+
+    # Define control bounds and initial guess
+    u_init, u_bounds = set_u_bounds_and_init(model, dynamics_type_str=dynamics_type)
+
+    # Set constraints
+    constraints = set_constraints(model, n_shooting, turn_number)
+
+    # Update the model with external forces and parameters
+    model = update_model(model, external_force_set, parameters=ParameterList(use_sx=use_sx))
+
+    return OptimalControlProgram(
+        [model],
+        dynamics,
+        n_shooting,
+        final_time,
+        x_bounds=x_bounds,
+        u_bounds=u_bounds,
+        x_init=x_init,
+        u_init=u_init,
+        objective_functions=objective_functions,
+        ode_solver=OdeSolver.RK1(n_integration_steps=integration_step),
+        n_threads=20,
+        constraints=constraints,
+        use_sx=use_sx,
+        control_type=ControlType.CONSTANT,
+    )
+
+
 def main():
     """
     Main function to configure and solve the optimal control problem.
     """
     # --- Configuration --- #
     dynamics_type = "fes_driven"  # Available options: "torque_driven", "muscle_driven", "fes_driven"
-    # dynamics_type = "torque_driven"
     model_path = "../../model_msk/simplified_UL_Seth_pedal_aligned.bioMod"
-    pulse_width = None
-    final_time = 1
+    final_time = 3
     n_shooting = 100 * final_time
     turn_number = final_time
     pedal_config = {"x_center": 0.35, "y_center": 0.0, "radius": 0.1}
@@ -526,7 +509,7 @@ def main():
             DingModelPulseWidthFrequencyWithFatigue(muscle_name="BIC_long", sum_stim_truncation=10),
             DingModelPulseWidthFrequencyWithFatigue(muscle_name="BIC_brevis", sum_stim_truncation=10),
         ]
-        stim_time = list(np.linspace(0, final_time, 34)[:-1])
+        stim_time = list(np.linspace(0, final_time, 100)[:-1])
         model = FesMskModel(
             name=None,
             biorbd_path=model_path,
@@ -538,15 +521,8 @@ def main():
             activate_residual_torque=False,
             external_force_set=None,  # External forces will be added later
         )
-        pulse_width = {
-            "min": DingModelPulseWidthFrequencyWithFatigue().pd0,
-            "max": 0.0006,
-            "bimapping": False,
-            "same_for_all_muscles": False,
-            "fixed": False,
-        }
         # Adjust n_shooting based on the stimulation time
-        n_shooting = OcpFes.prepare_n_shooting(stim_time, final_time)
+        n_shooting = model.muscles_dynamics_model[0].get_n_shooting(final_time)
         integration_step = 5
     else:
         raise ValueError(f"Dynamics type '{dynamics_type}' not recognized")
@@ -557,24 +533,23 @@ def main():
         final_time=final_time,
         turn_number=turn_number,
         pedal_config=pedal_config,
-        pulse_width=pulse_width,
         dynamics_type=dynamics_type,
-        use_sx=True,
+        use_sx=False,
         integration_step=integration_step,
     )
+
     # Add the penalty cost function plot
     ocp.add_plot_penalty(CostType.ALL)
+
     # Solve the optimal control problem
     sol = ocp.solve(Solver.IPOPT(show_online_optim=False, _max_iter=1000))
+
     # Display graphs and animate the solution
-
-    sol.graphs(show_bounds=True)
-
-    # if dynamics_type == "fes_driven":
-    #     FES_plot(data=sol).plot(title="FES-driven cycling")
-    # else:
-    #     sol.graphs(show_bounds=True)
-    # sol.animate(viewer="pyorerun")
+    if dynamics_type == "fes_driven":
+        FES_plot(data=sol).plot(title="FES-driven cycling")
+    else:
+        sol.graphs(show_bounds=True)
+    sol.animate(viewer="pyorerun")
 
 
 if __name__ == "__main__":

@@ -61,12 +61,12 @@ def initialize_model():
     # Build the functional electrical stimulation models according
     # to number and name of muscle in the musculoskeletal model used
     fes_muscle_models = [
-        DingModelPulseWidthFrequencyWithFatigue(muscle_name="BIClong"),
-        DingModelPulseWidthFrequencyWithFatigue(muscle_name="BICshort"),
-        DingModelPulseWidthFrequencyWithFatigue(muscle_name="TRIlong"),
-        DingModelPulseWidthFrequencyWithFatigue(muscle_name="TRIlat"),
-        DingModelPulseWidthFrequencyWithFatigue(muscle_name="TRImed"),
-        DingModelPulseWidthFrequencyWithFatigue(muscle_name="BRA"),
+        DingModelPulseWidthFrequencyWithFatigue(muscle_name="BIClong", sum_stim_truncation=10),
+        DingModelPulseWidthFrequencyWithFatigue(muscle_name="BICshort", sum_stim_truncation=10),
+        DingModelPulseWidthFrequencyWithFatigue(muscle_name="TRIlong", sum_stim_truncation=10),
+        DingModelPulseWidthFrequencyWithFatigue(muscle_name="TRIlat", sum_stim_truncation=10),
+        DingModelPulseWidthFrequencyWithFatigue(muscle_name="TRImed", sum_stim_truncation=10),
+        DingModelPulseWidthFrequencyWithFatigue(muscle_name="BRA", sum_stim_truncation=10),
     ]
 
     # Applying the scaling
