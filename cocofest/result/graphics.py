@@ -374,7 +374,7 @@ class FES_plot:
         force_label = "FES forces (N)"
 
         fes_parameter_label = (
-            "Pulse duration (us)"
+            "Pulse width (us)"
             if isinstance(solution.ocp.nlp[0].model.muscles_dynamics_model[0], DingModelPulseWidthFrequency)
             else "Pulse intensity (mA)"
         )

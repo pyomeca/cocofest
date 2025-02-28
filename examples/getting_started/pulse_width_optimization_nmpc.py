@@ -10,7 +10,6 @@ import numpy as np
 from bioptim import (
     CostType,
     ConstraintFcn,
-    InitialGuessList,
     MultiCyclicCycleSolutions,
     MultiCyclicNonlinearModelPredictiveControl,
     ObjectiveFcn,
@@ -19,9 +18,6 @@ from bioptim import (
     SolutionMerge,
     Solution,
     Solver,
-    ParameterList,
-    BoundsList,
-    ParameterObjectiveList,
 )
 
 from cocofest import (
@@ -43,7 +39,7 @@ def prepare_nmpc(
     minimize_force: bool = True,
     minimize_fatigue: bool = False,
 ):
-    total_cycle_len = OcpFes.prepare_n_shooting(model.stim_time, cycle_duration * n_cycles_simultaneous)
+    total_cycle_len = model.get_n_shooting(cycle_duration * n_cycles_simultaneous)
     total_cycle_duration = cycle_duration * n_cycles_simultaneous
     cycle_len = int(total_cycle_len / n_cycles_simultaneous)
 
@@ -76,11 +72,6 @@ def prepare_nmpc(
     if minimize_fatigue:
         objective_functions.add(ObjectiveFcn.Lagrange.MINIMIZE_STATE, key="A", weight=-1, quadratic=True)
 
-    parameters = ParameterList(use_sx=use_sx)
-    parameters_bounds = BoundsList()
-    parameters_init = InitialGuessList()
-    parameter_objectives = ParameterObjectiveList()
-
     return FesNmpc(
         bio_model=model,
         dynamics=dynamics,
@@ -94,10 +85,6 @@ def prepare_nmpc(
         x_init=x_init,
         u_bounds=u_bounds,
         u_init=u_init,
-        parameters=parameters,
-        parameter_bounds=parameters_bounds,
-        parameter_init=parameters_init,
-        parameter_objectives=parameter_objectives,
         ode_solver=OdeSolver.RK4(n_integration_steps=10),
         n_threads=20,
         use_sx=use_sx,
