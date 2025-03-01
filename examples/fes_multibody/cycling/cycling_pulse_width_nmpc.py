@@ -94,7 +94,7 @@ def prepare_nmpc(
     x_init = set_x_init(window_n_shooting, pedal_config, turn_number)
 
     # Path constraint
-    x_bounds = set_bounds(
+    x_bounds, x_init = set_bounds(
         model=model,
         x_init=x_init,
         n_shooting=window_n_shooting,
@@ -220,7 +220,9 @@ def set_u_bounds_and_init(bio_model):
 
 
 def set_bounds(model, x_init, n_shooting, turn_number, interpolation_type=InterpolationType.CONSTANT, cardinal=4):
-    x_bounds, _ = OcpFesMsk.set_x_bounds_fes(model)
+    x_bounds, x_init_fes = OcpFesMsk.set_x_bounds_fes(model)
+    for key in x_init_fes.keys():
+        x_init[key] = x_init_fes[key]
 
     q_x_bounds = model.bounds_from_ranges("q")
     qdot_x_bounds = model.bounds_from_ranges("qdot")
