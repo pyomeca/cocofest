@@ -66,6 +66,7 @@ class DingModelFrequency(FesModel):
         self.tau1_rest = TAU1_REST_DEFAULT
         self.tau2 = TAU2_DEFAULT
         self.km_rest = KM_REST_DEFAULT
+        self.fmax = 315.5  # Maximum force (N) at 100 Hz
 
     def set_a_rest(self, model, a_rest: MX | float):
         # models is required for bioptim compatibility

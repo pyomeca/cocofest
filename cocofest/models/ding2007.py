@@ -77,6 +77,7 @@ class DingModelPulseWidthFrequency(DingModelFrequency):
         self.tau2 = TAU2_DEFAULT
         self.km_rest = KM_REST_DEFAULT
         self.tauc = TAUC_DEFAULT
+        self.fmax = 248  # Maximum force (N) at 100 Hz and 600 us
 
     @property
     def identifiable_parameters(self):

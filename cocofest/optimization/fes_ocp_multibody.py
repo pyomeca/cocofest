@@ -214,7 +214,7 @@ class OcpFesMsk(OcpFes):
         if isinstance(models[0], DingModelPulseWidthFrequency):
             for model in models:
                 key = "last_pulse_width_" + str(model.muscle_name)
-                u_init.add(key=key, initial_guess=[0], phase=0)
+                u_init.add(key=key, initial_guess=[model.pd0], phase=0)
                 u_bounds.add(key=key, min_bound=[model.pd0], max_bound=[0.0006], phase=0)
 
         if isinstance(models[0], DingModelPulseIntensityFrequency):

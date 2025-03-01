@@ -97,6 +97,29 @@ class CustomObjective:
         return sum1(muscle_fatigue_rest) / sum1(muscle_fatigue)
 
     @staticmethod
+    def minimize_multibody_muscle_fatigue(controller: PenaltyController) -> MX:
+        """
+        Minimize the overall muscle fatigue.
+
+        Parameters
+        ----------
+        controller: PenaltyController
+            The penalty node elements
+
+        Returns
+        -------
+        The sum of each force scaling factor
+        """
+        muscle_name_list = controller.model.bio_model.muscle_names
+        inv_fatigue_norm = vertcat(
+            *[
+                controller.states["A_" + muscle_name_list[i]].cx / controller.model.muscles_dynamics_model[i].a_rest
+                for i in range(len(muscle_name_list))
+            ]
+        )
+        return inv_fatigue_norm
+
+    @staticmethod
     def minimize_overall_muscle_force_production(controller: PenaltyController) -> MX:
         """
         Minimize the overall muscle force production.
@@ -115,3 +138,26 @@ class CustomObjective:
             *[controller.states["F_" + muscle_name_list[x]].cx for x in range(len(muscle_name_list))]
         )
         return muscle_force
+
+    @staticmethod
+    def minimize_multibody_muscle_force_norm(controller: PenaltyController) -> MX:
+        """
+        Minimize the overall muscle force production.
+
+        Parameters
+        ----------
+        controller: PenaltyController
+            The penalty node elements
+
+        Returns
+        -------
+        The sum of each force
+        """
+        muscle_name_list = controller.model.bio_model.muscle_names
+        muscle_force_norm = vertcat(
+            *[
+                controller.states["F_" + muscle_name_list[i]].cx / controller.model.muscles_dynamics_model[i].fmax
+                for i in range(len(muscle_name_list))
+            ]
+        )
+        return muscle_force_norm

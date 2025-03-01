@@ -256,7 +256,7 @@ def set_u_bounds_and_init(
         if isinstance(model.muscles_dynamics_model[0], DingModelPulseWidthFrequency):
             for model in model.muscles_dynamics_model:
                 key = "last_pulse_width_" + str(model.muscle_name)
-                u_init.add(key=key, initial_guess=[0], phase=0)
+                u_init.add(key=key, initial_guess=[model.pd0], phase=0)
                 u_bounds.add(key=key, min_bound=[model.pd0], max_bound=[0.0006], phase=0)
 
     return u_init, u_bounds
@@ -311,9 +311,10 @@ def set_state_bounds(
 
         # Adjust bounds at cardinal nodes for a specific coordinate (e.g., index 2)
         cardinal_node_list = [
-            i * int(n_shooting / ((n_shooting / (n_shooting / turn_number)) * cardinal))
+            i * (n_shooting / ((n_shooting / (n_shooting / turn_number)) * cardinal))
             for i in range(int((n_shooting / (n_shooting / turn_number)) * cardinal + 1))
         ]
+        cardinal_node_list = [int(cardinal_node_list[i]) for i in range(len(cardinal_node_list))]
         slack = 10 * (np.pi / 180)
         for i in range(len(x_min_bound[0])):
             x_min_bound[0][i] = 0
@@ -346,7 +347,8 @@ def set_state_bounds(
     qdot_x_bounds.min[0] = [-10, -10, -10]
     qdot_x_bounds.max[1] = [10, 10, 10]
     qdot_x_bounds.min[1] = [-10, -10, -10]
-    qdot_x_bounds.max[2] = [-1, -1, -1]
+    # qdot_x_bounds.max[2] = [-2, -2, -2]
+    # qdot_x_bounds.min[2] = [-15, -15, -15]
     x_bounds.add(key="qdot", bounds=qdot_x_bounds, phase=0)
     return x_bounds
 
@@ -490,6 +492,8 @@ def main():
     """
     # --- Configuration --- #
     dynamics_type = "fes_driven"  # Available options: "torque_driven", "muscle_driven", "fes_driven"
+    # dynamics_type = "torque_driven"
+    # dynamics_type = "muscle_driven"
     model_path = "../../model_msk/simplified_UL_Seth_pedal_aligned.bioMod"
     final_time = 3
     n_shooting = 100 * final_time
@@ -542,8 +546,8 @@ def main():
     ocp.add_plot_penalty(CostType.ALL)
 
     # Solve the optimal control problem
-    sol = ocp.solve(Solver.IPOPT(show_online_optim=False, _max_iter=1000))
-
+    sol = ocp.solve(Solver.IPOPT(show_online_optim=False, _max_iter=10000))
+    sol.graphs(show_bounds=True)
     # Display graphs and animate the solution
     if dynamics_type == "fes_driven":
         FES_plot(data=sol).plot(title="FES-driven cycling")
