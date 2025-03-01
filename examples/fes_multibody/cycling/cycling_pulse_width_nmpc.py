@@ -274,7 +274,7 @@ def set_bounds(model, x_init, n_shooting, turn_number, interpolation_type=Interp
     qdot_x_bounds.max[2] = [-2, -2, -2]
     qdot_x_bounds.min[2] = [-15, -15, -15]
     x_bounds.add(key="qdot", bounds=qdot_x_bounds, phase=0)
-    return x_bounds
+    return x_bounds, x_init
 
 
 def set_constraints(bio_model, n_shooting, turn_number):
