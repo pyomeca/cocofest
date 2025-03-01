@@ -356,7 +356,7 @@ def main():
 
     resistive_torque = {
         "Segment_application": "wheel",
-        "torque": np.array([0, 0, -0.5]),
+        "torque": np.array([0, 0, -1]),
     }
 
     simulation_conditions_1 = {
