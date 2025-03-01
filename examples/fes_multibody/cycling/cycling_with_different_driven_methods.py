@@ -343,12 +343,12 @@ def set_state_bounds(
         x_bounds.add(key="q", bounds=q_x_bounds, phase=0)
 
     # Modify bounds for velocities (e.g., setting maximum pedal speed to 0 to prevent the pedal to go backward)
-    qdot_x_bounds.max[0] = [10, 10, 10]
-    qdot_x_bounds.min[0] = [-10, -10, -10]
-    qdot_x_bounds.max[1] = [10, 10, 10]
-    qdot_x_bounds.min[1] = [-10, -10, -10]
-    # qdot_x_bounds.max[2] = [-2, -2, -2]
-    # qdot_x_bounds.min[2] = [-15, -15, -15]
+    qdot_x_bounds.max[0] = [4, 4, 4]
+    qdot_x_bounds.min[0] = [-4, -4, -4]
+    qdot_x_bounds.max[1] = [4, 4, 4]
+    qdot_x_bounds.min[1] = [-4, -4, -4]
+    qdot_x_bounds.max[2] = [-2, -2, -2]
+    qdot_x_bounds.min[2] = [-15, -15, -15]
     x_bounds.add(key="qdot", bounds=qdot_x_bounds, phase=0)
     return x_bounds
 
@@ -431,7 +431,7 @@ def prepare_ocp(
         An OptimalControlProgram instance configured for the problem.
     """
     # Set external forces (e.g., resistive torque at the handle)
-    numerical_time_series, external_force_set = set_external_forces(n_shooting, torque=-1)
+    numerical_time_series, external_force_set = set_external_forces(n_shooting, torque=-0.5)
 
     # Set stimulation time in numerical_data_time_series
     if isinstance(model, FesMskModel):
@@ -548,11 +548,11 @@ def main():
     # Solve the optimal control problem
     sol = ocp.solve(Solver.IPOPT(show_online_optim=False, _max_iter=10000))
     sol.graphs(show_bounds=True)
-    # Display graphs and animate the solution
-    if dynamics_type == "fes_driven":
-        FES_plot(data=sol).plot(title="FES-driven cycling")
-    else:
-        sol.graphs(show_bounds=True)
+    # # Display graphs and animate the solution
+    # if dynamics_type == "fes_driven":
+    #     FES_plot(data=sol).plot(title="FES-driven cycling")
+    # else:
+    #     sol.graphs(show_bounds=True)
     sol.animate(viewer="pyorerun")
 
 
