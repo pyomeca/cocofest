@@ -423,7 +423,7 @@ def main():
         # Solve the optimal control problem
         sol = nmpc.solve_fes_nmpc(
             update_functions,
-            solver=Solver.IPOPT(show_online_optim=False, _max_iter=0, show_options=dict(show_bounds=True)),
+            solver=Solver.IPOPT(show_online_optim=False, _max_iter=1000000, show_options=dict(show_bounds=True)),
             total_cycles=n_cycles,
             external_force=resistive_torque,
             cycle_solutions=MultiCyclicCycleSolutions.ALL_CYCLES,
