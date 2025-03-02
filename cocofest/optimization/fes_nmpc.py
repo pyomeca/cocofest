@@ -25,8 +25,8 @@ class FesNmpc(MultiCyclicNonlinearModelPredictiveControl):
         self.cycle_duration = kwargs["cycle_duration"]
         self.n_cycles_simultaneous = kwargs["n_cycles_simultaneous"]
 
-        self.initial_guess_param_index = []
-        self.initial_guess_frames = []
+        # self.initial_guess_param_index = []
+        # self.initial_guess_frames = []
 
         model = kwargs["bio_model"][0] if isinstance(kwargs["bio_model"], list) else kwargs["bio_model"]
         if isinstance(model, FesMskModel):
@@ -35,21 +35,21 @@ class FesNmpc(MultiCyclicNonlinearModelPredictiveControl):
             muscle_model = model
 
         stim_time = [] if isinstance(kwargs["bio_model"], BiorbdModel) else muscle_model.stim_time
-        self.initialize_frames_and_parameters(stim_time)
+        # self.initialize_frames_and_parameters(stim_time)
         self.first_run = True
         self.use_sx = kwargs["use_sx"]
 
-    def initialize_frames_and_parameters(self, stim_time):
-        for i in range(self.n_cycles_simultaneous - 1):
-            self.initial_guess_frames.extend(
-                list(range((self.n_cycles_to_advance + i) * self.cycle_len, self.n_cycles * self.cycle_len))
-            )
-        self.initial_guess_frames.append(self.n_cycles * self.cycle_len)
-
-        for i in range(self.n_cycles_simultaneous - 1):
-            self.initial_guess_param_index.extend(
-                list(range((int(len(stim_time) / self.n_cycles) * (1 + i)), len(stim_time)))
-            )
+    # def initialize_frames_and_parameters(self, stim_time):
+    #     for i in range(self.n_cycles_simultaneous - 1):
+    #         self.initial_guess_frames.extend(
+    #             list(range((self.n_cycles_to_advance + i) * self.cycle_len, self.n_cycles * self.cycle_len))
+    #         )
+    #     self.initial_guess_frames.append(self.n_cycles * self.cycle_len)
+    #
+    #     for i in range(self.n_cycles_simultaneous - 1):
+    #         self.initial_guess_param_index.extend(
+    #             list(range((int(len(stim_time) / self.n_cycles) * (1 + i)), len(stim_time)))
+    #         )
 
     def advance_window_bounds_states(self, sol, n_cycles_simultaneous=None, **extra):
         super(FesNmpc, self).advance_window_bounds_states(sol)
@@ -60,21 +60,21 @@ class FesNmpc(MultiCyclicNonlinearModelPredictiveControl):
         super(FesNmpc, self).advance_window_initial_guess_states(sol)
         return True
 
-    def advance_window_initial_guess_parameters(self, sol, **advance_options):
-        parameters = sol.parameters
-        for key in parameters.keys():
-            if self.parameter_init[key].type != InterpolationType.EACH_FRAME:
-                self.parameter_init.add(
-                    key, np.ndarray(parameters[key].shape), interpolation=InterpolationType.CONSTANT, phase=0
-                )
-                self.parameter_init[key].check_and_adjust_dimensions(len(self.nlp[0].parameters[key]), self.nlp[0].ns)
-            reshaped_parameter = parameters[key][:, None]
-            if self.bimapped_param:
-                self.parameter_init[key].init[:, :] = np.concatenate(
-                    (reshaped_parameter[:, 1:], reshaped_parameter[:, -1][:, np.newaxis]), axis=1
-                )
-            else:
-                self.parameter_init[key].init[:, :] = reshaped_parameter[self.initial_guess_param_index, :]
+    # def advance_window_initial_guess_parameters(self, sol, **advance_options):
+    #     parameters = sol.parameters
+    #     for key in parameters.keys():
+    #         if self.parameter_init[key].type != InterpolationType.EACH_FRAME:
+    #             self.parameter_init.add(
+    #                 key, np.ndarray(parameters[key].shape), interpolation=InterpolationType.CONSTANT, phase=0
+    #             )
+    #             self.parameter_init[key].check_and_adjust_dimensions(len(self.nlp[0].parameters[key]), self.nlp[0].ns)
+    #         reshaped_parameter = parameters[key][:, None]
+    #         if self.bimapped_param:
+    #             self.parameter_init[key].init[:, :] = np.concatenate(
+    #                 (reshaped_parameter[:, 1:], reshaped_parameter[:, -1][:, np.newaxis]), axis=1
+    #             )
+    #         else:
+    #             self.parameter_init[key].init[:, :] = reshaped_parameter[self.initial_guess_param_index, :]
 
     @staticmethod
     def build_new_model(model, previous_stim):

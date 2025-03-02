@@ -235,7 +235,7 @@ def set_bounds(model, x_init, n_shooting, turn_number, interpolation_type=Interp
             x_max_bound.append([q_x_bounds.max[i][0]] * (n_shooting + 1))
 
         cardinal_node_list = [
-            i * int(n_shooting / ((n_shooting / (n_shooting / turn_number)) * cardinal))
+            i * (n_shooting / ((n_shooting / (n_shooting / turn_number)) * cardinal))
             for i in range(int((n_shooting / (n_shooting / turn_number)) * cardinal + 1))
         ]
         cardinal_node_list = [int(cardinal_node_list[i]) for i in range(len(cardinal_node_list))]
@@ -347,13 +347,6 @@ def main():
     turn_number = n_cycles_simultaneous
     pedal_config = {"x_center": 0.35, "y_center": 0.0, "radius": 0.1}
 
-    # --- Set FES model --- #
-    stim_time = list(np.linspace(0, cycle_duration * n_cycles_simultaneous, 100)[:-1])
-    model = set_model(model_path, stim_time)
-
-    # Adjust n_shooting based on the stimulation time
-    cycle_len = int(len(stim_time) / 3)
-
     resistive_torque = {
         "Segment_application": "wheel",
         "torque": np.array([0, 0, -1]),
@@ -361,24 +354,28 @@ def main():
 
     simulation_conditions_1 = {
         "n_cycles_simultaneous": 3,
+        "stimulation": 99,
         "minimize_force": True,
         "minimize_fatigue": False,
         "pickle_file_path": "3_min_force.pkl",
     }
     simulation_conditions_2 = {
         "n_cycles_simultaneous": 3,
+        "stimulation": 99,
         "minimize_force": False,
         "minimize_fatigue": True,
         "pickle_file_path": "3_min_fatigue.pkl",
     }
     simulation_conditions_3 = {
         "n_cycles_simultaneous": 10,
+        "stimulation": 330,
         "minimize_force": True,
         "minimize_fatigue": False,
         "pickle_file_path": "10_min_force.pkl",
     }
     simulation_conditions_4 = {
         "n_cycles_simultaneous": 10,
+        "stimulation": 330,
         "minimize_force": False,
         "minimize_fatigue": True,
         "pickle_file_path": "10_min_fatigue.pkl",
@@ -391,6 +388,19 @@ def main():
     ]
 
     for i in range(len(simulation_conditions_list)):
+        # --- Set FES model --- #
+        stim_time = list(
+            np.linspace(
+                0,
+                cycle_duration * simulation_conditions_list[i]["n_cycles_simultaneous"],
+                simulation_conditions_list[i]["stimulation"] + 1,
+            )[:-1]
+        )
+        model = set_model(model_path, stim_time)
+
+        # Adjust n_shooting based on the stimulation time
+        cycle_len = int(len(stim_time) / 3)
+        turn_number = simulation_conditions_list[i]["n_cycles_simultaneous"]
         nmpc = prepare_nmpc(
             model=model,
             cycle_duration=cycle_duration,
@@ -403,7 +413,7 @@ def main():
             pedal_config=pedal_config,
             external_force=resistive_torque,
         )
-        nmpc.n_cycles_simultaneous = n_cycles_simultaneous
+        nmpc.n_cycles_simultaneous = simulation_conditions_list[i]["n_cycles_simultaneous"]
 
         def update_functions(_nmpc: MultiCyclicNonlinearModelPredictiveControl, cycle_idx: int, _sol: Solution):
             return cycle_idx < n_cycles  # True if there are still some cycle to perform
@@ -413,7 +423,7 @@ def main():
         # Solve the optimal control problem
         sol = nmpc.solve_fes_nmpc(
             update_functions,
-            solver=Solver.IPOPT(show_online_optim=False, _max_iter=10000, show_options=dict(show_bounds=True)),
+            solver=Solver.IPOPT(show_online_optim=False, _max_iter=0, show_options=dict(show_bounds=True)),
             total_cycles=n_cycles,
             external_force=resistive_torque,
             cycle_solutions=MultiCyclicCycleSolutions.ALL_CYCLES,
@@ -426,7 +436,7 @@ def main():
         time = sol[0].stepwise_time(to_merge=[SolutionMerge.NODES]).T[0]
         states = sol[0].stepwise_states(to_merge=[SolutionMerge.NODES])
         controls = sol[0].stepwise_controls(to_merge=[SolutionMerge.NODES])
-        stim_time = sol[0].nlp[0].model.muscles_dynamics_model[0].stim_time
+        stim_time = sol[0].ocp.nlp[0].model.muscles_dynamics_model[0].stim_time
         solving_time_per_ocp = [sol[1][i].solver_time_to_optimize for i in range(len(sol[1]))]
         objective_values_per_ocp = [float(sol[1][i].cost) for i in range(len(sol[1]))]
         number_of_turns_before_failing = len(sol[2])
