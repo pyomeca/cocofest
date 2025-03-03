@@ -320,8 +320,10 @@ class IvpFes:
         p = InitialGuessList()
         s = InitialGuessList()
 
+        muscle_name = "_" + ocp.model.muscle_name if ocp.model.muscle_name else ""
         for j in range(len(self.model.name_dof)):
-            x.add(ocp.model.name_dof[j], ocp.model.standard_rest_values()[j], phase=0)
+            key = ocp.model.name_dof[j] + muscle_name
+            x.add(key=key, initial_guess=ocp.model.standard_rest_values()[j], phase=0)
 
         if ocp.controls_keys:
             for key in ocp.controls_keys:
