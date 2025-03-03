@@ -74,7 +74,7 @@ def prepare_ocp(model, final_time, pi_max, force_tracking):
     )
 
 
-def main():
+def main(plot=True):
     final_time = 1
     model = ModelMaker.create_model("hmed2018", stim_time=list(np.linspace(0, 1, 34)[:-1]))
 
@@ -87,28 +87,29 @@ def main():
     sol = ocp.solve()
 
     # --- Show results from solution --- #
-    sol_merged = sol.stepwise_states(to_merge=[SolutionMerge.NODES])
-    sol_time = sol.stepwise_time(to_merge=[SolutionMerge.NODES]).T[0]
+    if plot:
+        sol_merged = sol.stepwise_states(to_merge=[SolutionMerge.NODES])
+        sol_time = sol.stepwise_time(to_merge=[SolutionMerge.NODES]).T[0]
 
-    fourier_fun = FourierSeries()
-    fourier_coef = fourier_fun.compute_real_fourier_coeffs(time, force, 50)
-    y_approx = FourierSeries().fit_func_by_fourier_series_with_real_coeffs(time, fourier_coef)
-    plt.title("Comparison between given and simulated force after parameter optimization")
-    plt.plot(time, force, color="red", label="force from file")
-    plt.plot(time, y_approx, color="orange", label="force after fourier transform")
-    plt.plot(
-        sol_time,
-        sol_merged["F"].squeeze(),
-        color="blue",
-        label="force from optimized stimulation",
-    )
-    plt.xlabel("Time (s)")
-    plt.ylabel("Force (N)")
-    plt.legend()
-    plt.show()
+        fourier_fun = FourierSeries()
+        fourier_coef = fourier_fun.compute_real_fourier_coeffs(time, force, 50)
+        y_approx = FourierSeries().fit_func_by_fourier_series_with_real_coeffs(time, fourier_coef)
+        plt.title("Comparison between given and simulated force after parameter optimization")
+        plt.plot(time, force, color="red", label="force from file")
+        plt.plot(time, y_approx, color="orange", label="force after fourier transform")
+        plt.plot(
+            sol_time,
+            sol_merged["F"].squeeze(),
+            color="blue",
+            label="force from optimized stimulation",
+        )
+        plt.xlabel("Time (s)")
+        plt.ylabel("Force (N)")
+        plt.legend()
+        plt.show()
 
-    # --- Show the optimization results --- #
-    sol.graphs()
+        # --- Show the optimization results --- #
+        sol.graphs()
 
 
 if __name__ == "__main__":

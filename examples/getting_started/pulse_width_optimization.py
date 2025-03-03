@@ -43,7 +43,7 @@ def prepare_ocp(model, final_time, pw_max):
     )
 
 
-def main():
+def main(plot=True):
     final_time = 0.2
     model = ModelMaker.create_model(
         "ding2007_with_fatigue",
@@ -57,7 +57,8 @@ def main():
     sol = ocp.solve(Solver.IPOPT())
 
     # --- Show results --- #
-    FES_plot(data=sol).plot(title="Optimize pulse width", show_bounds=False, show_stim=False)
+    if plot:
+        FES_plot(data=sol).plot(title="Optimize pulse width", show_bounds=False, show_stim=False)
 
 
 if __name__ == "__main__":

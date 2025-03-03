@@ -127,7 +127,7 @@ def prepare_ocp(
     )
 
 
-def main():
+def main(plot=True):
     # Parameters for simulation and identification
     n_stim = 33
     final_time = 2
@@ -156,38 +156,39 @@ def main():
     )
     sol = ocp.solve()
 
-    param_keys = [
-        "km_rest",
-        "tau1_rest",
-        "tau2",
-        "pd0",
-        "pdt",
-        "a_scale",
-    ]
-    identified_params = extract_identified_parameters(sol, param_keys)
+    if plot:
+        param_keys = [
+            "km_rest",
+            "tau1_rest",
+            "tau2",
+            "pd0",
+            "pdt",
+            "a_scale",
+        ]
+        identified_params = extract_identified_parameters(sol, param_keys)
 
-    print("Identified parameters:")
-    for key, value in identified_params.items():
-        print(f"  {key}: {value}")
+        print("Identified parameters:")
+        for key, value in identified_params.items():
+            print(f"  {key}: {value}")
 
-    sim_data_time = sim_data["time"]
-    sim_data_force = sim_data["force"]
-    sol_time = sol.stepwise_time(to_merge=SolutionMerge.NODES).T[0]
-    sol_force = sol.stepwise_states(to_merge=SolutionMerge.NODES)["F"][0]
+        sim_data_time = sim_data["time"]
+        sim_data_force = sim_data["force"]
+        sol_time = sol.stepwise_time(to_merge=SolutionMerge.NODES).T[0]
+        sol_force = sol.stepwise_states(to_merge=SolutionMerge.NODES)["F"][0]
 
-    # Plot the simulation and identification results
-    fig, ax = plt.subplots()
-    ax.set_title("Force state result")
-    ax.plot(sim_data_time, sim_data_force, color="blue", label="simulated")
-    ax.plot(sol_time, sol_force, color="green", label="identified")
-    ax.set_xlabel("time (s)")
-    ax.set_ylabel("force (N)")
+        # Plot the simulation and identification results
+        fig, ax = plt.subplots()
+        ax.set_title("Force state result")
+        ax.plot(sim_data_time, sim_data_force, color="blue", label="simulated")
+        ax.plot(sol_time, sol_force, color="green", label="identified")
+        ax.set_xlabel("time (s)")
+        ax.set_ylabel("force (N)")
 
-    default_model = DingModelPulseWidthFrequency()
-    annotate_parameters(ax, identified_params, default_model)
+        default_model = DingModelPulseWidthFrequency()
+        annotate_parameters(ax, identified_params, default_model)
 
-    ax.legend()
-    plt.show()
+        ax.legend()
+        plt.show()
 
 
 if __name__ == "__main__":

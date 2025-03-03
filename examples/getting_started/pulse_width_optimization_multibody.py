@@ -67,11 +67,11 @@ def prepare_ocp(model: FesMskModel, final_time: float, external_force: dict, msk
     )
 
 
-def main():
+def main(plot=True, biorbd_path="../model_msk/arm26_biceps_1dof.bioMod"):
     simulation_ending_time = 1
     model = FesMskModel(
         name=None,
-        biorbd_path="../model_msk/arm26_biceps_1dof.bioMod",
+        biorbd_path=biorbd_path,
         muscles_model=[DingModelPulseWidthFrequencyWithFatigue(muscle_name="BIClong", sum_stim_truncation=10)],
         stim_time=list(np.linspace(0, simulation_ending_time, 34)[:-1]),
         activate_force_length_relationship=True,
@@ -102,8 +102,9 @@ def main():
 
     sol = ocp.solve(Solver.IPOPT(show_online_optim=False, _max_iter=2000))
 
-    sol.animate(viewer="pyorerun")
-    sol.graphs(show_bounds=False)
+    if plot:
+        sol.animate(viewer="pyorerun")
+        sol.graphs(show_bounds=False)
 
 
 if __name__ == "__main__":

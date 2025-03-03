@@ -265,7 +265,7 @@ class OcpFesMsk(OcpFes):
         return u_bounds, u_init
 
     @staticmethod
-    def set_u_bounds(bio_models, with_residual_torque, max_bound):
+    def set_u_bounds(bio_models, with_residual_torque, max_bound=None):
         u_bounds, u_init = OcpFesMsk.set_u_bounds_fes(bio_models)
         u_bounds, u_init = OcpFesMsk.set_u_bounds_msk(u_bounds, u_init, bio_models, with_residual_torque, max_bound)
         return u_bounds, u_init

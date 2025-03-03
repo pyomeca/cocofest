@@ -16,7 +16,7 @@ import numpy as np
 from bioptim import OdeSolver
 
 
-def main(model_name="Ding2003"):
+def main(model_name="Ding2003", plot=True):
     # --- Set stimulation time apparition --- #
     final_time = 3
     stim_time = [val for start in range(0, final_time, 2) for val in np.linspace(start, start + 1, 34)[:-1]]
@@ -43,7 +43,8 @@ def main(model_name="Ding2003"):
     result["time"] = time
 
     # Plotting the force state result
-    FES_plot(data=result).plot(title="FES model integration")
+    if plot:
+        FES_plot(data=result).plot(title="FES model integration")
 
 
 if __name__ == "__main__":

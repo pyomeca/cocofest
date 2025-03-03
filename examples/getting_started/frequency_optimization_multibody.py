@@ -64,11 +64,11 @@ def prepare_ocp(model, final_time: float, resistive_torque, msk_info):
     )
 
 
-def main():
+def main(plot=True, biorbd_path="../model_msk/arm26_biceps_1dof.bioMod"):
     simulation_ending_time = 1
     model = FesMskModel(
         name=None,
-        biorbd_path="../model_msk/arm26_biceps_1dof.bioMod",
+        biorbd_path=biorbd_path,
         muscles_model=[DingModelFrequencyWithFatigue(muscle_name="BIClong")],
         stim_time=list(np.linspace(0, 1, 11)[:-1]),
         activate_force_length_relationship=True,
@@ -94,8 +94,9 @@ def main():
     )
     sol = ocp.solve()
 
-    sol.animate(viewer="pyorerun", n_frames=1000)
-    sol.graphs(show_bounds=False)
+    if plot:
+        sol.animate(viewer="pyorerun", n_frames=1000)
+        sol.graphs(show_bounds=False)
 
 
 if __name__ == "__main__":

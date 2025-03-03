@@ -41,6 +41,12 @@ def prepare_ocp(model: FesMskModel, final_time: float, external_force: dict, msk
 
     objective_functions = ObjectiveList()
     objective_functions.add(
+        ObjectiveFcn.Lagrange.MINIMIZE_CONTROL,
+        key="tau",
+        weight=1000,
+        quadratic=True,
+    )
+    objective_functions.add(
         CustomObjective.minimize_overall_muscle_force_production,
         custom_type=ObjectiveFcn.Lagrange,
         weight=1,
@@ -85,17 +91,17 @@ def prepare_ocp(model: FesMskModel, final_time: float, external_force: dict, msk
     )
 
 
-def main():
+def main(plot=True, biorbd_path="../model_msk/arm26_biceps_1dof.bioMod"):
     simulation_ending_time = 1
     model = FesMskModel(
         name=None,
-        biorbd_path="../model_msk/arm26_biceps_1dof.bioMod",
+        biorbd_path=biorbd_path,
         muscles_model=[DingModelPulseIntensityFrequencyWithFatigue(muscle_name="BIClong")],
         stim_time=list(np.linspace(0, simulation_ending_time, 34)[:-1]),
         activate_force_length_relationship=True,
         activate_force_velocity_relationship=True,
         activate_passive_force_relationship=True,
-        activate_residual_torque=False,
+        activate_residual_torque=True,
         external_force_set=None,  # External forces will be added later
     )
 
@@ -106,7 +112,7 @@ def main():
     }
 
     msk_info = {
-        "with_residual_torque": False,
+        "with_residual_torque": True,
         "bound_type": "start_end",
         "bound_data": [[5], [120]],
     }
@@ -121,8 +127,9 @@ def main():
 
     sol = ocp.solve(Solver.IPOPT(show_online_optim=False, _max_iter=2000))
 
-    sol.animate(viewer="pyorerun")
-    sol.graphs(show_bounds=False)
+    if plot:
+        sol.animate(viewer="pyorerun")
+        sol.graphs(show_bounds=False)
 
 
 if __name__ == "__main__":

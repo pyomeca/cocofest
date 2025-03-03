@@ -66,7 +66,7 @@ def prepare_ocp(model, final_time, pi_max):
     )
 
 
-def main():
+def main(plot=True):
     final_time = 1
     model = DingModelPulseIntensityFrequencyWithFatigue(
         stim_time=list(np.linspace(0, final_time, 11)[:-1]), sum_stim_truncation=10
@@ -76,7 +76,8 @@ def main():
     # --- Solve the program --- #
     sol = ocp.solve()
     # --- Show results --- #
-    sol.graphs()
+    if plot:
+        sol.graphs()
 
 
 if __name__ == "__main__":

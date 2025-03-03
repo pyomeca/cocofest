@@ -38,14 +38,15 @@ def prepare_ocp(model, final_time):
     )
 
 
-def main():
+def main(plot=True):
     final_time = 1
     model = ModelMaker.create_model("ding2003", stim_time=[0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9])
     ocp = prepare_ocp(model, final_time)
     sol = ocp.solve()
 
     # --- Show results from solution --- #
-    sol.graphs(show_bounds=True)
+    if plot:
+        sol.graphs(show_bounds=True)
 
 
 if __name__ == "__main__":

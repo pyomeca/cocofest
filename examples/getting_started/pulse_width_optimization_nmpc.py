@@ -91,7 +91,7 @@ def prepare_nmpc(
     )
 
 
-def main():
+def main(plot=True):
     """
     Main function to configure and solve the optimal control problem in NMPC.
     """
@@ -146,7 +146,8 @@ def main():
     result["pulse_width"] = sol[0].stepwise_controls(to_merge=[SolutionMerge.NODES])["last_pulse_width"]
 
     # Plotting the force state result
-    FES_plot(data=result).plot(title="NMPC FES model optimization")
+    if plot:
+        FES_plot(data=result).plot(title="NMPC FES model optimization")
 
 
 if __name__ == "__main__":
