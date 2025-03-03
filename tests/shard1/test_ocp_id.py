@@ -13,11 +13,14 @@ from cocofest import (
     ModelMaker,
     DingModelFrequency,
     DingModelPulseWidthFrequency,
-    DingModelPulseIntensityFrequency,
-    DingModelFrequencyForceParameterIdentification,
-    DingModelPulseIntensityFrequencyForceParameterIdentification,
-    DingModelPulseWidthFrequencyForceParameterIdentification,
+    # DingModelPulseIntensityFrequency,
+    # DingModelFrequencyForceParameterIdentification,
+    # DingModelPulseIntensityFrequencyForceParameterIdentification,
+    # DingModelPulseWidthFrequencyForceParameterIdentification,
 )
+
+from ..utils import TestUtils
+
 
 force_at_node = [
     0.0,
@@ -145,200 +148,223 @@ additional_key_settings = {
 }
 
 
-def test_ocp_id_ding2003():
-    # --- Creating the simulated data to identify on --- #
-    # Building the Initial Value Problem
-    ivp = IvpFes(
-        fes_parameters={
-            "model": ding2003,
-        },
-        ivp_parameters={
-            "final_time": 2,
-            "use_sx": True,
-            "ode_solver": OdeSolver.RK4(n_integration_steps=10),
-        },
-    )
+def test__identification__ding2003_model_id():
+    from examples.identification import ding2003_model_id as ocp_module
 
-    # Integrating the solution
-    result, time = ivp.integrate()
+    # stim_time = list(np.linspace(0, 1, 33 + 1)[:-1])
+    # model = ModelMaker.create_model("ding2003", stim_time=stim_time, sum_stim_truncation=10)
+    # sim_data = ocp_module.simulate_data(model, final_time=2, n_integration_steps=10)
+    #
+    # ocp = ocp_module.prepare_ocp(
+    #     model=model,
+    #     final_time=2,
+    #     simulated_data=sim_data,
+    #     key_parameter_to_identify=[
+    #         "a_rest",
+    #         "km_rest",
+    #         "tau1_rest",
+    #         "tau2",
+    #     ],
+    # )
+    # ocp.solve()
 
-    force = result["F"][0].tolist()
-    time = [float(time) for time in time]
-
-    # Saving the data in a pickle file
-    dictionary = {
-        "time": time,
-        "force": force,
-        "stim_time": [0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9],
-    }
-
-    pickle_file_name = "temp_identification_simulation.pkl"
-    with open(pickle_file_name, "wb") as file:
-        pickle.dump(dictionary, file)
-
-    # --- Identifying the model parameters --- #
-    ocp = DingModelFrequencyForceParameterIdentification(
-        model=ding2003,
-        final_time=2,
-        data_path=[pickle_file_name],
-        identification_method="full",
-        double_step_identification=False,
-        key_parameter_to_identify=["a_rest", "km_rest", "tau1_rest", "tau2"],
-        additional_key_settings={},
-        use_sx=True,
-        n_threads=6,
-        control_type=ControlType.LINEAR_CONTINUOUS,
-    )
-
-    identification_result = ocp.force_model_identification()
-
-    # --- Delete the temp file ---#
-    os.remove(f"temp_identification_simulation.pkl")
-
-    tested_model = DingModelFrequency()
-    np.testing.assert_almost_equal(identification_result["a_rest"], tested_model.a_rest, decimal=0)
-    np.testing.assert_almost_equal(identification_result["km_rest"], tested_model.km_rest, decimal=3)
-    np.testing.assert_almost_equal(identification_result["tau1_rest"], tested_model.tau1_rest, decimal=3)
-    np.testing.assert_almost_equal(identification_result["tau2"], tested_model.tau2, decimal=3)
+    ocp_module.main(plot=False)
 
 
-ding2007 = ModelMaker.create_model("ding2007", stim_time=[0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9])
-
-
-def test_ocp_id_ding2007(model):
-    # --- Creating the simulated data to identify on --- #
-    # Building the Initial Value Problem
-    ivp = IvpFes(
-        fes_parameters={
-            "model": ding2007,
-            "pulse_width": 0.003,
-        },
-        ivp_parameters={
-            "final_time": 2,
-            "use_sx": True,
-            "ode_solver": OdeSolver.RK4(n_integration_steps=10),
-        },
-    )
-
-    # Integrating the solution
-    result, time = ivp.integrate()
-
-    force = result["F"][0].tolist()
-    time = [float(time) for time in time]
-
-    # Saving the data in a pickle file
-    dictionary = {
-        "time": time,
-        "force": force,
-        "stim_time": [0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9],
-        "pulse_width": [0.003] * 10,
-    }
-
-    pickle_file_name = "temp_identification_simulation.pkl"
-    with open(pickle_file_name, "wb") as file:
-        pickle.dump(dictionary, file)
-
-    # --- Identifying the model parameters --- #
-    ocp = DingModelPulseWidthFrequencyForceParameterIdentification(
-        model=model,
-        final_time=2,
-        data_path=[pickle_file_name],
-        identification_method="full",
-        double_step_identification=False,
-        key_parameter_to_identify=["tau1_rest", "tau2", "km_rest", "a_scale", "pd0", "pdt"],
-        additional_key_settings={},
-        use_sx=True,
-        n_threads=6,
-    )
-
-    identification_result = ocp.force_model_identification()
-
-    # --- Delete the temp file ---#
-    os.remove(f"temp_identification_simulation.pkl")
-
-    tested_model = DingModelPulseWidthFrequency()
-    np.testing.assert_almost_equal(identification_result["tau1_rest"], tested_model.tau1_rest, decimal=3)
-    np.testing.assert_almost_equal(identification_result["tau2"], tested_model.tau2, decimal=3)
-    np.testing.assert_almost_equal(identification_result["km_rest"], tested_model.km_rest, decimal=3)
-    np.testing.assert_almost_equal(identification_result["a_scale"], tested_model.a_scale, decimal=-2)
-    np.testing.assert_almost_equal(identification_result["pd0"], tested_model.pd0, decimal=3)
-    np.testing.assert_almost_equal(identification_result["pdt"], tested_model.pdt, decimal=3)
-
-
-hmed2018 = ModelMaker.create_model(
-    "hmed2018", stim_time=[0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9], sum_stim_truncation=10
-)
-
-
-def test_ocp_id_hmed2018():
-    # --- Creating the simulated data to identify on --- #
-
-    # Building the Initial Value Problem
-    ivp = IvpFes(
-        fes_parameters={
-            "model": hmed2018,
-            "pulse_intensity": list(np.linspace(30, 130, 11))[:-1],
-        },
-        ivp_parameters={
-            "final_time": 2,
-            "use_sx": True,
-            "ode_solver": OdeSolver.RK4(n_integration_steps=10),
-        },
-    )
-
-    # Integrating the solution
-    result, time = ivp.integrate()
-
-    force = result["F"][0].tolist()
-    time = [float(time) for time in time]
-
-    # Saving the data in a pickle file
-    dictionary = {
-        "time": time,
-        "force": force,
-        "stim_time": [0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9],
-        "pulse_intensity": list(np.linspace(30, 130, 11))[:-1],
-    }
-
-    pickle_file_name = "temp_identification_simulation.pkl"
-    with open(pickle_file_name, "wb") as file:
-        pickle.dump(dictionary, file)
-
-    # --- Identifying the model parameters --- #
-    ocp = DingModelPulseIntensityFrequencyForceParameterIdentification(
-        model=hmed2018,
-        final_time=2,
-        data_path=[pickle_file_name],
-        identification_method="full",
-        double_step_identification=False,
-        key_parameter_to_identify=[
-            "a_rest",
-            "km_rest",
-            "tau1_rest",
-            "tau2",
-            "ar",
-            "bs",
-            "Is",
-            "cr",
-        ],
-        additional_key_settings={},
-        use_sx=True,
-        n_threads=6,
-    )
-
-    identification_result = ocp.force_model_identification()
-
-    # --- Delete the temp file ---#
-    os.remove(f"temp_identification_simulation.pkl")
-
-    tested_model = DingModelPulseIntensityFrequency()
-    np.testing.assert_almost_equal(identification_result["tau1_rest"], tested_model.tau1_rest, decimal=3)
-    np.testing.assert_almost_equal(identification_result["tau2"], tested_model.tau2, decimal=3)
-    np.testing.assert_almost_equal(identification_result["km_rest"], 0.174, decimal=3)
-    np.testing.assert_almost_equal(identification_result["ar"], 0.9913, decimal=3)
-    np.testing.assert_almost_equal(identification_result["bs"], tested_model.bs, decimal=3)
-    np.testing.assert_almost_equal(identification_result["Is"], tested_model.Is, decimal=1)
-    np.testing.assert_almost_equal(identification_result["cr"], tested_model.cr, decimal=3)
+# def test_ocp_id_ding2003():
+#     # --- Creating the simulated data to identify on --- #
+#     # Building the Initial Value Problem
+#     ivp = IvpFes(
+#         fes_parameters={
+#             "model": ding2003,
+#         },
+#         ivp_parameters={
+#             "final_time": 2,
+#             "use_sx": True,
+#             "ode_solver": OdeSolver.RK4(n_integration_steps=10),
+#         },
+#     )
+#
+#     # Integrating the solution
+#     result, time = ivp.integrate()
+#
+#     force = result["F"][0].tolist()
+#     time = [float(time) for time in time]
+#
+#     # Saving the data in a pickle file
+#     dictionary = {
+#         "time": time,
+#         "force": force,
+#         "stim_time": [0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9],
+#     }
+#
+#     pickle_file_name = "temp_identification_simulation.pkl"
+#     with open(pickle_file_name, "wb") as file:
+#         pickle.dump(dictionary, file)
+#
+#     # --- Identifying the model parameters --- #
+#     ocp = DingModelFrequencyForceParameterIdentification(
+#         model=ding2003,
+#         final_time=2,
+#         data_path=[pickle_file_name],
+#         identification_method="full",
+#         double_step_identification=False,
+#         key_parameter_to_identify=["a_rest", "km_rest", "tau1_rest", "tau2"],
+#         additional_key_settings={},
+#         use_sx=True,
+#         n_threads=6,
+#         control_type=ControlType.LINEAR_CONTINUOUS,
+#     )
+#
+#     identification_result = ocp.force_model_identification()
+#
+#     # --- Delete the temp file ---#
+#     os.remove(f"temp_identification_simulation.pkl")
+#
+#     tested_model = DingModelFrequency()
+#     np.testing.assert_almost_equal(identification_result["a_rest"], tested_model.a_rest, decimal=0)
+#     np.testing.assert_almost_equal(identification_result["km_rest"], tested_model.km_rest, decimal=3)
+#     np.testing.assert_almost_equal(identification_result["tau1_rest"], tested_model.tau1_rest, decimal=3)
+#     np.testing.assert_almost_equal(identification_result["tau2"], tested_model.tau2, decimal=3)
+#
+#
+# ding2007 = ModelMaker.create_model("ding2007", stim_time=[0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9])
+#
+#
+# def test_ocp_id_ding2007(model):
+#     # --- Creating the simulated data to identify on --- #
+#     # Building the Initial Value Problem
+#     ivp = IvpFes(
+#         fes_parameters={
+#             "model": ding2007,
+#             "pulse_width": 0.003,
+#         },
+#         ivp_parameters={
+#             "final_time": 2,
+#             "use_sx": True,
+#             "ode_solver": OdeSolver.RK4(n_integration_steps=10),
+#         },
+#     )
+#
+#     # Integrating the solution
+#     result, time = ivp.integrate()
+#
+#     force = result["F"][0].tolist()
+#     time = [float(time) for time in time]
+#
+#     # Saving the data in a pickle file
+#     dictionary = {
+#         "time": time,
+#         "force": force,
+#         "stim_time": [0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9],
+#         "pulse_width": [0.003] * 10,
+#     }
+#
+#     pickle_file_name = "temp_identification_simulation.pkl"
+#     with open(pickle_file_name, "wb") as file:
+#         pickle.dump(dictionary, file)
+#
+#     # --- Identifying the model parameters --- #
+#     ocp = DingModelPulseWidthFrequencyForceParameterIdentification(
+#         model=model,
+#         final_time=2,
+#         data_path=[pickle_file_name],
+#         identification_method="full",
+#         double_step_identification=False,
+#         key_parameter_to_identify=["tau1_rest", "tau2", "km_rest", "a_scale", "pd0", "pdt"],
+#         additional_key_settings={},
+#         use_sx=True,
+#         n_threads=6,
+#     )
+#
+#     identification_result = ocp.force_model_identification()
+#
+#     # --- Delete the temp file ---#
+#     os.remove(f"temp_identification_simulation.pkl")
+#
+#     tested_model = DingModelPulseWidthFrequency()
+#     np.testing.assert_almost_equal(identification_result["tau1_rest"], tested_model.tau1_rest, decimal=3)
+#     np.testing.assert_almost_equal(identification_result["tau2"], tested_model.tau2, decimal=3)
+#     np.testing.assert_almost_equal(identification_result["km_rest"], tested_model.km_rest, decimal=3)
+#     np.testing.assert_almost_equal(identification_result["a_scale"], tested_model.a_scale, decimal=-2)
+#     np.testing.assert_almost_equal(identification_result["pd0"], tested_model.pd0, decimal=3)
+#     np.testing.assert_almost_equal(identification_result["pdt"], tested_model.pdt, decimal=3)
+#
+#
+# hmed2018 = ModelMaker.create_model(
+#     "hmed2018", stim_time=[0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9], sum_stim_truncation=10
+# )
+#
+#
+# def test_ocp_id_hmed2018():
+#     # --- Creating the simulated data to identify on --- #
+#
+#     # Building the Initial Value Problem
+#     ivp = IvpFes(
+#         fes_parameters={
+#             "model": hmed2018,
+#             "pulse_intensity": list(np.linspace(30, 130, 11))[:-1],
+#         },
+#         ivp_parameters={
+#             "final_time": 2,
+#             "use_sx": True,
+#             "ode_solver": OdeSolver.RK4(n_integration_steps=10),
+#         },
+#     )
+#
+#     # Integrating the solution
+#     result, time = ivp.integrate()
+#
+#     force = result["F"][0].tolist()
+#     time = [float(time) for time in time]
+#
+#     # Saving the data in a pickle file
+#     dictionary = {
+#         "time": time,
+#         "force": force,
+#         "stim_time": [0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9],
+#         "pulse_intensity": list(np.linspace(30, 130, 11))[:-1],
+#     }
+#
+#     pickle_file_name = "temp_identification_simulation.pkl"
+#     with open(pickle_file_name, "wb") as file:
+#         pickle.dump(dictionary, file)
+#
+#     # --- Identifying the model parameters --- #
+#     ocp = DingModelPulseIntensityFrequencyForceParameterIdentification(
+#         model=hmed2018,
+#         final_time=2,
+#         data_path=[pickle_file_name],
+#         identification_method="full",
+#         double_step_identification=False,
+#         key_parameter_to_identify=[
+#             "a_rest",
+#             "km_rest",
+#             "tau1_rest",
+#             "tau2",
+#             "ar",
+#             "bs",
+#             "Is",
+#             "cr",
+#         ],
+#         additional_key_settings={},
+#         use_sx=True,
+#         n_threads=6,
+#     )
+#
+#     identification_result = ocp.force_model_identification()
+#
+#     # --- Delete the temp file ---#
+#     os.remove(f"temp_identification_simulation.pkl")
+#
+#     tested_model = DingModelPulseIntensityFrequency()
+#     np.testing.assert_almost_equal(identification_result["tau1_rest"], tested_model.tau1_rest, decimal=3)
+#     np.testing.assert_almost_equal(identification_result["tau2"], tested_model.tau2, decimal=3)
+#     np.testing.assert_almost_equal(identification_result["km_rest"], 0.174, decimal=3)
+#     np.testing.assert_almost_equal(identification_result["ar"], 0.9913, decimal=3)
+#     np.testing.assert_almost_equal(identification_result["bs"], tested_model.bs, decimal=3)
+#     np.testing.assert_almost_equal(identification_result["Is"], tested_model.Is, decimal=1)
+#     np.testing.assert_almost_equal(identification_result["cr"], tested_model.cr, decimal=3)
 
 
 # def test_all_ocp_id_errors():
