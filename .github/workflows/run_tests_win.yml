@@ -55,7 +55,7 @@ jobs:
 
       - name: Archive coverage report
         id: archive
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v3
         with:
           name: coverage${{ matrix.shard }}
           path: |
