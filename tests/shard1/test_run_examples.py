@@ -1,3 +1,4 @@
+import os
 import importlib
 import pytest
 
@@ -28,9 +29,13 @@ MULTIBODY_EXAMPLE_MODULES = [
     "examples.getting_started.pulse_intensity_optimization_multibody",
     "examples.getting_started.pulse_width_optimization_multibody",
 ]
+from examples.model_msk import init as model_path
+
+biomodel_folder = os.path.dirname(model_path.__file__)
+biorbd_model_path = biomodel_folder + "/arm26_biceps_1dof.bioMod"
 
 
 @pytest.mark.parametrize("module_name", MULTIBODY_EXAMPLE_MODULES)
 def test_multibody_examples(module_name):
     ocp_module = importlib.import_module(module_name)
-    ocp_module.main(plot=False, biorbd_path="../../examples/model_msk/arm26_biceps_1dof.bioMod")
+    ocp_module.main(plot=False, biorbd_path=biorbd_model_path)

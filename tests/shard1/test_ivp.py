@@ -13,7 +13,7 @@ stim_time = np.linspace(0, 1, 34).tolist()
 tested_index = np.linspace(0, 330, 34, dtype=int)
 
 
-def test_values(result, tested_values):
+def check_values(result, tested_values):
     for i in range(len(tested_values)):
         np.testing.assert_almost_equal(
             result[tested_index[i]],
@@ -113,7 +113,7 @@ def test_ding2003_ivp(model):
             268.88100073943167,
         ]
 
-    test_values(result["F"][0], tested_values)
+    check_values(result["F"][0], tested_values)
 
 
 ding2007_model = ModelMaker.create_model("ding2007", stim_time=stim_time, sum_stim_truncation=10)
@@ -210,7 +210,7 @@ def test_ding2007_ivp(model):
             193.8469562724926,
         ]
 
-    test_values(result["F"][0], tested_values)
+    check_values(result["F"][0], tested_values)
 
 
 hmed2018_model = ModelMaker.create_model("hmed2018", stim_time=stim_time, sum_stim_truncation=10)
@@ -305,7 +305,7 @@ def test_hmed2018_ivp(model):
             268.224267798157,
         ]
 
-    test_values(result["F"][0], tested_values)
+    check_values(result["F"][0], tested_values)
 
 
 ding2003_with_fatigue_model = ModelMaker.create_model(
@@ -417,7 +417,7 @@ def test_pulse_mode_ivp(pulse_mode):
             228.37937196951108,
         ]
 
-    test_values(result["F"][0], tested_values)
+    check_values(result["F"][0], tested_values)
 
 
 def test_ivp_methods():
