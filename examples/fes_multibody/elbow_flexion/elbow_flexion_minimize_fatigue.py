@@ -75,7 +75,7 @@ def prepare_ocp(
         )
 
     # --- Set parameters (required for intensity models) --- #
-    use_sx = True
+    use_sx = False
     if isinstance(muscle_model, DingModelPulseIntensityFrequencyWithFatigue):
         parameters, parameters_bounds, parameters_init = OcpFesMsk.build_parameters(
             model=model,
