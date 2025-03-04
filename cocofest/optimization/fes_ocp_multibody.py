@@ -134,7 +134,7 @@ class OcpFesMsk(OcpFes):
                 if variable_bound_list[i] == "Cn_" + muscle_name:
                     max_bounds[i] = 10
                 elif variable_bound_list[i] == "F_" + muscle_name:
-                    max_bounds[i] = 1000
+                    max_bounds[i] = model.fmax
                 elif variable_bound_list[i] == "Tau1_" + muscle_name or variable_bound_list[i] == "Km_" + muscle_name:
                     max_bounds[i] = 1
                 elif variable_bound_list[i] == "A_" + muscle_name:
