@@ -3,6 +3,7 @@ This example will do an optimal control program of a 100 steps hand cycling moti
 muscle driven / FES driven dynamics and includes a resistive torque at the handle.
 """
 
+import matplotlib.pyplot as plt
 import numpy as np
 
 from bioptim import (
@@ -26,6 +27,7 @@ from bioptim import (
     ParameterList,
     PhaseDynamics,
     Solver,
+    VariableScalingList,
 )
 
 from cocofest import (
@@ -167,6 +169,7 @@ def set_objective_functions(model: BiorbdModel | FesMskModel, dynamics_type: str
         objective_functions.add(
             CustomObjective.minimize_overall_muscle_force_production,
             custom_type=ObjectiveFcn.Lagrange,
+            node=Node.ALL,
             weight=1,
             quadratic=True,
         )
@@ -179,6 +182,7 @@ def set_objective_functions(model: BiorbdModel | FesMskModel, dynamics_type: str
     else:
         control_key = "tau" if dynamics_type == "torque_driven" else "muscles"
         objective_functions.add(ObjectiveFcn.Lagrange.MINIMIZE_CONTROL, key=control_key, weight=1000, quadratic=True)
+
     return objective_functions
 
 
@@ -208,11 +212,10 @@ def set_x_init(n_shooting: int, pedal_config: dict, turn_number: int) -> Initial
         x_center=pedal_config["x_center"],
         y_center=pedal_config["y_center"],
         radius=pedal_config["radius"],
-        ik_method="lm",
+        ik_method="trf",
         cycling_number=turn_number,
     )
     x_init.add("q", q_guess, interpolation=InterpolationType.EACH_FRAME)
-    # Optionally, add qdot initialization if needed:
     # x_init.add("qdot", qdot_guess, interpolation=InterpolationType.EACH_FRAME)
 
     # Optional, method to get control initial guess:
@@ -224,7 +227,7 @@ def set_x_init(n_shooting: int, pedal_config: dict, turn_number: int) -> Initial
 
 def set_u_bounds_and_init(
     model: BiorbdModel | FesMskModel, dynamics_type_str: str
-) -> tuple[InitialGuessList, BoundsList]:
+) -> tuple[InitialGuessList, BoundsList, VariableScalingList]:
     """
     Define the control bounds and initial guess for the optimal control problem.
 
@@ -241,6 +244,7 @@ def set_u_bounds_and_init(
     """
     u_bounds = BoundsList()
     u_init = InitialGuessList()
+    u_scaling = VariableScalingList()
     if dynamics_type_str == "torque_driven":
         u_bounds.add(key="tau", min_bound=np.array([-50, -50, -0]), max_bound=np.array([50, 50, 0]), phase=0)
     elif dynamics_type_str == "muscle_driven":
@@ -258,18 +262,15 @@ def set_u_bounds_and_init(
                 key = "last_pulse_width_" + str(model.muscle_name)
                 u_init.add(key=key, initial_guess=[model.pd0], phase=0)
                 u_bounds.add(key=key, min_bound=[model.pd0], max_bound=[0.0006], phase=0)
+                u_scaling.add(key=key, scaling=[10000])
 
-    return u_init, u_bounds
+    return u_init, u_bounds, u_scaling
 
 
 def set_state_bounds(
     model: BiorbdModel | FesMskModel,
     x_init: InitialGuessList,
-    n_shooting: int,
-    turn_number: int,
-    interpolation_type: InterpolationType = InterpolationType.CONSTANT,
-    cardinal: int = 4,
-) -> BoundsList:
+) -> tuple[BoundsList, InitialGuessList]:
     """
     Set the bounds for the state variables.
 
@@ -279,14 +280,6 @@ def set_state_bounds(
         The biomechanical model.
     x_init: InitialGuessList
         Initial guess for states.
-    n_shooting: int
-        Number of shooting nodes.
-    turn_number: int
-        Number of complete turns.
-    interpolation_type: InterpolationType
-        Interpolation type for the bounds.
-    cardinal: int
-        Number of cardinal nodes per turn for bounds adjustment.
 
     Returns
     -------
@@ -295,54 +288,25 @@ def set_state_bounds(
     x_bounds = BoundsList()
     # For FES models, retrieve custom bounds
     if isinstance(model, FesMskModel):
-        x_bounds, _ = OcpFesMsk.set_x_bounds_fes(model)
+        x_bounds, x_init_fes = OcpFesMsk.set_x_bounds_fes(model)
+        for key in x_init_fes.keys():
+            x_init[key] = x_init_fes[key]
 
     # Retrieve default bounds from the model for positions and velocities
     q_x_bounds = model.bounds_from_ranges("q")
-    qdot_x_bounds = model.bounds_from_ranges("qdot")
-
-    if interpolation_type == InterpolationType.EACH_FRAME:
-        # Replicate bounds for each shooting node
-        x_min_bound = []
-        x_max_bound = []
-        for i in range(q_x_bounds.min.shape[0]):
-            x_min_bound.append([q_x_bounds.min[i][0]] * (n_shooting + 1))
-            x_max_bound.append([q_x_bounds.max[i][0]] * (n_shooting + 1))
-
-        # Adjust bounds at cardinal nodes for a specific coordinate (e.g., index 2)
-        cardinal_node_list = [
-            i * (n_shooting / ((n_shooting / (n_shooting / turn_number)) * cardinal))
-            for i in range(int((n_shooting / (n_shooting / turn_number)) * cardinal + 1))
-        ]
-        cardinal_node_list = [int(cardinal_node_list[i]) for i in range(len(cardinal_node_list))]
-        slack = 10 * (np.pi / 180)
-        for i in range(len(x_min_bound[0])):
-            x_min_bound[0][i] = 0
-            x_max_bound[0][i] = 1
-            x_min_bound[1][i] = 1
-            x_min_bound[2][i] = x_init["q"].init[2][-1]
-            x_max_bound[2][i] = x_init["q"].init[2][0]
-        for i in range(len(cardinal_node_list)):
-            cardinal_index = cardinal_node_list[i]
-            x_min_bound[2][cardinal_index] = (
-                x_init["q"].init[2][cardinal_index]
-                if i % cardinal == 0
-                else x_init["q"].init[2][cardinal_index] - slack
-            )
-            x_max_bound[2][cardinal_index] = (
-                x_init["q"].init[2][cardinal_index]
-                if i % cardinal == 0
-                else x_init["q"].init[2][cardinal_index] + slack
-            )
-
-        x_bounds.add(
-            key="q", min_bound=x_min_bound, max_bound=x_max_bound, phase=0, interpolation=InterpolationType.EACH_FRAME
-        )
-
-    else:
-        x_bounds.add(key="q", bounds=q_x_bounds, phase=0)
+    q_x_bounds.min[0] = [-0.5] * 3
+    q_x_bounds.max[0] = [1.5] * 3
+    q_x_bounds.min[1] = [1] * 3
+    q_x_bounds.min[2][0] = x_init["q"].init[2][0]
+    q_x_bounds.max[2][0] = x_init["q"].init[2][0]
+    q_x_bounds.min[2][-1] = x_init["q"].init[2][-1]
+    q_x_bounds.max[2][-1] = x_init["q"].init[2][-1]
+    q_x_bounds.max[2][1] = x_init["q"].init[2][0]
+    q_x_bounds.min[2][1] = x_init["q"].init[2][-1]
+    x_bounds.add(key="q", bounds=q_x_bounds, phase=0)
 
     # Modify bounds for velocities (e.g., setting maximum pedal speed to 0 to prevent the pedal to go backward)
+    qdot_x_bounds = model.bounds_from_ranges("qdot")
     qdot_x_bounds.max[0] = [4, 4, 4]
     qdot_x_bounds.min[0] = [-4, -4, -4]
     qdot_x_bounds.max[1] = [4, 4, 4]
@@ -350,10 +314,10 @@ def set_state_bounds(
     qdot_x_bounds.max[2] = [-2, -2, -2]
     qdot_x_bounds.min[2] = [-15, -15, -15]
     x_bounds.add(key="qdot", bounds=qdot_x_bounds, phase=0)
-    return x_bounds
+    return x_bounds, x_init
 
 
-def set_constraints(model: BiorbdModel | FesMskModel, n_shooting: int, turn_number: int) -> ConstraintList:
+def set_constraints(model: BiorbdModel | FesMskModel) -> ConstraintList:
     """
     Set constraints for the optimal control problem.
 
@@ -361,10 +325,6 @@ def set_constraints(model: BiorbdModel | FesMskModel, n_shooting: int, turn_numb
     ----------
     model: BiorbdModel | FesMskModel
         The biomechanical model.
-    n_shooting: int
-        Number of shooting nodes.
-    turn_number: int
-        Number of complete turns.
 
     Returns
     -------
@@ -378,18 +338,21 @@ def set_constraints(model: BiorbdModel | FesMskModel, n_shooting: int, turn_numb
         axes=[Axis.X, Axis.Y],
     )
 
-    superimpose_marker_list = [
-        i * int(n_shooting / ((n_shooting / (n_shooting / turn_number)) * 1))
-        for i in range(int((n_shooting / (n_shooting / turn_number)) * 1 + 1))
-    ]
-    for i in superimpose_marker_list:
-        constraints.add(
-            ConstraintFcn.SUPERIMPOSE_MARKERS,
-            first_marker="wheel_center",
-            second_marker="global_wheel_center",
-            node=i,
-            axes=[Axis.X, Axis.Y],
-        )
+    constraints.add(
+        ConstraintFcn.SUPERIMPOSE_MARKERS,
+        first_marker="wheel_center",
+        second_marker="global_wheel_center",
+        node=Node.START,
+        axes=[Axis.X, Axis.Y],
+    )
+
+    constraints.add(
+        ConstraintFcn.SUPERIMPOSE_MARKERS,
+        first_marker="wheel_center",
+        second_marker="global_wheel_center",
+        node=33,
+        axes=[Axis.X, Axis.Y],
+    )
 
     return constraints
 
@@ -431,7 +394,7 @@ def prepare_ocp(
         An OptimalControlProgram instance configured for the problem.
     """
     # Set external forces (e.g., resistive torque at the handle)
-    numerical_time_series, external_force_set = set_external_forces(n_shooting, torque=-0.5)
+    numerical_time_series, external_force_set = set_external_forces(n_shooting, torque=-1)
 
     # Set stimulation time in numerical_data_time_series
     if isinstance(model, FesMskModel):
@@ -450,20 +413,16 @@ def prepare_ocp(
     x_init = set_x_init(n_shooting, pedal_config, turn_number)
 
     # Define state bounds
-    x_bounds = set_state_bounds(
+    x_bounds, x_init = set_state_bounds(
         model=model,
         x_init=x_init,
-        n_shooting=n_shooting,
-        turn_number=turn_number,
-        interpolation_type=InterpolationType.EACH_FRAME,
-        cardinal=2,
     )
 
     # Define control bounds and initial guess
-    u_init, u_bounds = set_u_bounds_and_init(model, dynamics_type_str=dynamics_type)
+    u_init, u_bounds, u_scaling = set_u_bounds_and_init(model, dynamics_type_str=dynamics_type)
 
     # Set constraints
-    constraints = set_constraints(model, n_shooting, turn_number)
+    constraints = set_constraints(model)
 
     # Update the model with external forces and parameters
     model = update_model(model, external_force_set, parameters=ParameterList(use_sx=use_sx))
@@ -477,11 +436,13 @@ def prepare_ocp(
         u_bounds=u_bounds,
         x_init=x_init,
         u_init=u_init,
+        u_scaling=u_scaling,
         objective_functions=objective_functions,
-        ode_solver=OdeSolver.RK1(n_integration_steps=integration_step),
+        # ode_solver=OdeSolver.RK4(n_integration_steps=integration_step),
+        ode_solver=OdeSolver.COLLOCATION(polynomial_degree=2, method="radau"),
         n_threads=20,
         constraints=constraints,
-        use_sx=use_sx,
+        use_sx=True,
         control_type=ControlType.CONSTANT,
     )
 
@@ -527,7 +488,7 @@ def main():
         )
         # Adjust n_shooting based on the stimulation time
         n_shooting = model.muscles_dynamics_model[0].get_n_shooting(final_time)
-        integration_step = 5
+        integration_step = 10
     else:
         raise ValueError(f"Dynamics type '{dynamics_type}' not recognized")
 
@@ -546,14 +507,15 @@ def main():
     ocp.add_plot_penalty(CostType.ALL)
 
     # Solve the optimal control problem
-    sol = ocp.solve(Solver.IPOPT(show_online_optim=False, _max_iter=10000))
+    sol = ocp.solve(Solver.IPOPT(show_online_optim=False, _max_iter=10000, show_options=dict(show_bounds=True)))
+    sol.print_cost()
+    sol.animate(viewer="pyorerun")
     sol.graphs(show_bounds=True)
     # # Display graphs and animate the solution
     # if dynamics_type == "fes_driven":
     #     FES_plot(data=sol).plot(title="FES-driven cycling")
     # else:
     #     sol.graphs(show_bounds=True)
-    sol.animate(viewer="pyorerun")
 
 
 if __name__ == "__main__":
