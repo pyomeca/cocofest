@@ -58,9 +58,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: coverage${{ matrix.shard }}
-          path: |
-            coverage.xml
-            .coverage
+          path: .coverage
           if-no-files-found: error
           include-hidden-files: true
 
@@ -105,6 +103,8 @@ jobs:
       - name: Download all workflow run artifacts
         id: download
         uses: actions/download-artifact@v4
+        with:
+          pattern: coverage-*
 
       - name: Rename coverage files
         run: |
@@ -127,11 +127,9 @@ jobs:
           coverage xml
           coverage report -m
 
-      - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v2
+      - uses: codecov/codecov-action@v5
         with:
           file: ./coverage.xml
           flags: unittests
           fail_ci_if_error: true
           verbose: true
-          token: ${{ secrets.CODECOV_TOKEN }}
