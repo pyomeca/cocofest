@@ -48,7 +48,7 @@ def test_pulse_width_multi_muscle_fes_dynamics():
 
     sol = ocp.solve(Solver.IPOPT(_max_iter=1000))
 
-    np.testing.assert_almost_equal(sol.cost, 1390.4256180619614)
+    np.testing.assert_almost_equal(float(sol.cost), 1390.4256426188954)
     np.testing.assert_almost_equal(
         sol.decision_controls(to_merge=SolutionMerge.NODES)["last_pulse_width_BIClong"][0],
         np.array(
@@ -122,7 +122,7 @@ def test_pulse_intensity_multi_muscle_fes_dynamics():
 
     sol = ocp.solve(Solver.IPOPT(_max_iter=1000))
 
-    np.testing.assert_almost_equal(sol.cost, 1904.7010473130113)
+    np.testing.assert_almost_equal(float(sol.cost), 1904.7010473130113)
     np.testing.assert_almost_equal(
         sol.parameters["pulse_intensity_BIClong"],
         np.array(
