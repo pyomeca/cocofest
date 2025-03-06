@@ -16,7 +16,6 @@ from .optimization.fes_nmpc import FesNmpc
 from .optimization.fes_nmpc_multibody import FesNmpcMsk
 from .integration.ivp_fes import IvpFes
 from .fourier_approx import FourierSeries
-
 from .dynamics.inverse_kinematics_and_dynamics import (
     get_circle_coord,
     inverse_kinematics_cycling,

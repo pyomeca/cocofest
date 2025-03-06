@@ -199,7 +199,7 @@ def set_objective_functions(minimize_force, minimize_fatigue):
 def set_x_init(n_shooting, pedal_config, turn_number):
     x_init = InitialGuessList()
 
-    biorbd_model_path = "../../model_msk/simplified_UL_Seth_pedal_aligned_for_inverse_kinematics.bioMod"
+    biorbd_model_path = "../../model_msk/simplified_UL_Seth_2D_cycling_for_inverse_kinematics.bioMod"
     q_guess, qdot_guess, qddotguess = inverse_kinematics_cycling(
         biorbd_model_path,
         n_shooting,
@@ -352,7 +352,7 @@ def main():
     Main function to configure and solve the optimal control problem.
     """
     # --- Configuration --- #
-    model_path = "../../model_msk/simplified_UL_Seth_pedal_aligned.bioMod"
+    model_path = "../../model_msk/simplified_UL_Seth_2D_cycling.bioMod"
 
     # NMPC parameters
     cycle_duration = 1

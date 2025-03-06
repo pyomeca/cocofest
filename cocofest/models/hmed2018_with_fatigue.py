@@ -129,7 +129,7 @@ class DingModelPulseIntensityFrequencyWithFatigue(DingModelPulseIntensityFrequen
         tau1: MX = None,
         km: MX = None,
         t: MX = None,
-        t_stim_prev: MX = None,
+        t_stim_prev: list[MX] = None,
         pulse_intensity: list[MX] | list[float] = None,
         force_length_relationship: float | MX = 1,
         force_velocity_relationship: float | MX = 1,
@@ -152,7 +152,7 @@ class DingModelPulseIntensityFrequencyWithFatigue(DingModelPulseIntensityFrequen
             The value of the cross_bridges (unitless)
         t: MX
             The current time at which the dynamics is evaluated (s)
-        t_stim_prev: MX
+        t_stim_prev: list[MX]
             The previous time at which the stimulation was applied (s)
         pulse_intensity: list[MX] | list[float]
             The intensity of the stimulations (mA)

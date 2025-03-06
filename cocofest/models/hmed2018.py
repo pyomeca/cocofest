@@ -120,7 +120,7 @@ class DingModelPulseIntensityFrequency(DingModelFrequency):
         cn: MX,
         f: MX,
         t: MX = None,
-        t_stim_prev: MX | float = None,
+        t_stim_prev: list[MX] | list[float] = None,
         pulse_intensity: list[MX] | list[float] = None,
         force_length_relationship: MX | float = 1,
         force_velocity_relationship: MX | float = 1,
@@ -137,7 +137,7 @@ class DingModelPulseIntensityFrequency(DingModelFrequency):
             The value of the force (N)
         t: MX
             The current time at which the dynamics is evaluated (s)
-        t_stim_prev: MX | float
+        t_stim_prev: list[MX] | list[float]
             The previous stimulation time (s)
         pulse_intensity: list[MX] | list[float]
             The pulsation intensity of the current stimulation (mA)

@@ -98,7 +98,7 @@ def prepare_nmpc(
     x_init = set_x_init(window_n_shooting, pedal_config, turn_number)
 
     # Path constraint
-    x_bounds = set_bounds(
+    x_bounds, x_init = set_bounds(
         model=model,
         x_init=x_init,
         n_shooting=window_n_shooting,
@@ -217,7 +217,7 @@ def set_objective_functions(model, dynamics_type):
 def set_x_init(n_shooting, pedal_config, turn_number):
     x_init = InitialGuessList()
 
-    biorbd_model_path = "../../model_msk/simplified_UL_Seth_pedal_aligned_for_inverse_kinematics.bioMod"
+    biorbd_model_path = "../../model_msk/simplified_UL_Seth_2D_cycling_for_inverse_kinematics.bioMod"
     q_guess, qdot_guess, qddotguess = inverse_kinematics_cycling(
         biorbd_model_path,
         n_shooting,
@@ -255,9 +255,9 @@ def set_u_bounds_and_init(bio_model, dynamics_type_str):
 
 
 def set_bounds(model, x_init, n_shooting, turn_number, interpolation_type=InterpolationType.CONSTANT, cardinal=4):
-    x_bounds = BoundsList()
-    if isinstance(model, FesMskModel):
-        x_bounds, _ = OcpFesMsk.set_x_bounds_fes(model)
+    x_bounds, x_init_fes = OcpFesMsk.set_x_bounds_fes(model)
+    for key in x_init_fes.keys():
+        x_init[key] = x_init_fes[key]
 
     q_x_bounds = model.bounds_from_ranges("q")
     q_x_bounds.min[2] = q_x_bounds.min[2] * (turn_number / 3)
@@ -312,7 +312,7 @@ def set_bounds(model, x_init, n_shooting, turn_number, interpolation_type=Interp
     qdot_x_bounds.max[2] = [-2, -2, -2]
     qdot_x_bounds.min[2] = [-12, -12, -12]
     x_bounds.add(key="qdot", bounds=qdot_x_bounds, phase=0)
-    return x_bounds
+    return x_bounds, x_init
 
 
 def set_constraints(bio_model, n_shooting, turn_number):
@@ -346,7 +346,7 @@ def main():
     """
     # --- Configuration --- #
     dynamics_type = "fes_driven"  # Available options: "torque_driven", "muscle_driven", "fes_driven"
-    model_path = "../../model_msk/simplified_UL_Seth_pedal_aligned.bioMod"
+    model_path = "../../model_msk/simplified_UL_Seth_2D_cycling.bioMod"
 
     # NMPC parameters
     cycle_duration = 1
