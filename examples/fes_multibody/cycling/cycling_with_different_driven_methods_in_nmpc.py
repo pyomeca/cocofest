@@ -1,3 +1,4 @@
+# NMPC FES not working yet
 """
 This example will do an optimal control program of a 100 steps tracking a hand cycling motion with a torque driven and
 a torque resistance at the handle.
