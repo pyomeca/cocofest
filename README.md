@@ -54,7 +54,7 @@ Follows the steps to install everything you need to use `Cocofest`.
 </br>
 First, you need to create a new conda environment
 ```bash
-conda create -n YOUR_ENV_NAME python=3.10
+conda create -n YOUR_ENV_NAME python=3.11
 ```
 
 Then, activate the environment

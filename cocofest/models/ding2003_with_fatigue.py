@@ -31,22 +31,24 @@ class DingModelFrequencyWithFatigue(DingModelFrequency):
         self,
         model_name: str = "ding2003_with_fatigue",
         muscle_name: str = None,
-        sum_stim_truncation: int = None,
-        is_approximated: bool = False,
+        stim_time: list[float] = None,
+        previous_stim: dict = None,
+        sum_stim_truncation: int = 20,
     ):
         super().__init__(
             model_name=model_name,
             muscle_name=muscle_name,
+            stim_time=stim_time,
+            previous_stim=previous_stim,
             sum_stim_truncation=sum_stim_truncation,
         )
         self._with_fatigue = True
-        self.is_approximated = is_approximated
 
         # --- Default values --- #
-        ALPHA_A_DEFAULT = -4.0 * 10e-7  # Value from Ding's experimentation [1] (s^-2)
-        ALPHA_TAU1_DEFAULT = 2.1 * 10e-5  # Value from Ding's experimentation [1] (N^-1)
+        ALPHA_A_DEFAULT = -4.0 * 10e-2  # Value from Ding's experimentation [1] (s^-2)
         TAU_FAT_DEFAULT = 127  # Value from Ding's experimentation [1] (s)
-        ALPHA_KM_DEFAULT = 1.9 * 10e-8  # Value from Ding's experimentation [1] (s^-1.N^-1)
+        ALPHA_TAU1_DEFAULT = 2.1 * 10e-6  # Value from Ding's experimentation [1] (N^-1)
+        ALPHA_KM_DEFAULT = 1.9 * 10e-6  # Value from Ding's experimentation [1] (s^-1.N^-1)
 
         # ---- Fatigue models ---- #
         self.alpha_a = ALPHA_A_DEFAULT
@@ -139,10 +141,10 @@ class DingModelFrequencyWithFatigue(DingModelFrequency):
         tau1: MX = None,
         km: MX = None,
         t: MX = None,
-        t_stim_prev: list[MX] | list[float] = None,
-        cn_sum: MX | float = None,
+        t_stim_prev: MX | float = None,
         force_length_relationship: MX | float = 1,
         force_velocity_relationship: MX | float = 1,
+        passive_force_relationship: MX | float = 0,
     ) -> MX:
         """
         The system dynamics is the function that describes the models.
@@ -156,25 +158,25 @@ class DingModelFrequencyWithFatigue(DingModelFrequency):
         a: MX
             The value of the scaling factor (unitless)
         tau1: MX
-            The value of the time_state_force_no_cross_bridge (ms)
+            The value of the time_state_force_no_cross_bridge (s)
         km: MX
             The value of the cross_bridges (unitless)
         t: MX
             The current time at which the dynamics is evaluated (s)
-        t_stim_prev: list[MX] | list[float]
-            The time list of the previous stimulations (s)
-        cn_sum: MX | float
-            The sum of the ca_troponin_complex (unitless)
+        t_stim_prev: MX | float
+            The previous time at which the stimulation was applied (s)
         force_length_relationship: MX | float
             The force length relationship value (unitless)
         force_velocity_relationship: MX | float
             The force velocity relationship value (unitless)
+        passive_force_relationship: MX | float
+            The passive force relationship value (unitless)
 
         Returns
         -------
         The value of the derivative of each state dx/dt at the current time t
         """
-        cn_dot = self.calculate_cn_dot(cn, cn_sum, t, t_stim_prev)
+        cn_dot = self.calculate_cn_dot(cn, t, t_stim_prev)
         f_dot = self.f_dot_fun(
             cn,
             f,
@@ -183,6 +185,7 @@ class DingModelFrequencyWithFatigue(DingModelFrequency):
             km,
             force_length_relationship=force_length_relationship,
             force_velocity_relationship=force_velocity_relationship,
+            passive_force_relationship=passive_force_relationship,
         )  # Equation n°2
         a_dot = self.a_dot_fun(a, f)  # Equation n°5
         tau1_dot = self.tau1_dot_fun(tau1, f)  # Equation n°9
@@ -209,13 +212,13 @@ class DingModelFrequencyWithFatigue(DingModelFrequency):
         Parameters
         ----------
         tau1: MX
-            The previous step value of time_state_force_no_cross_bridge (ms)
+            The previous step value of time_state_force_no_cross_bridge (s)
         f: MX
             The previous step value of force (N)
 
         Returns
         -------
-        The value of the derivative time_state_force_no_cross_bridge (ms)
+        The value of the derivative time_state_force_no_cross_bridge (s)
         """
         return -(tau1 - self.tau1_rest) / self.tau_fat + self.alpha_tau1 * f  # Equation n°9
 
@@ -246,6 +249,7 @@ class DingModelFrequencyWithFatigue(DingModelFrequency):
         fes_model=None,
         force_length_relationship: MX | float = 1,
         force_velocity_relationship: MX | float = 1,
+        passive_force_relationship: MX | float = 0,
     ) -> DynamicsEvaluation:
         """
         Functional electrical stimulation dynamic
@@ -272,19 +276,14 @@ class DingModelFrequencyWithFatigue(DingModelFrequency):
             The force length relationship value (unitless)
         force_velocity_relationship: MX | float
             The force velocity relationship value (unitless)
+        passive_force_relationship: MX | float
+            The passive force relationship value (unitless)
         Returns
         -------
         The derivative of the states in the tuple[MX] format
         """
         model = fes_model if fes_model else nlp.model
         dxdt_fun = model.system_dynamics
-        stim_apparition = None
-        cn_sum = None
-
-        if model.is_approximated:
-            cn_sum = controls[0]
-        else:
-            stim_apparition = model.get_stim(nlp=nlp, parameters=parameters)
 
         return DynamicsEvaluation(
             dxdt=dxdt_fun(
@@ -293,11 +292,11 @@ class DingModelFrequencyWithFatigue(DingModelFrequency):
                 a=states[2],
                 tau1=states[3],
                 km=states[4],
-                cn_sum=cn_sum,
                 t=time,
-                t_stim_prev=stim_apparition,
+                t_stim_prev=numerical_timeseries,
                 force_length_relationship=force_length_relationship,
                 force_velocity_relationship=force_velocity_relationship,
+                passive_force_relationship=passive_force_relationship,
             ),
             defects=None,
         )
@@ -321,6 +320,4 @@ class DingModelFrequencyWithFatigue(DingModelFrequency):
             A list of values to pass to the dynamics at each node. Experimental external forces should be included here.
         """
         StateConfigure().configure_all_fes_model_states(ocp, nlp, fes_model=self)
-        if self.is_approximated:
-            StateConfigure().configure_cn_sum(ocp, nlp)
         ConfigureProblem.configure_dynamics_function(ocp, nlp, dyn_func=self.dynamics)

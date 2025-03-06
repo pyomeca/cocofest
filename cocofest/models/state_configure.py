@@ -253,6 +253,44 @@ class StateConfigure:
         name_cn_sum = [name]
         return ConfigureProblem.configure_new_variable(name, name_cn_sum, ocp, nlp, as_states=False, as_controls=True)
 
+    @staticmethod
+    def configure_last_pulse_width(ocp, nlp, muscle_name: str = None):
+        """
+        Configure the last pulse width control
+
+        Parameters
+        ----------
+        ocp: OptimalControlProgram
+            A reference to the ocp
+        nlp: NonLinearProgram
+            A reference to the phase
+        """
+        muscle_name = "_" + muscle_name if muscle_name else ""
+        name = "last_pulse_width" + muscle_name
+        last_pulse_width = [name]
+        return ConfigureProblem.configure_new_variable(
+            name, last_pulse_width, ocp, nlp, as_states=False, as_controls=True
+        )
+
+    @staticmethod
+    def configure_pulse_intensity(ocp, nlp, muscle_name: str = None, truncation: int = 20):
+        """
+        Configure the pulse intensity control
+
+        Parameters
+        ----------
+        ocp: OptimalControlProgram
+            A reference to the ocp
+        nlp: NonLinearProgram
+            A reference to the phase
+        """
+        muscle_name = "_" + muscle_name if muscle_name else ""
+        name = "pulse_intensity" + muscle_name
+        pulse_intensity = [str(i) for i in range(truncation)]
+        return ConfigureProblem.configure_new_variable(
+            name, pulse_intensity, ocp, nlp, as_states=False, as_controls=True
+        )
+
     def configure_all_muscle_states(self, muscles_dynamics_model, ocp, nlp):
         state_name_list = []
         for muscle_dynamics_model in muscles_dynamics_model:

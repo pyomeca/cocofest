@@ -1,5 +1,6 @@
 import math
 import numpy as np
+from scipy.interpolate import interp1d
 
 import biorbd
 
@@ -50,6 +51,7 @@ def inverse_kinematics_cycling(
     y_center: int | float,
     radius: int | float,
     ik_method: str = "trf",
+    cycling_number: int = 1,
 ) -> tuple:
     """
     Perform the inverse kinematics of a cycling movement
@@ -80,6 +82,8 @@ def inverse_kinematics_cycling(
             -‘lm’ : Levenberg-Marquardt algorithm as implemented in MINPACK.
                     Does not handle bounds and sparse Jacobians.
                     Usually the most efficient method for small unconstrained problems.
+    cycling_number: int
+        The number of cycle performed in a single problem
 
     Returns
     ----------
@@ -88,21 +92,29 @@ def inverse_kinematics_cycling(
     """
 
     model = biorbd.Model(model_path)
-    if 0 <= model.nbMarkers() > 1:
-        raise ValueError("The model must have only one markers to perform the inverse kinematics")
 
-    z = model.markers(np.array([0, 0]))[0].to_array()[2]
-    if z != model.markers(np.array([np.pi / 2, np.pi / 2]))[0].to_array()[2]:
+    z = model.markers(np.array([0] * model.nbQ()))[0].to_array()[2]
+    if z != model.markers(np.array([np.pi / 2] * model.nbQ()))[0].to_array()[2]:
         print("The model not strictly 2d. Warm start not optimal.")
 
-    x_y_z_coord = np.array(
-        [
-            get_circle_coord(theta, x_center, y_center, radius, z=z)
-            for theta in np.linspace(0, -2 * np.pi + (-2 * np.pi / n_shooting), n_shooting + 1)
-        ]
-    ).T
-    target_q = x_y_z_coord.reshape((3, 1, n_shooting + 1))
-    ik = biorbd.InverseKinematics(model, target_q)
+    f = interp1d(
+        np.linspace(0, -360 * cycling_number, 360 * cycling_number + 1),
+        np.linspace(0, -360 * cycling_number, 360 * cycling_number + 1),
+        kind="linear",
+    )
+    x_new = f(np.linspace(0, -360 * cycling_number, n_shooting + 1))
+    x_new_rad = np.deg2rad(x_new)
+
+    x_y_z_coord = np.array([get_circle_coord(theta, x_center, y_center, radius) for theta in x_new_rad]).T
+
+    target_marker_hand = x_y_z_coord.reshape((3, 1, n_shooting + 1))  # Hand marker_target
+    wheel_center_x_y_z_coord = np.array([x_center, y_center, z])
+    target_marker_wheel_center = np.tile(
+        wheel_center_x_y_z_coord[:, np.newaxis, np.newaxis], (1, 1, n_shooting + 1)
+    )  # Wheel marker_target
+    target_marker = np.concatenate((target_marker_hand, target_marker_wheel_center), axis=1)
+    ik = biorbd.InverseKinematics(model, target_marker)
+    # ik_kalman = extended_kalman_filter(
     ik_q = ik.solve(method=ik_method)
     ik_qdot = np.array([np.gradient(ik_q[i], (1 / n_shooting)) for i in range(ik_q.shape[0])])
     ik_qddot = np.array([np.gradient(ik_qdot[i], (1 / n_shooting)) for i in range(ik_qdot.shape[0])])
@@ -136,9 +148,84 @@ def inverse_dynamics_cycling(
         joints torques
     """
     model = biorbd.Model(model_path)
-    tau_shape = (model.nbQ(), q.shape[1] - 1)
+    tau_shape = (model.nbQ(), q.shape[1])
     tau = np.zeros(tau_shape)
     for i in range(tau.shape[1]):
         tau_i = model.InverseDynamics(q[:, i], qdot[:, i], qddot[:, i])
         tau[:, i] = tau_i.to_array()
-    return tau
+    return tau[:, :-1]
+
+
+def extended_kalman_filter(
+    model_path: str,
+    n_shooting: int,
+    x_center: int | float,
+    y_center: int | float,
+    radius: int | float,
+    cycling_number: int = 1,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """
+    Reconstruct the kinematics of the specified trial assuming a biorbd model is loaded using an Extended Kalman filter
+
+    Parameters
+    ----------
+    model_path: str
+        The path to the model
+    n_shooting: int
+        The number of shooting points
+    x_center: int | float
+        The x coordinate of the center of the circle
+    y_center: int | float
+        The y coordinate of the center of the circle
+    radius: int | float
+        The radius of the circle
+    cycling_number: int
+        The number of cycle performed in a single problem
+
+    Returns
+    -------
+    First element is the time vector, the next three are the q, qdot and qddot computed from the EKF.
+    These three matrices are of size nq x ntimes
+    """
+    model = biorbd.Model(model_path)
+
+    z = model.markers(np.array([0] * model.nbQ()))[0].to_array()[2]
+    if z != model.markers(np.array([np.pi / 2] * model.nbQ()))[0].to_array()[2]:
+        print("The model not strictly 2d. Warm start not optimal.")
+
+    f = interp1d(
+        np.linspace(0, -360 * cycling_number, 360 * cycling_number + 1),
+        np.linspace(0, -360 * cycling_number, 360 * cycling_number + 1),
+        kind="linear",
+    )
+    x_new = f(np.linspace(0, -360 * cycling_number, n_shooting + 1))
+    x_new_rad = np.deg2rad(x_new)
+
+    x_y_z_coord = np.array([get_circle_coord(theta, x_center, y_center, radius) for theta in x_new_rad]).T
+
+    target_marker_hand = x_y_z_coord.reshape((3, 1, n_shooting + 1))  # Hand marker_target
+    wheel_center_x_y_z_coord = np.array([x_center, y_center, z])
+    target_marker_wheel_center = np.tile(
+        wheel_center_x_y_z_coord[:, np.newaxis, np.newaxis], (1, 1, n_shooting + 1)
+    )  # Wheel marker_target
+    target_marker = np.concatenate((target_marker_hand, target_marker_wheel_center), axis=1)
+
+    # Create a Kalman filter structure
+    freq = int(n_shooting / cycling_number)
+    params = biorbd.KalmanParam(freq)
+    kalman = biorbd.KalmanReconsMarkers(model, params)
+
+    # Perform the kalman filter for each frame (the first frame is much longer than the next)
+    q = biorbd.GeneralizedCoordinates(model)
+    qdot = biorbd.GeneralizedVelocity(model)
+    qddot = biorbd.GeneralizedAcceleration(model)
+    q_out = np.ndarray((model.nbQ(), n_shooting))
+    qdot_out = np.ndarray((model.nbQdot(), n_shooting))
+    qddot_out = np.ndarray((model.nbQddot(), n_shooting))
+    for i in range(n_shooting):
+        kalman.reconstructFrame(model, np.reshape(target_marker[:, :, i].T, -1), q, qdot, qddot)
+        q_out[:, i] = q.to_array()
+        qdot_out[:, i] = qdot.to_array()
+        qddot_out[:, i] = qddot.to_array()
+
+    return q_out, qdot_out, qddot_out

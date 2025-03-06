@@ -6,6 +6,9 @@ from bioptim import NonLinearProgram, OptimalControlProgram
 
 
 class FesModel(ABC):
+    def __init__(self):
+        self.stim_time = None
+
     @abstractmethod
     def set_a_rest(self, model, a_rest: MX | float):
         """
@@ -113,6 +116,7 @@ class FesModel(ABC):
         cn_sum: MX,
         force_length_relationship: MX | float,
         force_velocity_relationship: MX | float,
+        passive_force_relationship: MX | float,
     ):
         """
 
@@ -166,6 +170,7 @@ class FesModel(ABC):
         km: MX | float,
         force_length_relationship: MX | float,
         force_velocity_relationship: MX | float,
+        passive_force_relationship: MX | float,
     ):
         """
 
@@ -187,6 +192,7 @@ class FesModel(ABC):
         fes_model,
         force_length_relationship: MX | float,
         force_velocity_relationship: MX | float,
+        passive_force_relationship: MX | float,
     ):
         """
 
@@ -210,7 +216,16 @@ class FesModel(ABC):
         """
 
     @abstractmethod
-    def set_pulse_apparition_time(self, value: list[MX]):
+    def get_numerical_data_time_series(self, total_cycle_len, total_cycle_duration):
+        """
+
+        Returns
+        -------
+
+        """
+
+    @abstractmethod
+    def get_n_shooting(self, final_time):
         """
 
         Returns

@@ -1,3 +1,10 @@
+"""
+The muscle force length, velocity and passive force coefficients calculation from:
+De Groote, F., Kinney, A. L., Rao, A. V., & Fregly, B. J. (2016).
+Evaluation of direct collocation optimal control problem formulations for solving the muscle redundancy problem.
+Annals of biomedical engineering, 44, 2922-2936.
+"""
+
 from casadi import exp, log, sqrt
 
 
@@ -31,7 +38,7 @@ def muscle_force_length_coefficient(model, muscle, q):
     b33 = 0.354
     b43 = 0.0
 
-    muscle_length = muscle.length(model, q, False).to_mx()
+    muscle_length = muscle.length(model, q, True).to_mx()
     muscle_optimal_length = muscle.characteristics().optimalLength().to_mx()
     norm_length = muscle_length / muscle_optimal_length
 
@@ -75,7 +82,7 @@ def muscle_force_velocity_coefficient(model, muscle, q, qdot):
     -------
     The muscle force velocity coefficient
     """
-    muscle_velocity = muscle.velocity(model, q, qdot, False).to_mx()
+    muscle_velocity = muscle.velocity(model, q, qdot, True).to_mx()
     m_cste_maxShorteningSpeed = 10
     norm_v = muscle_velocity / m_cste_maxShorteningSpeed
 
@@ -87,3 +94,32 @@ def muscle_force_velocity_coefficient(model, muscle, q, qdot):
     m_FvCE = d1 * log((d2 * norm_v + d3) + sqrt((d2 * norm_v + d3) * (d2 * norm_v + d3) + 1)) + d4
 
     return m_FvCE
+
+
+def muscle_passive_force_coefficient(model, muscle, q):
+    """
+    Muscle passive force coefficient from HillDeGroote
+
+    Parameters
+    ----------
+    model: BiorbdModel
+        The biorbd model
+    muscle: MX
+        The muscle
+    q: MX
+        The generalized coordinates
+
+    Returns
+    -------
+    The muscle passive force coefficient
+    """
+    kpe = 4
+    e0 = 0.6
+
+    muscle_length = muscle.length(model, q, True).to_mx()
+    muscle_optimal_length = muscle.characteristics().optimalLength().to_mx()
+    norm_length = muscle_length / muscle_optimal_length
+
+    m_FpCE = (exp(kpe * (norm_length - 1) / e0) - 1) / (exp(kpe) - 1)
+
+    return m_FpCE
