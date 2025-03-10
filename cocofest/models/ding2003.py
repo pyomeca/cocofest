@@ -240,6 +240,8 @@ class DingModelFrequency(FesModel):
             The current time at which the dynamics is evaluated (s)
         t_stim_prev: list[MX]
             The time list of the previous stimulations (s)
+        lambda_i: list[MX]
+            #TODO
 
         Returns
         -------
