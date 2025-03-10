@@ -1,0 +1,3 @@
+[submodule "external/bioptim"]
+	path = external/bioptim
+	url = https://github.com/Kev1CO/bioptim
