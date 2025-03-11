@@ -241,7 +241,7 @@ class DingModelFrequency(FesModel):
         t_stim_prev: list[MX]
             The time list of the previous stimulations (s)
         lambda_i: list[MX]
-            #TODO
+            A list of attenuation coefficients (unitless)
 
         Returns
         -------
@@ -262,6 +262,8 @@ class DingModelFrequency(FesModel):
         ----------
         cn: MX
             The previous step value of ca_troponin_complex (unitless)
+        cn_sum: MX
+            The previous calculated sum
 
         Returns
         -------
