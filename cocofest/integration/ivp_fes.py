@@ -111,6 +111,17 @@ class IvpFes:
         self.initial_guess_solution = self._build_solution_from_initial_guess()
 
     def _fill_fes_dict(self, fes_parameters):
+        """
+        Parameters
+        ----------
+        fes_parameters : Dictionary
+            Contains FES parameters
+
+        Returns
+        -------
+        A dictionary with all needed FES parameters (if not specified, default parameter is used)
+        """
+
         default_fes_dict = {
             "model": FesModel,
             "stim_time": None,
@@ -129,6 +140,18 @@ class IvpFes:
         self.fes_parameters = fes_parameters
 
     def _fill_ivp_dict(self, ivp_parameters):
+        """
+
+        Parameters
+        ----------
+        ivp_parameters: Dictionary
+            Contains IVP parameters
+
+        Returns
+        -------
+        A dictionary with all needed IVP parameters (if not specified, default parameter is used)
+
+        """
         default_ivp_dict = {
             "final_time": None,
             "ode_solver": OdeSolver.RK4(n_integration_steps=10),
