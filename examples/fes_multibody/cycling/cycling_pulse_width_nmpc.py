@@ -45,16 +45,53 @@ class MyCyclicNMPC(FesNmpcMsk):
         super().__init__(**kwargs)
 
     def advance_window_bounds_states(self, sol, n_cycles_simultaneous=None, **extra):
-        min_pedal_bound = self.nlp[0].x_bounds["q"].min[-1, 0]
-        max_pedal_bound = self.nlp[0].x_bounds["q"].max[-1, 0]
+        # min_pedal_bound = self.nlp[0].x_bounds["q"].min[-1, 0]
+        # max_pedal_bound = self.nlp[0].x_bounds["q"].max[-1, 0]
         super(MyCyclicNMPC, self).advance_window_bounds_states(sol)
-        self.nlp[0].x_bounds["q"].min[-1, 0] = min_pedal_bound
-        self.nlp[0].x_bounds["q"].max[-1, 0] = max_pedal_bound
+        # self.nlp[0].x_bounds["q"].min[-1, 0] = min_pedal_bound
+        # self.nlp[0].x_bounds["q"].max[-1, 0] = max_pedal_bound
+
+        # Adjust bounds
+        plus_one_cycle = -2*np.pi
+        # self.bound_value += plus_one_cycle
+        # self.common_objective_functions[0][1].target[0][0] = self.objective_value
+        self.nlp[0].x_bounds["q"].min[-1, 1] = self.nlp[0].x_bounds["q"].min[-1, 1] + plus_one_cycle
+        self.nlp[0].x_bounds["q"].min[-1, 2] = self.nlp[0].x_bounds["q"].min[-1, 2] + plus_one_cycle
+        self.nlp[0].x_bounds["q"].max[-1, 1] = self.nlp[0].x_bounds["q"].max[-1, 1] + plus_one_cycle
+        self.nlp[0].x_bounds["q"].max[-1, 2] = self.nlp[0].x_bounds["q"].max[-1, 2] + plus_one_cycle
+
+        # constraints = ConstraintList()
+        # constraints.add(
+        #     ConstraintFcn.TRACK_MARKERS_VELOCITY,
+        #     node=Node.START,
+        #     marker_index=self.nlp[0].model.marker_index("wheel_center"),
+        #     axes=[Axis.X, Axis.Y],
+        # )
+        #
+        # constraints.add(
+        #     ConstraintFcn.SUPERIMPOSE_MARKERS,
+        #     first_marker="wheel_center",
+        #     second_marker="global_wheel_center",
+        #     node=Node.ALL,
+        #     axes=[Axis.X, Axis.Y],
+        # )
+        # self.update_constraints(constraints)
+
+
+        # self.nlp[0].x_bounds["q"].min[2][1] = self.end_cycling_bound - 0.2
+        # self.nlp[0].x_bounds["q"].max[2][1] = self.nlp[0].x_bounds["q"].max[2][0]
+        # self.nlp[0].x_bounds["q"].min[2][-1] = self.end_cycling_bound - 0.2
+        # self.nlp[0].x_bounds["q"].max[2][-1] = self.end_cycling_bound + 0.2
+
         return True
 
     def advance_window_initial_guess_states(self, sol, n_cycles_simultaneous=None):
         # Reimplementation of the advance_window method so the rotation of the wheel restart at -pi
         super(MyCyclicNMPC, self).advance_window_initial_guess_states(sol)
+        start = self.nlp[0].x_bounds["q"].min[-1, 0]
+        end = self.nlp[0].x_bounds["q"].max[-1, 2] - 1
+        q_wheel_init = np.linspace(start, end, self.n_shooting + 1)
+        self.nlp[0].x_init["q"].init[2] = q_wheel_init
         # q = sol.decision_states(to_merge=SolutionMerge.NODES)["q"]
         # self.nlp[0].x_init["q"].init[:, :] = q[:, :]  # Keep the previously found value for the wheel
         return True
@@ -88,9 +125,6 @@ def prepare_nmpc(
 
     dynamics = set_dynamics(model=model, numerical_time_series=numerical_time_series)
 
-    # Define objective functions
-    objective_functions = set_objective_functions(minimize_force, minimize_fatigue)
-
     # Initial q guess
     x_init = set_x_init(window_n_shooting, pedal_config, turn_number)
 
@@ -104,6 +138,14 @@ def prepare_nmpc(
 
     # Control path constraint
     u_bounds, u_init, u_scaling = set_u_bounds_and_init(model)
+
+    # Define objective functions
+    cardinal_node_list = [
+        i * (window_n_shooting / ((window_n_shooting / (window_n_shooting / turn_number)) * 1))
+        for i in range(int((window_n_shooting / (window_n_shooting / turn_number)) * 1 + 1))
+    ]
+    cardinal_node_list = [int(cardinal_node_list[i]) for i in range(len(cardinal_node_list))]
+    objective_functions = set_objective_functions(minimize_force, minimize_fatigue, x_init, cardinal_node_list)
 
     # Constraints
     constraints = set_constraints(model, window_n_shooting, turn_number)
@@ -124,9 +166,10 @@ def prepare_nmpc(
         u_bounds=u_bounds,
         x_init=x_init,
         u_init=u_init,
-        # ode_solver=OdeSolver.RK4(n_integration_steps=10),
-        ode_solver=OdeSolver.COLLOCATION(polynomial_degree=2, method="radau"),
-        n_threads=20,
+        # ode_solver=OdeSolver.RK1(n_integration_steps=3),
+        ode_solver=OdeSolver.RK4(n_integration_steps=10),
+        #ode_solver=OdeSolver.COLLOCATION(polynomial_degree=2, method="radau"),
+        n_threads=32,
         use_sx=use_sx,
     )
 
@@ -174,12 +217,12 @@ def set_dynamics(model, numerical_time_series):
     return dynamics
 
 
-def set_objective_functions(minimize_force, minimize_fatigue):
+def set_objective_functions(minimize_force, minimize_fatigue, x_init, cardinals_nodes):
     objective_functions = ObjectiveList()
 
     if minimize_force:
         objective_functions.add(
-            CustomObjective.minimize_multibody_muscle_force_norm,
+            CustomObjective.minimize_overall_muscle_force_production,
             custom_type=ObjectiveFcn.Lagrange,
             weight=1,
             quadratic=True,
@@ -187,11 +230,22 @@ def set_objective_functions(minimize_force, minimize_fatigue):
 
     if minimize_fatigue:
         objective_functions.add(
-            CustomObjective.minimize_multibody_muscle_fatigue,
+            CustomObjective.minimize_overall_muscle_fatigue,
             custom_type=ObjectiveFcn.Lagrange,
-            weight=1,
+            weight=-1,
             quadratic=True,
         )
+
+    # for i in range(len(cardinals_nodes)):
+    # objective_functions.add(
+    #     ObjectiveFcn.Mayer.MINIMIZE_STATE,
+    #     key="q",
+    #     index=2,
+    #     target=x_init["q"].init[2][33],
+    #     node=33,
+    #     weight=1000,
+    #     quadratic=True,
+    #     )
 
     return objective_functions
 
@@ -199,7 +253,7 @@ def set_objective_functions(minimize_force, minimize_fatigue):
 def set_x_init(n_shooting, pedal_config, turn_number):
     x_init = InitialGuessList()
 
-    biorbd_model_path = "../../model_msk/simplified_UL_Seth_2D_cycling_for_inverse_kinematics.bioMod"
+    biorbd_model_path = "../../model_msk/simplified_UL_Seth_pedal_aligned_for_inverse_kinematics.bioMod"
     q_guess, qdot_guess, qddotguess = inverse_kinematics_cycling(
         biorbd_model_path,
         n_shooting,
@@ -234,49 +288,62 @@ def set_bounds(model, x_init, n_shooting, turn_number):
     for key in x_init_fes.keys():
         x_init[key] = x_init_fes[key]
 
-    # Retrieve default bounds from the model for positions and velocities
     q_x_bounds = model.bounds_from_ranges("q")
+    # q_x_bounds.min[0] = [-0.5] * 3
+    # q_x_bounds.max[0] = [1.5] * 3
+    # q_x_bounds.min[1] = [1] * 3
+    q_x_bounds.max[1] = [2.5] * 3
+    q_x_bounds.min[2][0] = x_init["q"].init[2][0]
+    q_x_bounds.max[2][0] = x_init["q"].init[2][0]
+    q_x_bounds.min[2][-1] = x_init["q"].init[2][-1] - 1
+    q_x_bounds.max[2][-1] = x_init["q"].init[2][-1] + 1
+    q_x_bounds.max[2][1] = x_init["q"].init[2][0]
+    q_x_bounds.min[2][1] = x_init["q"].init[2][-1]
+    x_bounds.add(key="q", bounds=q_x_bounds, phase=0)
 
-    x_min_bound = []
-    x_max_bound = []
-    for i in range(q_x_bounds.min.shape[0]):
-        x_min_bound.append([q_x_bounds.min[i][0]] * (n_shooting + 1))
-        x_max_bound.append([q_x_bounds.max[i][0]] * (n_shooting + 1))
-
-    slack = 0.2
-    for i in range(len(x_min_bound[0])):
-        x_min_bound[0][i] = -0.5
-        x_max_bound[0][i] = 1.5
-        x_min_bound[1][i] = 1
-        x_min_bound[2][i] = x_init["q"].init[2][-1] - slack
-        x_max_bound[2][i] = x_init["q"].init[2][0] + slack
-
-    # Adjust bounds at cardinal nodes for a specific coordinate (e.g., index 2)
-    cardinal_node_list = [
-        i * (n_shooting / ((n_shooting / (n_shooting / turn_number)) * 1))
-        for i in range(int((n_shooting / (n_shooting / turn_number)) * 1 + 1))
-    ]
-    cardinal_node_list = [int(cardinal_node_list[i]) for i in range(len(cardinal_node_list))]
-
-    x_min_bound[2][0] = x_init["q"].init[2][0]
-    x_max_bound[2][0] = x_init["q"].init[2][0]
-    x_min_bound[2][-1] = x_init["q"].init[2][-1]
-    x_max_bound[2][-1] = x_init["q"].init[2][-1]
-
-    for i in range(1, len(cardinal_node_list) - 1):
-        x_max_bound[2][cardinal_node_list[i]] = x_init["q"].init[2][cardinal_node_list[i]] + slack
-        x_min_bound[2][cardinal_node_list[i]] = x_init["q"].init[2][cardinal_node_list[i]] - slack
-
-    x_bounds.add(
-        key="q", min_bound=x_min_bound, max_bound=x_max_bound, phase=0, interpolation=InterpolationType.EACH_FRAME
-    )
+    # # Retrieve default bounds from the model for positions and velocities
+    # q_x_bounds = model.bounds_from_ranges("q")
+    #
+    # x_min_bound = []
+    # x_max_bound = []
+    # for i in range(q_x_bounds.min.shape[0]):
+    #     x_min_bound.append([q_x_bounds.min[i][0]] * (n_shooting + 1))
+    #     x_max_bound.append([q_x_bounds.max[i][0]] * (n_shooting + 1))
+    #
+    # slack = 0.2
+    # for i in range(len(x_min_bound[0])):
+    #     x_min_bound[0][i] = -0.5
+    #     x_max_bound[0][i] = 1.5
+    #     x_min_bound[1][i] = 1
+    #     x_min_bound[2][i] = x_init["q"].init[2][-1] - slack
+    #     x_max_bound[2][i] = x_init["q"].init[2][0] + slack
+    #
+    # # Adjust bounds at cardinal nodes for a specific coordinate (e.g., index 2)
+    # cardinal_node_list = [
+    #     i * (n_shooting / ((n_shooting / (n_shooting / turn_number)) * 1))
+    #     for i in range(int((n_shooting / (n_shooting / turn_number)) * 1 + 1))
+    # ]
+    # cardinal_node_list = [int(cardinal_node_list[i]) for i in range(len(cardinal_node_list))]
+    #
+    # x_min_bound[2][0] = x_init["q"].init[2][0]
+    # x_max_bound[2][0] = x_init["q"].init[2][0]
+    # x_min_bound[2][-1] = x_init["q"].init[2][-1]
+    # x_max_bound[2][-1] = x_init["q"].init[2][-1]
+    #
+    # for i in range(1, len(cardinal_node_list) - 1):
+    #     x_max_bound[2][cardinal_node_list[i]] = x_init["q"].init[2][cardinal_node_list[i]] + slack
+    #     x_min_bound[2][cardinal_node_list[i]] = x_init["q"].init[2][cardinal_node_list[i]] - slack
+    #
+    # x_bounds.add(
+    #     key="q", min_bound=x_min_bound, max_bound=x_max_bound, phase=0, interpolation=InterpolationType.EACH_FRAME
+    # )
 
     # Modify bounds for velocities (e.g., setting maximum pedal speed to 0 to prevent the pedal to go backward)
     qdot_x_bounds = model.bounds_from_ranges("qdot")
-    qdot_x_bounds.max[0] = [4, 4, 4]
-    qdot_x_bounds.min[0] = [-4, -4, -4]
-    qdot_x_bounds.max[1] = [4, 4, 4]
-    qdot_x_bounds.min[1] = [-4, -4, -4]
+    # qdot_x_bounds.max[0] = [4, 4, 4]
+    # qdot_x_bounds.min[0] = [-4, -4, -4]
+    # qdot_x_bounds.max[1] = [4, 4, 4]
+    # qdot_x_bounds.min[1] = [-4, -4, -4]
     qdot_x_bounds.max[2] = [-2, -2, -2]
     qdot_x_bounds.min[2] = [-15, -15, -15]
     x_bounds.add(key="qdot", bounds=qdot_x_bounds, phase=0)
@@ -285,36 +352,44 @@ def set_bounds(model, x_init, n_shooting, turn_number):
 
 def set_constraints(bio_model, n_shooting, turn_number):
     constraints = ConstraintList()
-    constraints.add(
-        ConstraintFcn.TRACK_MARKERS_VELOCITY,
-        node=Node.START,
-        marker_index=bio_model.marker_index("wheel_center"),
-        axes=[Axis.X, Axis.Y],
-    )
+    # constraints.add(
+    #     ConstraintFcn.TRACK_MARKERS_VELOCITY,
+    #     node=Node.START,
+    #     marker_index=bio_model.marker_index("wheel_center"),
+    #     axes=[Axis.X, Axis.Y],
+    # )
+    #
+    # constraints.add(
+    #     ConstraintFcn.SUPERIMPOSE_MARKERS,
+    #     first_marker="wheel_center",
+    #     second_marker="global_wheel_center",
+    #     node=Node.START,
+    #     axes=[Axis.X, Axis.Y],
+    # )
 
     constraints.add(
         ConstraintFcn.SUPERIMPOSE_MARKERS,
         first_marker="wheel_center",
         second_marker="global_wheel_center",
-        node=Node.START,
+        node=Node.ALL,
         axes=[Axis.X, Axis.Y],
     )
 
-    # Adjust bounds at cardinal nodes for a specific coordinate (e.g., index 2)
-    cardinal_node_list = [
-        i * (n_shooting / ((n_shooting / (n_shooting / turn_number)) * 1))
-        for i in range(int((n_shooting / (n_shooting / turn_number)) * 1 + 1))
-    ]
-    cardinal_node_list = [int(cardinal_node_list[i]) for i in range(len(cardinal_node_list))]
-
-    for i in range(1, len(cardinal_node_list) - 1):
-        constraints.add(
-            ConstraintFcn.SUPERIMPOSE_MARKERS,
-            first_marker="wheel_center",
-            second_marker="global_wheel_center",
-            node=cardinal_node_list[i],
-            axes=[Axis.X, Axis.Y],
-        )
+    # # Adjust bounds at cardinal nodes for a specific coordinate (e.g., index 2)
+    # cardinal_node_list = [
+    #     i * (n_shooting / ((n_shooting / (n_shooting / turn_number)) * 1))
+    #     for i in range(int((n_shooting / (n_shooting / turn_number)) * 1 + 1))
+    # ]
+    # cardinal_node_list = [int(cardinal_node_list[i]) for i in range(len(cardinal_node_list))]
+    #
+    # for i in range(1, len(cardinal_node_list) - 1):
+    #     constraints.add(
+    #         ConstraintFcn.SUPERIMPOSE_MARKERS,
+    #         first_marker="wheel_center",
+    #         second_marker="global_wheel_center",
+    #         node=cardinal_node_list[i],
+    #         axes=[Axis.X, Axis.Y],
+    #     )
 
     return constraints
 
@@ -352,12 +427,12 @@ def main():
     Main function to configure and solve the optimal control problem.
     """
     # --- Configuration --- #
-    model_path = "../../model_msk/simplified_UL_Seth_2D_cycling.bioMod"
+    model_path = "../../model_msk/simplified_UL_Seth_pedal_aligned.bioMod"
 
     # NMPC parameters
     cycle_duration = 1
     n_cycles_to_advance = 1
-    n_cycles = 3
+    n_cycles = 100000
 
     # Bike parameters
     pedal_config = {"x_center": 0.35, "y_center": 0.0, "radius": 0.1}
@@ -429,6 +504,9 @@ def main():
             external_force=resistive_torque,
         )
         nmpc.n_cycles_simultaneous = simulation_conditions_list[i]["n_cycles_simultaneous"]
+        # nmpc.objective_value = nmpc.nlp[0].x_init["q"].init[2][33]
+
+        # nmpc.end_cycling_bound = float(nmpc.nlp[0].x_init["q"].init[2][-1])
 
         def update_functions(_nmpc: MultiCyclicNonlinearModelPredictiveControl, cycle_idx: int, _sol: Solution):
             return cycle_idx < n_cycles  # True if there are still some cycle to perform
@@ -438,7 +516,7 @@ def main():
         # Solve the optimal control problem
         sol = nmpc.solve_fes_nmpc(
             update_functions,
-            solver=Solver.IPOPT(show_online_optim=False, _max_iter=100000, show_options=dict(show_bounds=True)),
+            solver=Solver.IPOPT(_linear_solver="ma57", show_online_optim=False, _max_iter=100000, show_options=dict(show_bounds=True)),
             total_cycles=n_cycles,
             external_force=resistive_torque,
             cycle_solutions=MultiCyclicCycleSolutions.ALL_CYCLES,
@@ -446,6 +524,11 @@ def main():
             cyclic_options={"states": {}},
             max_consecutive_failing=3,
         )
+
+        # sol[1][0].graphs(show_bounds=True)
+        # sol[1][1].graphs(show_bounds=True)
+        # sol[0].animate(viewer="pyorerun")
+        # sol[0].graphs(show_bounds=True)
 
         # Saving the data in a pickle file
         time = sol[0].stepwise_time(to_merge=[SolutionMerge.NODES]).T[0]
