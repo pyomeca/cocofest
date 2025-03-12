@@ -9,10 +9,23 @@ class FES_plot:
     def __init__(self, data: Solution | dict):
         self.data = data
 
-    def plot(self, title: str = None, show_stim: bool = False, show_bounds: bool = False):
+        # --- Default Values for Annotation ---
+        X_START = 0.7
+        Y_START = 0.4
+        Y_STEP = 0.05
+
+        self.x_start = X_START
+        self.y_start = Y_START
+        self.y_step = Y_STEP
+
+    def plot(self, sim_data=None, default_model=None, title: str = None, show_stim: bool = False,
+             show_bounds: bool = False):
         if isinstance(self.data, Solution):
             if isinstance(self.data.ocp.nlp[0].model, FesMskModel):
                 self.msk_plot(title, show_stim, show_bounds)
+            elif any(parameter in self.data.parameters.keys() for parameter in
+                     ['a_rest', 'km_rest', 'tau1_rest', 'tau2']):
+                self.id_plot(sim_data, default_model)
             else:
                 self.ocp_plot(title, show_stim, show_bounds)
 
@@ -117,7 +130,7 @@ class FES_plot:
         axis.set_xlabel("Time [s]")
 
     def build_several_y_axis_FES(
-        self, axis, time, values, labels: list = None, stim_time=None, stim_values=None, axes_title=None
+            self, axis, time, values, labels: list = None, stim_time=None, stim_values=None, axes_title=None
     ):
         n = len(labels)
         cmap = plt.get_cmap("tab20b", n)
@@ -391,4 +404,69 @@ class FES_plot:
 
         plt.legend()
         plt.tight_layout()
+        plt.show()
+
+    def extract_identified_parameters(self, identified, keys):
+        """
+        For each parameter in keys, use the identified value if available.
+        Returns a dictionary mapping parameter names to their values.
+        """
+        return {key: identified.parameters[key][0] for key in keys}
+
+    def annotate_parameters(self, ax, identified_params, default_model):
+        """
+            Annotate the plot with parameter names, the identified values, and default values.
+            The names are annotated in black, identified values in red, and default values in blue.
+            """
+        for i, key in enumerate(identified_params.keys()):
+            y = self.y_start - i * self.y_step
+            ax.annotate(f"{key} :", xy=(self.x_start, y), xycoords="axes fraction", color="black")
+            ax.annotate(f"{getattr(default_model, key)}", xy=(self.x_start + 0.08, y), xycoords="axes fraction",
+                        color="blue")
+            if key == 'a_rest':
+                ax.annotate(
+                    f"{round(identified_params[key], 0)}", xy=(self.x_start + 0.15, y), xycoords="axes fraction",
+                    color="red"
+                )
+            if key == 'km_rest':
+                ax.annotate(
+                    f"{round(identified_params[key], 3)}", xy=(self.x_start + 0.15, y), xycoords="axes fraction",
+                    color="red"
+                )
+            if key == 'tau1_rest':
+                ax.annotate(
+                    f"{round(identified_params[key], 6)}", xy=(self.x_start + 0.15, y), xycoords="axes fraction",
+                    color="red"
+                )
+            if key == 'tau2':
+                ax.annotate(
+                    f"{round(identified_params[key], 2)}", xy=(self.x_start + 0.15, y), xycoords="axes fraction",
+                    color="red"
+                )
+
+    def id_plot(self, sim_data, default_model, title: str = None, show_stim: bool = True, show_bounds: bool = True):
+        solution = self.data
+        param_keys = ["a_rest", "km_rest", "tau1_rest", "tau2"]
+        identified_params = self.extract_identified_parameters(solution, param_keys)
+
+        print("Identified parameters:")
+        for key, value in identified_params.items():
+            print(f"  {key}: {value}")
+
+        sim_data_time = sim_data["time"]
+        sim_data_force = sim_data["force"]
+        sol_time = solution.stepwise_time(to_merge=SolutionMerge.NODES).T[0]
+        sol_force = solution.stepwise_states(to_merge=SolutionMerge.NODES)["F"][0]
+
+        # Plot the simulation and identification results
+        fig, ax = plt.subplots()
+        ax.set_title("Force state result")
+        ax.plot(sim_data_time, sim_data_force, color="blue", label="simulated")
+        ax.plot(sol_time, sol_force, color="red", label="identified")
+        ax.set_xlabel("time (s)")
+        ax.set_ylabel("force (N)")
+
+        self.annotate_parameters(ax, identified_params, default_model)
+
+        ax.legend()
         plt.show()
