@@ -52,7 +52,7 @@ class MyCyclicNMPC(FesNmpcMsk):
         # self.nlp[0].x_bounds["q"].max[-1, 0] = max_pedal_bound
 
         # Adjust bounds
-        plus_one_cycle = -2*np.pi
+        plus_one_cycle = -2 * np.pi
         # self.bound_value += plus_one_cycle
         # self.common_objective_functions[0][1].target[0][0] = self.objective_value
         self.nlp[0].x_bounds["q"].min[-1, 1] = self.nlp[0].x_bounds["q"].min[-1, 1] + plus_one_cycle
@@ -76,7 +76,6 @@ class MyCyclicNMPC(FesNmpcMsk):
         #     axes=[Axis.X, Axis.Y],
         # )
         # self.update_constraints(constraints)
-
 
         # self.nlp[0].x_bounds["q"].min[2][1] = self.end_cycling_bound - 0.2
         # self.nlp[0].x_bounds["q"].max[2][1] = self.nlp[0].x_bounds["q"].max[2][0]
@@ -168,7 +167,7 @@ def prepare_nmpc(
         u_init=u_init,
         # ode_solver=OdeSolver.RK1(n_integration_steps=3),
         ode_solver=OdeSolver.RK4(n_integration_steps=10),
-        #ode_solver=OdeSolver.COLLOCATION(polynomial_degree=2, method="radau"),
+        # ode_solver=OdeSolver.COLLOCATION(polynomial_degree=2, method="radau"),
         n_threads=32,
         use_sx=use_sx,
     )
@@ -253,7 +252,7 @@ def set_objective_functions(minimize_force, minimize_fatigue, x_init, cardinals_
 def set_x_init(n_shooting, pedal_config, turn_number):
     x_init = InitialGuessList()
 
-    biorbd_model_path = "../../model_msk/simplified_UL_Seth_pedal_aligned_for_inverse_kinematics.bioMod"
+    biorbd_model_path = "../../model_msk/simplified_UL_Seth_2D_cycling_for_inverse_kinematics.bioMod"
     q_guess, qdot_guess, qddotguess = inverse_kinematics_cycling(
         biorbd_model_path,
         n_shooting,
@@ -427,7 +426,7 @@ def main():
     Main function to configure and solve the optimal control problem.
     """
     # --- Configuration --- #
-    model_path = "../../model_msk/simplified_UL_Seth_pedal_aligned.bioMod"
+    model_path = "../../model_msk/simplified_UL_Seth_2D_cycling.bioMod"
 
     # NMPC parameters
     cycle_duration = 1
@@ -516,7 +515,9 @@ def main():
         # Solve the optimal control problem
         sol = nmpc.solve_fes_nmpc(
             update_functions,
-            solver=Solver.IPOPT(_linear_solver="ma57", show_online_optim=False, _max_iter=100000, show_options=dict(show_bounds=True)),
+            solver=Solver.IPOPT(
+                _linear_solver="ma57", show_online_optim=False, _max_iter=0, show_options=dict(show_bounds=True)
+            ),
             total_cycles=n_cycles,
             external_force=resistive_torque,
             cycle_solutions=MultiCyclicCycleSolutions.ALL_CYCLES,

@@ -373,21 +373,21 @@ def set_constraints(model: BiorbdModel | FesMskModel, n_shooting, turn_number) -
         axes=[Axis.X, Axis.Y],
     )
 
-    # Adjust bounds at cardinal nodes for a specific coordinate (e.g., index 2)
-    cardinal_node_list = [
-        i * (n_shooting / ((n_shooting / (n_shooting / turn_number)) * 1))
-        for i in range(int((n_shooting / (n_shooting / turn_number)) * 1 + 1))
-    ]
-    cardinal_node_list = [int(cardinal_node_list[i]) for i in range(len(cardinal_node_list))]
-
-    for i in range(1, len(cardinal_node_list) - 1):
-        constraints.add(
-            ConstraintFcn.SUPERIMPOSE_MARKERS,
-            first_marker="wheel_center",
-            second_marker="global_wheel_center",
-            node=cardinal_node_list[i],
-            axes=[Axis.X, Axis.Y],
-        )
+    # # Adjust bounds at cardinal nodes for a specific coordinate (e.g., index 2)
+    # cardinal_node_list = [
+    #     i * (n_shooting / ((n_shooting / (n_shooting / turn_number)) * 1))
+    #     for i in range(int((n_shooting / (n_shooting / turn_number)) * 1 + 1))
+    # ]
+    # cardinal_node_list = [int(cardinal_node_list[i]) for i in range(len(cardinal_node_list))]
+    #
+    # for i in range(1, len(cardinal_node_list) - 1):
+    #     constraints.add(
+    #         ConstraintFcn.SUPERIMPOSE_MARKERS,
+    #         first_marker="wheel_center",
+    #         second_marker="global_wheel_center",
+    #         node=cardinal_node_list[i],
+    #         axes=[Axis.X, Axis.Y],
+    #     )
 
     return constraints
 
@@ -493,7 +493,7 @@ def main():
     # dynamics_type = "torque_driven"
     # dynamics_type = "muscle_driven"
     model_path = "../../model_msk/simplified_UL_Seth_2D_cycling.bioMod"
-    final_time = 3
+    final_time = 10
     n_shooting = 100 * final_time
     turn_number = final_time
     pedal_config = {"x_center": 0.35, "y_center": 0.0, "radius": 0.1}
@@ -511,7 +511,7 @@ def main():
             DingModelPulseWidthFrequencyWithFatigue(muscle_name="BIC_long", sum_stim_truncation=10),
             DingModelPulseWidthFrequencyWithFatigue(muscle_name="BIC_brevis", sum_stim_truncation=10),
         ]
-        stim_time = list(np.linspace(0, final_time, 100)[:-1])
+        stim_time = list(np.linspace(0, final_time, 33 * final_time + 1)[:-1])
         model = FesMskModel(
             name=None,
             biorbd_path=model_path,
