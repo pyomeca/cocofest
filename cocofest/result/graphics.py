@@ -18,14 +18,14 @@ class FES_plot:
         self.y_start = Y_START
         self.y_step = Y_STEP
 
-    def plot(self, sim_data=None, default_model=None, title: str = None, show_stim: bool = False,
+    def plot(self, sim_data=None, default_model=None, param_keys=None, title: str = None, show_stim: bool = False,
              show_bounds: bool = False):
         if isinstance(self.data, Solution):
             if isinstance(self.data.ocp.nlp[0].model, FesMskModel):
                 self.msk_plot(title, show_stim, show_bounds)
             elif any(parameter in self.data.parameters.keys() for parameter in
                      ['a_rest', 'km_rest', 'tau1_rest', 'tau2']):
-                self.id_plot(sim_data, default_model)
+                self.id_plot(sim_data, default_model, param_keys)
             else:
                 self.ocp_plot(title, show_stim, show_bounds)
 
@@ -406,6 +406,20 @@ class FES_plot:
         plt.tight_layout()
         plt.show()
 
+    def count_decimal_places(self, number):
+        """
+        Counts the number of decimal places in a given number represented as a string.
+        """
+        number_str = str(number)
+
+        if 'e' in number_str or 'E' in number_str:  # Handle scientific notation
+            return len(number_str.split('e')[0].split('.')[-1].rstrip('0'))
+
+        if '.' in number_str:
+            return len(number_str.split('.')[1].rstrip('0'))
+
+        return 0
+
     def extract_identified_parameters(self, identified, keys):
         """
         For each parameter in keys, use the identified value if available.
@@ -421,32 +435,12 @@ class FES_plot:
         for i, key in enumerate(identified_params.keys()):
             y = self.y_start - i * self.y_step
             ax.annotate(f"{key} :", xy=(self.x_start, y), xycoords="axes fraction", color="black")
-            ax.annotate(f"{getattr(default_model, key)}", xy=(self.x_start + 0.08, y), xycoords="axes fraction",
-                        color="blue")
-            if key == 'a_rest':
-                ax.annotate(
-                    f"{round(identified_params[key], 0)}", xy=(self.x_start + 0.15, y), xycoords="axes fraction",
-                    color="red"
-                )
-            if key == 'km_rest':
-                ax.annotate(
-                    f"{round(identified_params[key], 3)}", xy=(self.x_start + 0.15, y), xycoords="axes fraction",
-                    color="red"
-                )
-            if key == 'tau1_rest':
-                ax.annotate(
-                    f"{round(identified_params[key], 6)}", xy=(self.x_start + 0.15, y), xycoords="axes fraction",
-                    color="red"
-                )
-            if key == 'tau2':
-                ax.annotate(
-                    f"{round(identified_params[key], 2)}", xy=(self.x_start + 0.15, y), xycoords="axes fraction",
-                    color="red"
-                )
+            ax.annotate(f"{round(getattr(default_model, key), min(self.count_decimal_places(getattr(default_model, key)), 6))}", xy=(self.x_start + 0.08, y), xycoords="axes fraction", color="blue")
+            ax.annotate(f"{round(identified_params[key], min(self.count_decimal_places(getattr(default_model, key)), 6))}", xy=(self.x_start + 0.15, y),
+                        xycoords="axes fraction", color="red")
 
-    def id_plot(self, sim_data, default_model, title: str = None, show_stim: bool = True, show_bounds: bool = True):
+    def id_plot(self, sim_data, default_model, param_keys, title: str = None, show_stim: bool = True, show_bounds: bool = True):
         solution = self.data
-        param_keys = ["a_rest", "km_rest", "tau1_rest", "tau2"]
         identified_params = self.extract_identified_parameters(solution, param_keys)
 
         print("Identified parameters:")
