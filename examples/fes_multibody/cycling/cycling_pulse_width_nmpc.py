@@ -45,20 +45,20 @@ class MyCyclicNMPC(FesNmpcMsk):
         super().__init__(**kwargs)
 
     def advance_window_bounds_states(self, sol, n_cycles_simultaneous=None, **extra):
-        # min_pedal_bound = self.nlp[0].x_bounds["q"].min[-1, 0]
-        # max_pedal_bound = self.nlp[0].x_bounds["q"].max[-1, 0]
         super(MyCyclicNMPC, self).advance_window_bounds_states(sol)
-        # self.nlp[0].x_bounds["q"].min[-1, 0] = min_pedal_bound
-        # self.nlp[0].x_bounds["q"].max[-1, 0] = max_pedal_bound
 
         # Adjust bounds
         plus_one_cycle = -2 * np.pi
-        # self.bound_value += plus_one_cycle
-        # self.common_objective_functions[0][1].target[0][0] = self.objective_value
-        self.nlp[0].x_bounds["q"].min[-1, 1] = self.nlp[0].x_bounds["q"].min[-1, 1] + plus_one_cycle
-        self.nlp[0].x_bounds["q"].min[-1, 2] = self.nlp[0].x_bounds["q"].min[-1, 2] + plus_one_cycle
-        self.nlp[0].x_bounds["q"].max[-1, 1] = self.nlp[0].x_bounds["q"].max[-1, 1] + plus_one_cycle
-        self.nlp[0].x_bounds["q"].max[-1, 2] = self.nlp[0].x_bounds["q"].max[-1, 2] + plus_one_cycle
+        self.nlp[0].x_bounds["q"].min[-1, 1] = (
+            self.nlp[0].x_bounds["q"].min[-1, 0] + n_cycles_simultaneous * plus_one_cycle - 0.1
+        )
+        self.nlp[0].x_bounds["q"].min[-1, 2] = (
+            self.nlp[0].x_bounds["q"].min[-1, 0] + n_cycles_simultaneous * plus_one_cycle - 0.1
+        )
+        self.nlp[0].x_bounds["q"].max[-1, 1] = self.nlp[0].x_bounds["q"].max[-1, 0]
+        self.nlp[0].x_bounds["q"].max[-1, 2] = (
+            self.nlp[0].x_bounds["q"].max[-1, 0] + n_cycles_simultaneous * plus_one_cycle + 0.1
+        )
 
         # constraints = ConstraintList()
         # constraints.add(
@@ -87,10 +87,12 @@ class MyCyclicNMPC(FesNmpcMsk):
     def advance_window_initial_guess_states(self, sol, n_cycles_simultaneous=None):
         # Reimplementation of the advance_window method so the rotation of the wheel restart at -pi
         super(MyCyclicNMPC, self).advance_window_initial_guess_states(sol)
-        start = self.nlp[0].x_bounds["q"].min[-1, 0]
-        end = self.nlp[0].x_bounds["q"].max[-1, 2] - 1
-        q_wheel_init = np.linspace(start, end, self.n_shooting + 1)
-        self.nlp[0].x_init["q"].init[2] = q_wheel_init
+
+        # start = self.nlp[0].x_bounds["q"].min[-1, 0]
+        # end = self.nlp[0].x_bounds["q"].max[-1, 2] - 1
+        # q_wheel_init = np.linspace(start, end, self.n_shooting + 1)
+        # self.nlp[0].x_init["q"].init[2] = q_wheel_init
+
         # q = sol.decision_states(to_merge=SolutionMerge.NODES)["q"]
         # self.nlp[0].x_init["q"].init[:, :] = q[:, :]  # Keep the previously found value for the wheel
         return True
@@ -265,7 +267,7 @@ def set_x_init(n_shooting, pedal_config, turn_number):
     x_init.add("q", q_guess, interpolation=InterpolationType.EACH_FRAME)
     x_init.add("qdot", [0, 0, -6], interpolation=InterpolationType.CONSTANT)
     # x_init.add("qdot", qdot_guess, interpolation=InterpolationType.EACH_FRAME)
-
+    # x_init.add("qddot", [0, 0, 0], interpolation=InterpolationType.CONSTANT)
     return x_init
 
 
@@ -294,10 +296,10 @@ def set_bounds(model, x_init, n_shooting, turn_number):
     q_x_bounds.max[1] = [2.5] * 3
     q_x_bounds.min[2][0] = x_init["q"].init[2][0]
     q_x_bounds.max[2][0] = x_init["q"].init[2][0]
-    q_x_bounds.min[2][-1] = x_init["q"].init[2][-1] - 1
-    q_x_bounds.max[2][-1] = x_init["q"].init[2][-1] + 1
+    q_x_bounds.min[2][-1] = x_init["q"].init[2][-1] - 0.1
+    q_x_bounds.max[2][-1] = x_init["q"].init[2][-1] + 0.1
     q_x_bounds.max[2][1] = x_init["q"].init[2][0]
-    q_x_bounds.min[2][1] = x_init["q"].init[2][-1]
+    q_x_bounds.min[2][1] = x_init["q"].init[2][-1] - 0.1
     x_bounds.add(key="q", bounds=q_x_bounds, phase=0)
 
     # # Retrieve default bounds from the model for positions and velocities
@@ -346,49 +348,60 @@ def set_bounds(model, x_init, n_shooting, turn_number):
     qdot_x_bounds.max[2] = [-2, -2, -2]
     qdot_x_bounds.min[2] = [-15, -15, -15]
     x_bounds.add(key="qdot", bounds=qdot_x_bounds, phase=0)
+
+    # qddot_x_bounds = model.bounds_from_ranges("qddot")
+    # x_bounds.add(key="qddot", bounds=qddot_x_bounds, phase=0)
+
     return x_bounds, x_init
 
 
 def set_constraints(bio_model, n_shooting, turn_number):
     constraints = ConstraintList()
     # constraints.add(
-    #     ConstraintFcn.TRACK_MARKERS_VELOCITY,
+    #     ConstraintFcn.TRACK_MARKERS_ACCELERATION,
     #     node=Node.START,
     #     marker_index=bio_model.marker_index("wheel_center"),
     #     axes=[Axis.X, Axis.Y],
     # )
-    #
-    # constraints.add(
-    #     ConstraintFcn.SUPERIMPOSE_MARKERS,
-    #     first_marker="wheel_center",
-    #     second_marker="global_wheel_center",
-    #     node=Node.START,
-    #     axes=[Axis.X, Axis.Y],
-    # )
+
+    constraints.add(
+        ConstraintFcn.TRACK_MARKERS_VELOCITY,
+        node=Node.START,
+        marker_index=bio_model.marker_index("wheel_center"),
+        axes=[Axis.X, Axis.Y],
+    )
 
     constraints.add(
         ConstraintFcn.SUPERIMPOSE_MARKERS,
         first_marker="wheel_center",
         second_marker="global_wheel_center",
-        node=Node.ALL,
+        node=Node.START,
         axes=[Axis.X, Axis.Y],
     )
 
-    # # Adjust bounds at cardinal nodes for a specific coordinate (e.g., index 2)
-    # cardinal_node_list = [
-    #     i * (n_shooting / ((n_shooting / (n_shooting / turn_number)) * 1))
-    #     for i in range(int((n_shooting / (n_shooting / turn_number)) * 1 + 1))
-    # ]
-    # cardinal_node_list = [int(cardinal_node_list[i]) for i in range(len(cardinal_node_list))]
-    #
-    # for i in range(1, len(cardinal_node_list) - 1):
-    #     constraints.add(
-    #         ConstraintFcn.SUPERIMPOSE_MARKERS,
-    #         first_marker="wheel_center",
-    #         second_marker="global_wheel_center",
-    #         node=cardinal_node_list[i],
-    #         axes=[Axis.X, Axis.Y],
-    #     )
+    # constraints.add(
+    #     ConstraintFcn.SUPERIMPOSE_MARKERS,
+    #     first_marker="wheel_center",
+    #     second_marker="global_wheel_center",
+    #     node=Node.ALL,
+    #     axes=[Axis.X, Axis.Y],
+    # )
+
+    # Adjust bounds at cardinal nodes for a specific coordinate (e.g., index 2)
+    cardinal_node_list = [
+        i * (n_shooting / ((n_shooting / (n_shooting / turn_number)) * 1))
+        for i in range(int((n_shooting / (n_shooting / turn_number)) * 1 + 1))
+    ]
+    cardinal_node_list = [int(cardinal_node_list[i]) for i in range(len(cardinal_node_list))]
+
+    for i in range(1, len(cardinal_node_list) - 1):
+        constraints.add(
+            ConstraintFcn.SUPERIMPOSE_MARKERS,
+            first_marker="wheel_center",
+            second_marker="global_wheel_center",
+            node=cardinal_node_list[i],
+            axes=[Axis.X, Axis.Y],
+        )
 
     return constraints
 
@@ -431,7 +444,7 @@ def main():
     # NMPC parameters
     cycle_duration = 1
     n_cycles_to_advance = 1
-    n_cycles = 100000
+    n_cycles = 3
 
     # Bike parameters
     pedal_config = {"x_center": 0.35, "y_center": 0.0, "radius": 0.1}
@@ -515,9 +528,7 @@ def main():
         # Solve the optimal control problem
         sol = nmpc.solve_fes_nmpc(
             update_functions,
-            solver=Solver.IPOPT(
-                _linear_solver="ma57", show_online_optim=False, _max_iter=0, show_options=dict(show_bounds=True)
-            ),
+            solver=Solver.IPOPT(show_online_optim=False, _max_iter=0, show_options=dict(show_bounds=True)),
             total_cycles=n_cycles,
             external_force=resistive_torque,
             cycle_solutions=MultiCyclicCycleSolutions.ALL_CYCLES,
@@ -526,10 +537,8 @@ def main():
             max_consecutive_failing=3,
         )
 
-        # sol[1][0].graphs(show_bounds=True)
-        # sol[1][1].graphs(show_bounds=True)
-        # sol[0].animate(viewer="pyorerun")
-        # sol[0].graphs(show_bounds=True)
+        sol[0].animate(viewer="pyorerun")
+        sol[0].graphs(show_bounds=True)
 
         # Saving the data in a pickle file
         time = sol[0].stepwise_time(to_merge=[SolutionMerge.NODES]).T[0]
