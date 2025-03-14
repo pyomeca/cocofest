@@ -135,13 +135,11 @@ def main(plot=True):
     sol = ocp.solve()
 
     if plot:
-        param_keys = ["a_rest", "km_rest", "tau1_rest", "tau2"]
         default_model = DingModelFrequency()
         FES_plot(data=sol).plot(
             title="Identification of Ding 2003 parameters",
             sim_data=sim_data,
             default_model=default_model,
-            param_keys=param_keys,
             show_bounds=False,
             show_stim=False,
         )

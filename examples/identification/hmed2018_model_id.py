@@ -132,14 +132,12 @@ def main(plot=True):
     sol = ocp.solve()
 
     if plot:
-        param_keys = ["a_rest", "km_rest", "tau1_rest", "tau2", "ar", "bs", "Is", "cr"]
         default_model = DingModelPulseIntensityFrequency()
 
         FES_plot(data=sol).plot(
             title="Identification of HMed 2018 parameters",
             sim_data=sim_data,
             default_model=default_model,
-            param_keys=param_keys,
             show_bounds=False,
             show_stim=False,
         )
