@@ -24,7 +24,8 @@ from cocofest import (
     DingModelFrequency,
     IvpFes,
     OcpFesId,
-    ModelMaker, FES_plot,
+    ModelMaker,
+    FES_plot,
 )
 from cocofest.identification.identification_method import DataExtraction
 
@@ -142,7 +143,7 @@ def main(plot=True):
             default_model=default_model,
             param_keys=param_keys,
             show_bounds=False,
-            show_stim=False
+            show_stim=False,
         )
 
 

@@ -6,7 +6,8 @@ from cocofest import (
     ModelMaker,
     DingModelPulseIntensityFrequency,
     IvpFes,
-    OcpFesId, FES_plot,
+    OcpFesId,
+    FES_plot,
 )
 from cocofest.identification.identification_method import DataExtraction
 
@@ -140,7 +141,7 @@ def main(plot=True):
             default_model=default_model,
             param_keys=param_keys,
             show_bounds=False,
-            show_stim=False
+            show_stim=False,
         )
 
 

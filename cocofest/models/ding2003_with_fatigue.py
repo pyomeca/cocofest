@@ -176,7 +176,7 @@ class DingModelFrequencyWithFatigue(DingModelFrequency):
         -------
         The value of the derivative of each state dx/dt at the current time t
         """
-        cn_dot = self.calculate_cn_dot(cn, t, t_stim_prev) # Equation n°1
+        cn_dot = self.calculate_cn_dot(cn, t, t_stim_prev)  # Equation n°1
         f_dot = self.f_dot_fun(
             cn,
             f,
