@@ -1,14 +1,25 @@
 import numpy as np
 import matplotlib.pyplot as plt
-from bioptim import SolutionMerge, OdeSolver, OptimalControlProgram, ObjectiveFcn, Node, ControlType, ObjectiveList, \
-    BoundsList, InitialGuessList
+from bioptim import (
+    SolutionMerge,
+    OdeSolver,
+    OptimalControlProgram,
+    ObjectiveFcn,
+    Node,
+    ControlType,
+    ObjectiveList,
+    BoundsList,
+    InitialGuessList,
+)
 import pytest
 from cocofest import (
     DingModelPulseWidthFrequency,
     IvpFes,
     ModelMaker,
     OcpFesId,
-    FES_plot, DingModelFrequency, DingModelPulseIntensityFrequency,
+    FES_plot,
+    DingModelFrequency,
+    DingModelPulseIntensityFrequency,
 )
 from cocofest.identification.identification_method import DataExtraction
 
@@ -22,7 +33,7 @@ def assert_plot(solution, model=None, data=None):
 
         FES_plot(data=solution).id_plot(default_model=model, tracked_data=data)
 
-        has_data = (len(ax.lines) > 0 or len(ax.collections) > 0 or len(ax.patches) > 0 or len(ax.images) > 0)
+        has_data = len(ax.lines) > 0 or len(ax.collections) > 0 or len(ax.patches) > 0 or len(ax.images) > 0
 
         plt.close(fig)
 
@@ -47,9 +58,9 @@ ding2003_with_fatigue_model = ModelMaker.create_model(
 
 def simulate_data_ding2003(model, final_time: int, n_integration_steps):
     """
-        Simulate the data using the pulse intensity method.
-        Returns a dictionary with time, force, stim_time.
-        """
+    Simulate the data using the pulse intensity method.
+    Returns a dictionary with time, force, stim_time.
+    """
     stim_time = model.stim_time
 
     fes_parameters = {"model": model}
@@ -127,7 +138,7 @@ def prepare_ocp_ding2003(
 
 
 @pytest.mark.parametrize("model", [ding2003_model, ding2003_with_fatigue_model])
-@pytest.mark.parametrize('plot', [True, False])
+@pytest.mark.parametrize("plot", [True, False])
 def test_ding2003_id(model, plot):
     # Parameters for simulation and identification
     n_stim = 33
@@ -167,8 +178,48 @@ def test_ding2003_id(model, plot):
     if model._with_fatigue:
         pass
     else:
-        tested_values_force = [0.0, 107.87317924748636, 178.7303591800682, 218.77104258782373, 241.05914664185326, 253.4393116503343, 260.3142001309098, 264.13181451221783, 266.2517237996478, 267.42890249475937, 268.08258596111745, 268.44557424419503, 268.6471404462057, 268.75906949649874, 268.8212233306958, 268.8557371507923, 268.8749025617931, 257.24663940949284, 159.2458935385931, 57.94842473471988, 18.142634108710155, 5.5493362036915785, 1.6907791804003263, 0.5147840777942536, 0.15671358723425183, 0.047706532911022004, 0.014522694341757077, 0.004420956155577021, 0.001345814368518724, 0.0004096888113336389, 0.0001247162501628999, 3.796575013442903e-05, 1.155742079494496e-05, 3.5182756815234537e-06]
-        tested_values_param = {'a_rest': [3009.00005647], 'km_rest': [0.10300001], 'tau1_rest': [0.050957], 'tau2': [0.06]}
+        tested_values_force = [
+            0.0,
+            107.87317924748636,
+            178.7303591800682,
+            218.77104258782373,
+            241.05914664185326,
+            253.4393116503343,
+            260.3142001309098,
+            264.13181451221783,
+            266.2517237996478,
+            267.42890249475937,
+            268.08258596111745,
+            268.44557424419503,
+            268.6471404462057,
+            268.75906949649874,
+            268.8212233306958,
+            268.8557371507923,
+            268.8749025617931,
+            257.24663940949284,
+            159.2458935385931,
+            57.94842473471988,
+            18.142634108710155,
+            5.5493362036915785,
+            1.6907791804003263,
+            0.5147840777942536,
+            0.15671358723425183,
+            0.047706532911022004,
+            0.014522694341757077,
+            0.004420956155577021,
+            0.001345814368518724,
+            0.0004096888113336389,
+            0.0001247162501628999,
+            3.796575013442903e-05,
+            1.155742079494496e-05,
+            3.5182756815234537e-06,
+        ]
+        tested_values_param = {
+            "a_rest": [3009.00005647],
+            "km_rest": [0.10300001],
+            "tau1_rest": [0.050957],
+            "tau2": [0.06],
+        }
 
     check_values(result=result_force, tested_values=tested_values_force)
     for key in tested_values_param.keys():
@@ -269,7 +320,7 @@ def prepare_ocp_ding2007(
 
 
 @pytest.mark.parametrize("model", [ding2007_model, ding2007_with_fatigue_model])
-@pytest.mark.parametrize('plot', [True, False])
+@pytest.mark.parametrize("plot", [True, False])
 def test_ding2007_id(model, plot):
     # Parameters for simulation and identification
     n_stim = 33
@@ -316,8 +367,50 @@ def test_ding2007_id(model, plot):
     if model._with_fatigue:
         pass
     else:
-        tested_values_force = [0.0, 90.25994758759484, 140.9028421065209, 163.40179387925275, 132.36402502358163, 142.71532162865827, 168.18346654092912, 129.89896905380124, 154.62535727666264, 146.33750754522316, 128.35683032619974, 164.20865767072732, 154.88240594142906, 142.49415905470514, 163.43282741422757, 164.46647214487567, 151.36703018215917, 117.68447116780446, 46.598428770371946, 17.167134312209058, 6.315060889833131, 2.3229881601844444, 0.8545083328222599, 0.3143298360241792, 0.1156258423866465, 0.04253282347203855, 0.015645646640603417, 0.005755231814402106, 0.0021170549225844396, 0.0007787560414201352, 0.00028646444906965836, 0.00010537559417341437, 3.8762282312734746e-05, 1.425865772694475e-05]
-        tested_values_param = {'km_rest': [0.13700005], 'tau1_rest': [0.060601], 'tau2': [0.001], 'pd0': [0.0001314], 'pdt': [0.00019414], 'a_scale': [4920.00051479]}
+        tested_values_force = [
+            0.0,
+            90.25994758759484,
+            140.9028421065209,
+            163.40179387925275,
+            132.36402502358163,
+            142.71532162865827,
+            168.18346654092912,
+            129.89896905380124,
+            154.62535727666264,
+            146.33750754522316,
+            128.35683032619974,
+            164.20865767072732,
+            154.88240594142906,
+            142.49415905470514,
+            163.43282741422757,
+            164.46647214487567,
+            151.36703018215917,
+            117.68447116780446,
+            46.598428770371946,
+            17.167134312209058,
+            6.315060889833131,
+            2.3229881601844444,
+            0.8545083328222599,
+            0.3143298360241792,
+            0.1156258423866465,
+            0.04253282347203855,
+            0.015645646640603417,
+            0.005755231814402106,
+            0.0021170549225844396,
+            0.0007787560414201352,
+            0.00028646444906965836,
+            0.00010537559417341437,
+            3.8762282312734746e-05,
+            1.425865772694475e-05,
+        ]
+        tested_values_param = {
+            "km_rest": [0.13700005],
+            "tau1_rest": [0.060601],
+            "tau2": [0.001],
+            "pd0": [0.0001314],
+            "pdt": [0.00019414],
+            "a_scale": [4920.00051479],
+        }
 
     check_values(result=result_force, tested_values=tested_values_force)
     for key in tested_values_param.keys():
@@ -353,6 +446,7 @@ def simulate_data_hmed2018(model, final_time: int, pulse_intensity_values: list,
         "pulse_intensity": pulse_intensity_values,
     }
     return data
+
 
 def prepare_ocp_hmed2018(
     model,
@@ -418,7 +512,7 @@ def prepare_ocp_hmed2018(
 
 
 @pytest.mark.parametrize("model", [hmed2018_model, hmed2018_with_fatigue_model])
-@pytest.mark.parametrize('plot', [True, False])
+@pytest.mark.parametrize("plot", [True, False])
 def test_hmed2018_id(model, plot):
     # Parameters for simulation and identification
     n_stim = 33
@@ -466,10 +560,53 @@ def test_hmed2018_id(model, plot):
     if model._with_fatigue:
         pass
     else:
-        tested_values_force = [0.0, 104.04035782777072, 170.50460362940066, 209.32823006643278, 224.87815826270773, 230.85336734772173, 244.90580998514395, 239.72260536328864, 247.446605123523, 241.8202060647484, 235.38838075758986, 238.79684986564615, 234.80303660023972, 244.78038612594935, 253.62816351295785, 252.5331694714469, 256.09052428207275, 248.03028764437445, 152.33433411401035, 55.15270603406743, 17.256399862334085, 5.277869614643382, 1.6080496723596438, 0.4895944387805321, 0.14904501724892028, 0.04537203054510817, 0.013812017755770527, 0.004204609942214798, 0.0012799536416889337, 0.000389639302963552, 0.00011861272226183607, 3.610769695395068e-05, 1.0991787004840968e-05, 3.3460838477592833e-06]
-        tested_values_param = {'a_rest': [3009.00944301], 'km_rest': [0.10313384], 'tau1_rest': [0.05095696], 'tau2': [0.05999946], 'ar': [0.58673292], 'bs': [0.02600106], 'Is': [63.10015773], 'cr': [0.83302601]}
+        tested_values_force = [
+            0.0,
+            104.04035782777072,
+            170.50460362940066,
+            209.32823006643278,
+            224.87815826270773,
+            230.85336734772173,
+            244.90580998514395,
+            239.72260536328864,
+            247.446605123523,
+            241.8202060647484,
+            235.38838075758986,
+            238.79684986564615,
+            234.80303660023972,
+            244.78038612594935,
+            253.62816351295785,
+            252.5331694714469,
+            256.09052428207275,
+            248.03028764437445,
+            152.33433411401035,
+            55.15270603406743,
+            17.256399862334085,
+            5.277869614643382,
+            1.6080496723596438,
+            0.4895944387805321,
+            0.14904501724892028,
+            0.04537203054510817,
+            0.013812017755770527,
+            0.004204609942214798,
+            0.0012799536416889337,
+            0.000389639302963552,
+            0.00011861272226183607,
+            3.610769695395068e-05,
+            1.0991787004840968e-05,
+            3.3460838477592833e-06,
+        ]
+        tested_values_param = {
+            "a_rest": [3009.00944301],
+            "km_rest": [0.10313384],
+            "tau1_rest": [0.05095696],
+            "tau2": [0.05999946],
+            "ar": [0.58673292],
+            "bs": [0.02600106],
+            "Is": [63.10015773],
+            "cr": [0.83302601],
+        }
 
     check_values(result=result_force, tested_values=tested_values_force)
     for key in tested_values_param.keys():
         np.testing.assert_almost_equal(result_param[key], tested_values_param[key])
-

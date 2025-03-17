@@ -26,15 +26,27 @@ class FES_plot:
             "Is",
             "cr",
         ]
-        self.default_values = {"a_rest": 3009, "km_rest": 0.103, "tau1_rest": 0.050957, "tau2": 0.060, "pd0": 0.000131405, "pdt": 0.000194138, "a_scale": 4920, "ar": 0.586, "bs": 0.026, "Is": 63.1, "cr": 0.833}
+        self.default_values = {
+            "a_rest": 3009,
+            "km_rest": 0.103,
+            "tau1_rest": 0.050957,
+            "tau2": 0.060,
+            "pd0": 0.000131405,
+            "pdt": 0.000194138,
+            "a_scale": 4920,
+            "ar": 0.586,
+            "bs": 0.026,
+            "Is": 63.1,
+            "cr": 0.833,
+        }
 
     def plot(
-            self,
-            title: str = None,
-            show_stim: bool = False,
-            show_bounds: bool = False,
-            tracked_data=None,
-            default_model=None,
+        self,
+        title: str = None,
+        show_stim: bool = False,
+        show_bounds: bool = False,
+        tracked_data=None,
+        default_model=None,
     ):
         if isinstance(self.data, Solution):
             if isinstance(self.data.ocp.nlp[0].model, FesMskModel):
@@ -145,7 +157,7 @@ class FES_plot:
         axis.set_xlabel("Time [s]")
 
     def build_several_y_axis_FES(
-            self, axis, time, values, labels: list = None, stim_time=None, stim_values=None, axes_title=None
+        self, axis, time, values, labels: list = None, stim_time=None, stim_values=None, axes_title=None
     ):
         n = len(labels)
         cmap = plt.get_cmap("tab20b", n)
@@ -471,8 +483,7 @@ class FES_plot:
                 )
 
     def id_plot(
-            self, title: str = None, show_stim: bool = True, show_bounds: bool = True, tracked_data=None,
-            default_model=None
+        self, title: str = None, show_stim: bool = True, show_bounds: bool = True, tracked_data=None, default_model=None
     ):
         solution = self.data
         identified_params = self.extract_identified_parameters(solution)
