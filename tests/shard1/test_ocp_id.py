@@ -162,16 +162,6 @@ def test_ding2003_id(model, plot):
     )
     sol = ocp.solve()
 
-    if plot:
-        default_model = DingModelFrequency()
-        FES_plot(data=sol).plot(
-            title="Identification of Ding 2003 parameters",
-            tracked_data=sim_data,
-            default_model=default_model,
-            show_bounds=False,
-            show_stim=False,
-        )
-
     result_force = [sol.stepwise_states(to_merge=SolutionMerge.NODES)["F"][0].tolist()[i] for i in tested_index]
     result_param = sol.parameters
 
@@ -350,17 +340,6 @@ def test_ding2007_id(model, plot):
         ],
     )
     sol = ocp.solve()
-
-    if plot:
-        default_model = DingModelPulseWidthFrequency()
-
-        FES_plot(data=sol).plot(
-            title="Identification of Ding 2007 parameters",
-            tracked_data=sim_data,
-            default_model=default_model,
-            show_bounds=False,
-            show_stim=False,
-        )
 
     result_force = [sol.stepwise_states(to_merge=SolutionMerge.NODES)["F"][0].tolist()[i] for i in tested_index]
     result_param = sol.parameters
@@ -545,16 +524,6 @@ def test_hmed2018_id(model, plot):
     )
     sol = ocp.solve()
 
-    if plot:
-        default_model = DingModelPulseIntensityFrequency()
-
-        FES_plot(data=sol).plot(
-            title="Identification of HMed 2018 parameters",
-            tracked_data=sim_data,
-            default_model=default_model,
-            show_bounds=False,
-            show_stim=False,
-        )
     result_force = [sol.stepwise_states(to_merge=SolutionMerge.NODES)["F"][0].tolist()[i] for i in tested_index]
     result_param = sol.parameters
     if model._with_fatigue:
