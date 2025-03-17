@@ -140,7 +140,7 @@ def main(plot=True):
 
         FES_plot(data=sol).plot(
             title="Identification of Ding 2007 parameters",
-            sim_data=sim_data,
+            tracked_data=sim_data,
             default_model=default_model,
             show_bounds=False,
             show_stim=False,

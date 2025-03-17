@@ -26,20 +26,21 @@ class FES_plot:
             "Is",
             "cr",
         ]
+        self.default_values = {"a_rest": 3009, "km_rest": 0.103, "tau1_rest": 0.050957, "tau2": 0.060, "pd0": 0.000131405, "pdt": 0.000194138, "a_scale": 4920, "ar": 0.586, "bs": 0.026, "Is": 63.1, "cr": 0.833}
 
     def plot(
-        self,
-        title: str = None,
-        show_stim: bool = False,
-        show_bounds: bool = False,
-        sim_data=None,
-        default_model=None,
+            self,
+            title: str = None,
+            show_stim: bool = False,
+            show_bounds: bool = False,
+            tracked_data=None,
+            default_model=None,
     ):
         if isinstance(self.data, Solution):
             if isinstance(self.data.ocp.nlp[0].model, FesMskModel):
                 self.msk_plot(title, show_stim, show_bounds)
             elif any(parameter in self.data.parameters.keys() for parameter in self.identifiable_parameters):
-                self.id_plot(sim_data, default_model)
+                self.id_plot(title=title, tracked_data=tracked_data, default_model=default_model)
             else:
                 self.ocp_plot(title, show_stim, show_bounds)
 
@@ -144,7 +145,7 @@ class FES_plot:
         axis.set_xlabel("Time [s]")
 
     def build_several_y_axis_FES(
-        self, axis, time, values, labels: list = None, stim_time=None, stim_values=None, axes_title=None
+            self, axis, time, values, labels: list = None, stim_time=None, stim_values=None, axes_title=None
     ):
         n = len(labels)
         cmap = plt.get_cmap("tab20b", n)
@@ -451,14 +452,15 @@ class FES_plot:
             y = 0.99 - i * self.y_step
             ax.annotate(f"{key} :", xy=(0.7, y), xycoords="axes fraction", color="black", ha="right", va="top")
             ax.annotate(
-                f"{round(identified_params[key], min(self.count_decimal_places(getattr(default_model, key)), 6))}",
+                f"{round(identified_params[key], min(self.count_decimal_places(self.default_values[key]), 6))}",
                 xy=(0.99, y),
                 xycoords="axes fraction",
                 color="red",
                 ha="right",
                 va="top",
             )
-            if default_model is not None:
+
+            if default_model:
                 ax.annotate(
                     f"{round(getattr(default_model, key), min(self.count_decimal_places(getattr(default_model, key)), 6))}",
                     xy=(0.85, y),
@@ -469,7 +471,8 @@ class FES_plot:
                 )
 
     def id_plot(
-        self, sim_data=None, default_model=None, title: str = None, show_stim: bool = True, show_bounds: bool = True
+            self, title: str = None, show_stim: bool = True, show_bounds: bool = True, tracked_data=None,
+            default_model=None
     ):
         solution = self.data
         identified_params = self.extract_identified_parameters(solution)
@@ -483,22 +486,17 @@ class FES_plot:
 
         # Plot the simulation and identification results
         fig, ax = plt.subplots()
-        ax.set_title("Force state result")
+        ax.set_title(title)
         ax.set_xlabel("time (s)")
         ax.set_ylabel("force (N)")
 
         ax.plot(sol_time, sol_force, color="red", label="identified")
 
-        if sim_data is None:
-            self.annotate_parameters(ax, identified_params, default_model)
+        if tracked_data:
+            tracked_data_time = tracked_data["time"]
+            tracked_data_force = tracked_data["force"]
 
-            ax.legend()
-            plt.show()
-
-        sim_data_time = sim_data["time"]
-        sim_data_force = sim_data["force"]
-
-        ax.plot(sim_data_time, sim_data_force, color="blue", label="simulated")
+            ax.plot(tracked_data_time, tracked_data_force, color="blue", label="simulated")
 
         self.annotate_parameters(ax, identified_params, default_model)
 
