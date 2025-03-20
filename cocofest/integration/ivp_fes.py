@@ -110,7 +110,18 @@ class IvpFes:
         self.fake_ocp = self._prepare_fake_ocp()
         self.initial_guess_solution = self._build_solution_from_initial_guess()
 
-    def _fill_fes_dict(self, fes_parameters):
+    def _fill_fes_dict(self, fes_parameters: dict):
+        """
+        Parameters
+        ----------
+        fes_parameters : dict
+            Contains FES parameters
+
+        Returns
+        -------
+        A dictionary with all needed FES parameters such as model, stimulation time, pulse width, intensity and mode (if not specified, default parameter is used)
+        """
+
         default_fes_dict = {
             "model": FesModel,
             "stim_time": None,
@@ -128,7 +139,19 @@ class IvpFes:
 
         self.fes_parameters = fes_parameters
 
-    def _fill_ivp_dict(self, ivp_parameters):
+    def _fill_ivp_dict(self, ivp_parameters: dict):
+        """
+
+        Parameters
+        ----------
+        ivp_parameters: dict
+            Contains IVP parameters
+
+        Returns
+        -------
+        A dictionary with all needed IVP parameters such as final time, the solver used and the number of threads (if not specified, default parameter is used)
+
+        """
         default_ivp_dict = {
             "final_time": None,
             "ode_solver": OdeSolver.RK4(n_integration_steps=10),

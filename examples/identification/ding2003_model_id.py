@@ -25,6 +25,7 @@ from cocofest import (
     IvpFes,
     OcpFesId,
     ModelMaker,
+    FES_plot,
 )
 from cocofest.identification.identification_method import DataExtraction
 
@@ -53,33 +54,11 @@ def simulate_data(model, final_time: int, n_integration_steps):
     return data
 
 
-def extract_identified_parameters(identified, keys):
-    """
-    For each parameter in keys, use the identified value if available.
-    Returns a dictionary mapping parameter names to their values.
-    """
-    return {key: identified.parameters[key][0] for key in keys}
-
-
-def annotate_parameters(ax, identified_params, default_model, start_x=0.7, y_start=0.4, y_step=0.05):
-    """
-    Annotate the plot with parameter names, the identified values, and default values.
-    The names are annotated in black, identified values in red, and default values in blue.
-    """
-    for i, key in enumerate(identified_params.keys()):
-        y = y_start - i * y_step
-        ax.annotate(f"{key} :", xy=(start_x, y), xycoords="axes fraction", color="black")
-        ax.annotate(
-            f"{round(identified_params[key], 5)}", xy=(start_x + 0.08, y), xycoords="axes fraction", color="red"
-        )
-        ax.annotate(f"{getattr(default_model, key)}", xy=(start_x + 0.15, y), xycoords="axes fraction", color="blue")
-
-
 def prepare_ocp(
     model,
     final_time,
-    simulated_data,
-    key_parameter_to_identify,
+    simulated_data,  # Dictionary from simulate_data
+    key_parameter_to_identify,  # List of parameters to identify
 ):
     n_shooting = model.get_n_shooting(final_time)
     force_at_node = DataExtraction.force_at_node_in_ocp(
@@ -156,31 +135,14 @@ def main(plot=True):
     sol = ocp.solve()
 
     if plot:
-        param_keys = ["a_rest", "km_rest", "tau1_rest", "tau2"]
-        identified_params = extract_identified_parameters(sol, param_keys)
-
-        print("Identified parameters:")
-        for key, value in identified_params.items():
-            print(f"  {key}: {value}")
-
-        sim_data_time = sim_data["time"]
-        sim_data_force = sim_data["force"]
-        sol_time = sol.stepwise_time(to_merge=SolutionMerge.NODES).T[0]
-        sol_force = sol.stepwise_states(to_merge=SolutionMerge.NODES)["F"][0]
-
-        # Plot the simulation and identification results
-        fig, ax = plt.subplots()
-        ax.set_title("Force state result")
-        ax.plot(sim_data_time, sim_data_force, color="blue", label="simulated")
-        ax.plot(sol_time, sol_force, color="green", label="identified")
-        ax.set_xlabel("time (s)")
-        ax.set_ylabel("force (N)")
-
         default_model = DingModelFrequency()
-        annotate_parameters(ax, identified_params, default_model)
-
-        ax.legend()
-        plt.show()
+        FES_plot(data=sol).plot(
+            title="Identification of Ding 2003 parameters",
+            tracked_data=sim_data,
+            default_model=default_model,
+            show_bounds=False,
+            show_stim=False,
+        )
 
 
 if __name__ == "__main__":
