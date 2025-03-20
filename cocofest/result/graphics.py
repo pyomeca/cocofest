@@ -26,18 +26,18 @@ class FES_plot:
             "Is",
             "cr",
         ]
-        self.default_values = {
-            "a_rest": 3009,
-            "km_rest": 0.103,
-            "tau1_rest": 0.050957,
-            "tau2": 0.060,
-            "pd0": 0.000131405,
-            "pdt": 0.000194138,
-            "a_scale": 4920,
-            "ar": 0.586,
-            "bs": 0.026,
-            "Is": 63.1,
-            "cr": 0.833,
+        self.default_decimal_values = {
+            "a_rest": 0,
+            "km_rest": 3,
+            "tau1_rest": 6,
+            "tau2": 3,
+            "pd0": 9,
+            "pdt": 9,
+            "a_scale": 0,
+            "ar": 3,
+            "bs": 3,
+            "Is": 1,
+            "cr": 3,
         }
 
     def plot(
@@ -433,20 +433,6 @@ class FES_plot:
         plt.tight_layout()
         plt.show()
 
-    def count_decimal_places(self, number):
-        """
-        Counts the number of decimal places in a given number represented as a string.
-        """
-        number_str = str(number)
-
-        if "e" in number_str or "E" in number_str:  # Handle scientific notation
-            return len(number_str.split("e")[0].split(".")[-1].rstrip("0"))
-
-        if "." in number_str:
-            return len(number_str.split(".")[1].rstrip("0"))
-
-        return 0
-
     def extract_identified_parameters(self, identified):
         """
         For each parameter in keys, use the identified value if available.
@@ -464,7 +450,7 @@ class FES_plot:
             y = 0.99 - i * self.y_step
             ax.annotate(f"{key} :", xy=(0.7, y), xycoords="axes fraction", color="black", ha="right", va="top")
             ax.annotate(
-                f"{round(identified_params[key], min(self.count_decimal_places(self.default_values[key]), 6))}",
+                f"{round(identified_params[key], min(self.default_decimal_values[key], 6))}",
                 xy=(0.99, y),
                 xycoords="axes fraction",
                 color="red",
@@ -474,7 +460,7 @@ class FES_plot:
 
             if default_model:
                 ax.annotate(
-                    f"{round(getattr(default_model, key), min(self.count_decimal_places(getattr(default_model, key)), 6))}",
+                    f"{round(getattr(default_model, key), min(self.default_decimal_values[key], 6))}",
                     xy=(0.85, y),
                     xycoords="axes fraction",
                     color="blue",

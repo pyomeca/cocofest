@@ -119,7 +119,7 @@ class IvpFes:
 
         Returns
         -------
-        A dictionary with all needed FES parameters (if not specified, default parameter is used)
+        A dictionary with all needed FES parameters such as model, stimulation time, pulse width, intensity and mode (if not specified, default parameter is used)
         """
 
         default_fes_dict = {
@@ -149,7 +149,7 @@ class IvpFes:
 
         Returns
         -------
-        A dictionary with all needed IVP parameters (if not specified, default parameter is used)
+        A dictionary with all needed IVP parameters such as final time, the solver used and the number of threads (if not specified, default parameter is used)
 
         """
         default_ivp_dict = {

@@ -27,24 +27,6 @@ stim_time = np.linspace(0, 1, 34).tolist()
 tested_index = np.linspace(0, 726, 34, dtype=int)  # Test values at 34 different times out of 727
 
 
-def assert_plot(solution, model=None, data=None):
-    try:
-        fig, ax = plt.subplots()
-
-        FES_plot(data=solution).id_plot(default_model=model, tracked_data=data)
-
-        has_data = len(ax.lines) > 0 or len(ax.collections) > 0 or len(ax.patches) > 0 or len(ax.images) > 0
-
-        plt.close(fig)
-
-        if not has_data:
-            raise RuntimeError("Plot failed")
-
-    except Exception as e:
-
-        raise RuntimeError(f"Plotting error : {e}")
-
-
 def check_values(result, tested_values):
     for i in range(len(tested_values)):
         np.testing.assert_almost_equal(result[i], tested_values[i])
@@ -138,8 +120,7 @@ def prepare_ocp_ding2003(
 
 
 @pytest.mark.parametrize("model", [ding2003_model, ding2003_with_fatigue_model])
-@pytest.mark.parametrize("plot", [True, False])
-def test_ding2003_id(model, plot):
+def test_ding2003_id(model):
     # Parameters for simulation and identification
     n_stim = 33
     final_time = 2
@@ -310,8 +291,7 @@ def prepare_ocp_ding2007(
 
 
 @pytest.mark.parametrize("model", [ding2007_model, ding2007_with_fatigue_model])
-@pytest.mark.parametrize("plot", [True, False])
-def test_ding2007_id(model, plot):
+def test_ding2007_id(model):
     # Parameters for simulation and identification
     n_stim = 33
     final_time = 2
@@ -491,8 +471,7 @@ def prepare_ocp_hmed2018(
 
 
 @pytest.mark.parametrize("model", [hmed2018_model, hmed2018_with_fatigue_model])
-@pytest.mark.parametrize("plot", [True, False])
-def test_hmed2018_id(model, plot):
+def test_hmed2018_id(model):
     # Parameters for simulation and identification
     n_stim = 33
     final_time = 2
