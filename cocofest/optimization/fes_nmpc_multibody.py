@@ -167,13 +167,12 @@ class FesNmpcMsk(FesNmpc):
         )
         model = self.nlp[0].model
 
-        total_external_forces_frame = total_cycles * self.cycle_len
         total_nmpc_duration = self.cycle_duration * total_cycles
-        total_nmpc_shooting_len = self.cycle_len * self.n_cycles
+        total_nmpc_shooting_len = self.cycle_len * total_cycles
 
-        external_force_set = ExternalForceSetTimeSeries(nb_frames=total_external_forces_frame)
+        external_force_set = ExternalForceSetTimeSeries(nb_frames=total_nmpc_shooting_len)
         external_force_array = np.array(external_force["torque"])
-        reshape_values_array = np.tile(external_force_array[:, np.newaxis], (1, total_external_forces_frame))
+        reshape_values_array = np.tile(external_force_array[:, np.newaxis], (1, total_nmpc_shooting_len))
         external_force_set.add_torque(segment=external_force["Segment_application"], values=reshape_values_array)
         numerical_time_series = {"external_forces": external_force_set.to_numerical_time_series()}
 

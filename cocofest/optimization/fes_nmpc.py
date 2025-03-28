@@ -37,6 +37,10 @@ class FesNmpc(MultiCyclicNonlinearModelPredictiveControl):
         super(FesNmpc, self).advance_window_initial_guess_states(sol)
         return True
 
+    def advance_window_bounds_controls(self, sol, n_cycles_simultaneous=None, **extra):
+        super(FesNmpc, self).advance_window_bounds_controls(sol)
+        return True
+
     @staticmethod
     def build_new_model(model, previous_stim):
         new_model = DingModelPulseWidthFrequencyWithFatigue(
