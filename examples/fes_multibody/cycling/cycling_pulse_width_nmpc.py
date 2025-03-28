@@ -4,6 +4,8 @@ a torque resistance at the handle.
 """
 
 import pickle
+
+import matplotlib.pyplot as plt
 import numpy as np
 from bioptim import (
     Axis,
@@ -57,8 +59,21 @@ class MyCyclicNMPC(FesNmpcMsk):
     def advance_window_initial_guess_states(self, sol, n_cycles_simultaneous=None):
         # Reimplementation of the advance_window method so the rotation of the wheel restart at -pi
         states = sol.decision_states(to_merge=SolutionMerge.NODES)
+        fes_state_key = ["A_", "Tau1_", "Km_"]
         for key in states.keys():
-            self.nlp[0].x_init[key].init[:, :] = states[key][:, :]
+            if any(x in key for x in fes_state_key):
+                if self.nlp[0].x_init[key].init.shape[1] == self.cycle_len + 1:
+                    self.nlp[0].x_init[key].init[:, :] = np.array([[states[key][0, -1]] * (self.cycle_len + 1)])
+                else:
+                    self.nlp[0].x_init[key].init[:, : self.cycle_len * (self.n_cycles_simultaneous - 1)] = states[key][
+                        :, self.cycle_len + 1 :
+                    ]
+                    self.nlp[0].x_init[key].init[:, self.cycle_len * (self.n_cycles_simultaneous - 1) :] = np.array(
+                        [[states[key][0, -1]] * (self.cycle_len + 1)]
+                    )
+            else:
+                self.nlp[0].x_init[key].init[:, :] = states[key][:, :]
+
         return True
 
     def advance_window_initial_guess_controls(self, sol, n_cycles_simultaneous=None):

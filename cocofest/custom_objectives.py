@@ -67,13 +67,17 @@ class CustomObjective:
             muscle_name_list = controller.model.bio_model.muscle_names
             if isinstance(controller.model.muscles_dynamics_model[0], DingModelPulseWidthFrequency):
                 stim_charge = vertcat(
-                    *[controller.controls["last_pulse_width_" + muscle_name_list[x]].cx for x in
-                      range(len(muscle_name_list))]
+                    *[
+                        controller.controls["last_pulse_width_" + muscle_name_list[x]].cx
+                        for x in range(len(muscle_name_list))
+                    ]
                 )
             else:
                 stim_charge = vertcat(
-                    *[controller.controls["pulse_intensity_" + muscle_name_list[x]].cx for x in
-                      range(len(muscle_name_list))]
+                    *[
+                        controller.controls["pulse_intensity_" + muscle_name_list[x]].cx
+                        for x in range(len(muscle_name_list))
+                    ]
                 )
         else:
             stim_charge = controller.controls.cx
