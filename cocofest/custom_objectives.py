@@ -81,3 +81,5 @@ class CustomObjective:
                 )
         else:
             stim_charge = controller.controls.cx
+
+        return stim_charge
