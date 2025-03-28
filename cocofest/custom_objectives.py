@@ -4,6 +4,8 @@ This custom objective class regroups all the custom objectives that are used in 
 
 from casadi import MX, vertcat
 from bioptim import PenaltyController
+from .models.ding2007 import DingModelPulseWidthFrequency
+from .models.dynamical_model import FesMskModel
 
 
 class CustomObjective:
@@ -46,3 +48,32 @@ class CustomObjective:
             *[controller.states["F_" + muscle_name_list[x]].cx for x in range(len(muscle_name_list))]
         )
         return muscle_force
+
+    @staticmethod
+    def minimize_overall_stimulation_charge(controller: PenaltyController) -> MX:
+        """
+        Minimize the overall stimulation charge.
+
+        Parameters
+        ----------
+        controller: PenaltyController
+            The penalty node elements
+
+        Returns
+        -------
+        The sum of each stimulation control
+        """
+        if isinstance(controller.model, FesMskModel):
+            muscle_name_list = controller.model.bio_model.muscle_names
+            if isinstance(controller.model.muscles_dynamics_model[0], DingModelPulseWidthFrequency):
+                stim_charge = vertcat(
+                    *[controller.controls["last_pulse_width_" + muscle_name_list[x]].cx for x in
+                      range(len(muscle_name_list))]
+                )
+            else:
+                stim_charge = vertcat(
+                    *[controller.controls["pulse_intensity_" + muscle_name_list[x]].cx for x in
+                      range(len(muscle_name_list))]
+                )
+        else:
+            stim_charge = controller.controls.cx

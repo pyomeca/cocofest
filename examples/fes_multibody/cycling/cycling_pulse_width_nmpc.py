@@ -189,17 +189,13 @@ def set_objective_functions(minimize_force, minimize_fatigue, minimize_control):
             quadratic=True,
         )
     if minimize_control:
-        control_keys = [
-            "last_pulse_width_BIC_brevis",
-            "last_pulse_width_BIC_long",
-            "last_pulse_width_DeltoideusClavicle_A",
-            "last_pulse_width_DeltoideusScapula_P",
-            "last_pulse_width_TRIlong",
-        ]
-        for key in control_keys:
-            objective_functions.add(
-                ObjectiveFcn.Lagrange.MINIMIZE_CONTROL, key=key, weight=1, node=Node.ALL, quadratic=True
-            )
+        objective_functions.add(
+            CustomObjective.minimize_overall_stimulation_charge,
+            custom_type=ObjectiveFcn.Lagrange,
+            node=Node.ALL,
+            weight=1,
+            quadratic=True,
+        )
     return objective_functions
 
 
