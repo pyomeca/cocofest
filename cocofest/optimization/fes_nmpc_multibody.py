@@ -11,6 +11,7 @@ from bioptim import (
     Solver,
     MultiCyclicCycleSolutions,
     ExternalForceSetTimeSeries,
+    OdeSolver,
 )
 from .fes_nmpc import FesNmpc
 from ..models.dynamical_model import FesMskModel
@@ -56,12 +57,17 @@ class FesNmpcMsk(FesNmpc):
     def _initialize_solution(self, dt: float, states: list, controls: list, parameters: list):
         combine_model = False if isinstance(self.nlp[0].model, BiorbdModel) else True
         combined_model = self.create_model_from_list(self.all_models) if combine_model else self.nlp[0].model
+        interpolation_type = (
+            InterpolationType.ALL_POINTS
+            if isinstance(self.nlp[0].ode_solver, OdeSolver.COLLOCATION)
+            else InterpolationType.EACH_FRAME
+        )
         x_init = InitialGuessList()
         for key in self.nlp[0].states.keys():
             x_init.add(
                 key,
                 np.concatenate([state[key][:, :-1] for state in states] + [states[-1][key][:, -1:]], axis=1),
-                interpolation=InterpolationType.EACH_FRAME,
+                interpolation=interpolation_type,
                 phase=0,
             )
 
