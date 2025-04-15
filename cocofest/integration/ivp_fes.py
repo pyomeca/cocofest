@@ -94,6 +94,7 @@ class IvpFes:
             self.n_shooting, self.final_time
         )
 
+        self.ode_solver = self.ivp_parameters["ode_solver"]
         self._declare_dynamics(numerical_data_time_series)
 
         (
@@ -269,7 +270,6 @@ class IvpFes:
             phase_time=self.final_time,
             x_init=self.x_init,
             u_init=self.u_init,
-            ode_solver=self.ode_solver,
             control_type=ControlType.CONSTANT,
             use_sx=False,
             parameters=self.parameters,
@@ -309,6 +309,7 @@ class IvpFes:
             phase=0,
             phase_dynamics=PhaseDynamics.SHARED_DURING_THE_PHASE,
             numerical_data_timeseries=numerical_data_time_series,
+            ode_solver=self.ode_solver,
         )
 
     def build_initial_guess_from_ocp(self, ocp, stim_idx_at_node_list=None):

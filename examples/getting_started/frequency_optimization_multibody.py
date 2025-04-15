@@ -23,7 +23,10 @@ def prepare_ocp(model, final_time: float, resistive_torque, msk_info):
     numerical_time_series.update(numerical_data_time_series)
 
     dynamics = OcpFesMsk.declare_dynamics(
-        model, numerical_time_series=numerical_time_series, with_contact=resistive_torque["with_contact"]
+        model,
+        numerical_time_series=numerical_time_series,
+        contact_type=[],
+        ode_solver=OdeSolver.RK4(n_integration_steps=10),
     )
 
     # --- Set initial guesses and bounds for states and controls --- #
@@ -59,7 +62,6 @@ def prepare_ocp(model, final_time: float, resistive_torque, msk_info):
         u_bounds=u_bounds,
         control_type=ControlType.CONSTANT,
         use_sx=True,
-        ode_solver=OdeSolver.RK4(n_integration_steps=10),
         n_threads=20,
     )
 

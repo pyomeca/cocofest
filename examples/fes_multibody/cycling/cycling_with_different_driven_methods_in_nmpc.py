@@ -90,7 +90,12 @@ def prepare_nmpc(
         ].get_numerical_data_time_series(window_n_shooting, window_cycle_duration)
         numerical_time_series.update(numerical_data_time_series)
 
-    dynamics = set_dynamics(model=model, numerical_time_series=numerical_time_series, dynamics_type_str=dynamics_type)
+    dynamics = set_dynamics(
+        model=model,
+        numerical_time_series=numerical_time_series,
+        dynamics_type_str=dynamics_type,
+        ode_solver=OdeSolver.RK1(n_integration_steps=5),
+    )
 
     # Define objective functions
     objective_functions = set_objective_functions(model, dynamics_type)
@@ -130,7 +135,6 @@ def prepare_nmpc(
         u_bounds=u_bounds,
         x_init=x_init,
         u_init=u_init,
-        ode_solver=OdeSolver.RK1(n_integration_steps=5),
         n_threads=20,
         use_sx=False,
     )
@@ -165,7 +169,9 @@ def updating_model(model, external_force_set, parameters=None):
     return model
 
 
-def set_dynamics(model, numerical_time_series, dynamics_type_str="torque_driven"):
+def set_dynamics(
+    model, numerical_time_series, dynamics_type_str="torque_driven", ode_solver=OdeSolver.RK4(n_integration_steps=10)
+):
     dynamics_type = (
         DynamicsFcn.TORQUE_DRIVEN
         if dynamics_type_str == "torque_driven"
@@ -190,6 +196,7 @@ def set_dynamics(model, numerical_time_series, dynamics_type_str="torque_driven"
         numerical_data_timeseries=numerical_time_series,
         with_contact=True,
         phase=0,
+        ode_solver=ode_solver,
     )
     return dynamics
 

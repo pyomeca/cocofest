@@ -103,7 +103,10 @@ def update_model(
 
 
 def set_dynamics(
-    model: BiorbdModel | FesMskModel, numerical_time_series: dict, dynamics_type_str: str = "torque_driven"
+    model: BiorbdModel | FesMskModel,
+    numerical_time_series: dict,
+    dynamics_type_str: str = "torque_driven",
+    ode_solver: OdeSolver = OdeSolver.RK4(n_integration_steps=10),
 ) -> DynamicsList:
     """
     Set the dynamics of the optimal control program based on the chosen dynamics type.
@@ -145,6 +148,7 @@ def set_dynamics(
         numerical_data_timeseries=numerical_time_series,
         with_contact=True,
         phase=0,
+        ode_solver=ode_solver,
     )
     return dynamics
 
@@ -439,7 +443,9 @@ def prepare_ocp(
         numerical_time_series.update(numerical_data_time_series)
 
     # Set dynamics based on the chosen dynamics type
-    dynamics = set_dynamics(model, numerical_time_series, dynamics_type_str=dynamics_type)
+    dynamics = set_dynamics(
+        model, numerical_time_series, dynamics_type_str=dynamics_type, ode_solver=OdeSolver.RK4(n_integration_steps=10)
+    )
 
     # Configure objective functions
     objective_functions = set_objective_functions(model, dynamics_type)
@@ -475,8 +481,6 @@ def prepare_ocp(
         u_init=u_init,
         u_scaling=u_scaling,
         objective_functions=objective_functions,
-        # ode_solver=OdeSolver.RK1(n_integration_steps=integration_step),
-        ode_solver=OdeSolver.COLLOCATION(polynomial_degree=2, method="radau"),
         n_threads=20,
         constraints=constraints,
         use_sx=True,
@@ -544,7 +548,7 @@ def main():
     ocp.add_plot_penalty(CostType.ALL)
 
     # Solve the optimal control problem
-    sol = ocp.solve(Solver.IPOPT(show_online_optim=False, _max_iter=10000, show_options=dict(show_bounds=True)))
+    sol = ocp.solve(Solver.IPOPT(show_online_optim=False, _max_iter=100000, show_options=dict(show_bounds=True)))
     sol.print_cost()
     sol.animate(viewer="pyorerun")
     sol.graphs(show_bounds=True)
