@@ -22,9 +22,13 @@ class DingModelFrequencyWithFatigue(DingModelFrequency):
 
     This is the Ding 2003 model using the stimulation frequency in input.
 
-    Ding, J., Wexler, A. S., & Binder-Macleod, S. A. (2003).
+    [1] Ding, J., Wexler, A. S., & Binder-Macleod, S. A. (2003).
     Mathematical models for fatigue minimization during functional electrical stimulation.
     Journal of Electromyography and Kinesiology, 13(6), 575-588.
+
+    [2] Doll, B. D., Kirsch, N. A., & Sharma, N. (2015).
+    Optimization of a stimulation train based on a predictive model of muscle force and fatigue.
+    IFAC-PapersOnLine, 48(20), 338-342.
     """
 
     def __init__(
@@ -45,7 +49,7 @@ class DingModelFrequencyWithFatigue(DingModelFrequency):
         self._with_fatigue = True
 
         # --- Default values --- #
-        ALPHA_A_DEFAULT = -4.0 * 10e-2  # Value from Ding's experimentation [1] (s^-2)
+        ALPHA_A_DEFAULT = -4.0 * 10e-2  # Value from Ding's experimentation [1] (s^-2) corrected in [2]
         TAU_FAT_DEFAULT = 127  # Value from Ding's experimentation [1] (s)
         ALPHA_TAU1_DEFAULT = 2.1 * 10e-6  # Value from Ding's experimentation [1] (N^-1)
         ALPHA_KM_DEFAULT = 1.9 * 10e-6  # Value from Ding's experimentation [1] (s^-1.N^-1)
