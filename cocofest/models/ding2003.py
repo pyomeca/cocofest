@@ -240,6 +240,8 @@ class DingModelFrequency(FesModel):
             The current time at which the dynamics is evaluated (s)
         t_stim_prev: list[MX]
             The time list of the previous stimulations (s)
+        lambda_i: list[MX]
+            A list of force-pulse amplitude relationship (unitless)
 
         Returns
         -------
@@ -260,6 +262,8 @@ class DingModelFrequency(FesModel):
         ----------
         cn: MX
             The previous step value of ca_troponin_complex (unitless)
+        cn_sum: MX
+            The previous calculated calcium sum
 
         Returns
         -------

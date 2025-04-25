@@ -94,25 +94,25 @@ class OcpFesId(OcpFes):
         parameters_bounds = BoundsList()
         parameters_init = InitialGuessList()
 
-        for i in range(len(parameter_to_identify)):
+        for param in parameter_to_identify:
             parameters.add(
-                name=parameter_to_identify[i],
-                function=parameter_setting[parameter_to_identify[i]]["function"],
+                name=param,
+                function=parameter_setting[param]["function"],
                 size=1,
                 scaling=VariableScaling(
-                    parameter_to_identify[i],
-                    [parameter_setting[parameter_to_identify[i]]["scaling"]],
+                    param,
+                    [parameter_setting[param]["scaling"]],
                 ),
             )
             parameters_bounds.add(
-                parameter_to_identify[i],
-                min_bound=np.array([parameter_setting[parameter_to_identify[i]]["min_bound"]]),
-                max_bound=np.array([parameter_setting[parameter_to_identify[i]]["max_bound"]]),
+                param,
+                min_bound=np.array([parameter_setting[param]["min_bound"]]),
+                max_bound=np.array([parameter_setting[param]["max_bound"]]),
                 interpolation=InterpolationType.CONSTANT,
             )
             parameters_init.add(
-                key=parameter_to_identify[i],
-                initial_guess=np.array([parameter_setting[parameter_to_identify[i]]["initial_guess"]]),
+                key=param,
+                initial_guess=np.array([parameter_setting[param]["initial_guess"]]),
             )
 
         return parameters, parameters_bounds, parameters_init

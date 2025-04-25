@@ -74,7 +74,11 @@ def prepare_ocp_ding2003(
     )
 
     numerical_data_time_series, stim_idx_at_node_list = model.get_numerical_data_time_series(n_shooting, final_time)
-    dynamics = OcpFesId.declare_dynamics(model=model, numerical_data_timeseries=numerical_data_time_series)
+    dynamics = OcpFesId.declare_dynamics(
+        model=model,
+        numerical_data_timeseries=numerical_data_time_series,
+        ode_solver=OdeSolver.RK4(n_integration_steps=10),
+    )
 
     x_bounds, x_init = OcpFesId.set_x_bounds(
         model=model,
@@ -240,7 +244,11 @@ def prepare_ocp_ding2007(
     )
 
     numerical_data_time_series, stim_idx_at_node_list = model.get_numerical_data_time_series(n_shooting, final_time)
-    dynamics = OcpFesId.declare_dynamics(model=model, numerical_data_timeseries=numerical_data_time_series)
+    dynamics = OcpFesId.declare_dynamics(
+        model=model,
+        numerical_data_timeseries=numerical_data_time_series,
+        ode_solver=OdeSolver.RK4(n_integration_steps=10),
+    )
 
     x_bounds, x_init = OcpFesId.set_x_bounds(
         model=model,
@@ -419,6 +427,7 @@ def prepare_ocp_hmed2018(
     )
 
     numerical_data_time_series, stim_idx_at_node_list = model.get_numerical_data_time_series(n_shooting, final_time)
+
     dynamics = OcpFesId.declare_dynamics(
         model=model,
         numerical_data_timeseries=numerical_data_time_series,
