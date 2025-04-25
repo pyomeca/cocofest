@@ -28,14 +28,18 @@ class OcpFesMsk(OcpFes):
         external_force_set = ExternalForceSetTimeSeries(nb_frames=n_shooting)
         external_force_array = np.array(external_force_dict["torque"])
         reshape_values_array = np.tile(external_force_array[:, np.newaxis], (1, n_shooting))
-        external_force_set.add_torque(segment=external_force_dict["Segment_application"], values=reshape_values_array)
+        external_force_set.add_torque(
+            segment=external_force_dict["Segment_application"],
+            values=reshape_values_array,
+            force_name="resistive_torque",
+        )
 
         numerical_time_series = {"external_forces": external_force_set.to_numerical_time_series()}
 
         return numerical_time_series, external_force_set
 
     @staticmethod
-    def declare_dynamics(bio_models, numerical_time_series, with_contact):
+    def declare_dynamics(bio_models, numerical_time_series, ode_solver, contact_type):
         dynamics = DynamicsList()
         dynamics.add(
             bio_models.declare_model_variables,
@@ -45,7 +49,8 @@ class OcpFesMsk(OcpFes):
             phase=0,
             phase_dynamics=PhaseDynamics.SHARED_DURING_THE_PHASE,
             numerical_data_timeseries=numerical_time_series,
-            with_contact=with_contact,
+            contact_type=contact_type,
+            ode_solver=ode_solver,
         )
         return dynamics
 

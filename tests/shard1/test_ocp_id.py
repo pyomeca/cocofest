@@ -1,5 +1,4 @@
 import numpy as np
-import matplotlib.pyplot as plt
 from bioptim import (
     SolutionMerge,
     OdeSolver,
@@ -13,13 +12,9 @@ from bioptim import (
 )
 import pytest
 from cocofest import (
-    DingModelPulseWidthFrequency,
     IvpFes,
     ModelMaker,
     OcpFesId,
-    FES_plot,
-    DingModelFrequency,
-    DingModelPulseIntensityFrequency,
 )
 from cocofest.identification.identification_method import DataExtraction
 
@@ -74,7 +69,11 @@ def prepare_ocp_ding2003(
     )
 
     numerical_data_time_series, stim_idx_at_node_list = model.get_numerical_data_time_series(n_shooting, final_time)
-    dynamics = OcpFesId.declare_dynamics(model=model, numerical_data_timeseries=numerical_data_time_series)
+    dynamics = OcpFesId.declare_dynamics(
+        model=model,
+        numerical_data_timeseries=numerical_data_time_series,
+        ode_solver=OdeSolver.RK4(n_integration_steps=10),
+    )
 
     x_bounds, x_init = OcpFesId.set_x_bounds(
         model=model,
@@ -114,7 +113,6 @@ def prepare_ocp_ding2003(
         parameter_init=parameters_init,
         control_type=ControlType.CONSTANT,
         use_sx=True,
-        ode_solver=OdeSolver.RK4(n_integration_steps=10),
         n_threads=20,
     )
 
@@ -240,7 +238,11 @@ def prepare_ocp_ding2007(
     )
 
     numerical_data_time_series, stim_idx_at_node_list = model.get_numerical_data_time_series(n_shooting, final_time)
-    dynamics = OcpFesId.declare_dynamics(model=model, numerical_data_timeseries=numerical_data_time_series)
+    dynamics = OcpFesId.declare_dynamics(
+        model=model,
+        numerical_data_timeseries=numerical_data_time_series,
+        ode_solver=OdeSolver.RK4(n_integration_steps=10),
+    )
 
     x_bounds, x_init = OcpFesId.set_x_bounds(
         model=model,
@@ -285,7 +287,6 @@ def prepare_ocp_ding2007(
         parameter_init=parameters_init,
         control_type=ControlType.CONSTANT,
         use_sx=True,
-        ode_solver=OdeSolver.RK4(n_integration_steps=10),
         n_threads=20,
     )
 
@@ -420,7 +421,12 @@ def prepare_ocp_hmed2018(
     )
 
     numerical_data_time_series, stim_idx_at_node_list = model.get_numerical_data_time_series(n_shooting, final_time)
-    dynamics = OcpFesId.declare_dynamics(model=model, numerical_data_timeseries=numerical_data_time_series)
+
+    dynamics = OcpFesId.declare_dynamics(
+        model=model,
+        numerical_data_timeseries=numerical_data_time_series,
+        ode_solver=OdeSolver.RK4(n_integration_steps=10),
+    )
 
     x_bounds, x_init = OcpFesId.set_x_bounds(
         model=model,
@@ -465,7 +471,6 @@ def prepare_ocp_hmed2018(
         parameter_init=parameters_init,
         control_type=ControlType.CONSTANT,
         use_sx=True,
-        ode_solver=OdeSolver.RK4(n_integration_steps=10),
         n_threads=20,
     )
 

@@ -291,6 +291,7 @@ class DingModelPulseWidthFrequency(DingModelFrequency):
         ocp: OptimalControlProgram,
         nlp: NonLinearProgram,
         numerical_data_timeseries: dict[str, np.ndarray] = None,
+        contact_type: list = (),
     ):
         """
         Tell the program which variables are states and controls.
@@ -303,6 +304,8 @@ class DingModelPulseWidthFrequency(DingModelFrequency):
             A reference to the phase
         numerical_data_timeseries: dict[str, np.ndarray]
             A list of values to pass to the dynamics at each node. Experimental external forces should be included here.
+        contact_type: list
+            A list of contact types. This is used to define the contact forces in the dynamics. Not used in this model.
         """
         StateConfigure().configure_all_fes_model_states(ocp, nlp, fes_model=self)
         StateConfigure().configure_last_pulse_width(ocp, nlp)

@@ -18,7 +18,9 @@ def prepare_ocp(model, final_time, pi_max, force_tracking):
     # --- Set dynamics --- #
     n_shooting = model.get_n_shooting(final_time=final_time)
     numerical_data_time_series, stim_idx_at_node_list = model.get_numerical_data_time_series(n_shooting, final_time)
-    dynamics = OcpFes.declare_dynamics(model, numerical_data_time_series)
+    dynamics = OcpFes.declare_dynamics(
+        model, numerical_data_time_series, ode_solver=OdeSolver.RK4(n_integration_steps=10)
+    )
 
     # --- Set initial guesses and bounds for states and controls --- #
     x_bounds, x_init = OcpFes.set_x_bounds(model)
@@ -69,7 +71,6 @@ def prepare_ocp(model, final_time, pi_max, force_tracking):
         constraints=constraints,
         control_type=ControlType.CONSTANT,
         use_sx=use_sx,
-        ode_solver=OdeSolver.RK4(n_integration_steps=10),
         n_threads=20,
     )
 

@@ -11,6 +11,7 @@ from bioptim import (
     Solver,
     MultiCyclicCycleSolutions,
     ExternalForceSetTimeSeries,
+    OdeSolver,
 )
 from .fes_nmpc import FesNmpc
 from ..models.dynamical_model import FesMskModel
@@ -61,14 +62,14 @@ class FesNmpcMsk(FesNmpc):
             x_init.add(
                 key,
                 np.concatenate([state[key][:, :-1] for state in states] + [states[-1][key][:, -1:]], axis=1),
-                interpolation=InterpolationType.EACH_FRAME,
+                interpolation=self.nlp[0].x_init.type,
                 phase=0,
             )
 
         u_init = InitialGuessList()
         for key in self.nlp[0].controls.keys():
             controls_tp = np.concatenate([control[key] for control in controls], axis=1)
-            u_init.add(key, controls_tp, interpolation=InterpolationType.EACH_FRAME, phase=0)
+            u_init.add(key, controls_tp, interpolation=self.nlp[0].u_init.type, phase=0)
 
         p_init = InitialGuessList()
         if combine_model:
@@ -103,7 +104,6 @@ class FesNmpcMsk(FesNmpc):
             use_sx=self.cx == SX,
             parameters=parameters,
             parameter_init=p_init,
-            ode_solver=self.nlp[0].ode_solver,
         )
         a_init = InitialGuessList()
         return Solution.from_initial_guess(solution_ocp, [np.array([dt]), x_init, u_init, p_init, a_init])
@@ -167,14 +167,15 @@ class FesNmpcMsk(FesNmpc):
         )
         model = self.nlp[0].model
 
-        total_external_forces_frame = total_cycles * self.cycle_len
         total_nmpc_duration = self.cycle_duration * total_cycles
-        total_nmpc_shooting_len = self.cycle_len * self.n_cycles
+        total_nmpc_shooting_len = self.cycle_len * total_cycles
 
-        external_force_set = ExternalForceSetTimeSeries(nb_frames=total_external_forces_frame)
+        external_force_set = ExternalForceSetTimeSeries(nb_frames=total_nmpc_shooting_len)
         external_force_array = np.array(external_force["torque"])
-        reshape_values_array = np.tile(external_force_array[:, np.newaxis], (1, total_external_forces_frame))
-        external_force_set.add_torque(segment=external_force["Segment_application"], values=reshape_values_array)
+        reshape_values_array = np.tile(external_force_array[:, np.newaxis], (1, total_nmpc_shooting_len))
+        external_force_set.add_torque(
+            segment=external_force["Segment_application"], values=reshape_values_array, force_name="resistance_torque"
+        )
         numerical_time_series = {"external_forces": external_force_set.to_numerical_time_series()}
 
         if isinstance(model, FesMskModel):
