@@ -38,7 +38,6 @@ def prepare_ocp(model, final_time, pw_max):
         u_init=u_init,
         control_type=ControlType.CONSTANT,
         use_sx=True,
-        ode_solver=OdeSolver.RK4(n_integration_steps=10),
         n_threads=20,
     )
 

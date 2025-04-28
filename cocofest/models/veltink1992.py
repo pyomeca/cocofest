@@ -13,7 +13,7 @@ from .state_configure import StateConfigure
 from .fes_model import FesModel
 
 
-class VeltinkModel1992(FesModel):
+class VeltinkModel1992:
     """
     This is a custom model implementing the muscle activation dynamics from:
     
@@ -105,15 +105,10 @@ class VeltinkModel1992(FesModel):
         -------
         Normalized stimulation between 0 and 1
         """
-        # Create a piecewise function for current normalization (equation 5)
+        # Piecewise function for current normalization
         u = (I - self.I_threshold) / (self.I_saturation - self.I_threshold)
         
-        # TODO: Modify the code here to prevent the if_else casadi function, can be handled from the control bounds ocp
-        # Ensure bounds between 0 and 1
-        u_bounded = MX.if_else(I < self.I_threshold, 0,
-                    MX.if_else(I > self.I_saturation, 1, u))
-        
-        return u_bounded
+        return u
 
     def system_dynamics(
         self,
@@ -141,6 +136,7 @@ class VeltinkModel1992(FesModel):
         a_dot = (-a + u) / self.Ta
         
         return vertcat(a_dot)
+
 
     @staticmethod
     def dynamics(
@@ -183,7 +179,7 @@ class VeltinkModel1992(FesModel):
         return DynamicsEvaluation(
             dxdt=dxdt_fun(
                 a=states[0],
-                I=controls[0] if controls.shape[0] > 0 else 0.0,
+                I=controls[0],
             ),
             defects=None,
         )
@@ -193,6 +189,7 @@ class VeltinkModel1992(FesModel):
         ocp: OptimalControlProgram,
         nlp: NonLinearProgram,
         numerical_data_timeseries: dict[str, np.ndarray] = None,
+        contact_type: tuple = (),
     ):
         """
         Tell the program which variables are states and controls.
@@ -205,7 +202,10 @@ class VeltinkModel1992(FesModel):
             A reference to the phase
         numerical_data_timeseries: dict[str, np.ndarray]
             A list of values to pass to the dynamics at each node
+        contact_type: tuple
+            The type of contact to use for the model
         """
         # TODO: Warning, not the same as ding, modify and check if their is an error
         StateConfigure().configure_all_fes_model_states(ocp, nlp, fes_model=self)
+        StateConfigure().configure_intensity(ocp, nlp)
         ConfigureProblem.configure_dynamics_function(ocp, nlp, dyn_func=self.dynamics) 

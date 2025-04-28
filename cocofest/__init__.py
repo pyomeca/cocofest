@@ -7,6 +7,8 @@ from .models.ding2007 import DingModelPulseWidthFrequency
 from .models.ding2007_with_fatigue import DingModelPulseWidthFrequencyWithFatigue
 from .models.hmed2018 import DingModelPulseIntensityFrequency
 from .models.hmed2018_with_fatigue import DingModelPulseIntensityFrequencyWithFatigue
+from .models.veltink1992 import VeltinkModel1992
+from .models.veltink1992_and_riener1998 import VeltinkRienerModel
 from .models.dynamical_model import FesMskModel
 from .models.model_maker import ModelMaker
 from .optimization.fes_ocp import OcpFes
@@ -23,5 +25,5 @@ from .dynamics.inverse_kinematics_and_dynamics import (
 )
 from .result.plot import PlotCyclingResult
 from .result.pickle import SolutionToPickle
-from .result.animate import PickleAnimate
+# from .result.animate import PickleAnimate
 from .result.graphics import FES_plot

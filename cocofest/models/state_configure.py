@@ -13,6 +13,7 @@ class StateConfigure:
             "A": self.configure_scaling_factor,
             "Tau1": self.configure_time_state_force_no_cross_bridge,
             "Km": self.configure_cross_bridges,
+            "a": self.configure_muscle_activation,
         }
 
     @staticmethod
@@ -254,6 +255,46 @@ class StateConfigure:
         return ConfigureProblem.configure_new_variable(name, name_cn_sum, ocp, nlp, as_states=False, as_controls=True)
 
     @staticmethod
+    def configure_muscle_activation(
+            ocp: OptimalControlProgram,
+            nlp: NonLinearProgram,
+            as_states: bool,
+            as_controls: bool,
+            as_states_dot: bool = False,
+            muscle_name: str = None,
+    ):
+        """
+        Configure a new variable for muscle activation (unitless)
+
+        Parameters
+        ----------
+        ocp: OptimalControlProgram
+            A reference to the ocp
+        nlp: NonLinearProgram
+            A reference to the phase
+        as_states: bool
+            If the generalized coordinates should be a state
+        as_controls: bool
+            If the generalized coordinates should be a control
+        as_states_dot: bool
+            If the generalized velocities should be a state_dot
+        muscle_name: str
+            The muscle name
+        """
+        muscle_name = "_" + muscle_name if muscle_name else ""
+        name = "a" + muscle_name
+        name_a = [name]
+        ConfigureProblem.configure_new_variable(
+            name,
+            name_a,
+            ocp,
+            nlp,
+            as_states,
+            as_controls,
+            as_states_dot,
+        )
+
+    @staticmethod
     def configure_last_pulse_width(ocp, nlp, muscle_name: str = None):
         """
         Configure the last pulse width control
@@ -275,7 +316,7 @@ class StateConfigure:
     @staticmethod
     def configure_pulse_intensity(ocp, nlp, muscle_name: str = None, truncation: int = 20):
         """
-        Configure the pulse intensity control
+        Configure the pulse intensity control for the Ding model
 
         Parameters
         ----------
@@ -287,6 +328,25 @@ class StateConfigure:
         muscle_name = "_" + muscle_name if muscle_name else ""
         name = "pulse_intensity" + muscle_name
         pulse_intensity = [str(i) for i in range(truncation)]
+        return ConfigureProblem.configure_new_variable(
+            name, pulse_intensity, ocp, nlp, as_states=False, as_controls=True
+        )
+
+    @staticmethod
+    def configure_intensity(ocp, nlp, muscle_name: str = None):
+        """
+        Configure the intensity control for the Veltink1992 model
+
+        Parameters
+        ----------
+        ocp: OptimalControlProgram
+            A reference to the ocp
+        nlp: NonLinearProgram
+            A reference to the phase
+        """
+        muscle_name = "_" + muscle_name if muscle_name else ""
+        name = "I" + muscle_name
+        pulse_intensity = [name]
         return ConfigureProblem.configure_new_variable(
             name, pulse_intensity, ocp, nlp, as_states=False, as_controls=True
         )
