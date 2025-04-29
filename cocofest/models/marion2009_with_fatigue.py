@@ -9,11 +9,11 @@ from bioptim import (
     NonLinearProgram,
     OptimalControlProgram,
 )
-from .marion2009 import MarionModel2009
+from .marion2009 import Marion2009ModelPulseWidthFrequency
 from .state_configure import StateConfigure
 
 
-class MarionModel2009WithFatigue(MarionModel2009):
+class Marion2009ModelPulseWidthFrequencyWithFatigue(Marion2009ModelPulseWidthFrequency):
     """
     This model extends the Marion 2009 model to include fatigue states.
     
@@ -128,7 +128,7 @@ class MarionModel2009WithFatigue(MarionModel2009):
             "alpha_km": self.alpha_km,
             "tau_fat": self.tau_fat,
         })
-        return (MarionModel2009WithFatigue, base_params)
+        return (Marion2009ModelPulseWidthFrequencyWithFatigue, base_params)
 
     def system_dynamics(
         self,
@@ -284,7 +284,7 @@ class MarionModel2009WithFatigue(MarionModel2009):
             The numerical timeseries of the system
         nlp: NonLinearProgram
             A reference to the phase
-        fes_model: MarionModel2009WithFatigue
+        fes_model: Marion2009ModelPulseWidthFrequencyWithFatigue
             The current phase fes model
         force_length_relationship: MX | float
             The force length relationship value (unitless)

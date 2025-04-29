@@ -11,7 +11,7 @@ from bioptim import (
 from .ding2007 import DingModelPulseWidthFrequency
 from .state_configure import StateConfigure
 
-class Marion2013(DingModelPulseWidthFrequency):
+class Marion2013ModelPulseWidthFrequency(DingModelPulseWidthFrequency):
     """
     Implementation of the Marion 2013 force-motion model for electrical stimulation
 
@@ -98,7 +98,7 @@ class Marion2013(DingModelPulseWidthFrequency):
 
     def serialize(self) -> tuple[Callable, dict]:
         return (
-            Marion2013,
+            Marion2013ModelPulseWidthFrequency,
             {
                 "A90": self.A90,
                 "a_coef": self.a_coef,
@@ -221,7 +221,7 @@ class Marion2013(DingModelPulseWidthFrequency):
             The numerical timeseries of the system
         nlp: NonLinearProgram
             A reference to the phase
-        fes_model: Marion2013
+        fes_model: Marion2013ModelPulseWidthFrequency
             The current phase fes model
 
         Returns

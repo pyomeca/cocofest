@@ -8,11 +8,11 @@ from bioptim import (
     NonLinearProgram,
     OptimalControlProgram,
 )
-from .marion2013 import Marion2013
+from .marion2013 import Marion2013ModelPulseWidthFrequency
 from .state_configure import StateConfigure
 
 
-class Marion2013WithFatigue(Marion2013):
+class Marion2013ModelPulseWidthFrequencyWithFatigue(Marion2013ModelPulseWidthFrequency):
     """
     Extension of Marion2013 model that includes fatigue effects
     Based on: Marion et al. (2013) - Predicting non-isometric fatigue induced by electrical 
@@ -117,7 +117,7 @@ class Marion2013WithFatigue(Marion2013):
             "alpha_tau1": self.alpha_tau1,
             "tau_fat": self.tau_fat,
         })
-        return (Marion2013WithFatigue, base_dict)
+        return (Marion2013ModelPulseWidthFrequencyWithFatigue, base_dict)
 
     def a_dot_fun(self, a90: MX, f: MX) -> MX | float:
         """
@@ -279,7 +279,7 @@ class Marion2013WithFatigue(Marion2013):
             The numerical timeseries of the system
         nlp: NonLinearProgram
             A reference to the phase
-        fes_model: Marion2013WithFatigue
+        fes_model: Marion2013ModelPulseWidthFrequencyWithFatigue
             The current phase fes model
         force_length_relationship: MX | float
             The force length relationship value (unitless)

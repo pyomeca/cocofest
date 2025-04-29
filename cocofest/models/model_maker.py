@@ -4,6 +4,10 @@ from .ding2007 import DingModelPulseWidthFrequency
 from .ding2007_with_fatigue import DingModelPulseWidthFrequencyWithFatigue
 from .hmed2018 import DingModelPulseIntensityFrequency
 from .hmed2018_with_fatigue import DingModelPulseIntensityFrequencyWithFatigue
+from .marion2009 import Marion2009ModelPulseWidthFrequency
+from .marion2009_with_fatigue import Marion2009ModelPulseWidthFrequencyWithFatigue
+from .marion2013 import Marion2013ModelPulseWidthFrequency
+from .marion2013_with_fatigue import Marion2013ModelPulseWidthFrequencyWithFatigue
 
 
 class ModelMaker:
@@ -16,6 +20,10 @@ class ModelMaker:
             "ding2007_with_fatigue": DingModelPulseWidthFrequencyWithFatigue,
             "hmed2018": DingModelPulseIntensityFrequency,
             "hmed2018_with_fatigue": DingModelPulseIntensityFrequencyWithFatigue,
+            "marion2009": Marion2009ModelPulseWidthFrequency,
+            "marion2009_with_fatigue": Marion2009ModelPulseWidthFrequencyWithFatigue,
+            "marion2013": Marion2013ModelPulseWidthFrequency,
+            "marion2013_with_fatigue": Marion2013ModelPulseWidthFrequencyWithFatigue,
         }
         if model_type not in model_dict:
             raise ValueError(f"Unknown model type: {model_type}")
