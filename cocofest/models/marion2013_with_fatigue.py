@@ -317,15 +317,16 @@ class Marion2013WithFatigue(Marion2013):
             defects=None,
         )
 
-    def declare_model_variables(
+    def declare_ding_variables(
         self,
         ocp: OptimalControlProgram,
         nlp: NonLinearProgram,
         numerical_data_timeseries: dict[str, np.ndarray] = None,
+        contact_type: tuple = (),
     ):
         """
         Tell the program which variables are states and controls.
-
+        The user is expected to use the ConfigureProblem.configure_xxx functions.
         Parameters
         ----------
         ocp: OptimalControlProgram
@@ -333,7 +334,9 @@ class Marion2013WithFatigue(Marion2013):
         nlp: NonLinearProgram
             A reference to the phase
         numerical_data_timeseries: dict[str, np.ndarray]
-            A list of values to pass to the dynamics at each node
+            A list of values to pass to the dynamics at each node. Experimental external forces should be included here.
+        contact_type: tuple
+            The type of contact to use for the model
         """
         StateConfigure().configure_all_fes_model_states(ocp, nlp, fes_model=self)
         ConfigureProblem.configure_dynamics_function(ocp, nlp, dyn_func=self.dynamics) 

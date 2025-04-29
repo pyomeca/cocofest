@@ -409,8 +409,8 @@ class FesMskModel(BiorbdModel):
         self,
         ocp: OptimalControlProgram,
         nlp: NonLinearProgram,
-        with_contact: bool = False,
         numerical_data_timeseries: dict[str, np.ndarray] = None,
+        contact_type: tuple = (),
     ):
         """
         Tell the program which variables are states and controls.
@@ -423,7 +423,8 @@ class FesMskModel(BiorbdModel):
             A reference to the phase
         numerical_data_timeseries: dict[str, np.ndarray]
             A list of values to pass to the dynamics at each node. Experimental external forces should be included here.
-
+        contact_type: tuple
+            The type of contact to use for the model
         """
 
         state_name_list = StateConfigure().configure_all_muscle_states(self.muscles_dynamics_model, ocp, nlp)
@@ -449,7 +450,7 @@ class FesMskModel(BiorbdModel):
             state_name_list=state_name_list,
         )
 
-        if with_contact:
+        if contact_type != ():
             ConfigureProblem.configure_contact_function(
                 ocp, nlp, self.forces_from_fes_driven, state_name_list=state_name_list
             )
