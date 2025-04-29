@@ -336,6 +336,44 @@ class StateConfigure:
         )
 
     @staticmethod
+    def configure_q_for_marion_model(ocp, nlp, as_states: bool, as_controls: bool):
+        """
+        Configure the generalized coordinates only for marion models
+
+        Parameters
+        ----------
+        nlp: NonLinearProgram
+            A reference to the phase
+        as_states: bool
+            If the generalized coordinates should be a state
+        as_controls: bool
+            If the generalized coordinates should be a control
+        """
+        name = "q"
+        name_q = nlp.model.bio_model.name_dof  # different function from bioptim because of this line
+        axes_idx = ConfigureProblem._apply_phase_mapping(ocp, nlp, name)
+        ConfigureProblem.configure_new_variable(name, name_q, ocp, nlp, as_states, as_controls, axes_idx=axes_idx)
+
+    @staticmethod
+    def configure_qdot_for_marion_model(ocp, nlp, as_states: bool, as_controls: bool):
+        """
+        Configure the generalized coordinates only for marion models
+
+        Parameters
+        ----------
+        nlp: NonLinearProgram
+            A reference to the phase
+        as_states: bool
+            If the generalized coordinates should be a state
+        as_controls: bool
+            If the generalized coordinates should be a control
+        """
+        name = "qdot"
+        name_qdot = nlp.model.bio_model.name_dof  # different function from bioptim because of this line
+        axes_idx = ConfigureProblem._apply_phase_mapping(ocp, nlp, name)
+        ConfigureProblem.configure_new_variable(name, name_qdot, ocp, nlp, as_states, as_controls, axes_idx=axes_idx)
+
+    @staticmethod
     def configure_last_pulse_width(ocp, nlp, muscle_name: str = None):
         """
         Configure the last pulse width control
