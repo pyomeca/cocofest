@@ -8,12 +8,13 @@ from bioptim import (
 class StateConfigure:
     def __init__(self):
         self.state_dictionary = {
-            "Cn": self.configure_ca_troponin_complex,
-            "F": self.configure_force,
-            "A": self.configure_scaling_factor,
-            "Tau1": self.configure_time_state_force_no_cross_bridge,
-            "Km": self.configure_cross_bridges,
-            "a": self.configure_muscle_activation,
+            "Cn": self.configure_ca_troponin_complex, # Ding model
+            "F": self.configure_force, # Ding model
+            "A": self.configure_scaling_factor, # Ding model
+            "Tau1": self.configure_time_state_force_no_cross_bridge, # Ding model
+            "Km": self.configure_cross_bridges, # Ding model
+            "a": self.configure_muscle_activation, # Veltink model
+            "mu": self.configure_fatigue_state, # Veltink model
         }
 
     @staticmethod
@@ -287,6 +288,46 @@ class StateConfigure:
         ConfigureProblem.configure_new_variable(
             name,
             name_a,
+            ocp,
+            nlp,
+            as_states,
+            as_controls,
+            as_states_dot,
+        )
+
+    @staticmethod
+    def configure_fatigue_state(
+            ocp: OptimalControlProgram,
+            nlp: NonLinearProgram,
+            as_states: bool,
+            as_controls: bool,
+            as_states_dot: bool = False,
+            muscle_name: str = None,
+    ):
+        """
+        Configure a new variable for fatigue state (unitless)
+
+        Parameters
+        ----------
+        ocp: OptimalControlProgram
+            A reference to the ocp
+        nlp: NonLinearProgram
+            A reference to the phase
+        as_states: bool
+            If the generalized coordinates should be a state
+        as_controls: bool
+            If the generalized coordinates should be a control
+        as_states_dot: bool
+            If the generalized velocities should be a state_dot
+        muscle_name: str
+            The muscle name
+        """
+        muscle_name = "_" + muscle_name if muscle_name else ""
+        name = "mu" + muscle_name
+        name_mu = [name]
+        ConfigureProblem.configure_new_variable(
+            name,
+            name_mu,
             ocp,
             nlp,
             as_states,

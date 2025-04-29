@@ -10,10 +10,9 @@ from bioptim import (
 )
 
 from .state_configure import StateConfigure
-from .fes_model import FesModel
 
 
-class VeltinkModel1992:
+class VeltinkModelPulseIntensity:
     """
     This is a custom model implementing the muscle activation dynamics from:
     
@@ -84,7 +83,7 @@ class VeltinkModel1992:
 
     def serialize(self) -> tuple[Callable, dict]:
         return (
-            VeltinkModel1992,
+            VeltinkModelPulseIntensity,
             {
                 "Ta": self.Ta,
                 "I_threshold": self.I_threshold,
@@ -110,10 +109,27 @@ class VeltinkModel1992:
         
         return u
 
+    def get_muscle_activation(self, a: MX, u: MX) -> MX:
+        """
+        Get the muscle activation from the state variable.
+
+        Parameters
+        ----------
+        a: MX
+            Muscle activation state (unitless)
+        u: MX
+            Normalized stimulation (unitless)
+
+        Returns
+        -------
+        The muscle activation value
+        """
+        return (-a + u) / self.Ta
+
     def system_dynamics(
         self,
         a: MX,
-        I: MX = None,
+        I: MX,
     ) -> MX:
         """
         The system dynamics implementing equation (4) for muscle activation.
@@ -129,11 +145,8 @@ class VeltinkModel1992:
         -------
         The derivative of muscle activation state
         """
-        # Get normalized stimulation (equation 5)
         u = self.normalize_current(I)
-        
-        # Muscle activation dynamics (equation 4)
-        a_dot = (-a + u) / self.Ta
+        a_dot = self.get_muscle_activation(a=a, u=u)
         
         return vertcat(a_dot)
 
@@ -166,7 +179,7 @@ class VeltinkModel1992:
             The numerical timeseries of the system
         nlp: NonLinearProgram
             A reference to the phase
-        fes_model: VeltinkModel1992
+        fes_model: VeltinkModelPulseIntensity
             The current phase fes model
 
         Returns
@@ -205,7 +218,6 @@ class VeltinkModel1992:
         contact_type: tuple
             The type of contact to use for the model
         """
-        # TODO: Warning, not the same as ding, modify and check if their is an error
         StateConfigure().configure_all_fes_model_states(ocp, nlp, fes_model=self)
         StateConfigure().configure_intensity(ocp, nlp)
         ConfigureProblem.configure_dynamics_function(ocp, nlp, dyn_func=self.dynamics) 

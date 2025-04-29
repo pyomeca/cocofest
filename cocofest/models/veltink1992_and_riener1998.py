@@ -9,13 +9,13 @@ from bioptim import (
     OptimalControlProgram,
 )
 
-from .veltink1992 import VeltinkModel1992
+from .veltink1992 import VeltinkModelPulseIntensity
 from .state_configure import StateConfigure
 
 
-class VeltinkRienerModel(VeltinkModel1992):
+class VeltinkRienerModelPulseIntensityWithFatigue(VeltinkModelPulseIntensity):
     """
-    Extension of VeltinkModel1992 that includes fatigue effects from:
+    Extension of VeltinkModelPulseIntensity that includes fatigue effects from:
     
     Veltink, P. H., Chizeck, H. J., Crago, P. E., & El-Bialy, A. (1992).
     Nonlinear joint angle control for artificially stimulated muscle.
@@ -93,13 +93,30 @@ class VeltinkRienerModel(VeltinkModel1992):
             "T_fat": self.T_fat,
             "T_rec": self.T_rec,
         })
-        return (VeltinkRienerModel, base_dict)
+        return (VeltinkRienerModelPulseIntensityWithFatigue, base_dict)
+
+    def get_mu_dot(self, a: MX, mu: MX) -> MX:
+        """
+        The fatigue dynamics.
+
+        Parameters
+        ----------
+        a: MX
+            Muscle activation state (unitless)
+        mu: MX
+            Fatigue state (unitless)
+
+        Returns
+        -------
+        The fatigue state (unitless)
+        """
+        return ((self.mu_min - mu) * a) / self.T_fat + ((1 - mu) * (1 - a)) / self.T_rec
 
     def system_dynamics(
         self,
         a: MX,
         mu: MX,
-        I: MX = None,
+        I: MX,
     ) -> MX:
         """
         The system dynamics including fatigue effects.
@@ -117,11 +134,9 @@ class VeltinkRienerModel(VeltinkModel1992):
         -------
         The value of the derivative of each state
         """
-        # Get activation dynamics from parent model
-        a_dot = super().system_dynamics(a, I)
-        
-        # Fatigue dynamics (equation 6)
-        mu_dot = ((self.mu_min - mu) * a) / self.T_fat + ((1 - mu) * (1 - a)) / self.T_rec
+        u = self.normalize_current(I)
+        a_dot = self.get_muscle_activation(a=a, u=u)
+        mu_dot = self.get_mu_dot(a=a, mu=mu)
         
         return vertcat(a_dot, mu_dot)
 
@@ -153,7 +168,7 @@ class VeltinkRienerModel(VeltinkModel1992):
             The numerical timeseries of the system
         nlp: NonLinearProgram
             A reference to the phase
-        fes_model: VeltinkRienerModel
+        fes_model: VeltinkRienerModelPulseIntensityWithFatigue
             The current phase fes model
 
         Returns
@@ -167,7 +182,7 @@ class VeltinkRienerModel(VeltinkModel1992):
             dxdt=dxdt_fun(
                 a=states[0],
                 mu=states[1],
-                I=controls[0] if controls.shape[0] > 0 else 0.0,
+                I=controls[0],
             ),
             defects=None,
         )
@@ -177,6 +192,7 @@ class VeltinkRienerModel(VeltinkModel1992):
         ocp: OptimalControlProgram,
         nlp: NonLinearProgram,
         numerical_data_timeseries: dict[str, np.ndarray] = None,
+        contact_type: tuple = (),
     ):
         """
         Tell the program which variables are states and controls.
@@ -189,7 +205,9 @@ class VeltinkRienerModel(VeltinkModel1992):
             A reference to the phase
         numerical_data_timeseries: dict[str, np.ndarray]
             A list of values to pass to the dynamics at each node
+        contact_type: tuple
+            The type of contact to use for the model
         """
-        # TODO: Warning, not the same as ding, modify and check if their is an error
         StateConfigure().configure_all_fes_model_states(ocp, nlp, fes_model=self)
+        StateConfigure().configure_intensity(ocp, nlp)
         ConfigureProblem.configure_dynamics_function(ocp, nlp, dyn_func=self.dynamics) 

@@ -1,5 +1,6 @@
 from cocofest import (
-VeltinkModel1992,
+VeltinkModelPulseIntensity,
+VeltinkRienerModelPulseIntensityWithFatigue,
 OcpFes,
 )
 
@@ -55,19 +56,21 @@ def prepare_ocp(model, final_time, n_shooting, fmax):
     )
 
 
-def main(plot=True):
+def main(with_fatigue=True, plot=True):
     final_time = 1
     fmax = 350
     n_shooting = 100
 
-    model = VeltinkModel1992()
+    model = VeltinkRienerModelPulseIntensityWithFatigue() if with_fatigue else VeltinkModelPulseIntensity()
     model.I_saturation = 70
     model.I_threshold = 20
     ocp = prepare_ocp(model=model, final_time=final_time, n_shooting=n_shooting, fmax=fmax)
 
     # --- Solve the program --- #
     sol = ocp.solve(Solver.IPOPT())
-    sol.graphs()
+    # --- Plot the results --- #
+    if plot:
+        sol.graphs()
 
 
 if __name__ == "__main__":
