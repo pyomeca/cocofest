@@ -8,6 +8,7 @@ from bioptim import (
     DynamicsEvaluation,
     NonLinearProgram,
     OptimalControlProgram,
+    DynamicsFunctions,
 )
 from .marion2009 import Marion2009ModelPulseWidthFrequency
 from .state_configure import StateConfigure
@@ -62,10 +63,6 @@ class Marion2009ModelPulseWidthFrequencyWithFatigue(Marion2009ModelPulseWidthFre
             pd0=pd0,
             pdt=pdt,
             a_scale=a_scale,
-            alpha_a=alpha_a,
-            alpha_tau1=alpha_tau1,
-            alpha_km=alpha_km,
-            tau_fat=tau_fat,
             theta_star=theta_star,
             a_theta=a_theta,
             b_theta=b_theta,
@@ -298,7 +295,6 @@ class Marion2009ModelPulseWidthFrequencyWithFatigue(Marion2009ModelPulseWidthFre
         The derivative of the states in the tuple[MX] format
         """
         model = fes_model if fes_model else nlp.model
-        # TODO: Check if it is linked to a model with q or qdot else raise an error
         q = DynamicsFunctions.get(nlp.states["q"], states)
         dxdt_fun = model.system_dynamics
 
@@ -319,28 +315,3 @@ class Marion2009ModelPulseWidthFrequencyWithFatigue(Marion2009ModelPulseWidthFre
             ),
             defects=None,
         )
-
-    def declare_ding_variables(
-        self,
-        ocp: OptimalControlProgram,
-        nlp: NonLinearProgram,
-        numerical_data_timeseries: dict[str, np.ndarray] = None,
-        contact_type: tuple = (),
-    ):
-        """
-        Tell the program which variables are states and controls.
-        The user is expected to use the ConfigureProblem.configure_xxx functions.
-        Parameters
-        ----------
-        ocp: OptimalControlProgram
-            A reference to the ocp
-        nlp: NonLinearProgram
-            A reference to the phase
-        numerical_data_timeseries: dict[str, np.ndarray]
-            A list of values to pass to the dynamics at each node. Experimental external forces should be included here.
-        contact_type: tuple
-            The type of contact to use for the model
-        """
-        StateConfigure().configure_all_fes_model_states(ocp, nlp, fes_model=self)
-        StateConfigure().configure_last_pulse_width(ocp, nlp)
-        ConfigureProblem.configure_dynamics_function(ocp, nlp, dyn_func=self.dynamics) 

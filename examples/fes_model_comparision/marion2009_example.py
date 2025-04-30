@@ -42,10 +42,10 @@ def prepare_ocp(model, final_time, pw_max):
     )
 
 
-def main(plot=True):
+def main(with_fatigue=True, plot=True):
     final_time = 0.2
     model = ModelMaker.create_model(
-        "marion2009",
+        "marion2009_with_fatigue" if with_fatigue else "marion2009",
         sum_stim_truncation=10,
         stim_time=list(np.linspace(0, final_time, 11)[:-1]),
         previous_stim={"time": [-0.15, -0.10, -0.05]},

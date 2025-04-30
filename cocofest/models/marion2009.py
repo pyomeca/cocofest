@@ -251,7 +251,8 @@ class Marion2009ModelPulseWidthFrequency(DingModelPulseWidthFrequency):
             if external_force_in_numerical_data_timeseries
             else numerical_data_timeseries
         )
-        muscle_dxdt = Marion2009ModelPulseWidthFrequency.dynamics(
+
+        muscle_dxdt = nlp.model.dynamics(
             time,
             states,
             controls,
