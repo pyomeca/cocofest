@@ -99,23 +99,26 @@ class DingModelPulseWidthFrequencyWithFatigue(DingModelPulseWidthFrequency):
     def serialize(self) -> tuple[Callable, dict]:
         # This is where you can serialize your models
         # This is useful if you want to save your models and load it later
+
+        # Check commented for nmpc test but might introduce a non continuity from personalized model
+
         return (
             DingModelPulseWidthFrequencyWithFatigue,
             {
-                "tauc": self.tauc,
-                "a_rest": self.a_rest,
-                "tau1_rest": self.tau1_rest,
-                "km_rest": self.km_rest,
-                "tau2": self.tau2,
-                "alpha_a": self.alpha_a,
-                "alpha_tau1": self.alpha_tau1,
-                "alpha_km": self.alpha_km,
-                "tau_fat": self.tau_fat,
-                "a_scale": self.a_scale,
-                "pd0": self.pd0,
-                "pdt": self.pdt,
-                "stim_time": self.stim_time,
-                "previous_stim": self.previous_stim,
+                # "tauc": self.tauc,
+                # "a_rest": self.a_rest,
+                # "tau1_rest": self.tau1_rest,
+                # "km_rest": self.km_rest,
+                # "tau2": self.tau2,
+                # "alpha_a": self.alpha_a,
+                # "alpha_tau1": self.alpha_tau1,
+                # "alpha_km": self.alpha_km,
+                # "tau_fat": self.tau_fat,
+                # "a_scale": self.a_scale,
+                # "pd0": self.pd0,
+                # "pdt": self.pdt,
+                # "stim_time": self.stim_time,
+                # "previous_stim": self.previous_stim,
             },
         )
 

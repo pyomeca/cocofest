@@ -12,9 +12,9 @@ from bioptim import (
     VariableScaling,
 )
 
-from ..models.ding2007 import DingModelPulseWidthFrequency
+from ..models.ding2007.ding2007 import DingModelPulseWidthFrequency
 from ..models.dynamical_model import FesMskModel
-from ..models.hmed2018 import DingModelPulseIntensityFrequency
+from ..models.hmed2018.hmed2018 import DingModelPulseIntensityFrequency
 from ..optimization.fes_ocp import OcpFes
 from ..custom_constraints import CustomConstraint
 
