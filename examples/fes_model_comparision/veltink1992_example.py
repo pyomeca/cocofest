@@ -1,14 +1,10 @@
 from cocofest import (
 VeltinkModelPulseIntensity,
 VeltinkRienerModelPulseIntensityWithFatigue,
-OcpFes,
 )
 
 from bioptim import (
     OptimalControlProgram,
-    DynamicsEvaluation,
-    NonLinearProgram,
-    ConfigureProblem,
     PhaseDynamics,
     DynamicsList,
     Solver,
