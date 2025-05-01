@@ -47,7 +47,7 @@ def prepare_ocp(model, final_time, pw_max=0.0006):
     )
 
 
-def main(with_pulse_width=False, with_fatigue=True, plot=True):
+def main(with_pulse_width=True, with_fatigue=True, plot=True):
     final_time = 0.2
     chosen_model = "marion2009_modified" if with_pulse_width else "marion2009"
     chosen_model = chosen_model + "_with_fatigue" if with_fatigue else chosen_model
@@ -57,8 +57,6 @@ def main(with_pulse_width=False, with_fatigue=True, plot=True):
         stim_time=list(np.linspace(0, final_time, 11)[:-1]),
         previous_stim={"time": [-0.15, -0.10, -0.05]},
     )
-    biorbd_path = "../model_msk/arm26_biceps_1dof.bioMod"
-    model.bio_model = BiorbdModel(biorbd_path, parameters=None, external_force_set=None)
     ocp = prepare_ocp(model=model, final_time=final_time, pw_max=0.0006)
 
     # --- Solve the program --- #

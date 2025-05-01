@@ -275,7 +275,6 @@ class Marion2009ModelPulseWidthFrequencyWithFatigue(Marion2009ModelPulseWidthFre
         The derivative of the states in the tuple[MX] format
         """
         model = fes_model if fes_model else nlp.model
-        q = DynamicsFunctions.get(nlp.states["q"], states)
         dxdt_fun = model.system_dynamics
 
         return DynamicsEvaluation(
@@ -288,7 +287,7 @@ class Marion2009ModelPulseWidthFrequencyWithFatigue(Marion2009ModelPulseWidthFre
                 t=time,
                 t_stim_prev=numerical_timeseries,
                 pulse_width=controls[0],
-                theta=q,
+                theta=controls[1] if controls.shape[0] > 1 else 90,
             ),
             defects=None,
         )

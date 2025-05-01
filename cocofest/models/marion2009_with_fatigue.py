@@ -260,7 +260,6 @@ class Marion2009ModelFrequencyWithFatigue(Marion2009ModelFrequency):
         The derivative of the states in the tuple[MX] format
         """
         model = fes_model if fes_model else nlp.model
-        q = DynamicsFunctions.get(nlp.states["q"], states)
         dxdt_fun = model.system_dynamics
 
         return DynamicsEvaluation(
@@ -272,7 +271,7 @@ class Marion2009ModelFrequencyWithFatigue(Marion2009ModelFrequency):
                 km=states[4],
                 t=time,
                 t_stim_prev=numerical_timeseries,
-                theta=q,
+                theta=controls[0] if controls.shape[0] > 0 else 90,
             ),
             defects=None,
         )
