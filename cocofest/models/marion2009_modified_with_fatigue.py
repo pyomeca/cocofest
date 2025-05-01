@@ -8,16 +8,19 @@ from bioptim import (
     NonLinearProgram,
     DynamicsFunctions,
 )
-from .marion2009 import Marion2009ModelFrequency
+from .marion2009_modified import Marion2009ModelPulseWidthFrequency
 
 
-class Marion2009ModelFrequencyWithFatigue(Marion2009ModelFrequency):
+class Marion2009ModelPulseWidthFrequencyWithFatigue(Marion2009ModelPulseWidthFrequency):
     """
-    This model extends the Marion 2009 model to include fatigue states.
+    This model extends the Marion 2009 model using pulse width to include fatigue states.
     
     It combines the angle-dependent force-fatigue relationship from Marion 2009 with
     explicit fatigue states tracking (A, Tau1, Km) as done in Ding's models.
-    
+
+    Warning: This model was not validated from Marion's experiment as the pulse with is added.
+    This model should be used with caution.
+
     Marion, M. S., Wexler, A. S., Hull, M. L., & Binder-Macleod, S. A. (2009).
     Predicting the effect of muscle length on fatigue during electrical stimulation.
     Muscle & Nerve: Official Journal of the American Association of Electrodiagnostic Medicine, 40(4), 573-581.
@@ -25,7 +28,7 @@ class Marion2009ModelFrequencyWithFatigue(Marion2009ModelFrequency):
 
     def __init__(
         self,
-        model_name: str = "marion_2009_with_fatigue",
+        model_name: str = "marion_2009_modified_with_fatigue",
         muscle_name: str = None,
         stim_time: list[float] = None,
         previous_stim: dict = None,
@@ -35,6 +38,9 @@ class Marion2009ModelFrequencyWithFatigue(Marion2009ModelFrequency):
         tau1_rest: float = None,
         km_rest: float = None,
         tau2: float = None,
+        pd0: float = None,
+        pdt: float = None,
+        a_scale: float = None,
         alpha_a: float = None,
         alpha_tau1: float = None,
         alpha_km: float = None,
@@ -54,6 +60,9 @@ class Marion2009ModelFrequencyWithFatigue(Marion2009ModelFrequency):
             tau1_rest=tau1_rest,
             km_rest=km_rest,
             tau2=tau2,
+            pd0=pd0,
+            pdt=pdt,
+            a_scale=a_scale,
             theta_star=theta_star,
             a_theta=a_theta,
             b_theta=b_theta,
@@ -107,7 +116,7 @@ class Marion2009ModelFrequencyWithFatigue(Marion2009ModelFrequency):
         -------
         The rested values of Cn, F, A, Tau1, Km
         """
-        return np.array([[0], [0], [self.a_rest], [self.tau1_rest], [self.km_rest]])
+        return np.array([[0], [0], [self.a_scale], [self.tau1_rest], [self.km_rest]])
 
     def serialize(self) -> tuple[Callable, dict]:
         base_params = super().serialize()[1]
@@ -117,7 +126,7 @@ class Marion2009ModelFrequencyWithFatigue(Marion2009ModelFrequency):
             "alpha_km": self.alpha_km,
             "tau_fat": self.tau_fat,
         })
-        return (Marion2009ModelFrequencyWithFatigue, base_params)
+        return (Marion2009ModelPulseWidthFrequencyWithFatigue, base_params)
 
     def system_dynamics(
         self,
@@ -128,6 +137,7 @@ class Marion2009ModelFrequencyWithFatigue(Marion2009ModelFrequency):
         km: MX = None,
         t: MX = None,
         t_stim_prev: list[float] | list[MX] = None,
+        pulse_width: MX = None,
         theta: MX = None,
     ) -> MX:
         """
@@ -149,6 +159,8 @@ class Marion2009ModelFrequencyWithFatigue(Marion2009ModelFrequency):
             The current time at which the dynamics is evaluated (s)
         t_stim_prev: list[float] | list[MX]
             The time list of the previous stimulations (s)
+        pulse_width: MX
+            The pulsation duration of the current stimulation (s)
         theta: MX
             The current knee angle in degrees
 
@@ -158,14 +170,17 @@ class Marion2009ModelFrequencyWithFatigue(Marion2009ModelFrequency):
         """
         cn_dot = self.calculate_cn_dot(cn, t, t_stim_prev)
         
+        # Calculate base a_scale with pulse width dependency
+        base_a_scale = self.a_calculation(a_scale=a, pulse_width=pulse_width)
+        
         # Apply angle scaling
         angle_factor = self.angle_scaling_factor(theta)
-        a = a * angle_factor
+        a_scale = base_a_scale * angle_factor
         
         f_dot = self.f_dot_fun(
             cn,
             f,
-            a,
+            a_scale,
             tau1,
             km,
         )
@@ -190,7 +205,7 @@ class Marion2009ModelFrequencyWithFatigue(Marion2009ModelFrequency):
         -------
         The value of the derivative scaling factor (unitless)
         """
-        return -(a - self.a_rest) / self.tau_fat + self.alpha_a * f
+        return -(a - self.a_scale) / self.tau_fat + self.alpha_a * f
 
     def tau1_dot_fun(self, tau1: MX, f: MX) -> MX | float:
         """
@@ -252,7 +267,7 @@ class Marion2009ModelFrequencyWithFatigue(Marion2009ModelFrequency):
             The numerical timeseries of the system
         nlp: NonLinearProgram
             A reference to the phase
-        fes_model: Marion2009ModelFrequencyWithFatigue
+        fes_model: Marion2009ModelPulseWidthFrequencyWithFatigue
             The current phase fes model
             
         Returns
@@ -272,6 +287,7 @@ class Marion2009ModelFrequencyWithFatigue(Marion2009ModelFrequency):
                 km=states[4],
                 t=time,
                 t_stim_prev=numerical_timeseries,
+                pulse_width=controls[0],
                 theta=q,
             ),
             defects=None,

@@ -5,6 +5,10 @@ from .models.ding2003 import DingModelFrequency
 from .models.ding2003_with_fatigue import DingModelFrequencyWithFatigue
 from .models.ding2007 import DingModelPulseWidthFrequency
 from .models.ding2007_with_fatigue import DingModelPulseWidthFrequencyWithFatigue
+from .models.marion2009 import Marion2009ModelFrequency
+from .models.marion2009_with_fatigue import Marion2009ModelFrequencyWithFatigue
+from .models.marion2009_modified import Marion2009ModelPulseWidthFrequency
+from .models.marion2009_modified_with_fatigue import Marion2009ModelPulseWidthFrequencyWithFatigue
 from .models.hmed2018 import DingModelPulseIntensityFrequency
 from .models.hmed2018_with_fatigue import DingModelPulseIntensityFrequencyWithFatigue
 from .models.veltink1992 import VeltinkModelPulseIntensity

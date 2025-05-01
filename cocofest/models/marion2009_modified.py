@@ -12,15 +12,18 @@ from bioptim import (
     OptimalControlProgram,
     DynamicsFunctions,
 )
-from .ding2007 import DingModelFrequency
+from .ding2007 import DingModelPulseWidthFrequency
 from .state_configure import StateConfigure
 
 
-class Marion2009ModelFrequency(DingModelFrequency):
+class Marion2009ModelPulseWidthFrequency(DingModelPulseWidthFrequency):
     """
-    This is a custom model that inherits from DingModelFrequency.
-
+    This is a custom model that inherits from DingModelPulseWidthFrequency.
+    
     This implements the Marion 2009 model which adds angle dependency to the force-fatigue relationship.
+
+    Warning: This model was not validated from Marion's experiment as the pulse with is added.
+    This model should be used with caution.
     
     Marion, M. S., Wexler, A. S., Hull, M. L., & Binder-Macleod, S. A. (2009).
     Predicting the effect of muscle length on fatigue during electrical stimulation.
@@ -29,7 +32,7 @@ class Marion2009ModelFrequency(DingModelFrequency):
 
     def __init__(
         self,
-        model_name: str = "marion_2009",
+        model_name: str = "marion_2009_modified",
         muscle_name: str = None,
         stim_time: list[float] = None,
         previous_stim: dict = None,
@@ -39,20 +42,30 @@ class Marion2009ModelFrequency(DingModelFrequency):
         tau1_rest: float = None,
         km_rest: float = None,
         tau2: float = None,
+        pd0: float = None,
+        pdt: float = None,
+        a_scale: float = None,
         theta_star: float = 90.0,  # Reference angle in degrees (90° in the paper)
         a_theta: float = None,  # Parabolic coefficient a
         b_theta: float = None,  # Parabolic coefficient b
         bio_model=None,  # The biorbd model to use for q and qdot
     ):
-
         super().__init__(
             model_name=model_name,
             muscle_name=muscle_name,
             stim_time=stim_time,
             previous_stim=previous_stim,
             sum_stim_truncation=sum_stim_truncation,
+            tauc=tauc,
+            a_rest=a_rest,
+            tau1_rest=tau1_rest,
+            km_rest=km_rest,
+            tau2=tau2,
+            pd0=pd0,
+            pdt=pdt,
+            a_scale=a_scale,
         )
-        
+
         # --- Default values --- #
         A_THETA_DEFAULT = 1473  # Value from Marion's 2009 article in figure n°3 (N/s)
         TAU1_REST_DEFAULT = 0.04298  # Value from Marion's 2009 article in figure n°3 (s)
@@ -60,6 +73,8 @@ class Marion2009ModelFrequency(DingModelFrequency):
         KM_REST_DEFAULT = 0.128  # Value from Marion's 2009 article in figure n°3 (unitless)
         TAUC_DEFAULT = 0.020  # Value from Marion's 2009 article in figure n°3 (s)
         R0_KM_RELATIONSHIP_DEFAULT = 1.168  # Value from Marion's 2009 article in figure n°3 (unitless)
+        PD0_DEFAULT = 0.000131405  # Value from Ding's 2007 article (s)
+        PDT_DEFAULT = 0.000194138  # Value from Ding's 2007 article (s)
 
         # --- Model parameters with default values --- #
         self.tauc = tauc if tauc is not None else TAUC_DEFAULT
@@ -68,11 +83,13 @@ class Marion2009ModelFrequency(DingModelFrequency):
         self.km_rest = km_rest if km_rest is not None else KM_REST_DEFAULT
         self.tau2 = tau2 if tau2 is not None else TAU2_DEFAULT
         self.r0_km_relationship = R0_KM_RELATIONSHIP_DEFAULT
-
+        self.pd0 = PD0_DEFAULT if pd0 is not None else PD0_DEFAULT
+        self.pdt = PDT_DEFAULT if pdt is not None else PDT_DEFAULT
+        
         # Angle-specific parameters
-        self.theta_star = theta_star  # Reference angle of identified parameters
-        self.a_theta = a_theta if a_theta is not None else -0.0001
-        self.b_theta = b_theta if b_theta is not None else 0.01
+        self.theta_star = theta_star  # Reference angle
+        self.a_theta = a_theta if a_theta is not None else -0.0001  # Default from paper
+        self.b_theta = b_theta if b_theta is not None else 0.01  # Default from paper
         self.activate_residual_torque = False
         self.bio_model = bio_model
 
@@ -93,7 +110,7 @@ class Marion2009ModelFrequency(DingModelFrequency):
             "a_theta": self.a_theta,
             "b_theta": self.b_theta,
         })
-        return (Marion2009ModelFrequency, base_params)
+        return (Marion2009ModelPulseWidthFrequency, base_params)
 
     def angle_scaling_factor(self, theta: MX) -> MX:
         """
@@ -117,6 +134,7 @@ class Marion2009ModelFrequency(DingModelFrequency):
         f: MX,
         t: MX = None,
         t_stim_prev: list[float] | list[MX] = None,
+        pulse_width: MX = None,
         theta: MX = None,
     ) -> MX:
         """
@@ -143,14 +161,17 @@ class Marion2009ModelFrequency(DingModelFrequency):
         """
         cn_dot = self.calculate_cn_dot(cn, t, t_stim_prev)
         
+        # Calculate base a_scale with pulse width dependency
+        base_a_scale = self.a_calculation(a_scale=self.a_scale, pulse_width=pulse_width)
+        
         # Apply angle scaling
         angle_factor = self.angle_scaling_factor(theta)
-        a = self.a_rest * angle_factor
+        a_scale = base_a_scale * angle_factor
         
         f_dot = self.f_dot_fun(
             cn,
             f,
-            a,
+            a_scale,
             self.tau1_rest,
             self.km_rest,
         )
@@ -319,7 +340,7 @@ class Marion2009ModelFrequency(DingModelFrequency):
         qdot = nlp.get_var_from_states_or_controls("qdot", states, controls)
         residual_tau = nlp.get_var_from_states_or_controls("tau", states, controls) if "tau" in nlp.controls else None
 
-        muscles_joint_torque, _ = Marion2009ModelFrequency.muscles_joint_torque(
+        muscles_joint_torque, _ = Marion2009ModelPulseWidthFrequency.muscles_joint_torque(
             time,
             states,
             controls,
@@ -374,7 +395,7 @@ class Marion2009ModelFrequency(DingModelFrequency):
             The numerical timeseries of the system
         nlp: NonLinearProgram
             A reference to the phase
-        fes_model: Marion2009ModelFrequency
+        fes_model: Marion2009ModelPulseWidthFrequency
             The current phase fes model
         force_length_relationship: MX | float
             The force length relationship value (unitless), not considered for this model
@@ -397,6 +418,7 @@ class Marion2009ModelFrequency(DingModelFrequency):
                 f=states[1],
                 t=time,
                 t_stim_prev=numerical_timeseries,
+                pulse_width=controls[0],
                 theta=q,
             ),
             defects=None,
@@ -426,6 +448,7 @@ class Marion2009ModelFrequency(DingModelFrequency):
         StateConfigure().configure_all_fes_model_states(ocp, nlp, fes_model=self)
         StateConfigure().configure_q_for_marion_model(ocp, nlp, as_states=True, as_controls=False)
         StateConfigure().configure_qdot_for_marion_model(ocp, nlp, as_states=True, as_controls=False)
+        StateConfigure().configure_last_pulse_width(ocp, nlp)
         if self.activate_residual_torque:
             ConfigureProblem.configure_tau(ocp, nlp, as_states=False, as_controls=True)
         ConfigureProblem.configure_dynamics_function(ocp, nlp, dyn_func=self.muscle_dynamic)

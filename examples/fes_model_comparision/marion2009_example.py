@@ -5,11 +5,13 @@ end of the last node while minimizing the muscle force state.
 """
 
 import numpy as np
-from bioptim import Solver, ObjectiveList, ObjectiveFcn, OptimalControlProgram, ControlType, Node, BiorbdModel
+from bioptim import Solver, ObjectiveList, ObjectiveFcn, OptimalControlProgram, ControlType, Node, BiorbdModel, \
+    BoundsList, InitialGuessList
 from cocofest import OcpFes, ModelMaker, FES_plot
+from cocofest.models.marion2009_modified import Marion2009ModelPulseWidthFrequency
 
 
-def prepare_ocp(model, final_time, pw_max):
+def prepare_ocp(model, final_time, pw_max=0.0006):
     # --- Set dynamics --- #
     n_shooting = model.get_n_shooting(final_time=final_time)
     numerical_data_time_series, stim_idx_at_node_list = model.get_numerical_data_time_series(n_shooting, final_time)
@@ -17,7 +19,10 @@ def prepare_ocp(model, final_time, pw_max):
 
     # --- Set initial guesses and bounds for states and controls --- #
     x_bounds, x_init = OcpFes.set_x_bounds(model)
-    u_bounds, u_init = OcpFes.set_u_bounds(model, max_bound=pw_max)
+    if isinstance(model, Marion2009ModelPulseWidthFrequency):
+        u_bounds, u_init = OcpFes.set_u_bounds(model, max_bound=pw_max)
+    else:
+        u_bounds, u_init = BoundsList(), InitialGuessList()
 
     # --- Set objective functions --- #
     objective_functions = ObjectiveList()
@@ -34,18 +39,20 @@ def prepare_ocp(model, final_time, pw_max):
         objective_functions=objective_functions,
         x_init=x_init,
         x_bounds=x_bounds,
-        u_bounds=u_bounds,
         u_init=u_init,
+        u_bounds=u_bounds,
         control_type=ControlType.CONSTANT,
         use_sx=True,
         n_threads=20,
     )
 
 
-def main(with_fatigue=True, plot=True):
+def main(with_pulse_width=False, with_fatigue=True, plot=True):
     final_time = 0.2
+    chosen_model = "marion2009_modified" if with_pulse_width else "marion2009"
+    chosen_model = chosen_model + "_with_fatigue" if with_fatigue else chosen_model
     model = ModelMaker.create_model(
-        "marion2009_with_fatigue" if with_fatigue else "marion2009",
+        chosen_model,
         sum_stim_truncation=10,
         stim_time=list(np.linspace(0, final_time, 11)[:-1]),
         previous_stim={"time": [-0.15, -0.10, -0.05]},
