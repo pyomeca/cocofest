@@ -1,17 +1,13 @@
 from typing import Callable
 
-import numpy as np
 from casadi import MX, vertcat
 
 
 from bioptim import (
-    ConfigureProblem,
     DynamicsEvaluation,
     NonLinearProgram,
-    OptimalControlProgram,
 )
-from .ding2007 import DingModelFrequency
-from .state_configure import StateConfigure
+from cocofest.models.ding2007.ding2007 import DingModelFrequency
 
 
 class Marion2009ModelFrequency(DingModelFrequency):

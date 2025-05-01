@@ -9,20 +9,17 @@ from bioptim import (
     PhaseDynamics,
     BoundsList,
     InterpolationType,
-    VariableScaling,
     Solution,
     Shooting,
     SolutionIntegrator,
     SolutionMerge,
 )
 
-from ..optimization.fes_ocp import OcpFes
 from ..models.fes_model import FesModel
-from ..models.ding2003 import DingModelFrequency
-from ..models.ding2007 import DingModelPulseWidthFrequency
-from ..models.ding2007_with_fatigue import DingModelPulseWidthFrequencyWithFatigue
-from ..models.hmed2018 import DingModelPulseIntensityFrequency
-from ..models.hmed2018_with_fatigue import DingModelPulseIntensityFrequencyWithFatigue
+from cocofest.models.ding2007.ding2007 import DingModelPulseWidthFrequency
+from cocofest.models.ding2007.ding2007_with_fatigue import DingModelPulseWidthFrequencyWithFatigue
+from cocofest.models.hmed2018.hmed2018 import DingModelPulseIntensityFrequency
+from cocofest.models.hmed2018.hmed2018_with_fatigue import DingModelPulseIntensityFrequencyWithFatigue
 
 
 class IvpFes:

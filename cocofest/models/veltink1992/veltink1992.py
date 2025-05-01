@@ -9,7 +9,7 @@ from bioptim import (
     OptimalControlProgram,
 )
 
-from .state_configure import StateConfigure
+from cocofest.models.state_configure import StateConfigure
 
 
 class VeltinkModelPulseIntensity:

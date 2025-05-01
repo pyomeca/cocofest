@@ -10,8 +10,8 @@ from bioptim import (
     OptimalControlProgram,
 )
 
-from .ding2003 import DingModelFrequency
-from .state_configure import StateConfigure
+from cocofest.models.ding2003.ding2003 import DingModelFrequency
+from cocofest.models.state_configure import StateConfigure
 
 
 class DingModelFrequencyWithFatigue(DingModelFrequency):

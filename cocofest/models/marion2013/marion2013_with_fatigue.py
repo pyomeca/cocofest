@@ -8,8 +8,8 @@ from bioptim import (
     NonLinearProgram,
     OptimalControlProgram,
 )
-from .marion2013 import Marion2013ModelFrequency
-from .state_configure import StateConfigure
+from cocofest.models.marion2013 import Marion2013ModelFrequency
+from cocofest.models.state_configure import StateConfigure
 
 
 class Marion2013ModelFrequencyWithFatigue(Marion2013ModelFrequency):

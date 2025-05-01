@@ -9,7 +9,7 @@ from bioptim import (
     OptimalControlProgram,
 )
 from .marion2013_modified import Marion2013ModelPulseWidthFrequency
-from .state_configure import StateConfigure
+from cocofest.models.state_configure import StateConfigure
 
 
 class Marion2013ModelPulseWidthFrequencyWithFatigue(Marion2013ModelPulseWidthFrequency):

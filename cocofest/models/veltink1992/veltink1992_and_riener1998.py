@@ -9,8 +9,8 @@ from bioptim import (
     OptimalControlProgram,
 )
 
-from .veltink1992 import VeltinkModelPulseIntensity
-from .state_configure import StateConfigure
+from cocofest.models.veltink1992.veltink1992 import VeltinkModelPulseIntensity
+from cocofest.models.state_configure import StateConfigure
 
 
 class VeltinkRienerModelPulseIntensityWithFatigue(VeltinkModelPulseIntensity):

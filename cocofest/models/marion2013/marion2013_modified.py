@@ -6,7 +6,7 @@ from bioptim import (
     DynamicsEvaluation,
     NonLinearProgram,
 )
-from .marion2009_modified import Marion2009ModelPulseWidthFrequency
+from cocofest.models.marion2009.marion2009_modified import Marion2009ModelPulseWidthFrequency
 
 class Marion2013ModelPulseWidthFrequency(Marion2009ModelPulseWidthFrequency):
     """

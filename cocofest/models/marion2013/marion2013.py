@@ -6,7 +6,7 @@ from bioptim import (
     DynamicsEvaluation,
     NonLinearProgram,
 )
-from .marion2009 import Marion2009ModelFrequency
+from cocofest.models.marion2009.marion2009 import Marion2009ModelFrequency
 
 class Marion2013ModelFrequency(Marion2009ModelFrequency):
     """

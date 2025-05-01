@@ -5,10 +5,9 @@ end of the last node while minimizing the muscle force state.
 """
 
 import numpy as np
-from bioptim import Solver, ObjectiveList, ObjectiveFcn, OptimalControlProgram, ControlType, Node, BiorbdModel, \
-    BoundsList, InitialGuessList
+from bioptim import Solver, ObjectiveList, ObjectiveFcn, OptimalControlProgram, ControlType, Node, BoundsList, InitialGuessList
 from cocofest import OcpFes, ModelMaker, FES_plot
-from cocofest.models.marion2009_modified import Marion2009ModelPulseWidthFrequency
+from cocofest.models.marion2009.marion2009_modified import Marion2009ModelPulseWidthFrequency
 
 
 def prepare_ocp(model, final_time, pw_max=0.0006):
@@ -47,7 +46,7 @@ def prepare_ocp(model, final_time, pw_max=0.0006):
     )
 
 
-def main(with_pulse_width=True, with_fatigue=True, plot=True):
+def main(with_pulse_width=True, with_fatigue=False, plot=True):
     final_time = 0.2
     chosen_model = "marion2009_modified" if with_pulse_width else "marion2009"
     chosen_model = chosen_model + "_with_fatigue" if with_fatigue else chosen_model

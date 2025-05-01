@@ -1,7 +1,7 @@
 from bioptim import Solution, SolutionMerge, InterpolationType
 import matplotlib.pyplot as plt
 import numpy as np
-from ..models.ding2007 import DingModelPulseWidthFrequency
+from cocofest.models.ding2007.ding2007 import DingModelPulseWidthFrequency
 from ..models.dynamical_model import FesMskModel
 
 

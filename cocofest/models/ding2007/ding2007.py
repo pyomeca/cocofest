@@ -1,7 +1,7 @@
 from typing import Callable
 
-from casadi import MX, vertcat
 import numpy as np
+from casadi import MX, vertcat, exp
 
 from bioptim import (
     ConfigureProblem,
@@ -9,115 +9,100 @@ from bioptim import (
     NonLinearProgram,
     OptimalControlProgram,
 )
-from .hmed2018 import DingModelPulseIntensityFrequency
-from .state_configure import StateConfigure
+from cocofest.models.ding2003.ding2003 import DingModelFrequency
+from cocofest.models.state_configure import StateConfigure
 
 
-class DingModelPulseIntensityFrequencyWithFatigue(DingModelPulseIntensityFrequency):
+class DingModelPulseWidthFrequency(DingModelFrequency):
     """
     This is a custom models that inherits from bioptim. CustomModel.
     As CustomModel is an abstract class, some methods are mandatory and must be implemented.
     Such as serialize, name_dof, nb_state.
 
-    This is the Hmed 2018 model using the stimulation frequency and pulse intensity in input.
+    This is the Ding 2007 model using the stimulation frequency and pulse width in input.
 
-    Hmed, A. B., Bakir, T., Garnier, Y. M., Sakly, A., Lepers, R., & Binczak, S. (2018).
-    An approach to a muscle force model with force-pulse amplitude relationship of human quadriceps muscles.
-    Computers in Biology and Medicine, 101, 218-228.
+    Ding, J., Chou, L. W., Kesar, T. M., Lee, S. C., Johnston, T. E., Wexler, A. S., & Binder‐Macleod, S. A. (2007).
+    Mathematical model that predicts the force–intensity and force–frequency relationships after spinal cord injuries.
+    Muscle & Nerve: Official Journal of the American Association of Electrodiagnostic Medicine, 36(2), 214-222.
     """
 
     def __init__(
         self,
-        model_name: str = "hmed2018_with_fatigue",
+        model_name: str = "ding_2007",
         muscle_name: str = None,
         stim_time: list[float] = None,
         previous_stim: dict = None,
         sum_stim_truncation: int = 20,
     ):
-        if previous_stim:
-            if len(previous_stim["time"]) != len(previous_stim["pulse_intensity"]):
-                raise ValueError("The previous_stim time and pulse_intensity must have the same length")
-        super(DingModelPulseIntensityFrequencyWithFatigue, self).__init__(
+        super(DingModelPulseWidthFrequency, self).__init__(
             model_name=model_name,
             muscle_name=muscle_name,
             stim_time=stim_time,
             previous_stim=previous_stim,
             sum_stim_truncation=sum_stim_truncation,
         )
-        self._with_fatigue = True
+        self._with_fatigue = False
+        self.pulse_width = None
+        self.previous_stim = previous_stim if previous_stim else {"time": []}
+        self.stim_time = stim_time
 
         # --- Default values --- #
-        ALPHA_A_DEFAULT = -4.0 * 10e-2  # Value from Ding's experimentation [1] (s^-2)
-        TAU_FAT_DEFAULT = 127  # Value from Ding's experimentation [1] (s)
-        ALPHA_TAU1_DEFAULT = 2.1 * 10e-6  # Value from Ding's experimentation [1] (N^-1)
-        ALPHA_KM_DEFAULT = 1.9 * 10e-6  # Value from Ding's experimentation [1] (s^-1.N^-1)
+        A_SCALE_DEFAULT = 4920  # Value from Ding's 2007 article (N/s)
+        PD0_DEFAULT = 0.000131405  # Value from Ding's 2007 article (s)
+        PDT_DEFAULT = 0.000194138  # Value from Ding's 2007 article (s)
+        TAU1_REST_DEFAULT = 0.060601  # Value from Ding's 2003 article (s)
+        TAU2_DEFAULT = 0.001  # Value from Ding's 2007 article (s)
+        KM_REST_DEFAULT = 0.137  # Value from Ding's 2007 article (unitless)
+        TAUC_DEFAULT = 0.011  # Value from Ding's 2007 article (s)
 
-        # ---- Fatigue models ---- #
-        self.alpha_a = ALPHA_A_DEFAULT
-        self.alpha_tau1 = ALPHA_TAU1_DEFAULT
-        self.tau_fat = TAU_FAT_DEFAULT
-        self.alpha_km = ALPHA_KM_DEFAULT
-
-    # ---- Absolutely needed methods ---- #
-    @property
-    def name_dof(self, with_muscle_name: bool = False) -> list[str]:
-        muscle_name = "_" + self.muscle_name if self.muscle_name and with_muscle_name else ""
-        return [
-            "Cn" + muscle_name,
-            "F" + muscle_name,
-            "A" + muscle_name,
-            "Tau1" + muscle_name,
-            "Km" + muscle_name,
-        ]
-
-    @property
-    def nb_state(self) -> int:
-        return 5
+        # ---- Custom values for the example ---- #
+        # ---- Force models ---- #
+        self.a_scale = A_SCALE_DEFAULT
+        self.pd0 = PD0_DEFAULT
+        self.pdt = PDT_DEFAULT
+        self.tau1_rest = TAU1_REST_DEFAULT
+        self.tau2 = TAU2_DEFAULT
+        self.km_rest = KM_REST_DEFAULT
+        self.tauc = TAUC_DEFAULT
+        self.fmax = 248  # Maximum force (N) at 100 Hz and 600 us
 
     @property
     def identifiable_parameters(self):
         return {
-            "a_rest": self.a_rest,
+            "a_scale": self.a_scale,
             "tau1_rest": self.tau1_rest,
             "km_rest": self.km_rest,
             "tau2": self.tau2,
-            "ar": self.ar,
-            "bs": self.bs,
-            "Is": self.Is,
-            "cr": self.cr,
-            "alpha_a": self.alpha_a,
-            "alpha_tau1": self.alpha_tau1,
-            "alpha_km": self.alpha_km,
-            "tau_fat": self.tau_fat,
+            "pd0": self.pd0,
+            "pdt": self.pdt,
         }
 
-    def standard_rest_values(self) -> np.array:
-        """
-        Returns
-        -------
-        The rested values of the states Cn, F, A, Tau1, Km
-        """
-        return np.array([[0], [0], [self.a_rest], [self.tau1_rest], [self.km_rest]])
+    def set_a_scale(self, model, a_scale: MX | float):
+        # models is required for bioptim compatibility
+        self.a_scale = a_scale
+
+    def set_pd0(self, model, pd0: MX | float):
+        self.pd0 = pd0
+
+    def set_pdt(self, model, pdt: MX | float):
+        self.pdt = pdt
 
     def serialize(self) -> tuple[Callable, dict]:
         # This is where you can serialize your models
         # This is useful if you want to save your models and load it later
         return (
-            DingModelPulseIntensityFrequencyWithFatigue,
+            DingModelPulseWidthFrequency,
             {
                 "tauc": self.tauc,
                 "a_rest": self.a_rest,
                 "tau1_rest": self.tau1_rest,
                 "km_rest": self.km_rest,
                 "tau2": self.tau2,
-                "alpha_a": self.alpha_a,
-                "alpha_tau1": self.alpha_tau1,
-                "alpha_km": self.alpha_km,
-                "tau_fat": self.tau_fat,
-                "ar": self.ar,
-                "bs": self.bs,
-                "Is": self.Is,
-                "cr": self.cr,
+                "a_scale": self.a_scale,
+                "pd0": self.pd0,
+                "pdt": self.pdt,
+                "stim_time": self.stim_time,
+                "previous_stim": self.previous_stim,
             },
         )
 
@@ -125,14 +110,11 @@ class DingModelPulseIntensityFrequencyWithFatigue(DingModelPulseIntensityFrequen
         self,
         cn: MX,
         f: MX,
-        a: MX = None,
-        tau1: MX = None,
-        km: MX = None,
         t: MX = None,
-        t_stim_prev: list[MX] = None,
-        pulse_intensity: list[MX] | list[float] = None,
-        force_length_relationship: float | MX = 1,
-        force_velocity_relationship: float | MX = 1,
+        t_stim_prev: list[float] | list[MX] = None,
+        pulse_width: MX = None,
+        force_length_relationship: MX | float = 1,
+        force_velocity_relationship: MX | float = 1,
         passive_force_relationship: MX | float = 0,
     ) -> MX:
         """
@@ -144,89 +126,90 @@ class DingModelPulseIntensityFrequencyWithFatigue(DingModelPulseIntensityFrequen
             The value of the ca_troponin_complex (unitless)
         f: MX
             The value of the force (N)
-        a: MX
-            The value of the scaling factor (unitless)
-        tau1: MX
-            The value of the time_state_force_no_cross_bridge (ms)
-        km: MX
-            The value of the cross_bridges (unitless)
         t: MX
             The current time at which the dynamics is evaluated (s)
-        t_stim_prev: list[MX]
-            The previous time at which the stimulation was applied (s)
-        pulse_intensity: list[MX] | list[float]
-            The intensity of the stimulations (mA)
+        t_stim_prev: list[float] | list[MX]
+            The time list of the previous stimulations (s)
+        pulse_width: MX
+            The pulsation duration of the current stimulation (s)
         force_length_relationship: MX | float
             The force length relationship value (unitless)
         force_velocity_relationship: MX | float
             The force velocity relationship value (unitless)
         passive_force_relationship: MX | float
-            The passive force relationship value (unitless)
+            The passive force coefficient of the muscle (unitless)
 
         Returns
         -------
         The value of the derivative of each state dx/dt at the current time t
         """
-        cn_dot = self.calculate_cn_dot(cn, t, t_stim_prev, pulse_intensity)
+        cn_dot = self.calculate_cn_dot(cn, t, t_stim_prev)
+        a_scale = self.a_calculation(a_scale=self.a_scale, pulse_width=pulse_width)
         f_dot = self.f_dot_fun(
             cn,
             f,
-            a,
-            tau1,
-            km,
+            a_scale,
+            self.tau1_rest,
+            self.km_rest,
             force_length_relationship=force_length_relationship,
             force_velocity_relationship=force_velocity_relationship,
             passive_force_relationship=passive_force_relationship,
-        )  # Equation n°2
-        a_dot = self.a_dot_fun(a, f)  # Equation n°5
-        tau1_dot = self.tau1_dot_fun(tau1, f)  # Equation n°9
-        km_dot = self.km_dot_fun(km, f)  # Equation n°11
-        return vertcat(cn_dot, f_dot, a_dot, tau1_dot, km_dot)
+        )  # Equation n°2 from Ding's 2003 article
+        return vertcat(cn_dot, f_dot)
 
-    def a_dot_fun(self, a: MX, f: MX) -> MX | float:
+    def a_calculation(
+        self,
+        a_scale: float | MX,
+        pulse_width: MX,
+    ) -> MX:
         """
         Parameters
         ----------
-        a: MX
-            The previous step value of scaling factor (unitless)
-        f: MX
-            The previous step value of force (N)
-
+        a_scale: float | MX
+            The scaling factor of the current stimulation (unitless)
+        pulse_width: MX
+            The pulsation duration of the current stimulation (s)
         Returns
         -------
-        The value of the derivative scaling factor (unitless)
+        The value of scaling factor (unitless)
         """
-        return -(a - self.a_rest) / self.tau_fat + self.alpha_a * f  # Equation n°5
+        return a_scale * (1 - exp(-(pulse_width - self.pd0) / self.pdt))
 
-    def tau1_dot_fun(self, tau1: MX, f: MX) -> MX | float:
+    def a_calculation_identification(
+        self,
+        a_scale: float | MX,
+        pulse_width: MX,
+        pd0: float | MX,
+        pdt: float | MX,
+    ) -> MX:
         """
         Parameters
         ----------
-        tau1: MX
-            The previous step value of time_state_force_no_cross_bridge (ms)
-        f: MX
-            The previous step value of force (N)
+        a_scale: float | MX
+            The scaling factor of the current stimulation (unitless)
+        pulse_width: MX
+            The pulsation duration of the current stimulation (s)
+        pd0: float | MX
+            The pd0 value (s)
+        pdt: float | MX
+            The pdt value (s)
 
         Returns
         -------
-        The value of the derivative time_state_force_no_cross_bridge (ms)
+        The value of scaling factor (unitless)
         """
-        return -(tau1 - self.tau1_rest) / self.tau_fat + self.alpha_tau1 * f  # Equation n°9
+        return a_scale * (1 - exp(-(pulse_width - pd0) / pdt))
 
-    def km_dot_fun(self, km: MX, f: MX) -> MX | float:
+    def set_impulse_width(self, value: list[MX]):
         """
+        Sets the pulse width for each pulse (phases) according to the ocp parameter "pulse_width"
+
         Parameters
         ----------
-        km: MX
-            The previous step value of cross_bridges (unitless)
-        f: MX
-            The previous step value of force (N)
-
-        Returns
-        -------
-        The value of the derivative cross_bridges (unitless)
+        value: list[MX]
+            The pulsation duration list (s)
         """
-        return -(km - self.km_rest) / self.tau_fat + self.alpha_km * f  # Equation n°11
+        self.pulse_width = value
 
     @staticmethod
     def dynamics(
@@ -238,8 +221,8 @@ class DingModelPulseIntensityFrequencyWithFatigue(DingModelPulseIntensityFrequen
         numerical_timeseries: MX,
         nlp: NonLinearProgram,
         fes_model=None,
-        force_length_relationship: float | MX = 1,
-        force_velocity_relationship: float | MX = 1,
+        force_length_relationship: MX | float = 1,
+        force_velocity_relationship: MX | float = 1,
         passive_force_relationship: MX | float = 0,
     ) -> DynamicsEvaluation:
         """
@@ -261,14 +244,14 @@ class DingModelPulseIntensityFrequencyWithFatigue(DingModelPulseIntensityFrequen
             The numerical timeseries of the system
         nlp: NonLinearProgram
             A reference to the phase
-        fes_model: DingModelPulseIntensityFrequencyWithFatigue
+        fes_model: DingModelPulseWidthFrequency
             The current phase fes model
         force_length_relationship: MX | float
             The force length relationship value (unitless)
         force_velocity_relationship: MX | float
             The force velocity relationship value (unitless)
         passive_force_relationship: MX | float
-            The passive force relationship value (unitless)
+            The passive force coefficient of the muscle (unitless)
         Returns
         -------
         The derivative of the states in the tuple[MX] format
@@ -280,12 +263,9 @@ class DingModelPulseIntensityFrequencyWithFatigue(DingModelPulseIntensityFrequen
             dxdt=dxdt_fun(
                 cn=states[0],
                 f=states[1],
-                a=states[2],
-                tau1=states[3],
-                km=states[4],
                 t=time,
                 t_stim_prev=numerical_timeseries,
-                pulse_intensity=controls,
+                pulse_width=controls[0],
                 force_length_relationship=force_length_relationship,
                 force_velocity_relationship=force_velocity_relationship,
                 passive_force_relationship=passive_force_relationship,
@@ -315,5 +295,5 @@ class DingModelPulseIntensityFrequencyWithFatigue(DingModelPulseIntensityFrequen
             The type of contact to use for the model
         """
         StateConfigure().configure_all_fes_model_states(ocp, nlp, fes_model=self)
-        StateConfigure().configure_pulse_intensity(ocp, nlp, truncation=self.sum_stim_truncation)
+        StateConfigure().configure_last_pulse_width(ocp, nlp)
         ConfigureProblem.configure_dynamics_function(ocp, nlp, dyn_func=self.dynamics)
