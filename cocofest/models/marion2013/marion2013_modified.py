@@ -12,6 +12,9 @@ class Marion2013ModelPulseWidthFrequency(Marion2009ModelPulseWidthFrequency):
     """
     Implementation of the Marion 2013 force-motion model for electrical stimulation
 
+    Warning: This model was not validated from Marion's experiment as the pulse with is added.
+    This model should be used with caution.
+
     Marion, M. S., Wexler, A. S., & Hull, M. L. (2013).
     Predicting non-isometric fatigue induced by electrical stimulation pulse trains as a function of pulse duration.
     Journal of neuroengineering and rehabilitation, 10, 1-16.

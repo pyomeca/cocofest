@@ -3,20 +3,19 @@ from casadi import MX, vertcat
 import numpy as np
 
 from bioptim import (
-    ConfigureProblem,
     DynamicsEvaluation,
     NonLinearProgram,
-    OptimalControlProgram,
 )
-from cocofest.models.marion2013 import Marion2013ModelFrequency
-from cocofest.models.state_configure import StateConfigure
+from .marion2013 import Marion2013ModelFrequency
 
 
 class Marion2013ModelFrequencyWithFatigue(Marion2013ModelFrequency):
     """
     Extension of Marion2013 model that includes fatigue effects
-    Based on: Marion et al. (2013) - Predicting non-isometric fatigue induced by electrical 
-    stimulation pulse trains as a function of pulse duration
+
+    Marion, M. S., Wexler, A. S., & Hull, M. L. (2013).
+    Predicting non-isometric fatigue induced by electrical stimulation pulse trains as a function of pulse duration.
+    Journal of neuroengineering and rehabilitation, 10, 1-16.
     """
     
     def __init__(

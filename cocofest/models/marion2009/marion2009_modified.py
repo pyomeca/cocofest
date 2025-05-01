@@ -18,7 +18,7 @@ class Marion2009ModelPulseWidthFrequency(DingModelPulseWidthFrequency):
     Warning: This model was not validated from Marion's experiment as the pulse with is added.
     This model should be used with caution.
     
-    Marion, M. S., Wexler, A. S., Hull, M. L., & Binder-Macleod, S. A. (2009).
+    Marion, M. S., Wexler, A. S., Hull, M. L., & Binder‐Macleod, S. A. (2009).
     Predicting the effect of muscle length on fatigue during electrical stimulation.
     Muscle & Nerve: Official Journal of the American Association of Electrodiagnostic Medicine, 40(4), 573-581.
     """

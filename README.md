@@ -83,6 +83,16 @@ You are now ready to use `Cocofest`!
 
 # Available FES models
 The available FES models are likely to increase so stay tune.
+## Veltink1992
+Veltink, P. H., Chizeck, H. J., Crago, P. E., & El-Bialy, A. (1992).
+Nonlinear joint angle control for artificially stimulated muscle.
+IEEE Transactions on Biomedical Engineering, 39(4), 368-380.
+
+## Riener1998
+Riener, R., & Veltink, P. H. (1998).
+A model of muscle fatigue during electrical stimulation.
+IEEE Transactions on Biomedical Engineering, 45(1), 105-113.
+
 ## Ding2003
 Ding, J., Wexler, A. S., & Binder-Macleod, S. A. (2003).
 Mathematical models for fatigue minimization during functional electrical stimulation.
@@ -92,6 +102,16 @@ Journal of Electromyography and Kinesiology, 13(6), 575-588.
 Ding, J., Chou, L. W., Kesar, T. M., Lee, S. C., Johnston, T. E., Wexler, A. S., & Binder‐Macleod, S. A. (2007).
 Mathematical model that predicts the force–intensity and force–frequency relationships after spinal cord injuries.
 Muscle & Nerve: Official Journal of the American Association of Electrodiagnostic Medicine, 36(2), 214-222.
+
+## Marion2009
+Marion, M. S., Wexler, A. S., Hull, M. L., & Binder‐Macleod, S. A. (2009).
+Predicting the effect of muscle length on fatigue during electrical stimulation.
+Muscle & Nerve: Official Journal of the American Association of Electrodiagnostic Medicine, 40(4), 573-581.
+
+## Marion2013
+Marion, M. S., Wexler, A. S., & Hull, M. L. (2013).
+Predicting non-isometric fatigue induced by electrical stimulation pulse trains as a function of pulse duration.
+Journal of neuroengineering and rehabilitation, 10, 1-16.
 
 ## Hmed2018
 Hmed, A. B., Bakir, T., Sakly, A., & Binczak, S. (2018, July).

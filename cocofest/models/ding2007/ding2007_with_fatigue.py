@@ -9,7 +9,7 @@ from bioptim import (
     NonLinearProgram,
     OptimalControlProgram,
 )
-from cocofest.models.ding2007 import DingModelPulseWidthFrequency
+from cocofest.models.ding2007.ding2007 import DingModelPulseWidthFrequency
 from cocofest.models.state_configure import StateConfigure
 
 

@@ -7,7 +7,7 @@ from bioptim import (
     DynamicsEvaluation,
     NonLinearProgram,
 )
-from cocofest.models.marion2009 import Marion2009ModelFrequency
+from .marion2009 import Marion2009ModelFrequency
 
 
 class Marion2009ModelFrequencyWithFatigue(Marion2009ModelFrequency):
@@ -17,7 +17,7 @@ class Marion2009ModelFrequencyWithFatigue(Marion2009ModelFrequency):
     It combines the angle-dependent force-fatigue relationship from Marion 2009 with
     explicit fatigue states tracking (A, Tau1, Km) as done in Ding's models.
     
-    Marion, M. S., Wexler, A. S., Hull, M. L., & Binder-Macleod, S. A. (2009).
+    Marion, M. S., Wexler, A. S., Hull, M. L., & Binder‐Macleod, S. A. (2009).
     Predicting the effect of muscle length on fatigue during electrical stimulation.
     Muscle & Nerve: Official Journal of the American Association of Electrodiagnostic Medicine, 40(4), 573-581.
     """
