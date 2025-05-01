@@ -6,9 +6,9 @@ from bioptim import (
     DynamicsEvaluation,
     NonLinearProgram,
 )
-from .marion2009 import Marion2009ModelFrequency
+from .marion2009_modified import Marion2009ModelPulseWidthFrequency
 
-class Marion2013ModelFrequency(Marion2009ModelFrequency):
+class Marion2013ModelPulseWidthFrequency(Marion2009ModelPulseWidthFrequency):
     """
     Implementation of the Marion 2013 force-motion model for electrical stimulation
 
@@ -23,7 +23,7 @@ class Marion2013ModelFrequency(Marion2009ModelFrequency):
         muscle_name: str = None,
         stim_time: list[float] = None,
         previous_stim: dict = None,
-        sum_stim_truncation: int = 10,
+        sum_stim_truncation: int = 20,
     ):
         # Initialize Ding 2007 parent class
         super().__init__(
@@ -47,9 +47,10 @@ class Marion2013ModelFrequency(Marion2009ModelFrequency):
         V2_DEFAULT = 0.0229  # Value from Marion's 2013 article in figure n°3 (deg^-1)
         L_I_DEFAULT = 9.85  # Value from Marion's 2013 article in figure n°3 (kg^-1.m^-1)
         FM_DEFAULT = 247.5  # Value from Marion's 2013 article in figure n°3 (N)
-        
+
         # Model parameters with default values
         self.a_rest = A_REST_DEFAULT
+        self.a_scale = A_REST_DEFAULT
         self.km_rest = KM_REST_DEFAULT
         self.tau1_rest = TAU1_REST_DEFAULT
         self.tau2 = TAU2_DEFAULT
@@ -58,7 +59,7 @@ class Marion2013ModelFrequency(Marion2009ModelFrequency):
         self.a_coef = A_COEF_DEFAULT
         self.b_coef = B_COEF_DEFAULT
         self.V1 = V1_DEFAULT
-        self.V2 =  V2_DEFAULT
+        self.V2 = V2_DEFAULT
         self.L_I = L_I_DEFAULT
         self.FM = FM_DEFAULT
 
@@ -74,12 +75,12 @@ class Marion2013ModelFrequency(Marion2009ModelFrequency):
 
     @property
     def nb_state(self) -> int:
-        return 2
+        return 4
 
     @property
     def identifiable_parameters(self):
         return {
-            "a_rest": self.a_rest,
+            "a": self.a_rest,
             "a_coef": self.a_coef,
             "b_coef": self.b_coef,
             "V1": self.V1,
@@ -98,9 +99,9 @@ class Marion2013ModelFrequency(Marion2009ModelFrequency):
 
     def serialize(self) -> tuple[Callable, dict]:
         return (
-            Marion2013ModelFrequency,
+            Marion2013ModelPulseWidthFrequency,
             {
-                "a_rest": self.a_rest,
+                "a": self.a_rest,
                 "a_coef": self.a_coef,
                 "b_coef": self.b_coef,
                 "V1": self.V1,
@@ -111,14 +112,15 @@ class Marion2013ModelFrequency(Marion2009ModelFrequency):
                 "previous_stim": self.previous_stim,
             },
         )
-    
-    def calculate_A(self, theta: MX) -> MX:
+
+    def calculate_A(self, a: MX, theta: MX) -> MX:
         """Calculate angle-dependent scaling term A"""
-        return self.a_rest * (self.a_coef * (90 - theta)**2 + self.b_coef * (90 - theta) + 1)
-    
+        return a * (self.a_coef * (90 - theta) ** 2 + self.b_coef * (90 - theta) + 1)
+
     def calculate_G(self, theta: MX, dtheta_dt: MX) -> MX:
         """Calculate velocity-dependent scaling term G"""
         return self.V1 * theta * exp(-self.V2 * theta) * dtheta_dt
+
     def calculate_acceleration(self, theta: MX, lambda_angle: MX, f: MX, Fload: MX) -> MX:
         return (self.L_I * ((Fload + self.FM) * cos(pi / 180 * (theta + lambda_angle)) - f))
 
@@ -130,6 +132,7 @@ class Marion2013ModelFrequency(Marion2009ModelFrequency):
         dtheta_dt: MX,
         t: MX = None,
         t_stim_prev: MX = None,
+        pulse_width: MX = None,
         Fload: MX = 0.0,
     ) -> MX:
         """
@@ -146,9 +149,11 @@ class Marion2013ModelFrequency(Marion2009ModelFrequency):
         dtheta_dt: MX
             The angular velocity
         t: MX
-            The current time at which the dynamics is evaluated (ms)
+            The current time at which the dynamics is evaluated (s)
         t_stim_prev: MX
-            The time of the previous stimulation (ms)
+            The time of the previous stimulation (s)
+        pulse_width: MX
+            The pulse width of the stimulation (s)
         Fload: MX
             External load force (N)
 
@@ -156,17 +161,21 @@ class Marion2013ModelFrequency(Marion2009ModelFrequency):
         -------
         The value of the derivative of each state dx/dt at the current time t
         """
-        cn_dot = self.calculate_cn_dot(cn, t, t_stim_prev)  # Similar to Ding's model calculation
-            
+        # Get CN dynamics from Ding model
+        cn_dot = self.calculate_cn_dot(cn, t, t_stim_prev)
+
+        # Calculate base a_scale with pulse width dependency
+        base_a_scale = self.a_calculation(a_scale=self.a_scale, pulse_width=pulse_width)
+
         # Calculate Marion-specific force scaling terms
-        A = self.calculate_A(theta)
+        A = self.calculate_A(base_a_scale, theta)
         G = self.calculate_G(theta, dtheta_dt)
         
-        # Similar to Ding's model calculation but using [G+A] as the scaling term instead of A from Marion 2013 equation
+        # Use Ding's force equation with G+A as the scaling term instead of a_scale
         f_dot = self.f_dot_fun(
             cn,
             f,
-            G + A,
+            G + A,  # Replace a_scale with G+A from Marion 2013
             self.tau1_rest,
             self.km_rest,
         )
@@ -212,7 +221,7 @@ class Marion2013ModelFrequency(Marion2009ModelFrequency):
             The numerical timeseries of the system
         nlp: NonLinearProgram
             A reference to the phase
-        fes_model: Marion2013ModelFrequency
+        fes_model: Marion2013ModelPulseWidthFrequency
             The current phase fes model
 
         Returns
@@ -230,8 +239,8 @@ class Marion2013ModelFrequency(Marion2009ModelFrequency):
                 dtheta_dt=states[3],
                 t=time,
                 t_stim_prev=numerical_timeseries,
-                Fload=controls[0] if controls.shape[0] > 0 else 0.0,
+                pulse_width=controls[0],
+                Fload=controls[1] if controls.shape[0] > 1 else 0.0,
             ),
             defects=None,
         )
-    

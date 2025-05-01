@@ -32,15 +32,6 @@ class Marion2009ModelFrequency(DingModelFrequency):
         stim_time: list[float] = None,
         previous_stim: dict = None,
         sum_stim_truncation: int = 20,
-        tauc: float = None,
-        a_rest: float = None,
-        tau1_rest: float = None,
-        km_rest: float = None,
-        tau2: float = None,
-        theta_star: float = 90.0,  # Reference angle in degrees (90° in the paper)
-        a_theta: float = None,  # Parabolic coefficient a
-        b_theta: float = None,  # Parabolic coefficient b
-        bio_model=None,  # The biorbd model to use for q and qdot
     ):
 
         super().__init__(
@@ -58,21 +49,22 @@ class Marion2009ModelFrequency(DingModelFrequency):
         KM_REST_DEFAULT = 0.128  # Value from Marion's 2009 article in figure n°3 (unitless)
         TAUC_DEFAULT = 0.020  # Value from Marion's 2009 article in figure n°3 (s)
         R0_KM_RELATIONSHIP_DEFAULT = 1.168  # Value from Marion's 2009 article in figure n°3 (unitless)
+        A_COEF_DEFAULT = -0.000449  # Value from Marion's 2013 article in figure n°3 (deg^-2), couldn't be found in 2009
+        B_COEF_DEFAULT = 0.0344  # Value from Marion's 2013 article in figure n°3 (deg^-1), couldn't be found in 2009
 
         # --- Model parameters with default values --- #
-        self.tauc = tauc if tauc is not None else TAUC_DEFAULT
-        self.a_rest = a_rest if a_rest is not None else A_THETA_DEFAULT
-        self.tau1_rest = tau1_rest if tau1_rest is not None else TAU1_REST_DEFAULT
-        self.km_rest = km_rest if km_rest is not None else KM_REST_DEFAULT
-        self.tau2 = tau2 if tau2 is not None else TAU2_DEFAULT
+        self.tauc = TAUC_DEFAULT
+        self.a_rest = A_THETA_DEFAULT
+        self.tau1_rest = TAU1_REST_DEFAULT
+        self.km_rest = KM_REST_DEFAULT
+        self.tau2 = TAU2_DEFAULT
         self.r0_km_relationship = R0_KM_RELATIONSHIP_DEFAULT
 
         # Angle-specific parameters
-        self.theta_star = theta_star  # Reference angle of identified parameters
-        self.a_theta = a_theta if a_theta is not None else -0.0001
-        self.b_theta = b_theta if b_theta is not None else 0.01
+        self.theta_star = 90  # Reference angle of identified parameters
+        self.a_theta = A_COEF_DEFAULT
+        self.b_theta = B_COEF_DEFAULT
         self.activate_residual_torque = False
-        self.bio_model = bio_model
 
     @property
     def identifiable_parameters(self):
@@ -212,27 +204,3 @@ class Marion2009ModelFrequency(DingModelFrequency):
             ),
             defects=None,
         )
-
-    def declare_ding_variables(
-        self,
-        ocp: OptimalControlProgram,
-        nlp: NonLinearProgram,
-        numerical_data_timeseries: dict[str, np.ndarray] = None,
-        contact_type: tuple = (),
-    ):
-        """
-        Tell the program which variables are states and controls.
-        The user is expected to use the ConfigureProblem.configure_xxx functions.
-        Parameters
-        ----------
-        ocp: OptimalControlProgram
-            A reference to the ocp
-        nlp: NonLinearProgram
-            A reference to the phase
-        numerical_data_timeseries: dict[str, np.ndarray]
-            A list of values to pass to the dynamics at each node. Experimental external forces should be included here.
-        contact_type: tuple
-            The type of contact to use for the model
-        """
-        StateConfigure().configure_all_fes_model_states(ocp, nlp, fes_model=self)
-        ConfigureProblem.configure_dynamics_function(ocp, nlp, dyn_func=self.dynamics)

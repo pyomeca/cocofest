@@ -6,7 +6,6 @@ from casadi import MX, vertcat
 from bioptim import (
     DynamicsEvaluation,
     NonLinearProgram,
-    DynamicsFunctions,
 )
 from .marion2009 import Marion2009ModelFrequency
 
@@ -29,19 +28,7 @@ class Marion2009ModelFrequencyWithFatigue(Marion2009ModelFrequency):
         muscle_name: str = None,
         stim_time: list[float] = None,
         previous_stim: dict = None,
-        sum_stim_truncation: int = 20,
-        tauc: float = None,
-        a_rest: float = None,
-        tau1_rest: float = None,
-        km_rest: float = None,
-        tau2: float = None,
-        alpha_a: float = None,
-        alpha_tau1: float = None,
-        alpha_km: float = None,
-        tau_fat: float = None,
-        theta_star: float = 90.0,
-        a_theta: float = None,
-        b_theta: float = None,
+        sum_stim_truncation: int = 10,
     ):
         super().__init__(
             model_name=model_name,
@@ -49,14 +36,6 @@ class Marion2009ModelFrequencyWithFatigue(Marion2009ModelFrequency):
             stim_time=stim_time,
             previous_stim=previous_stim,
             sum_stim_truncation=sum_stim_truncation,
-            tauc=tauc,
-            a_rest=a_rest,
-            tau1_rest=tau1_rest,
-            km_rest=km_rest,
-            tau2=tau2,
-            theta_star=theta_star,
-            a_theta=a_theta,
-            b_theta=b_theta,
         )
         self._with_fatigue = True
         self.stim_time = stim_time
@@ -70,10 +49,10 @@ class Marion2009ModelFrequencyWithFatigue(Marion2009ModelFrequency):
         ALPHA_KM_DEFAULT = 6.269 * 10e-6  # Value from Marion's 2009 article in figure n°3 (s^-1.N^-1)
 
         # ---- Fatigue model parameters ---- #
-        self.alpha_a = alpha_a if alpha_a is not None else ALPHA_A_DEFAULT
-        self.alpha_tau1 = alpha_tau1 if alpha_tau1 is not None else ALPHA_TAU1_DEFAULT
-        self.tau_fat = tau_fat if tau_fat is not None else TAU_FAT_DEFAULT
-        self.alpha_km = alpha_km if alpha_km is not None else ALPHA_KM_DEFAULT
+        self.alpha_a = ALPHA_A_DEFAULT
+        self.alpha_tau1 = ALPHA_TAU1_DEFAULT
+        self.tau_fat = TAU_FAT_DEFAULT
+        self.alpha_km = ALPHA_KM_DEFAULT
 
     @property
     def name_dof(self, with_muscle_name: bool = False) -> list[str]:

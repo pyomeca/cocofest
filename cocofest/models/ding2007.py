@@ -34,18 +34,6 @@ class DingModelPulseWidthFrequency(DingModelFrequency):
         stim_time: list[float] = None,
         previous_stim: dict = None,
         sum_stim_truncation: int = 20,
-        tauc: float = None,
-        a_rest: float = None,
-        tau1_rest: float = None,
-        km_rest: float = None,
-        tau2: float = None,
-        pd0: float = None,
-        pdt: float = None,
-        a_scale: float = None,
-        alpha_a: float = None,
-        alpha_tau1: float = None,
-        alpha_km: float = None,
-        tau_fat: float = None,
     ):
         super(DingModelPulseWidthFrequency, self).__init__(
             model_name=model_name,

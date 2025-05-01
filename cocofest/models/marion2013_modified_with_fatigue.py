@@ -8,11 +8,11 @@ from bioptim import (
     NonLinearProgram,
     OptimalControlProgram,
 )
-from .marion2013 import Marion2013ModelFrequency
+from .marion2013_modified import Marion2013ModelPulseWidthFrequency
 from .state_configure import StateConfigure
 
 
-class Marion2013ModelFrequencyWithFatigue(Marion2013ModelFrequency):
+class Marion2013ModelPulseWidthFrequencyWithFatigue(Marion2013ModelPulseWidthFrequency):
     """
     Extension of Marion2013 model that includes fatigue effects
     Based on: Marion et al. (2013) - Predicting non-isometric fatigue induced by electrical 
@@ -21,11 +21,11 @@ class Marion2013ModelFrequencyWithFatigue(Marion2013ModelFrequency):
     
     def __init__(
         self,
-        model_name: str = "marion_2013_with_fatigue",
+        model_name: str = "marion_2013_modified_with_fatigue",
         muscle_name: str = None,
         stim_time: list[float] = None,
         previous_stim: dict = None,
-        sum_stim_truncation: int = 20,
+        sum_stim_truncation: int = 10,
     ):
         super().__init__(
             model_name=model_name,
@@ -105,7 +105,7 @@ class Marion2013ModelFrequencyWithFatigue(Marion2013ModelFrequency):
             "alpha_tau1": self.alpha_tau1,
             "tau_fat": self.tau_fat,
         })
-        return (Marion2013ModelFrequencyWithFatigue, base_dict)
+        return (Marion2013ModelPulseWidthFrequencyWithFatigue, base_dict)
 
     def a_dot_fun(self, a: MX, f: MX, velocity: MX) -> MX | float:
         """
@@ -169,6 +169,7 @@ class Marion2013ModelFrequencyWithFatigue(Marion2013ModelFrequency):
         tau1: MX,
         t: MX = None,
         t_stim_prev: MX = None,
+        pulse_width: MX = None,
         Fload: MX = 0.0,
     ) -> MX:
         """
@@ -191,9 +192,11 @@ class Marion2013ModelFrequencyWithFatigue(Marion2013ModelFrequency):
         tau1: MX
             The current tau1 value affected by fatigue
         t: MX
-            The current time at which the dynamics is evaluated (ms)
+            The current time at which the dynamics is evaluated (s)
         t_stim_prev: MX
-            The time of the previous stimulation (ms)
+            The time of the previous stimulation (s)
+        pulse_width: MX
+            The pulse width of the stimulation (s)
         Fload: MX
             External load force (N)
 
@@ -203,9 +206,12 @@ class Marion2013ModelFrequencyWithFatigue(Marion2013ModelFrequency):
         """
         # Get CN dynamics from Ding model
         cn_dot = self.calculate_cn_dot(cn, t, t_stim_prev)
-            
+
+        # Calculate base a_scale with pulse width dependency
+        base_a_scale = self.a_calculation(a_scale=self.a_scale, pulse_width=pulse_width)
+
         # Calculate Marion-specific force scaling terms with fatigue-affected A90
-        A = self.calculate_A(theta)  # Using current A90 value
+        A = self.calculate_A(base_a_scale, theta)  # Using current A90 value
         G = self.calculate_G(theta, dtheta_dt)
         
         # Use Ding's force equation with G+A as the scaling term
@@ -284,7 +290,8 @@ class Marion2013ModelFrequencyWithFatigue(Marion2013ModelFrequency):
                 tau1=states[6],
                 t=time,
                 t_stim_prev=numerical_timeseries,
-                Fload=controls[0] if controls.shape[0] > 0 else 0.0,
+                pulse_width=controls[0],
+                Fload=controls[1] if controls.shape[0] > 1 else 0.0,
             ),
             defects=None,
         )
