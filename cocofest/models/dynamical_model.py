@@ -11,6 +11,7 @@ from bioptim import (
     DynamicsFunctions,
     DynamicsEvaluation,
     ParameterList,
+    ContactType,
 )
 
 from ..models.fes_model import FesModel
@@ -403,14 +404,14 @@ class FesMskModel(BiorbdModel):
 
         external_forces = nlp.get_external_forces(states, controls, algebraic_states, numerical_timeseries[0:3])
 
-        return nlp.model.contact_forces()(q, qdot, tau, external_forces, nlp.parameters.cx)
+        return nlp.model.rigid_contact_forces()(q, qdot, tau, external_forces, nlp.parameters.cx)
 
     def declare_model_variables(
         self,
         ocp: OptimalControlProgram,
         nlp: NonLinearProgram,
         numerical_data_timeseries: dict[str, np.ndarray] = None,
-        contact_type: tuple = (),
+        contact_type: list = (),
     ):
         """
         Tell the program which variables are states and controls.
@@ -423,8 +424,8 @@ class FesMskModel(BiorbdModel):
             A reference to the phase
         numerical_data_timeseries: dict[str, np.ndarray]
             A list of values to pass to the dynamics at each node. Experimental external forces should be included here.
-        contact_type: tuple
-            The type of contact to use for the model
+        contact_type: list
+            The type of contact to be used
         """
 
         state_name_list = StateConfigure().configure_all_muscle_states(self.muscles_dynamics_model, ocp, nlp)
@@ -450,8 +451,8 @@ class FesMskModel(BiorbdModel):
             state_name_list=state_name_list,
         )
 
-        if contact_type != ():
-            ConfigureProblem.configure_contact_function(
+        if ContactType.RIGID_EXPLICIT in contact_type:
+            ConfigureProblem.configure_rigid_contact_function(
                 ocp, nlp, self.forces_from_fes_driven, state_name_list=state_name_list
             )
 

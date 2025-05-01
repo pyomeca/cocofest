@@ -102,7 +102,12 @@ def prepare_ocp(
         n_shooting, final_time
     )
 
-    dynamics = OcpFesMsk.declare_dynamics(model, numerical_time_series=numerical_data_time_series, with_contact=False)
+    dynamics = OcpFesMsk.declare_dynamics(
+        model,
+        numerical_time_series=numerical_data_time_series,
+        ode_solver=OdeSolver.RK4(n_integration_steps=5),
+        with_contact=False,
+    )
 
     x_bounds, x_init = OcpFesMsk.set_x_bounds(model, msk_info)
     u_bounds, u_init = OcpFesMsk.set_u_bounds(model, msk_info["with_residual_torque"], max_bound=max_bound)
@@ -146,7 +151,6 @@ def prepare_ocp(
         u_bounds=u_bounds,
         control_type=ControlType.CONSTANT,
         use_sx=True,
-        ode_solver=OdeSolver.RK4(n_integration_steps=5),
         n_threads=20,
     )
 

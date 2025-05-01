@@ -22,9 +22,13 @@ class DingModelFrequencyWithFatigue(DingModelFrequency):
 
     This is the Ding 2003 model using the stimulation frequency in input.
 
-    Ding, J., Wexler, A. S., & Binder-Macleod, S. A. (2003).
+    [1] Ding, J., Wexler, A. S., & Binder-Macleod, S. A. (2003).
     Mathematical models for fatigue minimization during functional electrical stimulation.
     Journal of Electromyography and Kinesiology, 13(6), 575-588.
+
+    [2] Doll, B. D., Kirsch, N. A., & Sharma, N. (2015).
+    Optimization of a stimulation train based on a predictive model of muscle force and fatigue.
+    IFAC-PapersOnLine, 48(20), 338-342.
     """
 
     def __init__(
@@ -45,7 +49,7 @@ class DingModelFrequencyWithFatigue(DingModelFrequency):
         self._with_fatigue = True
 
         # --- Default values --- #
-        ALPHA_A_DEFAULT = -4.0 * 10e-2  # Value from Ding's experimentation [1] (s^-2)
+        ALPHA_A_DEFAULT = -4.0 * 10e-2  # Value from Ding's experimentation [1] (s^-2) corrected in [2]
         TAU_FAT_DEFAULT = 127  # Value from Ding's experimentation [1] (s)
         ALPHA_TAU1_DEFAULT = 2.1 * 10e-6  # Value from Ding's experimentation [1] (N^-1)
         ALPHA_KM_DEFAULT = 1.9 * 10e-6  # Value from Ding's experimentation [1] (s^-1.N^-1)
@@ -176,7 +180,7 @@ class DingModelFrequencyWithFatigue(DingModelFrequency):
         -------
         The value of the derivative of each state dx/dt at the current time t
         """
-        cn_dot = self.calculate_cn_dot(cn, t, t_stim_prev)
+        cn_dot = self.calculate_cn_dot(cn, t, t_stim_prev)  # Equation n°1
         f_dot = self.f_dot_fun(
             cn,
             f,
@@ -306,7 +310,7 @@ class DingModelFrequencyWithFatigue(DingModelFrequency):
         ocp: OptimalControlProgram,
         nlp: NonLinearProgram,
         numerical_data_timeseries: dict[str, np.ndarray] = None,
-        contact_type: tuple = (),
+        contact_type: list = (),
     ):
         """
         Tell the program which variables are states and controls.
@@ -319,8 +323,8 @@ class DingModelFrequencyWithFatigue(DingModelFrequency):
             A reference to the phase
         numerical_data_timeseries: dict[str, np.ndarray]
             A list of values to pass to the dynamics at each node. Experimental external forces should be included here.
-        contact_type: tuple
-            The type of contact to use for the model
+        contact_type: list
+            A list of contact types. This is used to define the contact forces in the dynamics. Not used in this model.
         """
         StateConfigure().configure_all_fes_model_states(ocp, nlp, fes_model=self)
         ConfigureProblem.configure_dynamics_function(ocp, nlp, dyn_func=self.dynamics)

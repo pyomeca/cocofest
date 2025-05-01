@@ -91,6 +91,7 @@ class IvpFes:
             self.n_shooting, self.final_time
         )
 
+        self.ode_solver = self.ivp_parameters["ode_solver"]
         self._declare_dynamics(numerical_data_time_series)
 
         (
@@ -107,7 +108,18 @@ class IvpFes:
         self.fake_ocp = self._prepare_fake_ocp()
         self.initial_guess_solution = self._build_solution_from_initial_guess()
 
-    def _fill_fes_dict(self, fes_parameters):
+    def _fill_fes_dict(self, fes_parameters: dict):
+        """
+        Parameters
+        ----------
+        fes_parameters : dict
+            Contains FES parameters
+
+        Returns
+        -------
+        A dictionary with all needed FES parameters such as model, stimulation time, pulse width, intensity and mode (if not specified, default parameter is used)
+        """
+
         default_fes_dict = {
             "model": FesModel,
             "stim_time": None,
@@ -125,7 +137,19 @@ class IvpFes:
 
         self.fes_parameters = fes_parameters
 
-    def _fill_ivp_dict(self, ivp_parameters):
+    def _fill_ivp_dict(self, ivp_parameters: dict):
+        """
+
+        Parameters
+        ----------
+        ivp_parameters: dict
+            Contains IVP parameters
+
+        Returns
+        -------
+        A dictionary with all needed IVP parameters such as final time, the solver used and the number of threads (if not specified, default parameter is used)
+
+        """
         default_ivp_dict = {
             "final_time": None,
             "ode_solver": OdeSolver.RK4(n_integration_steps=10),
@@ -266,7 +290,6 @@ class IvpFes:
             phase_time=self.final_time,
             x_init=self.x_init,
             u_init=self.u_init,
-            ode_solver=self.ode_solver,
             control_type=ControlType.CONSTANT,
             use_sx=False,
             parameters=self.parameters,
@@ -306,6 +329,7 @@ class IvpFes:
             phase=0,
             phase_dynamics=PhaseDynamics.SHARED_DURING_THE_PHASE,
             numerical_data_timeseries=numerical_data_time_series,
+            ode_solver=self.ode_solver,
         )
 
     def build_initial_guess_from_ocp(self, ocp, stim_idx_at_node_list=None):

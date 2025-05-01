@@ -10,6 +10,8 @@ import numpy as np
 from bioptim import (
     CostType,
     ConstraintFcn,
+    InitialGuessList,
+    InterpolationType,
     MultiCyclicCycleSolutions,
     MultiCyclicNonlinearModelPredictiveControl,
     ObjectiveFcn,
@@ -38,19 +40,34 @@ def prepare_nmpc(
     use_sx: bool = False,
     minimize_force: bool = True,
     minimize_fatigue: bool = False,
+    ode_solver: OdeSolver = OdeSolver.RK4(n_integration_steps=10),
 ):
-    total_cycle_len = model.get_n_shooting(cycle_duration * n_cycles_simultaneous)
     total_cycle_duration = cycle_duration * n_cycles_simultaneous
+    total_cycle_len = model.get_n_shooting(total_cycle_duration)
     cycle_len = int(total_cycle_len / n_cycles_simultaneous)
 
     numerical_data_time_series, stim_idx_at_node_list = model.get_numerical_data_time_series(
         total_cycle_len, total_cycle_duration
     )
 
-    dynamics = OcpFes.declare_dynamics(model, numerical_data_time_series)
+    dynamics = OcpFes.declare_dynamics(model, numerical_data_time_series, ode_solver)
 
-    x_bounds, x_init = OcpFes.set_x_bounds(model)
+    x_bounds, x_init_fes = OcpFes.set_x_bounds(model)
     u_bounds, u_init = OcpFes.set_u_bounds(model, max_pulse_width)
+    if isinstance(ode_solver, OdeSolver.COLLOCATION):
+        x_init = InitialGuessList()
+        for key in x_init_fes.keys():
+            x_init.add(
+                key=key,
+                initial_guess=np.array(
+                    [[x_init_fes[key].init[0][0]] * (total_cycle_len * (ode_solver.polynomial_degree + 1) + 1)]
+                ),
+                phase=0,
+                interpolation=InterpolationType.ALL_POINTS,
+            )
+
+    else:
+        x_init = x_init_fes
 
     constraints = OcpFes.set_constraints(
         model,
@@ -85,7 +102,6 @@ def prepare_nmpc(
         x_init=x_init,
         u_bounds=u_bounds,
         u_init=u_init,
-        ode_solver=OdeSolver.RK4(n_integration_steps=10),
         n_threads=20,
         use_sx=use_sx,
     )
@@ -96,19 +112,16 @@ def main(plot=True):
     Main function to configure and solve the optimal control problem in NMPC.
     """
     # --- Set nmpc parameters --- #
-    cycle_duration = 2  # Duration of a cycle in seconds
+    cycle_duration = 1  # Duration of a cycle in seconds
     n_cycles_simultaneous = 3  # Number of cycles to solve simultaneously
     n_cycles_to_advance = 1  # Number of cycles to advance at each iteration
     n_cycles = 5  # Number of total cycles to perform
 
     # --- Set stimulation time apparition --- #
     stimulation_frequency = 33  # Stimulation frequency in Hz
+    total_stim = stimulation_frequency * n_cycles_simultaneous
     final_time = cycle_duration * n_cycles_simultaneous
-    stim_time = [
-        val
-        for start in range(0, final_time, 2)
-        for val in np.linspace(start, start + 1, stimulation_frequency + 1)[:-1]
-    ]
+    stim_time = list(np.linspace(0, final_time, total_stim + 1)[:-1])
 
     # --- Build FES model --- #
     fes_model = DingModelPulseWidthFrequencyWithFatigue(stim_time=stim_time, sum_stim_truncation=10)
@@ -122,6 +135,7 @@ def main(plot=True):
         minimize_force=True,
         minimize_fatigue=False,
         use_sx=False,
+        ode_solver=OdeSolver.COLLOCATION(polynomial_degree=5, method="radau"),
     )
 
     def update_functions(_nmpc: MultiCyclicNonlinearModelPredictiveControl, cycle_idx: int, _sol: Solution):

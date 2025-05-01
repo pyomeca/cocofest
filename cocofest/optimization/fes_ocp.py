@@ -12,6 +12,7 @@ from bioptim import (
     ParameterList,
     PhaseDynamics,
     VariableScaling,
+    OdeSolver,
 )
 
 from ..fourier_approx import FourierSeries
@@ -71,7 +72,7 @@ class OcpFes:
         return constraints
 
     @staticmethod
-    def declare_dynamics(model, numerical_data_timeseries=None):
+    def declare_dynamics(model, numerical_data_timeseries=None, ode_solver=OdeSolver.RK4(n_integration_steps=10)):
         dynamics = DynamicsList()
         dynamics.add(
             model.declare_ding_variables,
@@ -79,6 +80,7 @@ class OcpFes:
             expand_dynamics=True,
             phase_dynamics=PhaseDynamics.SHARED_DURING_THE_PHASE,
             numerical_data_timeseries=numerical_data_timeseries,
+            ode_solver=ode_solver,
         )
         return dynamics
 

@@ -113,11 +113,11 @@ def inverse_kinematics_cycling(
         wheel_center_x_y_z_coord[:, np.newaxis, np.newaxis], (1, 1, n_shooting + 1)
     )  # Wheel marker_target
     target_marker = np.concatenate((target_marker_hand, target_marker_wheel_center), axis=1)
+    time_step = cycling_number / n_shooting
     ik = biorbd.InverseKinematics(model, target_marker)
-    # ik_kalman = extended_kalman_filter(
     ik_q = ik.solve(method=ik_method)
-    ik_qdot = np.array([np.gradient(ik_q[i], (1 / n_shooting)) for i in range(ik_q.shape[0])])
-    ik_qddot = np.array([np.gradient(ik_qdot[i], (1 / n_shooting)) for i in range(ik_qdot.shape[0])])
+    ik_qdot = np.array([np.gradient(ik_q[i], time_step) for i in range(ik_q.shape[0])])
+    ik_qddot = np.array([np.gradient(ik_qdot[i], time_step) for i in range(ik_qdot.shape[0])])
     return ik_q, ik_qdot, ik_qddot
 
 

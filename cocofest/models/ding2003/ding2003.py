@@ -240,6 +240,8 @@ class DingModelFrequency(FesModel):
             The current time at which the dynamics is evaluated (s)
         t_stim_prev: list[MX]
             The time list of the previous stimulations (s)
+        lambda_i: list[MX]
+            A list of force-pulse amplitude relationship (unitless)
 
         Returns
         -------
@@ -260,6 +262,8 @@ class DingModelFrequency(FesModel):
         ----------
         cn: MX
             The previous step value of ca_troponin_complex (unitless)
+        cn_sum: MX
+            The previous calculated calcium sum
 
         Returns
         -------
@@ -378,7 +382,7 @@ class DingModelFrequency(FesModel):
         ocp: OptimalControlProgram,
         nlp: NonLinearProgram,
         numerical_data_timeseries: dict[str, np.ndarray] = None,
-        contact_type: tuple = (),
+        contact_type: list = (),
     ):
         """
         Tell the program which variables are states and controls.
@@ -391,8 +395,8 @@ class DingModelFrequency(FesModel):
             A reference to the phase
         numerical_data_timeseries: dict[str, np.ndarray]
             A list of values to pass to the dynamics at each node. Experimental external forces should be included here.
-        contact_type: tuple
-            The type of contact to use for the model
+        contact_type: list
+            A list of contact types. This is used to define the contact forces in the dynamics. Not used in this model.
         """
         StateConfigure().configure_all_fes_model_states(ocp, nlp, fes_model=self)
         ConfigureProblem.configure_dynamics_function(ocp, nlp, dyn_func=self.dynamics)
