@@ -5,7 +5,16 @@ end of the last node while minimizing the muscle force state.
 """
 
 import numpy as np
-from bioptim import Solver, ObjectiveList, ObjectiveFcn, OptimalControlProgram, ControlType, Node, BoundsList, InitialGuessList
+from bioptim import (
+    Solver,
+    ObjectiveList,
+    ObjectiveFcn,
+    OptimalControlProgram,
+    ControlType,
+    Node,
+    BoundsList,
+    InitialGuessList,
+)
 from cocofest import OcpFes, ModelMaker, FES_plot
 from cocofest.models.marion2013.marion2013_modified import Marion2013ModelPulseWidthFrequency
 

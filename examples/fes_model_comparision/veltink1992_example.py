@@ -1,6 +1,6 @@
 from cocofest import (
-VeltinkModelPulseIntensity,
-VeltinkRienerModelPulseIntensityWithFatigue,
+    VeltinkModelPulseIntensity,
+    VeltinkRienerModelPulseIntensityWithFatigue,
 )
 
 from bioptim import (
@@ -13,6 +13,7 @@ from bioptim import (
     BoundsList,
     Node,
 )
+
 
 def prepare_ocp(model, final_time, n_shooting, fmax):
     # --- Set dynamics --- #
@@ -36,7 +37,7 @@ def prepare_ocp(model, final_time, n_shooting, fmax):
     objective_functions = ObjectiveList()
     objective_functions.add(ObjectiveFcn.Lagrange.MINIMIZE_STATE, key="a", weight=1, quadratic=True)
     objective_functions.add(
-        ObjectiveFcn.Mayer.MINIMIZE_STATE, key="a", node=Node.END, target=200/fmax, weight=1e5, quadratic=True
+        ObjectiveFcn.Mayer.MINIMIZE_STATE, key="a", node=Node.END, target=200 / fmax, weight=1e5, quadratic=True
     )
 
     return OptimalControlProgram(
