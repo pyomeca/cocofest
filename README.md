@@ -12,7 +12,7 @@ To solve the OCP, the robust solver [Ipopt](https://github.com/coin-or/Ipopt) ha
 | Type          | Status                                                                                                                                                                  |
 |---------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | License       | <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/license-MIT-success" alt="License"/></a>                                           |
-| Code coverage | [![codecov](https://codecov.io/github/Kev1CO/cocofest/graph/badge.svg?token=85XHAQGLWQ)](https://codecov.io/github/Kev1CO/cocofest)                                     |
+| Code coverage | [![codecov](https://codecov.io/gh/pyomeca/cocofest/graph/badge.svg?token=GPBRI2U4CO)](https://codecov.io/gh/pyomeca/cocofest)                                     |
 | Code climate  | <a href="https://codeclimate.com/github/pyomeca/cocofest/maintainability"><img src="https://api.codeclimate.com/v1/badges/68cd9855a07be8bfb8c5/maintainability" /></a>  |
 
 # Table of Contents 
@@ -194,4 +194,4 @@ But if you use `Cocofest` in your research, please kindly cite this zenodo link 
 
 # Acknowledgements
 The software development was supported by Ingénierie de technologies interactives en réadaptation [INTER #160 OptiStim](https://regroupementinter.com/fr/mandat/160-optistim/).
-The Cocofest [logo](docs/cocofest_logo.png) has been design by [MaxMV](https://www.instagram.com/max_mv3/)
+The Cocofest [logo](docs/cocofest_logo.png) has been design by [MaxMV](https://www.instagram.com/maxmvpainting/)
