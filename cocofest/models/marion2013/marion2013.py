@@ -75,7 +75,7 @@ class Marion2013ModelFrequency(Marion2009ModelFrequency):
 
     @property
     def nb_state(self) -> int:
-        return 2
+        return 4
 
     @property
     def identifiable_parameters(self):
