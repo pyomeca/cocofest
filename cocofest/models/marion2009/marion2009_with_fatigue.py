@@ -13,10 +13,10 @@ from .marion2009 import Marion2009ModelFrequency
 class Marion2009ModelFrequencyWithFatigue(Marion2009ModelFrequency):
     """
     This model extends the Marion 2009 model to include fatigue states.
-    
+
     It combines the angle-dependent force-fatigue relationship from Marion 2009 with
     explicit fatigue states tracking (A, Tau1, Km) as done in Ding's models.
-    
+
     Marion, M. S., Wexler, A. S., Hull, M. L., & Binder‐Macleod, S. A. (2009).
     Predicting the effect of muscle length on fatigue during electrical stimulation.
     Muscle & Nerve: Official Journal of the American Association of Electrodiagnostic Medicine, 40(4), 573-581.
@@ -72,12 +72,14 @@ class Marion2009ModelFrequencyWithFatigue(Marion2009ModelFrequency):
     @property
     def identifiable_parameters(self):
         params = super().identifiable_parameters
-        params.update({
-            "alpha_a": self.alpha_a,
-            "alpha_tau1": self.alpha_tau1,
-            "alpha_km": self.alpha_km,
-            "tau_fat": self.tau_fat,
-        })
+        params.update(
+            {
+                "alpha_a": self.alpha_a,
+                "alpha_tau1": self.alpha_tau1,
+                "alpha_km": self.alpha_km,
+                "tau_fat": self.tau_fat,
+            }
+        )
         return params
 
     def standard_rest_values(self) -> np.array:
@@ -90,12 +92,14 @@ class Marion2009ModelFrequencyWithFatigue(Marion2009ModelFrequency):
 
     def serialize(self) -> tuple[Callable, dict]:
         base_params = super().serialize()[1]
-        base_params.update({
-            "alpha_a": self.alpha_a,
-            "alpha_tau1": self.alpha_tau1,
-            "alpha_km": self.alpha_km,
-            "tau_fat": self.tau_fat,
-        })
+        base_params.update(
+            {
+                "alpha_a": self.alpha_a,
+                "alpha_tau1": self.alpha_tau1,
+                "alpha_km": self.alpha_km,
+                "tau_fat": self.tau_fat,
+            }
+        )
         return (Marion2009ModelFrequencyWithFatigue, base_params)
 
     def system_dynamics(
@@ -136,11 +140,11 @@ class Marion2009ModelFrequencyWithFatigue(Marion2009ModelFrequency):
         The value of the derivative of each state dx/dt at the current time t
         """
         cn_dot = self.calculate_cn_dot(cn, t, t_stim_prev)
-        
+
         # Apply angle scaling
         angle_factor = self.angle_scaling_factor(theta)
         a = a * angle_factor
-        
+
         f_dot = self.f_dot_fun(
             cn,
             f,
@@ -153,7 +157,7 @@ class Marion2009ModelFrequencyWithFatigue(Marion2009ModelFrequency):
         a_dot = self.a_dot_fun(a, f)
         tau1_dot = self.tau1_dot_fun(tau1, f)
         km_dot = self.km_dot_fun(km, f)
-        
+
         return vertcat(cn_dot, f_dot, a_dot, tau1_dot, km_dot)
 
     def a_dot_fun(self, a: MX, f: MX) -> MX | float:
@@ -233,7 +237,7 @@ class Marion2009ModelFrequencyWithFatigue(Marion2009ModelFrequency):
             A reference to the phase
         fes_model: Marion2009ModelFrequencyWithFatigue
             The current phase fes model
-            
+
         Returns
         -------
         The derivative of the states in the tuple[MX] format

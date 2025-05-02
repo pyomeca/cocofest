@@ -15,7 +15,7 @@ from cocofest.models.state_configure import StateConfigure
 class VeltinkModelPulseIntensity:
     """
     This is a custom model implementing the muscle activation dynamics from:
-    
+
     Veltink, P. H., Chizeck, H. J., Crago, P. E., & El-Bialy, A. (1992).
     Nonlinear joint angle control for artificially stimulated muscle.
     IEEE Transactions on Biomedical Engineering, 39(4), 368-380.
@@ -94,19 +94,19 @@ class VeltinkModelPulseIntensity:
     def normalize_current(self, I: MX) -> MX:
         """
         Normalize stimulation current according to equation (5)
-        
+
         Parameters
         ----------
         I: MX
             Stimulation current amplitude (mA)
-            
+
         Returns
         -------
         Normalized stimulation between 0 and 1
         """
         # Piecewise function for current normalization
         u = (I - self.I_threshold) / (self.I_saturation - self.I_threshold)
-        
+
         return u
 
     def get_muscle_activation(self, a: MX, u: MX) -> MX:
@@ -147,9 +147,8 @@ class VeltinkModelPulseIntensity:
         """
         u = self.normalize_current(I)
         a_dot = self.get_muscle_activation(a=a, u=u)
-        
-        return vertcat(a_dot)
 
+        return vertcat(a_dot)
 
     @staticmethod
     def dynamics(
@@ -220,4 +219,4 @@ class VeltinkModelPulseIntensity:
         """
         StateConfigure().configure_all_fes_model_states(ocp, nlp, fes_model=self)
         StateConfigure().configure_intensity(ocp, nlp)
-        ConfigureProblem.configure_dynamics_function(ocp, nlp, dyn_func=self.dynamics) 
+        ConfigureProblem.configure_dynamics_function(ocp, nlp, dyn_func=self.dynamics)

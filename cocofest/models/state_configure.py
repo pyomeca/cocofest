@@ -8,15 +8,15 @@ from bioptim import (
 class StateConfigure:
     def __init__(self):
         self.state_dictionary = {
-            "Cn": self.configure_ca_troponin_complex, # Ding model
-            "F": self.configure_force, # Ding model
-            "A": self.configure_scaling_factor, # Ding model
-            "Tau1": self.configure_time_state_force_no_cross_bridge, # Ding model
-            "Km": self.configure_cross_bridges, # Ding model
-            "a": self.configure_muscle_activation, # Veltink model
-            "mu": self.configure_fatigue_state, # Veltink model
-            "theta": self.configure_angle, # Marion model
-            "dtheta_dt": self.configure_angular_velocity, # Marion model
+            "Cn": self.configure_ca_troponin_complex,  # Ding model
+            "F": self.configure_force,  # Ding model
+            "A": self.configure_scaling_factor,  # Ding model
+            "Tau1": self.configure_time_state_force_no_cross_bridge,  # Ding model
+            "Km": self.configure_cross_bridges,  # Ding model
+            "a": self.configure_muscle_activation,  # Veltink model
+            "mu": self.configure_fatigue_state,  # Veltink model
+            "theta": self.configure_angle,  # Marion model
+            "dtheta_dt": self.configure_angular_velocity,  # Marion model
         }
 
     @staticmethod
@@ -259,12 +259,12 @@ class StateConfigure:
 
     @staticmethod
     def configure_muscle_activation(
-            ocp: OptimalControlProgram,
-            nlp: NonLinearProgram,
-            as_states: bool,
-            as_controls: bool,
-            as_states_dot: bool = False,
-            muscle_name: str = None,
+        ocp: OptimalControlProgram,
+        nlp: NonLinearProgram,
+        as_states: bool,
+        as_controls: bool,
+        as_states_dot: bool = False,
+        muscle_name: str = None,
     ):
         """
         Configure a new variable for muscle activation (unitless)
@@ -299,12 +299,12 @@ class StateConfigure:
 
     @staticmethod
     def configure_fatigue_state(
-            ocp: OptimalControlProgram,
-            nlp: NonLinearProgram,
-            as_states: bool,
-            as_controls: bool,
-            as_states_dot: bool = False,
-            muscle_name: str = None,
+        ocp: OptimalControlProgram,
+        nlp: NonLinearProgram,
+        as_states: bool,
+        as_controls: bool,
+        as_states_dot: bool = False,
+        muscle_name: str = None,
     ):
         """
         Configure a new variable for fatigue state (unitless)
@@ -339,12 +339,12 @@ class StateConfigure:
 
     @staticmethod
     def configure_angle(
-            ocp: OptimalControlProgram,
-            nlp: NonLinearProgram,
-            as_states: bool,
-            as_controls: bool,
-            as_states_dot: bool = False,
-            muscle_name: str = None,
+        ocp: OptimalControlProgram,
+        nlp: NonLinearProgram,
+        as_states: bool,
+        as_controls: bool,
+        as_states_dot: bool = False,
+        muscle_name: str = None,
     ):
         """
         Configure a new variable for angle (rad)
@@ -379,12 +379,12 @@ class StateConfigure:
 
     @staticmethod
     def configure_angular_velocity(
-            ocp: OptimalControlProgram,
-            nlp: NonLinearProgram,
-            as_states: bool,
-            as_controls: bool,
-            as_states_dot: bool = False,
-            muscle_name: str = None,
+        ocp: OptimalControlProgram,
+        nlp: NonLinearProgram,
+        as_states: bool,
+        as_controls: bool,
+        as_states_dot: bool = False,
+        muscle_name: str = None,
     ):
         """
         Configure a new variable for angular velocity (rad/s)

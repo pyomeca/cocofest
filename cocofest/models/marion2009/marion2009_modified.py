@@ -12,12 +12,12 @@ from cocofest.models.ding2007.ding2007 import DingModelPulseWidthFrequency
 class Marion2009ModelPulseWidthFrequency(DingModelPulseWidthFrequency):
     """
     This is a custom model that inherits from DingModelPulseWidthFrequency.
-    
+
     This implements the Marion 2009 model which adds angle dependency to the force-fatigue relationship.
 
     Warning: This model was not validated from Marion's experiment as the pulse with is added.
     This model should be used with caution.
-    
+
     Marion, M. S., Wexler, A. S., Hull, M. L., & Binder‐Macleod, S. A. (2009).
     Predicting the effect of muscle length on fatigue during electrical stimulation.
     Muscle & Nerve: Official Journal of the American Association of Electrodiagnostic Medicine, 40(4), 573-581.
@@ -60,7 +60,7 @@ class Marion2009ModelPulseWidthFrequency(DingModelPulseWidthFrequency):
         self.r0_km_relationship = R0_KM_RELATIONSHIP_DEFAULT
         self.pd0 = PD0_DEFAULT
         self.pdt = PDT_DEFAULT
-        
+
         # Angle-specific parameters
         self.theta_star = 90  # Reference angle
         self.a_theta = A_COEF_DEFAULT
@@ -69,31 +69,35 @@ class Marion2009ModelPulseWidthFrequency(DingModelPulseWidthFrequency):
     @property
     def identifiable_parameters(self):
         params = super().identifiable_parameters
-        params.update({
-            "theta_star": self.theta_star,
-            "a_theta": self.a_theta,
-            "b_theta": self.b_theta,
-        })
+        params.update(
+            {
+                "theta_star": self.theta_star,
+                "a_theta": self.a_theta,
+                "b_theta": self.b_theta,
+            }
+        )
         return params
 
     def serialize(self) -> tuple[Callable, dict]:
         base_params = super().serialize()[1]
-        base_params.update({
-            "theta_star": self.theta_star,
-            "a_theta": self.a_theta,
-            "b_theta": self.b_theta,
-        })
+        base_params.update(
+            {
+                "theta_star": self.theta_star,
+                "a_theta": self.a_theta,
+                "b_theta": self.b_theta,
+            }
+        )
         return (Marion2009ModelPulseWidthFrequency, base_params)
 
     def angle_scaling_factor(self, theta: MX) -> MX:
         """
         Calculate the angle-dependent scaling factor A(θ) according to equation 2a from Marion 2009.
-        
+
         Parameters
         ----------
         theta: MX
             Current knee angle in degrees
-            
+
         Returns
         -------
         The angle scaling factor (unitless)
@@ -133,14 +137,14 @@ class Marion2009ModelPulseWidthFrequency(DingModelPulseWidthFrequency):
         The value of the derivative of each state dx/dt at the current time t
         """
         cn_dot = self.calculate_cn_dot(cn, t, t_stim_prev)
-        
+
         # Calculate base a_scale with pulse width dependency
         base_a_scale = self.a_calculation(a_scale=self.a_scale, pulse_width=pulse_width)
-        
+
         # Apply angle scaling
         angle_factor = self.angle_scaling_factor(theta)
         a_scale = base_a_scale * angle_factor
-        
+
         f_dot = self.f_dot_fun(
             cn,
             f,
@@ -148,7 +152,7 @@ class Marion2009ModelPulseWidthFrequency(DingModelPulseWidthFrequency):
             self.tau1_rest,
             self.km_rest,
         )
-        
+
         return vertcat(cn_dot, f_dot)
 
     @staticmethod
@@ -192,7 +196,7 @@ class Marion2009ModelPulseWidthFrequency(DingModelPulseWidthFrequency):
             The force velocity relationship value (unitless), not considered for this model
         passive_force_relationship: MX | float
             The passive force coefficient of the muscle (unitless), not considered for this model
-            
+
         Returns
         -------
         The derivative of the states in the tuple[MX] format

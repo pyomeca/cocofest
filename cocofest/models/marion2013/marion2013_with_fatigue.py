@@ -17,7 +17,7 @@ class Marion2013ModelFrequencyWithFatigue(Marion2013ModelFrequency):
     Predicting non-isometric fatigue induced by electrical stimulation pulse trains as a function of pulse duration.
     Journal of neuroengineering and rehabilitation, 10, 1-16.
     """
-    
+
     def __init__(
         self,
         model_name: str = "marion_2013_with_fatigue",
@@ -34,7 +34,7 @@ class Marion2013ModelFrequencyWithFatigue(Marion2013ModelFrequency):
             sum_stim_truncation=sum_stim_truncation,
         )
         self._with_fatigue = True
-        
+
         # Default fatigue parameter values from Marion 2013 paper
         ALPHA_A_DEFAULT = -4.03e-2  # Force scaling factor for A90 (s^-2)
         TAU_FAT_DEFAULT = 99.4  # Time constant for fatigue (s)
@@ -48,7 +48,7 @@ class Marion2013ModelFrequencyWithFatigue(Marion2013ModelFrequency):
         # a new equation for βτ1 (Equation 9) as a function of existing force-motion-fatigue model parameters (Marion et al., 2013).
         BETA_KM_DEFAULT = 0  # Angular velocity x force scaling factor in fatigue model for force-motion model parameter Km (deg^-1.N^-1)
         BETA_A_DEFAULT = 0  # Angular velocity x force scaling factor in fatigue model for force-motion model parameter A90 (s^-1.deg^-1)
-        
+
         # Fatigue model parameters
         self.alpha_a = ALPHA_A_DEFAULT
         self.alpha_km = ALPHA_KM_DEFAULT
@@ -78,12 +78,14 @@ class Marion2013ModelFrequencyWithFatigue(Marion2013ModelFrequency):
     @property
     def identifiable_parameters(self):
         params = super().identifiable_parameters
-        params.update({
-            "alpha_a": self.alpha_a,
-            "alpha_km": self.alpha_km,
-            "alpha_tau1": self.alpha_tau1,
-            "tau_fat": self.tau_fat,
-        })
+        params.update(
+            {
+                "alpha_a": self.alpha_a,
+                "alpha_km": self.alpha_km,
+                "alpha_tau1": self.alpha_tau1,
+                "tau_fat": self.tau_fat,
+            }
+        )
         return params
 
     def standard_rest_values(self) -> np.array:
@@ -98,12 +100,14 @@ class Marion2013ModelFrequencyWithFatigue(Marion2013ModelFrequency):
 
     def serialize(self) -> tuple[Callable, dict]:
         base_dict = super().serialize()[1]
-        base_dict.update({
-            "alpha_a": self.alpha_a,
-            "alpha_km": self.alpha_km,
-            "alpha_tau1": self.alpha_tau1,
-            "tau_fat": self.tau_fat,
-        })
+        base_dict.update(
+            {
+                "alpha_a": self.alpha_a,
+                "alpha_km": self.alpha_km,
+                "alpha_tau1": self.alpha_tau1,
+                "tau_fat": self.tau_fat,
+            }
+        )
         return (Marion2013ModelFrequencyWithFatigue, base_dict)
 
     def a_dot_fun(self, a: MX, f: MX, velocity: MX) -> MX | float:
@@ -138,7 +142,7 @@ class Marion2013ModelFrequencyWithFatigue(Marion2013ModelFrequency):
         -------
         The value of the derivative time_state_force_no_cross_bridge (ms)
         """
-        return -(tau1 - self.tau1_rest) / self.tau_fat + (self.alpha_tau1 + self.beta_tau1 * velocity)* f
+        return -(tau1 - self.tau1_rest) / self.tau_fat + (self.alpha_tau1 + self.beta_tau1 * velocity) * f
 
     def km_dot_fun(self, km: MX, f: MX, velocity: MX) -> MX | float:
         """
@@ -202,11 +206,11 @@ class Marion2013ModelFrequencyWithFatigue(Marion2013ModelFrequency):
         """
         # Get CN dynamics from Ding model
         cn_dot = self.calculate_cn_dot(cn, t, t_stim_prev)
-            
+
         # Calculate Marion-specific force scaling terms with fatigue-affected A90
         A = self.calculate_A(theta)  # Using current A90 value
         G = self.calculate_G(theta, dtheta_dt)
-        
+
         # Use Ding's force equation with G+A as the scaling term
         f_dot = self.f_dot_fun(
             cn,
@@ -215,7 +219,7 @@ class Marion2013ModelFrequencyWithFatigue(Marion2013ModelFrequency):
             tau1,
             km,
         )
-        
+
         # Motion dynamics
         lambda_angle = 90.0 - theta
         d2theta_dt2 = self.calculate_acceleration(
@@ -224,12 +228,12 @@ class Marion2013ModelFrequencyWithFatigue(Marion2013ModelFrequency):
             f,
             Fload,
         )
-        
+
         # Fatigue dynamics
         a_dot = self.a_dot_fun(a, f, dtheta_dt)
         km_dot = self.km_dot_fun(km, f, dtheta_dt)
         tau1_dot = self.tau1_dot_fun(tau1, f, dtheta_dt)
-        
+
         return vertcat(cn_dot, f_dot, dtheta_dt, d2theta_dt2, a_dot, km_dot, tau1_dot)
 
     @staticmethod
