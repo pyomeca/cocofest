@@ -1,3 +1,5 @@
+import pytest
+
 import numpy as np
 from casadi import DM
 
@@ -250,7 +252,61 @@ def test_hmed2018_dynamics():
         np.array(DM(0.0799499)).squeeze(),
     )
 
+def test_veltink1992_dynamics():
+    model = ModelMaker.create_model("veltink_and_riener1998")
+    assert model.nb_state == 2
+    assert model.name_dof == [
+        "a",
+        "mu",
+    ]
+    np.testing.assert_almost_equal(
+        model.standard_rest_values(),
+        np.array([[0], [1]]),
+    )
+    np.testing.assert_almost_equal(
+        np.array(
+            [
+                model.Ta,
+                model.I_threshold,
+                model.I_saturation,
+                model.mu_min,
+                model.T_fat,
+                model.T_rec,
+            ]
+        ),
+        np.array(
+            [
+                0.26,
+                20.0,
+                60.0,
+                0.2,
+                30.0,
+                50.0,
+            ]
+        ),
+    )
+    np.testing.assert_almost_equal(
+        np.array(
+            model.system_dynamics(
+                a=0.5,
+                mu=0.1,
+                I=50,
+            )
+        ).squeeze(),
+        np.array(DM([0.96153846, 0.01066667])).squeeze(),
+        decimal=3,
+    )
 
-# TODO: Add tests for the Veltink1992 models
-# TODO: Add tests for the Marion 2009 models
-# TODO: Add tests for the Marion 2013 models
+
+    np.testing.assert_almost_equal(model.normalize_current(I=50), 0.75)
+    np.testing.assert_almost_equal(model.get_muscle_activation(a=0.6, u=0.75), 0.576923076923077)
+    np.testing.assert_almost_equal(model.get_mu_dot(a=0.6, mu=0.09), 0.00948)
+
+
+@pytest.mark.parametrize("model", ["marion2009_with_fatigue", "marion2009_modified_with_fatigue"])
+def test_marion2009_dynamics(model):
+    return
+
+@pytest.mark.parametrize("model", ["marion2013_with_fatigue", "marion2013_modified_with_fatigue"])
+def test_marion2013_dynamics(model):
+    return

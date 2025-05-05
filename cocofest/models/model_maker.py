@@ -12,6 +12,8 @@ from cocofest.models.marion2013.marion2013 import Marion2013ModelFrequency
 from cocofest.models.marion2013.marion2013_with_fatigue import Marion2013ModelFrequencyWithFatigue
 from cocofest.models.marion2013.marion2013_modified import Marion2013ModelPulseWidthFrequency
 from cocofest.models.marion2013.marion2013_modified_with_fatigue import Marion2013ModelPulseWidthFrequencyWithFatigue
+from cocofest.models.veltink1992.veltink1992 import VeltinkModelPulseIntensity
+from cocofest.models.veltink1992.veltink1992_and_riener1998 import VeltinkRienerModelPulseIntensityWithFatigue
 
 
 class ModelMaker:
@@ -32,6 +34,8 @@ class ModelMaker:
             "marion2013_with_fatigue": Marion2013ModelFrequencyWithFatigue,
             "marion2013_modified": Marion2013ModelPulseWidthFrequency,
             "marion2013_modified_with_fatigue": Marion2013ModelPulseWidthFrequencyWithFatigue,
+            "veltink1992": VeltinkModelPulseIntensity,
+            "veltink_and_riener1998": VeltinkRienerModelPulseIntensityWithFatigue,
         }
         if model_type not in model_dict:
             raise ValueError(f"Unknown model type: {model_type}")
