@@ -297,7 +297,6 @@ def test_veltink1992_dynamics():
         decimal=3,
     )
 
-
     np.testing.assert_almost_equal(model.normalize_current(I=50), 0.75)
     np.testing.assert_almost_equal(model.get_muscle_activation(a=0.6, u=0.75), 0.576923076923077)
     np.testing.assert_almost_equal(model.get_mu_dot(a=0.6, mu=0.09), 0.00948)
@@ -305,6 +304,79 @@ def test_veltink1992_dynamics():
 
 @pytest.mark.parametrize("model", ["marion2009_with_fatigue", "marion2009_modified_with_fatigue"])
 def test_marion2009_dynamics(model):
+    model = ModelMaker.create_model(model)
+    assert model.nb_state == 5
+    assert model.name_dof == [
+        "Cn",
+        "F",
+        "A",
+        "Tau1",
+        "Km",
+    ]
+    np.testing.assert_almost_equal(
+        model.standard_rest_values(),
+        np.array([[0], [0], [model.a_rest], [model.tau1_rest], [model.km_rest]]),
+    )
+
+    np.testing.assert_almost_equal(
+        np.array(
+            [
+                model.tauc,
+                model.r0_km_relationship,
+                model.alpha_a,
+                model.alpha_tau1,
+                model.tau2,
+                model.tau_fat,
+                model.alpha_km,
+                model.a_rest,
+                model.tau1_rest,
+                model.km_rest,
+                model.pd0,
+                model.pdt,
+                model.theta_star,
+                model.a_theta,
+                model.b_theta,
+
+            ]
+        ),
+        np.array(
+            [
+                0.020,
+                1.168,
+                -2.006 * 10e-2,
+                1.563 * 10e-5,
+                0.10536,
+                97.48,
+                6.269 * 10e-6,
+                1473,
+                0.04298,
+                0.128,
+                0.000131405,
+                0.000194138,
+                90,
+                -0.000449,
+                0.0344,
+            ]
+        ),
+    )
+
+
+    if model == "marion2009_modified_with_fatigue":
+        np.testing.assert_almost_equal(
+            np.array(
+                [
+                    model.pd0,
+                    model.pdt,
+                ]
+            ),
+            np.array(
+                [
+                    0.000131405,
+                    0.000194138,
+                ]
+            ),
+        )
+    
     return
 
 @pytest.mark.parametrize("model", ["marion2013_with_fatigue", "marion2013_modified_with_fatigue"])
