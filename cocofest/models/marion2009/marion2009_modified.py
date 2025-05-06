@@ -58,6 +58,7 @@ class Marion2009ModelPulseWidthFrequency(DingModelPulseWidthFrequency):
         self.km_rest = KM_REST_DEFAULT
         self.tau2 = TAU2_DEFAULT
         self.r0_km_relationship = R0_KM_RELATIONSHIP_DEFAULT
+        self.a_scale = A_THETA_DEFAULT
         self.pd0 = PD0_DEFAULT
         self.pdt = PDT_DEFAULT
 
