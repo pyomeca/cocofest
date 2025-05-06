@@ -42,8 +42,8 @@ class Marion2013ModelFrequency(Marion2009ModelFrequency):
         KM_REST_DEFAULT = 0.352  # Value from Marion's 2013 article in figure n°3 (unitless)
         TAUC_DEFAULT = 0.020  # Value from Marion's 2013 article in figure n°3 (s)
         R0_KM_RELATIONSHIP_DEFAULT = 2  # Value from Marion's 2013 article in figure n°3 (unitless)
-        A_COEF_DEFAULT = -0.000449  # Value from Marion's 2013 article in figure n°3 (deg^-2)
-        B_COEF_DEFAULT = 0.0344  # Value from Marion's 2013 article in figure n°3 (deg^-1)
+        A_THETA_DEFAULT = -0.000449  # Value from Marion's 2013 article in figure n°3 (deg^-2)
+        B_THETA_DEFAULT = 0.0344  # Value from Marion's 2013 article in figure n°3 (deg^-1)
         V1_DEFAULT = 0.371  # Value from Marion's 2013 article in figure n°3 (N.deg^-2)
         V2_DEFAULT = 0.0229  # Value from Marion's 2013 article in figure n°3 (deg^-1)
         L_I_DEFAULT = 9.85  # Value from Marion's 2013 article in figure n°3 (kg^-1.m^-1)
@@ -56,8 +56,8 @@ class Marion2013ModelFrequency(Marion2009ModelFrequency):
         self.tau2 = TAU2_DEFAULT
         self.tauc = TAUC_DEFAULT
         self.r0_km_relationship = R0_KM_RELATIONSHIP_DEFAULT
-        self.a_coef = A_COEF_DEFAULT
-        self.b_coef = B_COEF_DEFAULT
+        self.a_theta = A_THETA_DEFAULT
+        self.b_theta = B_THETA_DEFAULT
         self.V1 = V1_DEFAULT
         self.V2 = V2_DEFAULT
         self.L_I = L_I_DEFAULT
@@ -81,8 +81,8 @@ class Marion2013ModelFrequency(Marion2009ModelFrequency):
     def identifiable_parameters(self):
         return {
             "a_rest": self.a_rest,
-            "a_coef": self.a_coef,
-            "b_coef": self.b_coef,
+            "a_theta": self.a_theta,
+            "b_theta": self.b_theta,
             "V1": self.V1,
             "V2": self.V2,
             "L_I": self.L_I,
@@ -102,8 +102,8 @@ class Marion2013ModelFrequency(Marion2009ModelFrequency):
             Marion2013ModelFrequency,
             {
                 "a_rest": self.a_rest,
-                "a_coef": self.a_coef,
-                "b_coef": self.b_coef,
+                "a_theta": self.a_theta,
+                "b_theta": self.b_theta,
                 "V1": self.V1,
                 "V2": self.V2,
                 "L_I": self.L_I,
@@ -115,7 +115,7 @@ class Marion2013ModelFrequency(Marion2009ModelFrequency):
 
     def calculate_A(self, theta: MX) -> MX:
         """Calculate angle-dependent scaling term A"""
-        return self.a_rest * (self.a_coef * (90 - theta) ** 2 + self.b_coef * (90 - theta) + 1)
+        return self.a_rest * (self.a_theta * (90 - theta) ** 2 + self.b_theta * (90 - theta) + 1)
 
     def calculate_G(self, theta: MX, dtheta_dt: MX) -> MX:
         """Calculate velocity-dependent scaling term G"""

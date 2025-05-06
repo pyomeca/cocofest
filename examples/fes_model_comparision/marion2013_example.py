@@ -1,6 +1,8 @@
 """
-This example will do a 10 stimulation example with Ding's 2007 pulse width and frequency model.
-The stimulation will be optimized the pulsation width between 0 and 0.0006 seconds to match a force value of 200N at the
+Warning : The model output are not those intended, use this model cautiously.
+
+This example will do a 10 stimulation example with Marion's 2013 frequency model (possibility to add pulse width).
+The stimulation will be optimized the pulsation width between 0 and 0.0006 seconds to match a force value of 90N at the
 end of the last node while minimizing the muscle force state.
 """
 
@@ -13,9 +15,9 @@ from bioptim import (
     ControlType,
     Node,
     BoundsList,
-    InitialGuessList,
+    InitialGuessList, InterpolationType,
 )
-from cocofest import OcpFes, ModelMaker, FES_plot
+from cocofest import OcpFes, ModelMaker
 from cocofest.models.marion2013.marion2013_modified import Marion2013ModelPulseWidthFrequency
 
 
@@ -27,6 +29,8 @@ def prepare_ocp(model, final_time, pw_max=0.0006):
 
     # --- Set initial guesses and bounds for states and controls --- #
     x_bounds, x_init = OcpFes.set_x_bounds(model)
+    x_bounds.add(key="theta", min_bound=np.array([[90, 0, 0]]), max_bound=np.array([[90, 90, 90]]), interpolation=InterpolationType.CONSTANT_WITH_FIRST_AND_LAST_DIFFERENT)
+    x_bounds.add(key="dtheta_dt", min_bound=np.array([[0, -100, -100]]), max_bound=np.array([[0, 100, 100]]), interpolation=InterpolationType.CONSTANT_WITH_FIRST_AND_LAST_DIFFERENT)
     if isinstance(model, Marion2013ModelPulseWidthFrequency):
         u_bounds, u_init = OcpFes.set_u_bounds(model, max_bound=pw_max)
     else:
@@ -36,7 +40,7 @@ def prepare_ocp(model, final_time, pw_max=0.0006):
     objective_functions = ObjectiveList()
     objective_functions.add(ObjectiveFcn.Lagrange.MINIMIZE_STATE, key="F", weight=1, quadratic=True)
     objective_functions.add(
-        ObjectiveFcn.Mayer.MINIMIZE_STATE, key="F", node=Node.END, target=200, weight=1e5, quadratic=True
+        ObjectiveFcn.Mayer.MINIMIZE_STATE, key="F", node=Node.END, target=90, weight=1e5, quadratic=True
     )
 
     return OptimalControlProgram(
@@ -55,7 +59,7 @@ def prepare_ocp(model, final_time, pw_max=0.0006):
     )
 
 
-def main(with_pulse_width=False, with_fatigue=True, plot=True):
+def main(with_pulse_width=True, with_fatigue=False, plot=True):
     final_time = 0.2
     chosen_model = "marion2013_modified" if with_pulse_width else "marion2013"
     chosen_model = chosen_model + "_with_fatigue" if with_fatigue else chosen_model
@@ -72,7 +76,7 @@ def main(with_pulse_width=False, with_fatigue=True, plot=True):
 
     # --- Show results --- #
     if plot:
-        sol.graphs()
+        sol.graphs(show_bounds=True)
 
 
 if __name__ == "__main__":

@@ -1,5 +1,5 @@
 """
-This example will do a 10 stimulation example with Ding's 2007 pulse width and frequency model.
+This example will do a 10 stimulation example with Marion's 2009 frequency model (possibility to add pulse width).
 The stimulation will be optimized the pulsation width between 0 and 0.0006 seconds to match a force value of 200N at the
 end of the last node while minimizing the muscle force state.
 """

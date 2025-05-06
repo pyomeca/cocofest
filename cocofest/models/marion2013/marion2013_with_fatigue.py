@@ -67,8 +67,8 @@ class Marion2013ModelFrequencyWithFatigue(Marion2013ModelFrequency):
             "theta" + muscle_name,
             "dtheta_dt" + muscle_name,
             "A" + muscle_name,
-            "Km" + muscle_name,
             "Tau1" + muscle_name,
+            "Km" + muscle_name,
         ]
 
     @property
@@ -95,7 +95,7 @@ class Marion2013ModelFrequencyWithFatigue(Marion2013ModelFrequency):
         The rested values of all states including fatigue parameters
         """
         base_values = super().standard_rest_values()
-        fatigue_values = np.array([[self.a_rest], [self.km_rest], [self.tau1_rest]])
+        fatigue_values = np.array([[self.a_rest], [self.tau1_rest], [self.km_rest]])
         return np.vstack((base_values, fatigue_values))
 
     def serialize(self) -> tuple[Callable, dict]:
@@ -168,8 +168,8 @@ class Marion2013ModelFrequencyWithFatigue(Marion2013ModelFrequency):
         theta: MX,
         dtheta_dt: MX,
         a: MX,
-        km: MX,
         tau1: MX,
+        km: MX,
         t: MX = None,
         t_stim_prev: MX = None,
         Fload: MX = 0.0,
@@ -234,7 +234,7 @@ class Marion2013ModelFrequencyWithFatigue(Marion2013ModelFrequency):
         km_dot = self.km_dot_fun(km, f, dtheta_dt)
         tau1_dot = self.tau1_dot_fun(tau1, f, dtheta_dt)
 
-        return vertcat(cn_dot, f_dot, dtheta_dt, d2theta_dt2, a_dot, km_dot, tau1_dot)
+        return vertcat(cn_dot, f_dot, dtheta_dt, d2theta_dt2, a_dot, tau1_dot, km_dot)
 
     @staticmethod
     def dynamics(
@@ -283,8 +283,8 @@ class Marion2013ModelFrequencyWithFatigue(Marion2013ModelFrequency):
                 theta=states[2],
                 dtheta_dt=states[3],
                 a=states[4],
-                km=states[5],
-                tau1=states[6],
+                tau1=states[5],
+                km=states[6],
                 t=time,
                 t_stim_prev=numerical_timeseries,
                 Fload=controls[0] if controls.shape[0] > 0 else 0.0,
