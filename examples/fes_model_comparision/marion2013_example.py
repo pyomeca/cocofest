@@ -55,7 +55,7 @@ def prepare_ocp(model, final_time, pw_max=0.0006):
     )
 
 
-def main(with_pulse_width=True, with_fatigue=True, plot=True):
+def main(with_pulse_width=False, with_fatigue=True, plot=True):
     final_time = 0.2
     chosen_model = "marion2013_modified" if with_pulse_width else "marion2013"
     chosen_model = chosen_model + "_with_fatigue" if with_fatigue else chosen_model
@@ -72,7 +72,7 @@ def main(with_pulse_width=True, with_fatigue=True, plot=True):
 
     # --- Show results --- #
     if plot:
-        FES_plot(data=sol).plot(title="Optimize pulse width", show_bounds=False, show_stim=False)
+        sol.graphs()
 
 
 if __name__ == "__main__":

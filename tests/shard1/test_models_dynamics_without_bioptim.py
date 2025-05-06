@@ -252,6 +252,7 @@ def test_hmed2018_dynamics():
         np.array(DM(0.0799499)).squeeze(),
     )
 
+
 def test_veltink1992_dynamics():
     model = ModelMaker.create_model("veltink_and_riener1998")
     assert model.nb_state == 2
@@ -333,7 +334,6 @@ def test_marion2009_dynamics():
                 model.theta_star,
                 model.a_theta,
                 model.b_theta,
-
             ]
         ),
         np.array(
@@ -368,10 +368,9 @@ def test_marion2009_dynamics():
                 theta=20,
             )
         ).squeeze(),
-        np.array(DM([-2.19408644e+02,  1.04853099e+03, -2.32015336e+01,  1.56300000e-02, 6.26900000e-03])).squeeze(),
+        np.array(DM([-2.19408644e02, 1.04853099e03, -2.32015336e01, 1.56300000e-02, 6.26900000e-03])).squeeze(),
         decimal=3,
     )
-
 
     return
 
@@ -446,11 +445,12 @@ def test_marion2009_modified_dynamics():
                 theta=20,
             )
         ).squeeze(),
-        np.array(DM([-2.19408644e+02,  6.13622448e+02, -2.00600000e+01,  1.56300000e-02, 6.26900000e-03 ])).squeeze(),
+        np.array(DM([-2.19408644e02, 6.13622448e02, -2.00600000e01, 1.56300000e-02, 6.26900000e-03])).squeeze(),
         decimal=3,
     )
 
     return
+
 
 @pytest.mark.parametrize("model", ["marion2013_with_fatigue", "marion2013_modified_with_fatigue"])
 def test_marion2013_dynamics(model):

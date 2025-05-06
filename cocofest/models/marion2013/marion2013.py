@@ -181,7 +181,6 @@ class Marion2013ModelFrequency(Marion2009ModelFrequency):
             f,
             Fload,
         )
-
         return vertcat(cn_dot, f_dot, dtheta_dt, d2theta_dt2)
 
     @staticmethod
