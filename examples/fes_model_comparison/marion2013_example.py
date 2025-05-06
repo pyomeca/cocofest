@@ -15,7 +15,8 @@ from bioptim import (
     ControlType,
     Node,
     BoundsList,
-    InitialGuessList, InterpolationType,
+    InitialGuessList,
+    InterpolationType,
 )
 from cocofest import OcpFes, ModelMaker
 from cocofest.models.marion2013.marion2013_modified import Marion2013ModelPulseWidthFrequency
@@ -29,8 +30,18 @@ def prepare_ocp(model, final_time, pw_max=0.0006):
 
     # --- Set initial guesses and bounds for states and controls --- #
     x_bounds, x_init = OcpFes.set_x_bounds(model)
-    x_bounds.add(key="theta", min_bound=np.array([[90, 0, 0]]), max_bound=np.array([[90, 90, 90]]), interpolation=InterpolationType.CONSTANT_WITH_FIRST_AND_LAST_DIFFERENT)
-    x_bounds.add(key="dtheta_dt", min_bound=np.array([[0, -100, -100]]), max_bound=np.array([[0, 100, 100]]), interpolation=InterpolationType.CONSTANT_WITH_FIRST_AND_LAST_DIFFERENT)
+    x_bounds.add(
+        key="theta",
+        min_bound=np.array([[90, 0, 0]]),
+        max_bound=np.array([[90, 90, 90]]),
+        interpolation=InterpolationType.CONSTANT_WITH_FIRST_AND_LAST_DIFFERENT,
+    )
+    x_bounds.add(
+        key="dtheta_dt",
+        min_bound=np.array([[0, -100, -100]]),
+        max_bound=np.array([[0, 100, 100]]),
+        interpolation=InterpolationType.CONSTANT_WITH_FIRST_AND_LAST_DIFFERENT,
+    )
     if isinstance(model, Marion2013ModelPulseWidthFrequency):
         u_bounds, u_init = OcpFes.set_u_bounds(model, max_bound=pw_max)
     else:

@@ -487,7 +487,6 @@ def test_marion2013_dynamics():
                 model.V2,
                 model.L_I,
                 model.FM,
-
             ]
         ),
         np.array(
@@ -511,7 +510,7 @@ def test_marion2013_dynamics():
                 0.0229,
                 9.85,
                 247.5,
-    ]
+            ]
         ),
     )
 
@@ -530,8 +529,19 @@ def test_marion2013_dynamics():
                 Fload=0,
             )
         ).squeeze(),
-        np.array(DM([-2.19192863e+02,  7.82268009e+02,  0.00000000e+00, -9.85000000e+02,
-       -4.03000000e+00,  2.93000000e-04,  1.36000000e-04])).squeeze(),
+        np.array(
+            DM(
+                [
+                    -2.19192863e02,
+                    7.82268009e02,
+                    0.00000000e00,
+                    -9.85000000e02,
+                    -4.03000000e00,
+                    2.93000000e-04,
+                    1.36000000e-04,
+                ]
+            )
+        ).squeeze(),
         decimal=3,
     )
 
@@ -606,7 +616,6 @@ def test_marion2013_modified_dynamics():
         ),
     )
 
-
     np.testing.assert_almost_equal(
         np.array(
             model.system_dynamics(
@@ -623,7 +632,18 @@ def test_marion2013_modified_dynamics():
                 Fload=0,
             )
         ).squeeze(),
-        np.array(DM([-2.19192863e+02,  2.90437549e+02,  0.00000000e+00, -9.85000000e+02,
-       -4.03000000e+00,  2.93000000e-04,  1.36000000e-04])).squeeze(),
+        np.array(
+            DM(
+                [
+                    -2.19192863e02,
+                    2.90437549e02,
+                    0.00000000e00,
+                    -9.85000000e02,
+                    -4.03000000e00,
+                    2.93000000e-04,
+                    1.36000000e-04,
+                ]
+            )
+        ).squeeze(),
         decimal=3,
     )

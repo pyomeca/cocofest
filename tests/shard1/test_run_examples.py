@@ -47,6 +47,8 @@ EXAMPLE_MODEL = [
     "examples.fes_model_comparison.marion2013_example",
     "examples.fes_model_comparison.veltink1992_example",
 ]
+
+
 @pytest.mark.parametrize("module_name", EXAMPLE_MODEL)
 @pytest.mark.parametrize("with_pulse_width", [False, True])
 @pytest.mark.parametrize("with_fatigue", [False, True])
