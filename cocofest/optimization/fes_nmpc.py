@@ -12,11 +12,9 @@ from bioptim import (
     VariableScaling,
     Solution,
     Solver,
-    BiorbdModel,
 )
 
-from ..models.ding2007_with_fatigue import DingModelPulseWidthFrequencyWithFatigue
-from ..models.dynamical_model import FesMskModel
+from cocofest.models.ding2007.ding2007_with_fatigue import DingModelPulseWidthFrequencyWithFatigue
 
 
 class FesNmpc(MultiCyclicNonlinearModelPredictiveControl):

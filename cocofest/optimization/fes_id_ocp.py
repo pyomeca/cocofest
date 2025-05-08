@@ -9,9 +9,9 @@ from bioptim import (
 )
 
 from ..models.fes_model import FesModel
-from ..models.ding2003 import DingModelFrequency
-from ..models.ding2007 import DingModelPulseWidthFrequency
-from ..models.hmed2018 import DingModelPulseIntensityFrequency
+from cocofest.models.ding2003.ding2003 import DingModelFrequency
+from cocofest.models.ding2007.ding2007 import DingModelPulseWidthFrequency
+from cocofest.models.hmed2018.hmed2018 import DingModelPulseIntensityFrequency
 from ..optimization.fes_ocp import OcpFes
 
 

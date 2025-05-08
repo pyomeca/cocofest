@@ -8,11 +8,15 @@ from bioptim import (
 class StateConfigure:
     def __init__(self):
         self.state_dictionary = {
-            "Cn": self.configure_ca_troponin_complex,
-            "F": self.configure_force,
-            "A": self.configure_scaling_factor,
-            "Tau1": self.configure_time_state_force_no_cross_bridge,
-            "Km": self.configure_cross_bridges,
+            "Cn": self.configure_ca_troponin_complex,  # Ding model
+            "F": self.configure_force,  # Ding model
+            "A": self.configure_scaling_factor,  # Ding model
+            "Tau1": self.configure_time_state_force_no_cross_bridge,  # Ding model
+            "Km": self.configure_cross_bridges,  # Ding model
+            "a": self.configure_muscle_activation,  # Veltink model
+            "mu": self.configure_fatigue_state,  # Veltink model
+            "theta": self.configure_angle,  # Marion model
+            "dtheta_dt": self.configure_angular_velocity,  # Marion model
         }
 
     @staticmethod
@@ -254,6 +258,166 @@ class StateConfigure:
         return ConfigureProblem.configure_new_variable(name, name_cn_sum, ocp, nlp, as_states=False, as_controls=True)
 
     @staticmethod
+    def configure_muscle_activation(
+        ocp: OptimalControlProgram,
+        nlp: NonLinearProgram,
+        as_states: bool,
+        as_controls: bool,
+        as_states_dot: bool = False,
+        muscle_name: str = None,
+    ):
+        """
+        Configure a new variable for muscle activation (unitless)
+
+        Parameters
+        ----------
+        ocp: OptimalControlProgram
+            A reference to the ocp
+        nlp: NonLinearProgram
+            A reference to the phase
+        as_states: bool
+            If the generalized coordinates should be a state
+        as_controls: bool
+            If the generalized coordinates should be a control
+        as_states_dot: bool
+            If the generalized velocities should be a state_dot
+        muscle_name: str
+            The muscle name
+        """
+        muscle_name = "_" + muscle_name if muscle_name else ""
+        name = "a" + muscle_name
+        name_a = [name]
+        ConfigureProblem.configure_new_variable(
+            name,
+            name_a,
+            ocp,
+            nlp,
+            as_states,
+            as_controls,
+            as_states_dot,
+        )
+
+    @staticmethod
+    def configure_fatigue_state(
+        ocp: OptimalControlProgram,
+        nlp: NonLinearProgram,
+        as_states: bool,
+        as_controls: bool,
+        as_states_dot: bool = False,
+        muscle_name: str = None,
+    ):
+        """
+        Configure a new variable for fatigue state (unitless)
+
+        Parameters
+        ----------
+        ocp: OptimalControlProgram
+            A reference to the ocp
+        nlp: NonLinearProgram
+            A reference to the phase
+        as_states: bool
+            If the generalized coordinates should be a state
+        as_controls: bool
+            If the generalized coordinates should be a control
+        as_states_dot: bool
+            If the generalized velocities should be a state_dot
+        muscle_name: str
+            The muscle name
+        """
+        muscle_name = "_" + muscle_name if muscle_name else ""
+        name = "mu" + muscle_name
+        name_mu = [name]
+        ConfigureProblem.configure_new_variable(
+            name,
+            name_mu,
+            ocp,
+            nlp,
+            as_states,
+            as_controls,
+            as_states_dot,
+        )
+
+    @staticmethod
+    def configure_angle(
+        ocp: OptimalControlProgram,
+        nlp: NonLinearProgram,
+        as_states: bool,
+        as_controls: bool,
+        as_states_dot: bool = False,
+        muscle_name: str = None,
+    ):
+        """
+        Configure a new variable for angle (rad)
+
+        Parameters
+        ----------
+        ocp: OptimalControlProgram
+            A reference to the ocp
+        nlp: NonLinearProgram
+            A reference to the phase
+        as_states: bool
+            If the generalized coordinates should be a state
+        as_controls: bool
+            If the generalized coordinates should be a control
+        as_states_dot: bool
+            If the generalized velocities should be a state_dot
+        muscle_name: str
+            The muscle name
+        """
+        muscle_name = "_" + muscle_name if muscle_name else ""
+        name = "theta" + muscle_name
+        name_theta = [name]
+        ConfigureProblem.configure_new_variable(
+            name,
+            name_theta,
+            ocp,
+            nlp,
+            as_states,
+            as_controls,
+            as_states_dot,
+        )
+
+    @staticmethod
+    def configure_angular_velocity(
+        ocp: OptimalControlProgram,
+        nlp: NonLinearProgram,
+        as_states: bool,
+        as_controls: bool,
+        as_states_dot: bool = False,
+        muscle_name: str = None,
+    ):
+        """
+        Configure a new variable for angular velocity (rad/s)
+
+        Parameters
+        ----------
+        ocp: OptimalControlProgram
+            A reference to the ocp
+        nlp: NonLinearProgram
+            A reference to the phase
+        as_states: bool
+            If the generalized coordinates should be a state
+        as_controls: bool
+            If the generalized coordinates should be a control
+        as_states_dot: bool
+            If the generalized velocities should be a state_dot
+        muscle_name: str
+            The muscle name
+        """
+        muscle_name = "_" + muscle_name if muscle_name else ""
+        name = "dtheta_dt" + muscle_name
+        name_dtheta_dt = [name]
+        ConfigureProblem.configure_new_variable(
+            name,
+            name_dtheta_dt,
+            ocp,
+            nlp,
+            as_states,
+            as_controls,
+            as_states_dot,
+        )
+
+    @staticmethod
     def configure_last_pulse_width(ocp, nlp, muscle_name: str = None):
         """
         Configure the last pulse width control
@@ -275,7 +439,7 @@ class StateConfigure:
     @staticmethod
     def configure_pulse_intensity(ocp, nlp, muscle_name: str = None, truncation: int = 20):
         """
-        Configure the pulse intensity control
+        Configure the pulse intensity control for the Ding model
 
         Parameters
         ----------
@@ -287,6 +451,25 @@ class StateConfigure:
         muscle_name = "_" + muscle_name if muscle_name else ""
         name = "pulse_intensity" + muscle_name
         pulse_intensity = [str(i) for i in range(truncation)]
+        return ConfigureProblem.configure_new_variable(
+            name, pulse_intensity, ocp, nlp, as_states=False, as_controls=True
+        )
+
+    @staticmethod
+    def configure_intensity(ocp, nlp, muscle_name: str = None):
+        """
+        Configure the intensity control for the Veltink1992 model
+
+        Parameters
+        ----------
+        ocp: OptimalControlProgram
+            A reference to the ocp
+        nlp: NonLinearProgram
+            A reference to the phase
+        """
+        muscle_name = "_" + muscle_name if muscle_name else ""
+        name = "I" + muscle_name
+        pulse_intensity = [name]
         return ConfigureProblem.configure_new_variable(
             name, pulse_intensity, ocp, nlp, as_states=False, as_controls=True
         )

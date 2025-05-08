@@ -12,8 +12,8 @@ from bioptim import (
     OptimalControlProgram,
 )
 
-from .state_configure import StateConfigure
-from .fes_model import FesModel
+from cocofest.models.state_configure import StateConfigure
+from cocofest.models.fes_model import FesModel
 
 
 class DingModelFrequency(FesModel):

@@ -4,7 +4,7 @@ This custom objective class regroups all the custom objectives that are used in 
 
 from casadi import MX, vertcat
 from bioptim import PenaltyController
-from .models.ding2007 import DingModelPulseWidthFrequency
+from .models.ding2007.ding2007 import DingModelPulseWidthFrequency
 from .models.dynamical_model import FesMskModel
 
 

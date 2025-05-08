@@ -16,8 +16,8 @@ from bioptim import (
 )
 
 from ..fourier_approx import FourierSeries
-from ..models.ding2007 import DingModelPulseWidthFrequency
-from ..models.hmed2018 import DingModelPulseIntensityFrequency
+from cocofest.models.ding2007.ding2007 import DingModelPulseWidthFrequency
+from cocofest.models.hmed2018.hmed2018 import DingModelPulseIntensityFrequency
 from ..custom_constraints import CustomConstraint
 
 

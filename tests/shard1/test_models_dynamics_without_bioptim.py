@@ -1,3 +1,5 @@
+import pytest
+
 import numpy as np
 from casadi import DM
 
@@ -248,4 +250,400 @@ def test_hmed2018_dynamics():
     np.testing.assert_almost_equal(
         np.array(model.lambda_i_calculation(pulse_intensity=30)).squeeze(),
         np.array(DM(0.0799499)).squeeze(),
+    )
+
+
+def test_veltink1992_dynamics():
+    model = ModelMaker.create_model("veltink_and_riener1998")
+    assert model.nb_state == 2
+    assert model.name_dof == [
+        "a",
+        "mu",
+    ]
+    np.testing.assert_almost_equal(
+        model.standard_rest_values(),
+        np.array([[0], [1]]),
+    )
+    np.testing.assert_almost_equal(
+        np.array(
+            [
+                model.Ta,
+                model.I_threshold,
+                model.I_saturation,
+                model.mu_min,
+                model.T_fat,
+                model.T_rec,
+            ]
+        ),
+        np.array(
+            [
+                0.26,
+                20.0,
+                60.0,
+                0.2,
+                30.0,
+                50.0,
+            ]
+        ),
+    )
+    np.testing.assert_almost_equal(
+        np.array(
+            model.system_dynamics(
+                a=0.5,
+                mu=0.1,
+                I=50,
+            )
+        ).squeeze(),
+        np.array(DM([0.96153846, 0.01066667])).squeeze(),
+        decimal=3,
+    )
+
+    np.testing.assert_almost_equal(model.normalize_current(I=50), 0.75)
+    np.testing.assert_almost_equal(model.get_muscle_activation(a=0.6, u=0.75), 0.576923076923077)
+    np.testing.assert_almost_equal(model.get_mu_dot(a=0.6, mu=0.09), 0.00948)
+
+
+def test_marion2009_dynamics():
+    model = ModelMaker.create_model("marion2009_with_fatigue")
+    assert model.nb_state == 5
+    assert model.name_dof == [
+        "Cn",
+        "F",
+        "A",
+        "Tau1",
+        "Km",
+    ]
+    np.testing.assert_almost_equal(
+        model.standard_rest_values(),
+        np.array([[0], [0], [model.a_rest], [model.tau1_rest], [model.km_rest]]),
+    )
+
+    np.testing.assert_almost_equal(
+        np.array(
+            [
+                model.tauc,
+                model.r0_km_relationship,
+                model.alpha_a,
+                model.alpha_tau1,
+                model.tau2,
+                model.tau_fat,
+                model.alpha_km,
+                model.a_rest,
+                model.tau1_rest,
+                model.km_rest,
+                model.theta_star,
+                model.a_theta,
+                model.b_theta,
+            ]
+        ),
+        np.array(
+            [
+                0.020,
+                1.168,
+                -2.006 * 10e-2,
+                1.563 * 10e-5,
+                0.10536,
+                97.48,
+                6.269 * 10e-6,
+                1473,
+                0.04298,
+                0.128,
+                90,
+                -0.000449,
+                0.0344,
+            ]
+        ),
+    )
+
+    np.testing.assert_almost_equal(
+        np.array(
+            model.system_dynamics(
+                cn=5,
+                f=100,
+                a=1473,
+                tau1=0.04298,
+                km=0.128,
+                t=0.11,
+                t_stim_prev=np.array([0, 0.1]),
+                theta=20,
+            )
+        ).squeeze(),
+        np.array(DM([-2.19408644e02, 1.04853099e03, -2.32015336e01, 1.56300000e-02, 6.26900000e-03])).squeeze(),
+        decimal=3,
+    )
+
+
+def test_marion2009_modified_dynamics():
+    model = ModelMaker.create_model("marion2009_modified_with_fatigue")
+    assert model.nb_state == 5
+    assert model.name_dof == [
+        "Cn",
+        "F",
+        "A",
+        "Tau1",
+        "Km",
+    ]
+    np.testing.assert_almost_equal(
+        model.standard_rest_values(),
+        np.array([[0], [0], [model.a_rest], [model.tau1_rest], [model.km_rest]]),
+    )
+
+    np.testing.assert_almost_equal(
+        np.array(
+            [
+                model.tauc,
+                model.r0_km_relationship,
+                model.alpha_a,
+                model.alpha_tau1,
+                model.tau2,
+                model.tau_fat,
+                model.alpha_km,
+                model.a_rest,
+                model.tau1_rest,
+                model.km_rest,
+                model.theta_star,
+                model.a_theta,
+                model.b_theta,
+                model.pd0,
+                model.pdt,
+            ]
+        ),
+        np.array(
+            [
+                0.020,
+                1.168,
+                -2.006 * 10e-2,
+                1.563 * 10e-5,
+                0.10536,
+                97.48,
+                6.269 * 10e-6,
+                1473,
+                0.04298,
+                0.128,
+                90,
+                -0.000449,
+                0.0344,
+                0.000131405,
+                0.000194138,
+            ]
+        ),
+    )
+
+    np.testing.assert_almost_equal(
+        np.array(
+            model.system_dynamics(
+                cn=5,
+                f=100,
+                a=1473,
+                tau1=0.04298,
+                km=0.128,
+                t=0.11,
+                t_stim_prev=np.array([0, 0.1]),
+                pulse_width=0.0004,
+                theta=20,
+            )
+        ).squeeze(),
+        np.array(DM([-2.19408644e02, 6.13622448e02, -2.00600000e01, 1.56300000e-02, 6.26900000e-03])).squeeze(),
+        decimal=3,
+    )
+
+
+def test_marion2013_dynamics():
+    model = ModelMaker.create_model("marion2013_with_fatigue")
+    assert model.nb_state == 7
+    assert model.name_dof == [
+        "Cn",
+        "F",
+        "theta",
+        "dtheta_dt",
+        "A",
+        "Tau1",
+        "Km",
+    ]
+    np.testing.assert_almost_equal(
+        model.standard_rest_values(),
+        np.array([[0], [0], [90], [0], [model.a_rest], [model.tau1_rest], [model.km_rest]]),
+    )
+
+    np.testing.assert_almost_equal(
+        np.array(
+            [
+                model.tauc,
+                model.r0_km_relationship,
+                model.alpha_a,
+                model.alpha_tau1,
+                model.tau2,
+                model.tau_fat,
+                model.alpha_km,
+                model.a_rest,
+                model.tau1_rest,
+                model.km_rest,
+                model.beta_tau1,
+                model.beta_km,
+                model.beta_a,
+                model.a_theta,
+                model.b_theta,
+                model.V1,
+                model.V2,
+                model.L_I,
+                model.FM,
+            ]
+        ),
+        np.array(
+            [
+                0.020,
+                2,
+                -4.03e-2,
+                2.93e-6,
+                0.0521,
+                99.4,
+                1.36e-6,
+                2100,
+                0.0361,
+                0.352,
+                8.54e-07,
+                0,
+                0,
+                -0.000449,
+                0.0344,
+                0.371,
+                0.0229,
+                9.85,
+                247.5,
+            ]
+        ),
+    )
+
+    np.testing.assert_almost_equal(
+        np.array(
+            model.system_dynamics(
+                cn=5,
+                f=100,
+                theta=90,
+                dtheta_dt=0,
+                a=2100,
+                tau1=0.0361,
+                km=0.352,
+                t=0.11,
+                t_stim_prev=np.array([0, 0.1]),
+                Fload=0,
+            )
+        ).squeeze(),
+        np.array(
+            DM(
+                [
+                    -2.19192863e02,
+                    7.82268009e02,
+                    0.00000000e00,
+                    -9.85000000e02,
+                    -4.03000000e00,
+                    2.93000000e-04,
+                    1.36000000e-04,
+                ]
+            )
+        ).squeeze(),
+        decimal=3,
+    )
+
+
+def test_marion2013_modified_dynamics():
+    model = ModelMaker.create_model("marion2013_modified_with_fatigue")
+    assert model.nb_state == 7
+    assert model.name_dof == [
+        "Cn",
+        "F",
+        "theta",
+        "dtheta_dt",
+        "A",
+        "Tau1",
+        "Km",
+    ]
+    np.testing.assert_almost_equal(
+        model.standard_rest_values(),
+        np.array([[0], [0], [90], [0], [model.a_rest], [model.tau1_rest], [model.km_rest]]),
+    )
+
+    np.testing.assert_almost_equal(
+        np.array(
+            [
+                model.tauc,
+                model.r0_km_relationship,
+                model.alpha_a,
+                model.alpha_tau1,
+                model.tau2,
+                model.tau_fat,
+                model.alpha_km,
+                model.a_rest,
+                model.tau1_rest,
+                model.km_rest,
+                model.beta_tau1,
+                model.beta_km,
+                model.beta_a,
+                model.a_theta,
+                model.b_theta,
+                model.V1,
+                model.V2,
+                model.L_I,
+                model.FM,
+                model.pd0,
+                model.pdt,
+            ]
+        ),
+        np.array(
+            [
+                0.020,
+                2,
+                -4.03e-2,
+                2.93e-6,
+                0.0521,
+                99.4,
+                1.36e-6,
+                2100,
+                0.0361,
+                0.352,
+                8.54e-07,
+                0,
+                0,
+                -0.000449,
+                0.0344,
+                0.371,
+                0.0229,
+                9.85,
+                247.5,
+                0.000131405,
+                0.000194138,
+            ]
+        ),
+    )
+
+    np.testing.assert_almost_equal(
+        np.array(
+            model.system_dynamics(
+                cn=5,
+                f=100,
+                theta=90,
+                dtheta_dt=0,
+                a=2100,
+                tau1=0.0361,
+                km=0.352,
+                t=0.11,
+                t_stim_prev=np.array([0, 0.1]),
+                pulse_width=0.0004,
+                Fload=0,
+            )
+        ).squeeze(),
+        np.array(
+            DM(
+                [
+                    -2.19192863e02,
+                    2.90437549e02,
+                    0.00000000e00,
+                    -9.85000000e02,
+                    -4.03000000e00,
+                    2.93000000e-04,
+                    1.36000000e-04,
+                ]
+            )
+        ).squeeze(),
+        decimal=3,
     )
