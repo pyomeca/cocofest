@@ -1,4 +1,5 @@
 import numpy as np
+from copy import deepcopy
 from casadi import SX
 from bioptim import (
     BiorbdModel,
@@ -11,6 +12,7 @@ from bioptim import (
     Solver,
     MultiCyclicCycleSolutions,
     ExternalForceSetTimeSeries,
+    ControlType,
     OdeSolver,
 )
 from .fes_nmpc import FesNmpc
@@ -99,7 +101,9 @@ class FesNmpcMsk(FesNmpc):
             dynamics=self.nlp[0].dynamics_type,
             n_shooting=self.total_optimization_run * self.cycle_len,
             phase_time=self.total_optimization_run * self.cycle_len * dt,
+            x_bounds=self.nlp[0].x_bounds,
             x_init=x_init,
+            u_bounds=self.nlp[0].u_bounds,
             u_init=u_init,
             use_sx=self.cx == SX,
             parameters=parameters,
@@ -107,6 +111,66 @@ class FesNmpcMsk(FesNmpc):
         )
         a_init = InitialGuessList()
         return Solution.from_initial_guess(solution_ocp, [np.array([dt]), x_init, u_init, p_init, a_init])
+
+    def _initialize_one_cycle(self, dt: float, states: np.ndarray, controls: np.ndarray, parameters: np.ndarray):
+        """return a solution for a single window kept of the MHE"""
+        x_init = InitialGuessList()
+        for key in self.nlp[0].states.keys():
+            x_init.add(
+                key,
+                states[key],
+                interpolation=self.nlp[0].x_init.type,
+                phase=0,
+            )
+
+        u_init = InitialGuessList()
+        u_init_for_solution = InitialGuessList()
+        for key in self.nlp[0].controls.keys():
+            controls_tp = controls[key]
+            u_init_for_solution.add(key, controls_tp, interpolation=InterpolationType.EACH_FRAME, phase=0)
+            if self.nlp[0].control_type == ControlType.CONSTANT:
+                controls_tp = controls_tp[:, :-1]
+            u_init.add(key, controls_tp, interpolation=InterpolationType.EACH_FRAME, phase=0)
+
+        model_serialized = self.nlp[0].model.serialize()
+        model_class = model_serialized[0]
+        model_initializer = model_serialized[1]
+
+        param_list = ParameterList(use_sx=self.cx == SX)
+        p_init = InitialGuessList()
+        for key in self.nlp[0].parameters.keys():
+            parameters_tp = parameters[key]
+            param_list.add(
+                name=key,
+                function=self.nlp[0].parameters[key].function,
+                size=self.nlp[0].parameters[key].shape,
+                scaling=self.nlp[0].parameters[key].scaling,
+            )
+            p_init.add(
+                key,
+                parameters_tp,
+                interpolation=InterpolationType.EACH_FRAME,
+                phase=0,
+            )
+
+        solution_ocp = OptimalControlProgram(
+            bio_model=model_class(**model_initializer),
+            dynamics=self.nlp[0].dynamics_type,
+            objective_functions=deepcopy(self.common_objective_functions),
+            n_shooting=self.cycle_len,
+            phase_time=self.cycle_len * dt,
+            x_bounds=self.nlp[0].x_bounds,
+            x_init=x_init,
+            u_bounds=self.nlp[0].u_bounds,
+            u_init=u_init,
+            use_sx=self.cx == SX,
+            parameters=param_list,
+            parameter_init=p_init,
+            parameter_bounds=self.parameter_bounds,
+        )
+        a_init = InitialGuessList()
+        return Solution.from_initial_guess(solution_ocp,
+                                           [np.array([dt]), x_init, u_init_for_solution, p_init, a_init])
 
     def create_model_from_list(self, models: list):
         if isinstance(models[0], BiorbdModel):

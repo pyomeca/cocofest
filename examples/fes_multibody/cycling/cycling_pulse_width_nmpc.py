@@ -7,6 +7,7 @@ import pickle
 
 import matplotlib.pyplot as plt
 import numpy as np
+from numpy.ma.extras import average
 
 from bioptim import (
     Axis,
@@ -50,16 +51,17 @@ class MyCyclicNMPC(FesNmpcMsk):
     def advance_window_bounds_states(self, sol, n_cycles_simultaneous=None, **extra):
         states = sol.decision_states(to_merge=SolutionMerge.NODES)
         states_keys = states.keys()
-        if self.nlp[0].dynamics_type.ode_solver == OdeSolver.COLLOCATION:
-            factor = self.nlp[0].dynamics_type.ode_solver.polynomial_degree + 1
-        else:
-            factor = 1
+        polynomial_order = (
+            self.nlp[0].dynamics_type.ode_solver.polynomial_degree + 1
+            if isinstance(self.nlp[0].dynamics_type.ode_solver, OdeSolver.COLLOCATION)
+            else 1
+        )
         for key in states_keys:
             if key == "q" or key == "qdot":
                 pass
             else:
-                self.nlp[0].x_bounds[key].min[0, 0] = states[key][0][self.cycle_len * factor]
-                self.nlp[0].x_bounds[key].max[0, 0] = states[key][0][self.cycle_len * factor]
+                self.nlp[0].x_bounds[key].min[0, 0] = states[key][0][self.cycle_len * polynomial_order]
+                self.nlp[0].x_bounds[key].max[0, 0] = states[key][0][self.cycle_len * polynomial_order]
         self.update_stim()
         return True
 
@@ -94,6 +96,8 @@ class MyCyclicNMPC(FesNmpcMsk):
             self.nlp[0].u_init[key].init[:, :] = controls[key][:, :]
         return True
 
+def task_performance_coefficient_cost_fun():
+    return
 
 def prepare_nmpc(
     model: BiorbdModel | FesMskModel,
@@ -107,8 +111,10 @@ def prepare_nmpc(
     minimize_force: bool = True,
     minimize_fatigue: bool = False,
     minimize_control: bool = False,
+    cost_fun_weight: list = None,
     use_sx: bool = False,
     ode_solver: OdeSolver = OdeSolver.RK4(n_integration_steps=10),
+    initial_guess_path: str=None,
 ):
     window_n_shooting = cycle_len * n_cycles_simultaneous
     window_cycle_duration = cycle_duration * n_cycles_simultaneous
@@ -122,7 +128,7 @@ def prepare_nmpc(
     numerical_time_series.update(numerical_data_time_series)
     dynamics = set_dynamics(model=model, numerical_time_series=numerical_time_series, ode_solver=ode_solver)
     # Initial q guess
-    x_init = set_x_init(window_n_shooting, pedal_config, turn_number, ode_solver=ode_solver)
+    x_init = set_x_init(window_n_shooting, pedal_config, turn_number, ode_solver=ode_solver, init_file_path=initial_guess_path)
     # Path constraint
     x_bounds, x_init = set_bounds(
         model=model,
@@ -130,10 +136,11 @@ def prepare_nmpc(
         n_shooting=window_n_shooting,
         turn_number=turn_number,
         ode_solver=ode_solver,
+        init_file_path = initial_guess_path,
     )
     # Control path constraint
-    u_bounds, u_init, u_scaling = set_u_bounds_and_init(model, window_n_shooting)
-    objective_functions = set_objective_functions(minimize_force, minimize_fatigue, minimize_control)
+    u_bounds, u_init, u_scaling = set_u_bounds_and_init(model, window_n_shooting, init_file_path=initial_guess_path)
+    objective_functions = set_objective_functions(minimize_force, minimize_fatigue, minimize_control, cost_fun_weight, x_init["q"].init[2][-1])
     # Constraints
     constraints = set_constraints(model, window_n_shooting, turn_number, x_init)
     # Update model
@@ -201,23 +208,22 @@ def set_dynamics(model, numerical_time_series, ode_solver):
     return dynamics
 
 
-def set_objective_functions(minimize_force, minimize_fatigue, minimize_control):
+def set_objective_functions(minimize_force, minimize_fatigue, minimize_control, cost_fun_weight, target):
     objective_functions = ObjectiveList()
     if minimize_force:
         objective_functions.add(
             CustomObjective.minimize_overall_muscle_force_production,
             custom_type=ObjectiveFcn.Lagrange,
-            node=Node.ALL_SHOOTING,
-            weight=1,
+            node=Node.ALL,
+            weight=10000 * cost_fun_weight[0],
             quadratic=True,
-            # integration_rule=QuadratureRule.TRAPEZOIDAL,
         )
     if minimize_fatigue:
         objective_functions.add(
             CustomObjective.minimize_overall_muscle_fatigue,
             custom_type=ObjectiveFcn.Lagrange,
             node=Node.ALL,
-            weight=-1,
+            weight=10000 * cost_fun_weight[1],
             quadratic=True,
         )
     if minimize_control:
@@ -225,45 +231,73 @@ def set_objective_functions(minimize_force, minimize_fatigue, minimize_control):
             CustomObjective.minimize_overall_stimulation_charge,
             custom_type=ObjectiveFcn.Lagrange,
             node=Node.ALL,
-            weight=1,
+            weight=10000 * cost_fun_weight[2],
             quadratic=True,
         )
+    objective_functions.add(
+        ObjectiveFcn.Mayer.MINIMIZE_STATE,
+        key="q",
+        index=2,
+        node=Node.END,
+        weight=1e-3,
+        target=target,
+        quadratic=True,
+    )
     return objective_functions
 
 
-def set_x_init(n_shooting, pedal_config, turn_number, ode_solver):
+def set_x_init(n_shooting, pedal_config, turn_number, ode_solver, init_file_path):
     if isinstance(ode_solver, OdeSolver.COLLOCATION):
         n_shooting = n_shooting * (ode_solver.polynomial_degree + 1)
     x_init = InitialGuessList()
-    biorbd_model_path = "../../model_msk/simplified_UL_Seth_2D_cycling_for_inverse_kinematics.bioMod"
-    q_guess, qdot_guess, qddotguess = inverse_kinematics_cycling(
-        biorbd_model_path,
-        n_shooting,
-        x_center=pedal_config["x_center"],
-        y_center=pedal_config["y_center"],
-        radius=pedal_config["radius"],
-        ik_method="lm",
-        cycling_number=turn_number,
-    )
-    if isinstance(ode_solver, OdeSolver.COLLOCATION):
+
+    if init_file_path:
+        with open(init_file_path, "rb") as file:
+            data = pickle.load(file)
+        q_guess = data["states"]["q"]
+        qdot_guess = data["states"]["qdot"]
         x_init.add("q", q_guess, interpolation=InterpolationType.ALL_POINTS)
         x_init.add("qdot", qdot_guess, interpolation=InterpolationType.ALL_POINTS)
     else:
-        x_init.add("q", q_guess, interpolation=InterpolationType.EACH_FRAME)
-        x_init.add("qdot", qdot_guess, interpolation=InterpolationType.EACH_FRAME)
+        biorbd_model_path = "../../model_msk/simplified_UL_Seth_2D_cycling_for_inverse_kinematics.bioMod"
+        q_guess, qdot_guess, qddotguess = inverse_kinematics_cycling(
+            biorbd_model_path,
+            n_shooting,
+            x_center=pedal_config["x_center"],
+            y_center=pedal_config["y_center"],
+            radius=pedal_config["radius"],
+            ik_method="lm",
+            cycling_number=turn_number,
+        )
+        if isinstance(ode_solver, OdeSolver.COLLOCATION):
+            x_init.add("q", q_guess, interpolation=InterpolationType.ALL_POINTS)
+            x_init.add("qdot", qdot_guess, interpolation=InterpolationType.ALL_POINTS)
+        else:
+            x_init.add("q", q_guess, interpolation=InterpolationType.EACH_FRAME)
+            x_init.add("qdot", qdot_guess, interpolation=InterpolationType.EACH_FRAME)
 
     return x_init
 
 
-def set_u_bounds_and_init(bio_model, n_shooting):
+def set_u_bounds_and_init(bio_model, n_shooting, init_file_path):
     u_bounds, u_init = OcpFesMsk.set_u_bounds_fes(bio_model)
     u_init = InitialGuessList()  # Controls initial guess
     models = bio_model.muscles_dynamics_model
+    if init_file_path:
+        with open(init_file_path, "rb") as file:
+            data = pickle.load(file)
+        u_guess = data["controls"]
+    else:
+        u_guess = None
     for model in models:
         key = "last_pulse_width_" + str(model.muscle_name)
+        if u_guess:
+            initial_guess = data["controls"][key]
+        else:
+            initial_guess = np.array([[model.pd0] * n_shooting])
         u_init.add(
             key=key,
-            initial_guess=np.array([[model.pd0] * n_shooting]),
+            initial_guess=initial_guess,
             phase=0,
             interpolation=InterpolationType.EACH_FRAME,
         )
@@ -278,19 +312,30 @@ def set_u_bounds_and_init(bio_model, n_shooting):
     )
 
 
-def set_bounds(model, x_init, n_shooting, turn_number, ode_solver):
+def set_bounds(model, x_init, n_shooting, turn_number, ode_solver, init_file_path):
     interpolation_type = InterpolationType.EACH_FRAME
     if isinstance(ode_solver, OdeSolver.COLLOCATION):
         n_shooting = n_shooting * (ode_solver.polynomial_degree + 1)
         interpolation_type = InterpolationType.ALL_POINTS
     x_bounds, x_init_fes = OcpFesMsk.set_x_bounds_fes(model)
+
+    states = None
+    if init_file_path:
+        with open(init_file_path, "rb") as file:
+            data = pickle.load(file)
+            states = data["states"]
+
     for key in x_init_fes.keys():
+        initial_guess = np.array([[x_init_fes[key].init[0][0]] * (n_shooting + 1)])
+        if states:
+            initial_guess = states[key]
         x_init.add(
             key=key,
-            initial_guess=np.array([[x_init_fes[key].init[0][0]] * (n_shooting + 1)]),
+            initial_guess=initial_guess,
             phase=0,
             interpolation=interpolation_type,
         )
+
     # Retrieve default bounds from the model for positions and velocities
     q_x_bounds = model.bounds_from_ranges("q")
     x_min_bound = []
@@ -383,6 +428,25 @@ def set_model(model_path, stim_time):
     )
     return model
 
+def create_simulation_list(n_cycles_simultaneous: list, stimulation: list, minimize_force: list, minimize_fatigue: list, minimize_control: list, cost_fun_weight: list, pickle_file_path: list):
+    checklist = [n_cycles_simultaneous, stimulation, minimize_force, minimize_fatigue, minimize_control, cost_fun_weight, pickle_file_path]
+    simulation_conditions_list = []
+    if all(len(checklist[0]) == len(l) for l in checklist[1:]):
+        for i in range(len(n_cycles_simultaneous)):
+            simulation_conditions = {
+                "n_cycles_simultaneous": n_cycles_simultaneous[i],
+                "stimulation": stimulation[i],
+                "minimize_force": minimize_force[i],
+                "minimize_fatigue": minimize_fatigue[i],
+                "minimize_control": minimize_control[i],
+                "cost_fun_weight": cost_fun_weight[i],
+                "pickle_file_path": pickle_file_path[i],
+            }
+            simulation_conditions_list.append(simulation_conditions)
+    else:
+        raise RuntimeError("all list must have the same len")
+
+    return simulation_conditions_list
 
 def main():
     """
@@ -393,97 +457,191 @@ def main():
     # NMPC parameters
     cycle_duration = 1
     n_cycles_to_advance = 1
-    n_cycles = 3
+    n_cycles = 10000
     # Bike parameters
     pedal_config = {"x_center": 0.35, "y_center": 0.0, "radius": 0.1}
     resistive_torque = {
         "Segment_application": "wheel",
         "torque": np.array([0, 0, -1]),
     }
-    simulation_conditions_1 = {
-        "n_cycles_simultaneous": 1,
-        "stimulation": 50,
-        "minimize_force": True,
-        "minimize_fatigue": False,
-        "minimize_control": False,
-        "pickle_file_path": "1_min_force.pkl",
-    }
-    simulation_conditions_2 = {
-        "n_cycles_simultaneous": 1,
-        "stimulation": 50,
-        "minimize_force": False,
-        "minimize_fatigue": True,
-        "minimize_control": False,
-        "pickle_file_path": "1_min_fatigue.pkl",
-    }
-    simulation_conditions_3 = {
-        "n_cycles_simultaneous": 1,
-        "stimulation": 50,
-        "minimize_force": False,
-        "minimize_fatigue": False,
-        "minimize_control": True,
-        "pickle_file_path": "1_min_control.pkl",
-    }
-    simulation_conditions_4 = {
-        "n_cycles_simultaneous": 3,
-        "stimulation": 150,
-        "minimize_force": True,
-        "minimize_fatigue": False,
-        "minimize_control": False,
-        "pickle_file_path": "3_min_force.pkl",
-    }
-    simulation_conditions_5 = {
-        "n_cycles_simultaneous": 3,
-        "stimulation": 150,
-        "minimize_force": False,
-        "minimize_fatigue": True,
-        "minimize_control": False,
-        "pickle_file_path": "3_min_fatigue.pkl",
-    }
-    simulation_conditions_6 = {
-        "n_cycles_simultaneous": 3,
-        "stimulation": 150,
-        "minimize_force": False,
-        "minimize_fatigue": False,
-        "minimize_control": True,
-        "pickle_file_path": "3_min_control.pkl",
-    }
-    simulation_conditions_7 = {
-        "n_cycles_simultaneous": 6,
-        "stimulation": 300,
-        "minimize_force": True,
-        "minimize_fatigue": False,
-        "minimize_control": False,
-        "pickle_file_path": "6_min_force.pkl",
-    }
-    simulation_conditions_8 = {
-        "n_cycles_simultaneous": 6,
-        "stimulation": 300,
-        "minimize_force": False,
-        "minimize_fatigue": True,
-        "minimize_control": False,
-        "pickle_file_path": "6_min_fatigue.pkl",
-    }
-    simulation_conditions_9 = {
-        "n_cycles_simultaneous": 6,
-        "stimulation": 300,
-        "minimize_force": False,
-        "minimize_fatigue": False,
-        "minimize_control": True,
-        "pickle_file_path": "6_min_control.pkl",
-    }
 
-    simulation_conditions_list = [
-        simulation_conditions_1,
-        simulation_conditions_2,
-        simulation_conditions_3,
-        simulation_conditions_4,
-        simulation_conditions_5,
-        simulation_conditions_6,
-        simulation_conditions_7,
-        simulation_conditions_8,
-        simulation_conditions_9,
-    ]
+    # Building simulation list
+    n_cycles_simultaneous = [
+                             2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2,
+                             3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3,
+                             4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4,
+                             5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5
+                            ]
+    stimulation = [100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100,
+                   150, 150, 150, 150, 150, 150, 150, 150, 150, 150, 150, 150, 150,
+                   200, 200, 200, 200, 200, 200, 200, 200, 200, 200, 200, 200, 200,
+                   250, 250, 250, 250, 250, 250, 250, 250, 250, 250, 250, 250, 250,
+                   ]
+    minimize_force = [
+                      True, False, False, True, True, True, True, True, True, False, False, False, True,
+                      True, False, False, True, True, True, True, True, True, False, False, False, True,
+                      True, False, False, True, True, True, True, True, True, False, False, False, True,
+                      True, False, False, True, True, True, True, True, True, False, False, False, True,
+                      ]
+    minimize_fatigue = [False, True, False, True, True, True, False, False, False, True, True, True, True,
+                        False, True, False, True, True, True, False, False, False, True, True, True, True,
+                        False, True, False, True, True, True, False, False, False, True, True, True, True,
+                        False, True, False, True, True, True, False, False, False, True, True, True, True,
+                        ]
+    minimize_control = [False, False, True, False, False, False, True, True, True, True, True, True, True,
+                        False, False, True, False, False, False, True, True, True, True, True, True, True,
+                        False, False, True, False, False, False, True, True, True, True, True, True, True,
+                        False, False, True, False, False, False, True, True, True, True, True, True, True,
+                        ]
+    cost_function_weight = [# 2 n_cycles_simultaneous
+                            [1, 0, 0], [0, 1, 0], [0, 0, 1],
+                            [0.75, 0.25, 0], [0.5, 0.5, 0], [0.25, 0.75, 0],
+                            [0.75, 0, 0.25], [0.5, 0, 0.5], [0.25, 0, 0.75],
+                            [0, 0.75, 0.25], [0, 0.5, 0.5], [0, 0.25, 0.75],
+                            [0.33, 0.33, 0.33],
+                            # 3 n_cycles_simultaneous
+                            [1, 0, 0], [0, 1, 0], [0, 0, 1],
+                            [0.75, 0.25, 0], [0.5, 0.5, 0], [0.25, 0.75, 0],
+                            [0.75, 0, 0.25], [0.5, 0, 0.5], [0.25, 0, 0.75],
+                            [0, 0.75, 0.25], [0, 0.5, 0.5], [0, 0.25, 0.75],
+                            [0.33, 0.33, 0.33],
+                            # 4 n_cycles_simultaneous
+                            [1, 0, 0], [0, 1, 0], [0, 0, 1],
+                            [0.75, 0.25, 0], [0.5, 0.5, 0], [0.25, 0.75, 0],
+                            [0.75, 0, 0.25], [0.5, 0, 0.5], [0.25, 0, 0.75],
+                            [0, 0.75, 0.25], [0, 0.5, 0.5], [0, 0.25, 0.75],
+                            [0.33, 0.33, 0.33],
+                            # 5 n_cycles_simultaneous
+                            [1, 0, 0], [0, 1, 0], [0, 0, 1],
+                            [0.75, 0.25, 0], [0.5, 0.5, 0], [0.25, 0.75, 0],
+                            [0.75, 0, 0.25], [0.5, 0, 0.5], [0.25, 0, 0.75],
+                            [0, 0.75, 0.25], [0, 0.5, 0.5], [0, 0.25, 0.75],
+                            [0.33, 0.33, 0.33],
+                            ]
+    # 1) first dim corresponds to the simulation 2) the second dim to the respective [force, fatigue, control] weight
+    pickle_file_path = ["result/2_cycle/2_min_force100_collocation_5_radau_with_init.pkl",
+                        "result/2_cycle/2_min_fatigue100_collocation_5_radau_with_init.pkl",
+                        "result/2_cycle/2_min_control100_collocation_5_radau_with_init.pkl",
+                        "result/2_cycle/2_min_force75_fatigue25_collocation_5_radau_with_init.pkl",
+                        "result/2_cycle/2_min_force50_fatigue50_collocation_5_radau_with_init.pkl",
+                        "result/2_cycle/2_min_force25_fatigue75_collocation_5_radau_with_init.pkl",
+                        "result/2_cycle/2_min_force75_control25_collocation_5_radau_with_init.pkl",
+                        "result/2_cycle/2_min_force50_control50_collocation_5_radau_with_init.pkl",
+                        "result/2_cycle/2_min_force25_control75_collocation_5_radau_with_init.pkl",
+                        "result/2_cycle/2_min_fatigue75_control25_collocation_5_radau_with_init.pkl",
+                        "result/2_cycle/2_min_fatigue50_control50_collocation_5_radau_with_init.pkl",
+                        "result/2_cycle/2_min_fatigue25_control75_collocation_5_radau_with_init.pkl",
+                        "result/2_cycle/2_min_force33_fatigue33_control33_collocation_5_radau_with_init.pkl",
+
+                        "result/3_cycle/3_min_force100_collocation_5_radau_with_init.pkl",
+                        "result/3_cycle/3_min_fatigue100_collocation_5_radau_with_init.pkl",
+                        "result/3_cycle/3_min_control100_collocation_5_radau_with_init.pkl",
+                        "result/3_cycle/3_min_force75_fatigue25_collocation_5_radau_with_init.pkl",
+                        "result/3_cycle/3_min_force50_fatigue50_collocation_5_radau_with_init.pkl",
+                        "result/3_cycle/3_min_force25_fatigue75_collocation_5_radau_with_init.pkl",
+                        "result/3_cycle/3_min_force75_control25_collocation_5_radau_with_init.pkl",
+                        "result/3_cycle/3_min_force50_control50_collocation_5_radau_with_init.pkl",
+                        "result/3_cycle/3_min_force25_control75_collocation_5_radau_with_init.pkl",
+                        "result/3_cycle/3_min_fatigue75_control25_collocation_5_radau_with_init.pkl",
+                        "result/3_cycle/3_min_fatigue50_control50_collocation_5_radau_with_init.pkl",
+                        "result/3_cycle/3_min_fatigue25_control75_collocation_5_radau_with_init.pkl",
+                        "result/3_cycle/3_min_force33_fatigue33_control33_collocation_5_radau_with_init.pkl",
+
+                        "result/4_cycle/4_min_force100_collocation_5_radau_with_init.pkl",
+                        "result/4_cycle/4_min_fatigue100_collocation_5_radau_with_init.pkl",
+                        "result/4_cycle/4_min_control100_collocation_5_radau_with_init.pkl",
+                        "result/4_cycle/4_min_force75_fatigue25_collocation_5_radau_with_init.pkl",
+                        "result/4_cycle/4_min_force50_fatigue50_collocation_5_radau_with_init.pkl",
+                        "result/4_cycle/4_min_force25_fatigue75_collocation_5_radau_with_init.pkl",
+                        "result/4_cycle/4_min_force75_control25_collocation_5_radau_with_init.pkl",
+                        "result/4_cycle/4_min_force50_control50_collocation_5_radau_with_init.pkl",
+                        "result/4_cycle/4_min_force25_control75_collocation_5_radau_with_init.pkl",
+                        "result/4_cycle/4_min_fatigue75_control25_collocation_5_radau_with_init.pkl",
+                        "result/4_cycle/4_min_fatigue50_control50_collocation_5_radau_with_init.pkl",
+                        "result/4_cycle/4_min_fatigue25_control75_collocation_5_radau_with_init.pkl",
+                        "result/4_cycle/4_min_force33_fatigue33_control33_collocation_5_radau_with_init.pkl",
+
+                        "result/5_cycle/5_min_force100_collocation_5_radau_with_init.pkl",
+                        "result/5_cycle/5_min_fatigue100_collocation_5_radau_with_init.pkl",
+                        "result/5_cycle/5_min_control100_collocation_5_radau_with_init.pkl",
+                        "result/5_cycle/5_min_force75_fatigue25_collocation_5_radau_with_init.pkl",
+                        "result/5_cycle/5_min_force50_fatigue50_collocation_5_radau_with_init.pkl",
+                        "result/5_cycle/5_min_force25_fatigue75_collocation_5_radau_with_init.pkl",
+                        "result/5_cycle/5_min_force75_control25_collocation_5_radau_with_init.pkl",
+                        "result/5_cycle/5_min_force50_control50_collocation_5_radau_with_init.pkl",
+                        "result/5_cycle/5_min_force25_control75_collocation_5_radau_with_init.pkl",
+                        "result/5_cycle/5_min_fatigue75_control25_collocation_5_radau_with_init.pkl",
+                        "result/5_cycle/5_min_fatigue50_control50_collocation_5_radau_with_init.pkl",
+                        "result/5_cycle/5_min_fatigue25_control75_collocation_5_radau_with_init.pkl",
+                        "result/5_cycle/5_min_force33_fatigue33_control33_collocation_5_radau_with_init.pkl",
+                        ]
+
+    init_guess_file_path = ["result/initial_guess/2_initial_guess_collocation_5_radau.pkl",
+                            "result/initial_guess/2_initial_guess_collocation_5_radau.pkl",
+                            "result/initial_guess/2_initial_guess_collocation_5_radau.pkl",
+                            "result/initial_guess/2_initial_guess_collocation_5_radau.pkl",
+                            "result/initial_guess/2_initial_guess_collocation_5_radau.pkl",
+                            "result/initial_guess/2_initial_guess_collocation_5_radau.pkl",
+                            "result/initial_guess/2_initial_guess_collocation_5_radau.pkl",
+                            "result/initial_guess/2_initial_guess_collocation_5_radau.pkl",
+                            "result/initial_guess/2_initial_guess_collocation_5_radau.pkl",
+                            "result/initial_guess/2_initial_guess_collocation_5_radau.pkl",
+                            "result/initial_guess/2_initial_guess_collocation_5_radau.pkl",
+                            "result/initial_guess/2_initial_guess_collocation_5_radau.pkl",
+                            "result/initial_guess/2_initial_guess_collocation_5_radau.pkl",
+
+                            "result/initial_guess/3_initial_guess_collocation_5_radau.pkl",
+                            "result/initial_guess/3_initial_guess_collocation_5_radau.pkl",
+                            "result/initial_guess/3_initial_guess_collocation_5_radau.pkl",
+                            "result/initial_guess/3_initial_guess_collocation_5_radau.pkl",
+                            "result/initial_guess/3_initial_guess_collocation_5_radau.pkl",
+                            "result/initial_guess/3_initial_guess_collocation_5_radau.pkl",
+                            "result/initial_guess/3_initial_guess_collocation_5_radau.pkl",
+                            "result/initial_guess/3_initial_guess_collocation_5_radau.pkl",
+                            "result/initial_guess/3_initial_guess_collocation_5_radau.pkl",
+                            "result/initial_guess/3_initial_guess_collocation_5_radau.pkl",
+                            "result/initial_guess/3_initial_guess_collocation_5_radau.pkl",
+                            "result/initial_guess/3_initial_guess_collocation_5_radau.pkl",
+                            "result/initial_guess/3_initial_guess_collocation_5_radau.pkl",
+
+                            "result/initial_guess/4_initial_guess_collocation_5_radau.pkl",
+                            "result/initial_guess/4_initial_guess_collocation_5_radau.pkl",
+                            "result/initial_guess/4_initial_guess_collocation_5_radau.pkl",
+                            "result/initial_guess/4_initial_guess_collocation_5_radau.pkl",
+                            "result/initial_guess/4_initial_guess_collocation_5_radau.pkl",
+                            "result/initial_guess/4_initial_guess_collocation_5_radau.pkl",
+                            "result/initial_guess/4_initial_guess_collocation_5_radau.pkl",
+                            "result/initial_guess/4_initial_guess_collocation_5_radau.pkl",
+                            "result/initial_guess/4_initial_guess_collocation_5_radau.pkl",
+                            "result/initial_guess/4_initial_guess_collocation_5_radau.pkl",
+                            "result/initial_guess/4_initial_guess_collocation_5_radau.pkl",
+                            "result/initial_guess/4_initial_guess_collocation_5_radau.pkl",
+                            "result/initial_guess/4_initial_guess_collocation_5_radau.pkl",
+
+                            "result/initial_guess/5_initial_guess_collocation_5_radau.pkl",
+                            "result/initial_guess/5_initial_guess_collocation_5_radau.pkl",
+                            "result/initial_guess/5_initial_guess_collocation_5_radau.pkl",
+                            "result/initial_guess/5_initial_guess_collocation_5_radau.pkl",
+                            "result/initial_guess/5_initial_guess_collocation_5_radau.pkl",
+                            "result/initial_guess/5_initial_guess_collocation_5_radau.pkl",
+                            "result/initial_guess/5_initial_guess_collocation_5_radau.pkl",
+                            "result/initial_guess/5_initial_guess_collocation_5_radau.pkl",
+                            "result/initial_guess/5_initial_guess_collocation_5_radau.pkl",
+                            "result/initial_guess/5_initial_guess_collocation_5_radau.pkl",
+                            "result/initial_guess/5_initial_guess_collocation_5_radau.pkl",
+                            "result/initial_guess/5_initial_guess_collocation_5_radau.pkl",
+                            "result/initial_guess/5_initial_guess_collocation_5_radau.pkl",
+                            ]
+
+    simulation_conditions_list = create_simulation_list(n_cycles_simultaneous=n_cycles_simultaneous,
+                                                        stimulation=stimulation,
+                                                        minimize_force=minimize_force,
+                                                        minimize_fatigue=minimize_fatigue,
+                                                        minimize_control=minimize_control,
+                                                        cost_fun_weight=cost_function_weight,
+                                                        pickle_file_path=pickle_file_path
+    )
+
     for i in range(len(simulation_conditions_list)):
         # --- Set FES model --- #
         stim_time = list(
@@ -495,7 +653,7 @@ def main():
         )
         model = set_model(model_path, stim_time)
         # Adjust n_shooting based on the stimulation time
-        cycle_len = int((len(stim_time) * 2) / simulation_conditions_list[i]["n_cycles_simultaneous"])
+        cycle_len = int((len(stim_time)) / simulation_conditions_list[i]["n_cycles_simultaneous"])
         turn_number = simulation_conditions_list[i]["n_cycles_simultaneous"]
         nmpc = prepare_nmpc(
             model=model,
@@ -506,15 +664,18 @@ def main():
             minimize_force=simulation_conditions_list[i]["minimize_force"],
             minimize_fatigue=simulation_conditions_list[i]["minimize_fatigue"],
             minimize_control=simulation_conditions_list[i]["minimize_control"],
+            cost_fun_weight=simulation_conditions_list[i]["cost_fun_weight"],
             turn_number=turn_number,
             pedal_config=pedal_config,
             external_force=resistive_torque,
-            # ode_solver=OdeSolver.COLLOCATION(polynomial_degree=1, method="radau"), # Available when Bioptim PR#969 is merged
-            ode_solver=OdeSolver.RK4(n_integration_steps=10),
+            ode_solver=OdeSolver.COLLOCATION(polynomial_degree=5, method="radau"),
+            # ode_solver=OdeSolver.RK4(n_integration_steps=10),
+            initial_guess_path=init_guess_file_path[i],
         )
         nmpc.n_cycles_simultaneous = simulation_conditions_list[i]["n_cycles_simultaneous"]
 
         def update_functions(_nmpc: MultiCyclicNonlinearModelPredictiveControl, cycle_idx: int, _sol: Solution):
+            print("Optimized window n°" + str(cycle_idx))
             return cycle_idx < n_cycles  # True if there are still some cycle to perform
 
         # Add the penalty cost function plot
@@ -522,16 +683,16 @@ def main():
         # Solve the optimal control problem
         sol = nmpc.solve_fes_nmpc(
             update_functions,
-            solver=Solver.IPOPT(show_online_optim=False, _max_iter=0, show_options=dict(show_bounds=True)),
+            solver=Solver.IPOPT(show_online_optim=False, _max_iter=10000, show_options=dict(show_bounds=True), _linear_solver="ma57"),
             total_cycles=n_cycles,
             external_force=resistive_torque,
             cycle_solutions=MultiCyclicCycleSolutions.ALL_CYCLES,
             get_all_iterations=True,
             cyclic_options={"states": {}},
-            max_consecutive_failing=3,
+            max_consecutive_failing=1,
         )
-        sol[0].animate(viewer="pyorerun")
-        sol[0].graphs(show_bounds=True)
+        # sol[0].animate(viewer="pyorerun")
+        # sol[0].graphs(show_bounds=True)
         # Saving the data in a pickle file
         time = sol[0].stepwise_time(to_merge=[SolutionMerge.NODES]).T[0]
         states = sol[0].stepwise_states(to_merge=[SolutionMerge.NODES])
@@ -539,7 +700,10 @@ def main():
         stim_time = sol[0].ocp.nlp[0].model.muscles_dynamics_model[0].stim_time
         solving_time_per_ocp = [sol[1][i].solver_time_to_optimize for i in range(len(sol[1]))]
         objective_values_per_ocp = [float(sol[1][i].cost) for i in range(len(sol[1]))]
-        number_of_turns_before_failing = len(sol[2])
+        iter_per_ocp = [sol[1][i].iterations for i in range(len(sol[1]))]
+        average_solving_time_per_iter_list = [solving_time_per_ocp[i]/iter_per_ocp[i] for i in range(len(sol[1]))]
+        total_average_solving_time_per_iter = average(average_solving_time_per_iter_list)
+        number_of_turns_before_failing = len(sol[2]) - 1 + simulation_conditions_list[i]["n_cycles_simultaneous"]
         convergence_status = [sol[1][i].status for i in range(len(sol[1]))]
         dictionary = {
             "time": time,
@@ -550,10 +714,14 @@ def main():
             "objective_values_per_ocp": objective_values_per_ocp,
             "number_of_turns_before_failing": number_of_turns_before_failing,
             "convergence_status": convergence_status,
+            "iter_per_ocp": iter_per_ocp,
+            "average_solving_time_per_iter_list": average_solving_time_per_iter_list,
+            "total_average_solving_time_per_iter": total_average_solving_time_per_iter
         }
         pickle_file_name = simulation_conditions_list[i]["pickle_file_path"]
         with open(pickle_file_name, "wb") as file:
             pickle.dump(dictionary, file)
+        print(simulation_conditions_list[i]["pickle_file_path"])
 
 
 if __name__ == "__main__":

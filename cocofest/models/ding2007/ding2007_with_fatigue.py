@@ -43,7 +43,7 @@ class DingModelPulseWidthFrequencyWithFatigue(DingModelPulseWidthFrequency):
         )
         self._with_fatigue = True
         self.stim_time = stim_time
-        self.fmax = 315
+        self.fmax = 248
 
         # --- Default values --- #
         ALPHA_A_DEFAULT = -4.0 * 10e-2  # Value from Ding's experimentation [1] (s^-2)
