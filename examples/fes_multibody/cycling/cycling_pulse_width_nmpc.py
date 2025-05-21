@@ -9,6 +9,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 from numpy.ma.extras import average
 
+from casadi import MX, vertcat
+
 from bioptim import (
     Axis,
     BiorbdModel,
@@ -31,7 +33,7 @@ from bioptim import (
     ParameterList,
     Node,
     VariableScalingList,
-    QuadratureRule,
+    PenaltyController,
     ContactType,
 )
 from cocofest import (
@@ -96,8 +98,22 @@ class MyCyclicNMPC(FesNmpcMsk):
             self.nlp[0].u_init[key].init[:, :] = controls[key][:, :]
         return True
 
-def task_performance_coefficient_cost_fun():
-    return
+def task_performance_coefficient_cost_fun(controller: PenaltyController):
+    F0 = vertcat(
+            *[controller.model.muscles_dynamics_model[i].fmax for i in range(len(controller.model.muscles_dynamics_model))]
+        )
+    force_state = vertcat(
+        *[controller.states["F_" + controller.model.muscles_dynamics_model[i].muscle_name].cx for i in
+          range(len(controller.model.muscles_dynamics_model))]
+    )
+    fatigue_state = vertcat(
+            *[controller.states["A_" + controller.model.muscles_dynamics_model[i].muscle_name].cx for i in range(len(controller.model.muscles_dynamics_model))]
+        )
+    rested_state = vertcat(
+            *[controller.model.muscles_dynamics_model[i].a_scale for i in range(len(controller.model.muscles_dynamics_model))]
+        )
+
+    return (1-(fatigue_state/rested_state)) - (force_state/F0)
 
 def prepare_nmpc(
     model: BiorbdModel | FesMskModel,
@@ -243,6 +259,16 @@ def set_objective_functions(minimize_force, minimize_fatigue, minimize_control, 
         target=target,
         quadratic=True,
     )
+
+    objective_functions.add(
+        task_performance_coefficient_cost_fun,
+        custom_type=ObjectiveFcn.Mayer,
+        node=Node.ALL,
+        weight=1e-3,
+        quadratic=True,
+    )
+
+
     return objective_functions
 
 
