@@ -88,10 +88,10 @@ Veltink, P. H., Chizeck, H. J., Crago, P. E., & El-Bialy, A. (1992).
 Nonlinear joint angle control for artificially stimulated muscle.
 IEEE Transactions on Biomedical Engineering, 39(4), 368-380.
 
-## Riener1998
-Riener, R., & Veltink, P. H. (1998).
-A model of muscle fatigue during electrical stimulation.
-IEEE Transactions on Biomedical Engineering, 45(1), 105-113.
+## Riener1996
+Riener, R., Quintern, J., & Schmidt, G. (1996).
+Biomechanical model of the human knee evaluated by neuromuscular stimulation.
+Journal of biomechanics, 29(9), 1157-1167.
 
 ## Ding2003
 Ding, J., Wexler, A. S., & Binder-Macleod, S. A. (2003).
