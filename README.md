@@ -82,41 +82,18 @@ You are now ready to use `Cocofest`!
 
 
 # Available FES models
-The available FES models are likely to increase so stay tune.
-## Veltink1992
-Veltink, P. H., Chizeck, H. J., Crago, P. E., & El-Bialy, A. (1992).
-Nonlinear joint angle control for artificially stimulated muscle.
-IEEE Transactions on Biomedical Engineering, 39(4), 368-380.
+All models are implemented at the muscle actuator level, making them applicable to a wide range of problems regardless of the specific optimal control problem.
 
-## Riener1996
-Riener, R., Quintern, J., & Schmidt, G. (1996).
-Biomechanical model of the human knee evaluated by neuromuscular stimulation.
-Journal of biomechanics, 29(9), 1157-1167.
+| **Model Name**  | **Citation**                                                                                                                                                                                                                     | **Description / Focus**                                             |
+| --------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------- |
+| **Veltink1992** | Veltink, P. H., Chizeck, H. J., Crago, P. E., & El-Bialy, A. (1992). *Nonlinear joint angle control for artificially stimulated muscle*. IEEE Transactions on Biomedical Engineering, 39(4), 368–380.                            | Nonlinear control of joint angles via electrical stimulation.       |
+| **Riener1996**  | Riener, R., Quintern, J., & Schmidt, G. (1996). *Biomechanical model of the human knee evaluated by neuromuscular stimulation*. Journal of Biomechanics, 29(9), 1157–1167.                                                       | Biomechanical knee model validated using neuromuscular stimulation. |
+| **Ding2003**    | Ding, J., Wexler, A. S., & Binder-Macleod, S. A. (2003). *Mathematical models for fatigue minimization during functional electrical stimulation*. Journal of Electromyography and Kinesiology, 13(6), 575–588.                   | Focus on mathematical models for minimising fatigue.                |
+| **Ding2007**    | Ding, J., Chou, L. W., Kesar, T. M., et al. (2007). *Mathematical model that predicts the force–intensity and force–frequency relationships after spinal cord injuries*. Muscle & Nerve, 36(2), 214–222.                         | Predicts force–intensity and force–frequency responses post-SCI.    |
+| **Marion2009**  | Marion, M. S., Wexler, A. S., Hull, M. L., & Binder-Macleod, S. A. (2009). *Predicting the effect of muscle length on fatigue during electrical stimulation*. Muscle & Nerve, 40(4), 573–581.                                    | Examines muscle length impact on fatigue under stimulation.         |
+| **Marion2013**  | Marion, M. S., Wexler, A. S., & Hull, M. L. (2013). *Predicting non-isometric fatigue induced by electrical stimulation pulse trains as a function of pulse duration*. Journal of NeuroEngineering and Rehabilitation, 10, 1–16. | Predicts non-isometric fatigue based on pulse duration.             |
+| **Hmed2018**    | Hmed, A. B., Bakir, T., Sakly, A., & Binczak, S. (2018). *A new mathematical force model that predicts the force-pulse amplitude relationship of human skeletal muscle*. In IEEE EMBC, pp. 3485–3488.                            | Models the relationship between pulse amplitude and force.          |
 
-## Ding2003
-Ding, J., Wexler, A. S., & Binder-Macleod, S. A. (2003).
-Mathematical models for fatigue minimization during functional electrical stimulation.
-Journal of Electromyography and Kinesiology, 13(6), 575-588.
-
-## Ding2007
-Ding, J., Chou, L. W., Kesar, T. M., Lee, S. C., Johnston, T. E., Wexler, A. S., & Binder‐Macleod, S. A. (2007).
-Mathematical model that predicts the force–intensity and force–frequency relationships after spinal cord injuries.
-Muscle & Nerve: Official Journal of the American Association of Electrodiagnostic Medicine, 36(2), 214-222.
-
-## Marion2009
-Marion, M. S., Wexler, A. S., Hull, M. L., & Binder‐Macleod, S. A. (2009).
-Predicting the effect of muscle length on fatigue during electrical stimulation.
-Muscle & Nerve: Official Journal of the American Association of Electrodiagnostic Medicine, 40(4), 573-581.
-
-## Marion2013
-Marion, M. S., Wexler, A. S., & Hull, M. L. (2013).
-Predicting non-isometric fatigue induced by electrical stimulation pulse trains as a function of pulse duration.
-Journal of neuroengineering and rehabilitation, 10, 1-16.
-
-## Hmed2018
-Hmed, A. B., Bakir, T., Sakly, A., & Binczak, S. (2018, July).
-A new mathematical force model that predicts the force-pulse amplitude relationship of human skeletal muscle.
-In 2018 40th Annual International Conference of the IEEE Engineering in Medicine and Biology Society (EMBC) (pp. 3485-3488). IEEE.
 
 
 # Create your own FES OCP
