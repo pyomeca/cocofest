@@ -60,27 +60,27 @@ class MyCyclicNMPC(FesNmpcMsk):
         states_keys = states.keys()
         for key in states_keys:
             for i in range(states[key].shape[0]):
-                if key == "q" and i == 2:  # For the wheel angle, we want to keep the same value at the end of the cycle
-                    self.nlp[0].x_bounds[key].min[i, 0] = states[key][i][self.cycle_len * self.polynomial_order] + self.pedal_turn_in_one_cycle
-                    self.nlp[0].x_bounds[key].max[i, :-1] = states[key][i][self.cycle_len * self.polynomial_order] + self.pedal_turn_in_one_cycle
+                if key == "q" or key == "qdot":
+                    pass  # not moving q and qdot bounds as a set of constraints makes sure the states are similar to the previous cycle
                 else:
                     self.nlp[0].x_bounds[key].min[i, 0] = states[key][i][self.cycle_len * self.polynomial_order]
                     self.nlp[0].x_bounds[key].max[i, 0] = states[key][i][self.cycle_len * self.polynomial_order]
-
         self.update_stim()
         return True
 
     def advance_window_initial_guess_states(self, sol, n_cycles_simultaneous=None):
         # Reimplementation of the advance_window method so the rotation of the wheel restart at + 2 * pi
         states = sol.decision_states(to_merge=SolutionMerge.NODES)
+
         non_cyc_keys = [s for s in states if any(s.startswith(prefix) for prefix in ("A_", "Tau1_", "Km_"))]
         cyc_keys = [k for k in states if k not in non_cyc_keys]
+        cyc_keys = [c for c in cyc_keys if c not in ("q", "qdot")]
 
         self._init_non_cyclical(states, non_cyc_keys)
         self._init_cyclical(states, cyc_keys)
-        # self._correct_init_guess_to_fit_bounds(corrected_input="states")  #This function is called to move init guess within the bounds if not in bounds
+        self._correct_init_guess_to_fit_bounds(corrected_input="states")  #This function is called to move init guess within the bounds if not in bounds
 
-        debug_init_plot = True
+        debug_init_plot = False
         if debug_init_plot:
             for key in states.keys():
                 self.plot_initial_guess(data=self.nlp[0].x_init[key].init, bounds=self.nlp[0].x_bounds[key], key=key)
@@ -104,27 +104,8 @@ class MyCyclicNMPC(FesNmpcMsk):
         return True
 
     def _init_cyclical(self, states, cyc_keys):
-        state_initial_guess_frames = list(
-            range(
-                self.n_cycles_to_advance * self.cycle_len * self.nb_intermediate_frames,
-                (self.n_cycles_to_advance + 1) * self.cycle_len * self.nb_intermediate_frames,
-            )
-        )
         for key in cyc_keys:
-            state_init_guess_val_list = []
-            _ = 0
-            for _ in range(self.n_cycles):
-                state_init_guess_val_list.append(states[key][:, state_initial_guess_frames])
-                if key == "q":
-                    state_init_guess_val_list = self.rewind_pedal_init_guess_q(state_init_guess_val_list, _)
-
-            last_frame_init_guess = (self.n_cycles_to_advance + 1) * self.cycle_len * self.nb_intermediate_frames
-            state_init_guess_val_list.append(states[key][:, [last_frame_init_guess]])
-            if key == "q":
-                state_init_guess_val_list = self.rewind_pedal_init_guess_q(state_init_guess_val_list, _)
-
-            states_init_guess = np.concatenate(state_init_guess_val_list, axis=1)
-            self.nlp[0].x_init[key].init[:, :] = states_init_guess
+            self.nlp[0].x_init[key].init[:, :][0] = states[key][0]
         return True
 
     def _correct_init_guess_to_fit_bounds(self, corrected_input="states"):
@@ -157,22 +138,12 @@ class MyCyclicNMPC(FesNmpcMsk):
 
     def advance_window_initial_guess_controls(self, sol, n_cycles_simultaneous=None):
         controls = sol.decision_controls(to_merge=SolutionMerge.NODES)
-        controls_initial_guess_frames = list(
-            range(
-                self.n_cycles_to_advance * self.cycle_len,
-                (self.n_cycles_to_advance + 1) * self.cycle_len,
-            )
-        )  # No polynomial order for controls as the controls are constant between nodes
         for key in controls.keys():
-            control_init_guess_val_list = []
-            for _ in range(self.n_cycles):
-                control_init_guess_val_list.append(controls[key][:, controls_initial_guess_frames])
-            control_init = np.concatenate(control_init_guess_val_list, axis=1)
-            self.nlp[0].u_init[key].init[:, :] = control_init
+            self.nlp[0].u_init[key].init[:, :] = controls[key][:, :]
 
-        # self._correct_init_guess_to_fit_bounds(corrected_input="controls")  # This function is called to move init guess within the bounds if not in bounds
+        self._correct_init_guess_to_fit_bounds(corrected_input="controls")  # This function is called to move init guess within the bounds if not in bounds
 
-        debug_init_plot = True
+        debug_init_plot = False
         if debug_init_plot:
             for key in controls.keys():
                 self.plot_initial_guess(data=self.nlp[0].u_init[key].init, bounds=self.nlp[0].u_bounds[key], key=key)
@@ -264,7 +235,10 @@ def prepare_nmpc(
     u_bounds, u_init, u_scaling = set_u_bounds_and_init(model, window_n_shooting, init_file_path=initial_guess_path)
     objective_functions = set_objective_functions(minimize_force, minimize_fatigue, minimize_control, cost_fun_weight, x_init["q"].init[2][-1])
     # Constraints
-    constraints = set_constraints(model)
+    constraints = set_constraints(model,
+                                  end_first_cycle_node=cycle_len,
+                                  pedal_target=x_init["q"].init[2][0],
+                                  pedal_speed_target=x_init["qdot"].init[2][0])
     # Update model
     model = updating_model(model=model, external_force_set=external_force_set, parameters=ParameterList(use_sx=use_sx))
     return MyCyclicNMPC(
@@ -367,7 +341,6 @@ def set_objective_functions(minimize_force, minimize_fatigue, minimize_control, 
         quadratic=True,
     )
 
-
     # objective_functions.add(
     #     ObjectiveFcn.Mayer.MINIMIZE_STATE,
     #     key="qdot",
@@ -413,7 +386,7 @@ def set_x_init(n_shooting, pedal_config, turn_number, ode_solver, init_file_path
             x_center=pedal_config["x_center"],
             y_center=pedal_config["y_center"],
             radius=pedal_config["radius"],
-            ik_method="lm",
+            ik_method="trf",
             cycling_number=turn_number,
         )
 
@@ -513,8 +486,6 @@ def set_bounds(model, x_init, n_shooting, ode_solver, init_file_path):
     qdot_x_bounds.min[0] = [-10, -10, -10]
     qdot_x_bounds.max[1] = [10, 10, 10]
     qdot_x_bounds.min[1] = [-14, -14, -14]
-    # qdot_x_bounds.max[2] = [-4, -4, -4]
-    # qdot_x_bounds.min[2] = [-8, -8, -8]
     qdot_x_bounds.max[2] = [-5, -5, -5]
     qdot_x_bounds.min[2] = [-8, -8, -8]
 
@@ -523,7 +494,7 @@ def set_bounds(model, x_init, n_shooting, ode_solver, init_file_path):
     return x_bounds, x_init
 
 
-def set_constraints(bio_model):
+def set_constraints(bio_model, end_first_cycle_node, pedal_target, pedal_speed_target):
     constraints = ConstraintList()
     constraints.add(
         ConstraintFcn.TRACK_MARKERS_VELOCITY,
@@ -538,6 +509,28 @@ def set_constraints(bio_model):
         node=Node.START,
         axes=[Axis.X, Axis.Y],
     )
+
+    constraints.add(
+        ConstraintFcn.TRACK_STATE,
+        key="q",
+        index=2,
+        node=end_first_cycle_node,
+        target=pedal_target-2*np.pi)
+
+    constraints.add(
+        ConstraintFcn.TRACK_STATE,
+        key="qdot",
+        index=2,
+        node=Node.START,
+        target=-2*np.pi)
+
+    constraints.add(
+        ConstraintFcn.TRACK_STATE,
+        key="qdot",
+        index=2,
+        node=end_first_cycle_node,
+        target=-2*np.pi)
+
     return constraints
 
 
@@ -609,8 +602,8 @@ def create_simulation_list(
             "minimize_control":      bool(w_c),
             "cost_fun_weight":       [w_f, w_fat, w_c],
             "pickle_file_path":      pkl_path,
-            "init_guess_file_path":  init_path,
-            # "init_guess_file_path":  None,  # Set to None for the initial guess run
+            # "init_guess_file_path":  init_path,
+            "init_guess_file_path":  None,  # Set to None for the initial guess run
         })
     return sims
 
@@ -690,50 +683,46 @@ def run_optim(mhe_info, cycling_info, simulation_conditions, model_path, save_so
         max_consecutive_failing=1,
     )
 
-    # q_val = sol[0].stepwise_states(to_merge=SolutionMerge.NODES)["q"]
-    # time = sol[0].stepwise_time(to_merge=SolutionMerge.NODES).T[0]
-    # # Plotting the results
-    # plt.figure(figsize=(10, 5))
-    # plt.plot(time, q_val[2], label="Wheel angle")
-    # # plt.plot(time, q_val[0], label="Humerus angle")
-    # # plt.plot(time, q_val[1], label="Ulna angle")
-    # plt.xlabel("Time (s)")
-    # plt.ylabel("Angle (rad)")
-    # plt.title("Wheel angle over time")
-    # plt.grid()
-    # plt.legend()
-    # plt.show()
-    #
-    # q_val_list = [sol[1][i].stepwise_states(to_merge=SolutionMerge.NODES)["q"] for i in range(len(sol[1]))]
-    # qdot_val_list = [sol[1][i].stepwise_states(to_merge=SolutionMerge.NODES)["qdot"] for i in range(len(sol[1]))]
-    # time_list = [sol[1][i].stepwise_time(to_merge=SolutionMerge.NODES).T[0] for i in range(len(sol[1]))]
-    #
-    # # Plotting the results
-    # plt.figure(figsize=(10, 5))
-    # for i in range(len(q_val_list)):
-    #     plt.plot(time_list[i], q_val_list[i][2], label=f"Wheel angle{i}")
-    #     # plt.plot(time_list[i], q_val_list[i][0], label=f"Humerus angle{i}")
-    #     # plt.plot(time_list[i], q_val_list[i][1], label=f"Ulna angle{i}")
-    #
-    # plt.xlabel("Time (s)")
-    # plt.ylabel("Angle (rad)")
-    # plt.title("Wheel angle over time")
-    # plt.grid()
-    # plt.legend()
-    # plt.show()
-    #
-    # plt.figure(figsize=(10, 5))
-    # for i in range(len(q_val_list)):
-    #     plt.plot(time_list[i], qdot_val_list[i][2], label=f"Wheel angular speed{i}")
-    #     plt.plot(time_list[i], qdot_val_list[i][0], label=f"Humerus angular speed{i}")
-    #     plt.plot(time_list[i], qdot_val_list[i][1], label=f"Ulna angular speed{i}")
-    #
-    # plt.xlabel("Time (s)")
-    # plt.ylabel("Speed (rad/s)")
-    # plt.title("Wheel speed over time")
-    # plt.grid()
-    # plt.legend()
-    # plt.show()
+    q_val = sol[0].stepwise_states(to_merge=SolutionMerge.NODES)["q"]
+    time = sol[0].stepwise_time(to_merge=SolutionMerge.NODES).T[0]
+    # Plotting the results
+    plt.figure(figsize=(10, 5))
+    plt.plot(time, q_val[2], label="Wheel angle")
+    plt.xlabel("Time (s)")
+    plt.ylabel("Angle (rad)")
+    plt.title("Wheel angle over time")
+    plt.grid()
+    plt.legend()
+    plt.show()
+
+    q_val_list = [sol[1][i].stepwise_states(to_merge=SolutionMerge.NODES)["q"] for i in range(len(sol[1]))]
+    qdot_val_list = [sol[1][i].stepwise_states(to_merge=SolutionMerge.NODES)["qdot"] for i in range(len(sol[1]))]
+    time_list = [sol[1][i].stepwise_time(to_merge=SolutionMerge.NODES).T[0] for i in range(len(sol[1]))]
+
+    # Plotting the results
+    plt.figure(figsize=(10, 5))
+    for i in range(len(q_val_list)):
+        plt.plot(time_list[i], q_val_list[i][2], label=f"Wheel angle{i}")
+
+    plt.xlabel("Time (s)")
+    plt.ylabel("Angle (rad)")
+    plt.title("Wheel angle over time")
+    plt.grid()
+    plt.legend()
+    plt.show()
+
+    plt.figure(figsize=(10, 5))
+    for i in range(len(q_val_list)):
+        plt.plot(time_list[i], qdot_val_list[i][2], label=f"Wheel angular speed{i}")
+        plt.plot(time_list[i], qdot_val_list[i][0], label=f"Humerus angular speed{i}")
+        plt.plot(time_list[i], qdot_val_list[i][1], label=f"Ulna angular speed{i}")
+
+    plt.xlabel("Time (s)")
+    plt.ylabel("Speed (rad/s)")
+    plt.title("Wheel speed over time")
+    plt.grid()
+    plt.legend()
+    plt.show()
 
     sol[0].animate(viewer="pyorerun")
     sol[0].graphs(show_bounds=True)
