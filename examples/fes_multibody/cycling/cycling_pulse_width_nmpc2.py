@@ -5,6 +5,7 @@ This example will perform an optimal control program moving time horizon for a h
 import pickle
 
 from itertools import product
+from matplotlib.pyplot import subplot
 from pathlib import Path
 
 import matplotlib.pyplot as plt
@@ -683,53 +684,58 @@ def run_optim(mhe_info, cycling_info, simulation_conditions, model_path, save_so
         max_consecutive_failing=1,
     )
 
-    q_val = sol[0].stepwise_states(to_merge=SolutionMerge.NODES)["q"]
-    time = sol[0].stepwise_time(to_merge=SolutionMerge.NODES).T[0]
-    # Plotting the results
-    plt.figure(figsize=(10, 5))
-    plt.plot(time, q_val[2], label="Wheel angle")
-    plt.xlabel("Time (s)")
-    plt.ylabel("Angle (rad)")
-    plt.title("Wheel angle over time")
-    plt.grid()
-    plt.legend()
-    plt.show()
-
-    q_val_list = [sol[1][i].stepwise_states(to_merge=SolutionMerge.NODES)["q"] for i in range(len(sol[1]))]
-    qdot_val_list = [sol[1][i].stepwise_states(to_merge=SolutionMerge.NODES)["qdot"] for i in range(len(sol[1]))]
-    time_list = [sol[1][i].stepwise_time(to_merge=SolutionMerge.NODES).T[0] for i in range(len(sol[1]))]
-
-    # Plotting the results
-    plt.figure(figsize=(10, 5))
-    for i in range(len(q_val_list)):
-        plt.plot(time_list[i], q_val_list[i][2], label=f"Wheel angle{i}")
-
-    plt.xlabel("Time (s)")
-    plt.ylabel("Angle (rad)")
-    plt.title("Wheel angle over time")
-    plt.grid()
-    plt.legend()
-    plt.show()
-
-    plt.figure(figsize=(10, 5))
-    for i in range(len(q_val_list)):
-        plt.plot(time_list[i], qdot_val_list[i][2], label=f"Wheel angular speed{i}")
-        plt.plot(time_list[i], qdot_val_list[i][0], label=f"Humerus angular speed{i}")
-        plt.plot(time_list[i], qdot_val_list[i][1], label=f"Ulna angular speed{i}")
-
-    plt.xlabel("Time (s)")
-    plt.ylabel("Speed (rad/s)")
-    plt.title("Wheel speed over time")
-    plt.grid()
-    plt.legend()
-    plt.show()
-
-    sol[0].animate(viewer="pyorerun")
-    sol[0].graphs(show_bounds=True)
+    # sol[0].animate(viewer="pyorerun")
+    plot_mhe_graphs(sol[0])
 
     # Saving the data in a pickle file
     if save_sol:
         save_sol_in_pkl(sol, simulation_conditions, is_initial_guess=run_initial_guess)
+
+
+def plot_mhe_graphs(sol):
+    states = sol.stepwise_states(to_merge=SolutionMerge.NODES)
+    controls = sol.stepwise_controls(to_merge=SolutionMerge.NODES)
+    time = sol.stepwise_time(to_merge=SolutionMerge.NODES).T[0]
+
+    q_key = ["q"]
+    qdot_key = ["qdot"]
+    cn_key = [key for key in states.keys() if "Cn_" in key]
+    f_key = [key for key in states.keys() if "F_" in key]
+    a_key = [key for key in states.keys() if "A_" in key]
+    tau1_key = [key for key in states.keys() if "Tau1_" in key]
+    km_key = [key for key in states.keys() if "Km_" in key]
+    control_key = list(controls.keys())
+
+    key_list = [q_key, qdot_key, cn_key, f_key, a_key, tau1_key, km_key]
+    subplot_index_list = [[0, 0], [0, 1], [1, 0], [1, 1]]
+    y_axis_labels = [
+        "rad", "rad/s", "(-)", "N", "N/s", "s", "(-)"]
+    j = 0
+    for key in key_list:
+        fig, axs = plt.subplots(2, 2)
+        if key == ["q"] or key == ["qdot"]:
+            for i in range(3):
+                axs[subplot_index_list[i][0], subplot_index_list[i][1]].plot(time[:-1], states[key[0]][i][:-1])
+                axs[subplot_index_list[i][0], subplot_index_list[i][1]].set_title(key[0] + f" index_{i}")
+        else:
+            for i in range(len(key)):
+                axs[subplot_index_list[i][0], subplot_index_list[i][1]].plot(time[:-1], states[key[i]][0][:-1])
+                axs[subplot_index_list[i][0], subplot_index_list[i][1]].set_title(key[i])
+        for ax in axs.flat:
+            ax.set(xlabel='Time (s)', ylabel=y_axis_labels[j])
+        j += 1
+        plt.show()
+
+    fig, axs = plt.subplots(2, 2)
+    for i in range(len(control_key)):
+        control_val = [v for v in controls[control_key[i]][0] for _ in range(4)]
+        axs[subplot_index_list[i][0], subplot_index_list[i][1]].plot(time[:-1], control_val)
+        axs[subplot_index_list[i][0], subplot_index_list[i][1]].set_title(control_key[i])
+
+    for ax in axs.flat:
+        ax.set(xlabel='Time (s)', ylabel="pulse width (us)")
+
+    plt.show()
 
 def main():
     # --- Configuration --- #
@@ -743,7 +749,7 @@ def main():
     mhe_info = {
         "cycle_duration": 1,
         "n_cycles_to_advance": 1,
-        "n_cycles": 100,
+        "n_cycles": 2,
         "ode_solver": OdeSolver.COLLOCATION(polynomial_degree=3, method="radau"),
         # "ode_solver": OdeSolver.RK4(n_integration_steps=5),
         "use_sx": False
