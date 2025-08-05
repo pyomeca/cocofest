@@ -336,8 +336,8 @@ def set_objective_functions(minimize_force, minimize_fatigue, minimize_control, 
         key="q",
         index=2,
         node=Node.END,
-        weight=1e-3,
-        # weight=1e6,
+        # weight=1e-3,
+        weight=1e6,
         target=target,
         quadratic=True,
     )
@@ -603,8 +603,8 @@ def create_simulation_list(
             "minimize_control":      bool(w_c),
             "cost_fun_weight":       [w_f, w_fat, w_c],
             "pickle_file_path":      pkl_path,
-            # "init_guess_file_path":  init_path,
-            "init_guess_file_path":  None,  # Set to None for the initial guess run
+            "init_guess_file_path":  init_path,
+            # "init_guess_file_path":  None,  # Set to None for the initial guess run
         })
     return sims
 
@@ -619,7 +619,7 @@ def save_sol_in_pkl(sol, simulation_conditions, is_initial_guess=False):
     iter_per_ocp = [sol[1][i].iterations for i in range(len(sol[1]))]
     average_solving_time_per_iter_list = [solving_time_per_ocp[i] / iter_per_ocp[i] for i in range(len(sol[1]))]
     total_average_solving_time_per_iter = average(average_solving_time_per_iter_list)
-    number_of_turns_before_failing = len(sol[2]) - 1 + simulation_conditions["n_cycles_simultaneous"]
+    number_of_turns_before_failing = len(sol[1]) - 1 + simulation_conditions["n_cycles_simultaneous"]
     convergence_status = [sol[1][i].status for i in range(len(sol[1]))]
     dictionary = {
         "time": time,
@@ -632,7 +632,10 @@ def save_sol_in_pkl(sol, simulation_conditions, is_initial_guess=False):
         "convergence_status": convergence_status,
         "iter_per_ocp": iter_per_ocp,
         "average_solving_time_per_iter_list": average_solving_time_per_iter_list,
-        "total_average_solving_time_per_iter": total_average_solving_time_per_iter
+        "total_average_solving_time_per_iter": total_average_solving_time_per_iter,
+        "total_n_shooting": solution.ocp.n_shooting,
+        "n_shooting_per_cycle": int(solution.ocp.n_shooting / (simulation_conditions["n_cycles_simultaneous"] - 1)),
+        "polynomial_order": solution.ocp.nlp[0].dynamics_type.ode_solver.polynomial_degree,
     }
     pickle_file_name = simulation_conditions["pickle_file_path"]
     with open(pickle_file_name, "wb") as file:
@@ -685,7 +688,7 @@ def run_optim(mhe_info, cycling_info, simulation_conditions, model_path, save_so
     )
 
     # sol[0].animate(viewer="pyorerun")
-    plot_mhe_graphs(sol[0])
+    # plot_mhe_graphs(sol[0])
 
     # Saving the data in a pickle file
     if save_sol:
@@ -740,7 +743,7 @@ def plot_mhe_graphs(sol):
 def main():
     # --- Configuration --- #
     save_sol = True
-    run_initial_guess = False
+    run_initial_guess = True
     # Chosen MSK model
     # model_path = "../../model_msk/simplified_UL_Seth_2D_cycling.bioMod"
     model_path = "../../model_msk/Wu_Shoulder_Model_mod_kev_v2.bioMod"
@@ -749,7 +752,7 @@ def main():
     mhe_info = {
         "cycle_duration": 1,
         "n_cycles_to_advance": 1,
-        "n_cycles": 2,
+        "n_cycles": 10,
         "ode_solver": OdeSolver.COLLOCATION(polynomial_degree=3, method="radau"),
         # "ode_solver": OdeSolver.RK4(n_integration_steps=5),
         "use_sx": False
@@ -761,7 +764,7 @@ def main():
 
     # Build cost function parameters
     cost_function_weight = [
-        (1, 0, 0), (0, 1, 0), (0, 0, 1),
+        (0, 0, 1), (0, 1, 0), (0, 0, 1),
         (0.75, 0.25, 0), (0.5, 0.5, 0), (0.25, 0.75, 0),
         (0.75, 0, 0.25), (0.5, 0, 0.5), (0.25, 0, 0.75),
         (0, 0.75, 0.25), (0, 0.5, 0.5), (0, 0.25, 0.75),
@@ -770,7 +773,7 @@ def main():
 
     # Build simulation list
     stimulation_frequency = 30
-    n_cycles_simultaneous = [2, 3, 4, 5]
+    n_cycles_simultaneous = [2] #, 3, 4, 5]
     stimulation = [stimulation_frequency * i for i in n_cycles_simultaneous]
     simulation_conditions_list = create_simulation_list(n_cycles_simultaneous=n_cycles_simultaneous,
                                                         stimulation=stimulation,
