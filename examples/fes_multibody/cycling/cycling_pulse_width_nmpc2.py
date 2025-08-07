@@ -49,6 +49,8 @@ from cocofest import (
 class MyCyclicNMPC(FesNmpcMsk):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
+        self.initial_wheel_position = self.nlp[0].x_bounds["q"].min[-1][0]
+        self.actual_cycle = 0
         self.pedal_turn_in_one_cycle = 2 * np.pi  # One mhe cycle simulates on pedal turn
         self.polynomial_order = (
             self.nlp[0].dynamics_type.ode_solver.polynomial_degree + 1
@@ -60,14 +62,32 @@ class MyCyclicNMPC(FesNmpcMsk):
         states = sol.decision_states(to_merge=SolutionMerge.NODES)
         states_keys = states.keys()
         for key in states_keys:
-            for i in range(states[key].shape[0]):
-                if key == "q" or key == "qdot":
-                    pass  # not moving q and qdot bounds as a set of constraints makes sure the states are similar to the previous cycle
-                else:
+            if key == "q":
+                self.set_q_bound(states)
+            else:
+                for i in range(states[key].shape[0]):
                     self.nlp[0].x_bounds[key].min[i, 0] = states[key][i][self.cycle_len * self.polynomial_order]
                     self.nlp[0].x_bounds[key].max[i, 0] = states[key][i][self.cycle_len * self.polynomial_order]
         self.update_stim()
         return True
+
+    def set_q_bound(self, states):
+        for i in range(states["q"].shape[0]-1):
+            self.nlp[0].x_bounds["q"].min[i, 0] = states["q"][i][self.cycle_len * self.polynomial_order]
+            self.nlp[0].x_bounds["q"].max[i, 0] = states["q"][i][self.cycle_len * self.polynomial_order]
+
+        # Shifting wheel position bounds by one cycle
+        self.nlp[0].x_bounds["q"].min[-1, 0] = states["q"][-1][self.cycle_len * self.polynomial_order]
+        self.nlp[0].x_bounds["q"].max[-1, :] = states["q"][-1][self.cycle_len * self.polynomial_order]
+        self.actual_cycle += 1
+        self.nlp[0].x_bounds["q"].min[-1, 1:] = self.initial_wheel_position - (self.pedal_turn_in_one_cycle * (self.n_cycles_simultaneous + self.actual_cycle)) - 0.1
+        self.nlp[0].x_bounds["q"].max[-1, -1] = self.initial_wheel_position - (self.pedal_turn_in_one_cycle * (self.n_cycles_simultaneous + self.actual_cycle))
+
+        # self.nlp[0].x_bounds["q"].min[-1, self.cycle_len * self.polynomial_order] = self.initial_wheel_position - (
+        #             self.pedal_turn_in_one_cycle * (1 + self.actual_cycle)) - 0.05
+        # self.nlp[0].x_bounds["q"].max[-1, self.cycle_len * self.polynomial_order] = self.initial_wheel_position - (
+        #             self.pedal_turn_in_one_cycle * (1 + self.actual_cycle)) + 0.05
+
 
     def advance_window_initial_guess_states(self, sol, n_cycles_simultaneous=None):
         # Reimplementation of the advance_window method so the rotation of the wheel restart at + 2 * pi
@@ -75,16 +95,16 @@ class MyCyclicNMPC(FesNmpcMsk):
 
         non_cyc_keys = [s for s in states if any(s.startswith(prefix) for prefix in ("A_", "Tau1_", "Km_"))]
         cyc_keys = [k for k in states if k not in non_cyc_keys]
-        cyc_keys = [c for c in cyc_keys if c not in ("q", "qdot")]
 
         self._init_non_cyclical(states, non_cyc_keys)
         self._init_cyclical(states, cyc_keys)
-        self._correct_init_guess_to_fit_bounds(corrected_input="states")  #This function is called to move init guess within the bounds if not in bounds
+        # self._correct_init_guess_to_fit_bounds(corrected_input="states")  #This function is called to move init guess within the bounds if not in bounds
 
-        debug_init_plot = False
+        debug_init_plot = True
         if debug_init_plot:
             for key in states.keys():
-                self.plot_initial_guess(data=self.nlp[0].x_init[key].init, bounds=self.nlp[0].x_bounds[key], key=key)
+                if key == "q":
+                    self.plot_initial_guess(data=self.nlp[0].x_init[key].init, bounds=self.nlp[0].x_bounds[key], key=key)
         return True
 
     def _init_non_cyclical(self, states, non_cyc_keys):
@@ -106,7 +126,14 @@ class MyCyclicNMPC(FesNmpcMsk):
 
     def _init_cyclical(self, states, cyc_keys):
         for key in cyc_keys:
-            self.nlp[0].x_init[key].init[:, :][0] = states[key][0]
+            if key == "q":
+                for i in range(states[key].shape[0]):
+                    if i == states[key].shape[0] - 1:
+                        self.nlp[0].x_init[key].init[i, :] = states[key][i, :] - self.pedal_turn_in_one_cycle
+                    else:
+                        self.nlp[0].x_init[key].init[i, :] = states[key][i, :]
+            else:
+                self.nlp[0].x_init[key].init[:, :][0] = states[key][0]
         return True
 
     def _correct_init_guess_to_fit_bounds(self, corrected_input="states"):
@@ -149,6 +176,102 @@ class MyCyclicNMPC(FesNmpcMsk):
             for key in controls.keys():
                 self.plot_initial_guess(data=self.nlp[0].u_init[key].init, bounds=self.nlp[0].u_bounds[key], key=key)
         return True
+
+
+
+    # def advance_window_bounds_states(self, sol, n_cycles_simultaneous=None, **extra):
+    #     states = sol.decision_states(to_merge=SolutionMerge.NODES)
+    #     states_keys = states.keys()
+    #     for key in states_keys:
+    #         for i in range(states[key].shape[0]):
+    #             if key == "q" or key == "qdot":
+    #                 pass  # not moving q and qdot bounds as a set of constraints makes sure the states are similar to the previous cycle
+    #             else:
+    #                 self.nlp[0].x_bounds[key].min[i, 0] = states[key][i][self.cycle_len * self.polynomial_order]
+    #                 self.nlp[0].x_bounds[key].max[i, 0] = states[key][i][self.cycle_len * self.polynomial_order]
+    #     self.update_stim()
+    #     return True
+    #
+    # def advance_window_initial_guess_states(self, sol, n_cycles_simultaneous=None):
+    #     # Reimplementation of the advance_window method so the rotation of the wheel restart at + 2 * pi
+    #     states = sol.decision_states(to_merge=SolutionMerge.NODES)
+    #
+    #     non_cyc_keys = [s for s in states if any(s.startswith(prefix) for prefix in ("A_", "Tau1_", "Km_"))]
+    #     cyc_keys = [k for k in states if k not in non_cyc_keys]
+    #     cyc_keys = [c for c in cyc_keys if c not in ("q", "qdot")]
+    #
+    #     self._init_non_cyclical(states, non_cyc_keys)
+    #     self._init_cyclical(states, cyc_keys)
+    #     self._correct_init_guess_to_fit_bounds(corrected_input="states")  #This function is called to move init guess within the bounds if not in bounds
+    #
+    #     debug_init_plot = False
+    #     if debug_init_plot:
+    #         for key in states.keys():
+    #             self.plot_initial_guess(data=self.nlp[0].x_init[key].init, bounds=self.nlp[0].x_bounds[key], key=key)
+    #     return True
+    #
+    # def _init_non_cyclical(self, states, non_cyc_keys):
+    #     for key in non_cyc_keys:
+    #         if self.nlp[0].x_init[key].init.shape[1] == self.cycle_len + 1:
+    #             self.nlp[0].x_init[key].init[:, :] = np.array([[states[key][0, -1]] * (self.cycle_len + 1)])
+    #         else:
+    #             self.nlp[0].x_init[key].init[
+    #                 :, : self.cycle_len * self.polynomial_order * (self.n_cycles_simultaneous - 1)
+    #             ] = states[key][:, self.cycle_len * self.polynomial_order + 1 :]
+    #
+    #             diff = states[key][:, -(self.cycle_len * self.polynomial_order + 1):][0][0]-states[key][:, -(self.cycle_len * self.polynomial_order + 1):][0][-1]
+    #             predicted_fes_init = states[key][:, self.cycle_len * self.polynomial_order * (self.n_cycles_simultaneous - 1):] - diff
+    #             self.nlp[0].x_init[key].init[
+    #                 :, self.cycle_len * self.polynomial_order * (self.n_cycles_simultaneous - 1) :
+    #             ] = predicted_fes_init
+    #
+    #     return True
+    #
+    # def _init_cyclical(self, states, cyc_keys):
+    #     for key in cyc_keys:
+    #         self.nlp[0].x_init[key].init[:, :][0] = states[key][0]
+    #     return True
+    #
+    # def _correct_init_guess_to_fit_bounds(self, corrected_input="states"):
+    #     corrected_data_input = self.nlp[0].x_init if corrected_input == "states" else self.nlp[0].u_init if corrected_input == "controls" else None
+    #     corrected_bound_input = self.nlp[0].x_bounds if corrected_input == "states" else self.nlp[0].u_bounds if corrected_input == "controls" else None
+    #     if corrected_data_input is None or corrected_bound_input is None:
+    #         raise ValueError("Input must be either 'states' or 'controls'.")
+    #     # This function is called to move init guess within the bounds if not in bounds
+    #     for key in corrected_data_input.keys():
+    #         data = corrected_data_input[key].init
+    #         bounds = corrected_bound_input[key]
+    #         for i in range(data.shape[0]):
+    #             if bounds.min.shape == data.shape:
+    #                 min_bounds = bounds.min[:, :][i]
+    #                 max_bounds = bounds.max[:, :][i]
+    #             else:
+    #                 min_bounds = [bounds.min[i][0], *[bounds.min[i][1]] * (data.shape[1] - 2), bounds.min[i][2]]
+    #                 max_bounds = [bounds.max[i][0], *[bounds.max[i][1]] * (data.shape[1] - 2), bounds.max[i][2]]
+    #
+    #             for j in range(data.shape[1]):
+    #                 if data[:, :][i][j] < min_bounds[j]:
+    #                     corrected_data_input[key].init[i, j] = min_bounds[j]
+    #                 if data[:, :][i][j] > max_bounds[j]:
+    #                     corrected_data_input[key].init[i, j] = max_bounds[j]
+    #
+    # def rewind_pedal_init_guess_q(self, init_guess_val_list, _):
+    #     turns_to_rewind = 1 if _ == 0 else (-_ + 1)
+    #     init_guess_val_list[-1][2] = init_guess_val_list[-1][2] + (turns_to_rewind * self.pedal_turn_in_one_cycle)
+    #     return init_guess_val_list
+    #
+    # def advance_window_initial_guess_controls(self, sol, n_cycles_simultaneous=None):
+    #     controls = sol.decision_controls(to_merge=SolutionMerge.NODES)
+    #     for key in controls.keys():
+    #         self.nlp[0].u_init[key].init[:, :] = controls[key][:, :]
+    #
+    #     self._correct_init_guess_to_fit_bounds(corrected_input="controls")  # This function is called to move init guess within the bounds if not in bounds
+    #
+    #     debug_init_plot = False
+    #     if debug_init_plot:
+    #         for key in controls.keys():
+    #             self.plot_initial_guess(data=self.nlp[0].u_init[key].init, bounds=self.nlp[0].u_bounds[key], key=key)
+    #     return True
 
     @staticmethod
     def plot_initial_guess(data, bounds, key):
@@ -229,6 +352,7 @@ def prepare_nmpc(
         model=model,
         x_init=x_init,
         n_shooting=window_n_shooting,
+        n_cycle_simultanous=n_cycles_simultaneous,
         ode_solver=ode_solver,
         init_file_path = initial_guess_path,
     )
@@ -331,16 +455,16 @@ def set_objective_functions(minimize_force, minimize_fatigue, minimize_control, 
             weight=10000 * cost_fun_weight[2],
             quadratic=True,
         )
-    objective_functions.add(
-        ObjectiveFcn.Mayer.MINIMIZE_STATE,
-        key="q",
-        index=2,
-        node=Node.END,
-        # weight=1e-3,
-        weight=1e6,
-        target=target,
-        quadratic=True,
-    )
+    # objective_functions.add(
+    #     ObjectiveFcn.Mayer.MINIMIZE_STATE,
+    #     key="q",
+    #     index=2,
+    #     node=Node.END,
+    #     # weight=1e-3,
+    #     weight=1e6,
+    #     target=target,
+    #     quadratic=True,
+    # )
 
     # objective_functions.add(
     #     ObjectiveFcn.Mayer.MINIMIZE_STATE,
@@ -376,8 +500,10 @@ def set_x_init(n_shooting, pedal_config, turn_number, ode_solver, init_file_path
             data = pickle.load(file)
         q_guess = data["states"]["q"]
         qdot_guess = data["states"]["qdot"]
+        # qddot_guess = data["states"]["qddot"]
         x_init.add("q", q_guess, interpolation=InterpolationType.ALL_POINTS)
         x_init.add("qdot", qdot_guess, interpolation=InterpolationType.ALL_POINTS)
+        # x_init.add("qddot", qddot_guess, interpolation=InterpolationType.ALL_POINTS)
     else:
         # biorbd_model_path = "../../model_msk/simplified_UL_Seth_2D_cycling_for_inverse_kinematics.bioMod"
         biorbd_model_path = "../../model_msk/Wu_Shoulder_Model_mod_kev_inverse_dyn.bioMod"
@@ -394,9 +520,11 @@ def set_x_init(n_shooting, pedal_config, turn_number, ode_solver, init_file_path
         if isinstance(ode_solver, OdeSolver.COLLOCATION):
             x_init.add("q", q_guess, interpolation=InterpolationType.ALL_POINTS)
             x_init.add("qdot", qdot_guess, interpolation=InterpolationType.ALL_POINTS)
+            # x_init.add("qddot", qddotguess, interpolation=InterpolationType.ALL_POINTS)
         else:
             x_init.add("q", q_guess, interpolation=InterpolationType.EACH_FRAME)
             x_init.add("qdot", qdot_guess, interpolation=InterpolationType.EACH_FRAME)
+            # x_init.add("qddot", qddotguess, interpolation=InterpolationType.EACH_FRAME)
 
     return x_init
 
@@ -434,7 +562,7 @@ def set_u_bounds_and_init(bio_model, n_shooting, init_file_path):
     )
 
 
-def set_bounds(model, x_init, n_shooting, ode_solver, init_file_path):
+def set_bounds(model, x_init, n_shooting, n_cycle_simultanous, ode_solver, init_file_path):
     interpolation_type = InterpolationType.EACH_FRAME
     if isinstance(ode_solver, OdeSolver.COLLOCATION):
         n_shooting = n_shooting * (ode_solver.polynomial_degree + 1)
@@ -476,6 +604,11 @@ def set_bounds(model, x_init, n_shooting, ode_solver, init_file_path):
 
     x_min_bound[2][0] = x_init["q"].init[2][0]
     x_max_bound[2][0] = x_init["q"].init[2][0]
+
+    first_cycle_n_shooting = int(n_shooting / n_cycle_simultanous)
+    x_min_bound[2][first_cycle_n_shooting] = x_init["q"].init[2][0] - 2 * np.pi - 0.05
+    x_max_bound[2][first_cycle_n_shooting] = x_init["q"].init[2][0] - 2 * np.pi + 0.05
+
     x_min_bound[2][-1] = x_init["q"].init[2][-1] - slack
     x_max_bound[2][-1] = x_init["q"].init[2][-1] + slack
 
@@ -490,8 +623,9 @@ def set_bounds(model, x_init, n_shooting, ode_solver, init_file_path):
     qdot_x_bounds.max[2] = [-5, -5, -5]
     qdot_x_bounds.min[2] = [-8, -8, -8]
 
-
     x_bounds.add(key="qdot", bounds=qdot_x_bounds, phase=0)
+    # x_bounds.add(key="qddot", bounds=model.bounds_from_ranges("qddot"), phase=0)
+
     return x_bounds, x_init
 
 
@@ -511,26 +645,26 @@ def set_constraints(bio_model, end_first_cycle_node, pedal_target, pedal_speed_t
         axes=[Axis.X, Axis.Y],
     )
 
-    constraints.add(
-        ConstraintFcn.TRACK_STATE,
-        key="q",
-        index=2,
-        node=end_first_cycle_node,
-        target=pedal_target-2*np.pi)
-
-    constraints.add(
-        ConstraintFcn.TRACK_STATE,
-        key="qdot",
-        index=2,
-        node=Node.START,
-        target=-2*np.pi)
-
-    constraints.add(
-        ConstraintFcn.TRACK_STATE,
-        key="qdot",
-        index=2,
-        node=end_first_cycle_node,
-        target=-2*np.pi)
+    # constraints.add(
+    #     ConstraintFcn.TRACK_STATE,
+    #     key="q",
+    #     index=2,
+    #     node=end_first_cycle_node,
+    #     target=pedal_target-2*np.pi)
+    #
+    # constraints.add(
+    #     ConstraintFcn.TRACK_STATE,
+    #     key="qdot",
+    #     index=2,
+    #     node=Node.START,
+    #     target=-2*np.pi)
+    #
+    # constraints.add(
+    #     ConstraintFcn.TRACK_STATE,
+    #     key="qdot",
+    #     index=2,
+    #     node=end_first_cycle_node,
+    #     target=-2*np.pi)
 
     return constraints
 
@@ -687,8 +821,8 @@ def run_optim(mhe_info, cycling_info, simulation_conditions, model_path, save_so
         max_consecutive_failing=1,
     )
 
-    # sol[0].animate(viewer="pyorerun")
-    # plot_mhe_graphs(sol[0])
+    sol[0].animate(viewer="pyorerun")
+    plot_mhe_graphs(sol[0])
 
     # Saving the data in a pickle file
     if save_sol:
@@ -743,7 +877,7 @@ def plot_mhe_graphs(sol):
 def main():
     # --- Configuration --- #
     save_sol = True
-    run_initial_guess = True
+    run_initial_guess = False
     # Chosen MSK model
     # model_path = "../../model_msk/simplified_UL_Seth_2D_cycling.bioMod"
     model_path = "../../model_msk/Wu_Shoulder_Model_mod_kev_v2.bioMod"
@@ -752,7 +886,7 @@ def main():
     mhe_info = {
         "cycle_duration": 1,
         "n_cycles_to_advance": 1,
-        "n_cycles": 10,
+        "n_cycles": 3,
         "ode_solver": OdeSolver.COLLOCATION(polynomial_degree=3, method="radau"),
         # "ode_solver": OdeSolver.RK4(n_integration_steps=5),
         "use_sx": False
@@ -760,11 +894,11 @@ def main():
 
     # Bike parameters
     cycling_info = {"pedal_config": {"x_center": 0.35, "y_center": 0.0, "radius": 0.1},
-                    "resistive_torque": {"Segment_application": "wheel", "torque": np.array([0, 0, 0])}}
+                    "resistive_torque": {"Segment_application": "wheel", "torque": np.array([0, 0, -0.3])}}
 
     # Build cost function parameters
     cost_function_weight = [
-        (0, 0, 1), (0, 1, 0), (0, 0, 1),
+        (1, 0, 0), (0, 1, 0), (0, 0, 1),
         (0.75, 0.25, 0), (0.5, 0.5, 0), (0.25, 0.75, 0),
         (0.75, 0, 0.25), (0.5, 0, 0.5), (0.25, 0, 0.75),
         (0, 0.75, 0.25), (0, 0.5, 0.5), (0, 0.25, 0.75),
