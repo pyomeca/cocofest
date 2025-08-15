@@ -63,14 +63,13 @@ class MyCyclicNMPC(FesNmpcMsk):
             if isinstance(self.nlp[0].dynamics_type.ode_solver, OdeSolver.COLLOCATION)
             else 1
         )
-        self.debugg_bounds = True
+        self.debugg_bounds = False
 
 
     def advance_window_bounds_states(self, sol, n_cycles_simultaneous=None, **extra):
         # --- Get states results --- #
         states = sol.decision_states(to_merge=SolutionMerge.NODES)
         states_keys = states.keys()
-
         # --- Store previous state bounds for debugg purpose --- #
         if self.debugg_bounds:
             self.previous_bounds = {}
@@ -84,14 +83,19 @@ class MyCyclicNMPC(FesNmpcMsk):
         # --- States are bounded to match the last node of the cycle to ensure continuity between window --- #
         for key in states_keys:
             for i in range(states[key].shape[0]):
-                self.nlp[0].x_bounds[key].min[i, 0] = states[key][i][self.nodes_per_cycle]
-                self.nlp[0].x_bounds[key].max[i, 0] = states[key][i][self.nodes_per_cycle]
-                # --- Shifting qwheel bounds from one pedal turn --- #
-                if key == "q" and i == 2:
-                    self.nlp[0].x_bounds[key].min[i, 0] = self.nlp[0].x_bounds["q"].min[
-                                                              i, 0] + self.pedal_turn_in_one_cycle
-                    self.nlp[0].x_bounds[key].max[i, 0] = self.nlp[0].x_bounds["q"].max[
-                                                              i, 0] + self.pedal_turn_in_one_cycle
+                # --- Only doing wheel to prevent overconstraining the system --- #
+                if key == "q" or key == "qdot":
+                    if i == 2:
+                        self.nlp[0].x_bounds[key].min[i, 0] = states[key][i][self.nodes_per_cycle]
+                        self.nlp[0].x_bounds[key].max[i, 0] = states[key][i][self.nodes_per_cycle]
+                    if key == "q" and i == 2:
+                        self.nlp[0].x_bounds[key].min[i, 0] = self.nlp[0].x_bounds["q"].min[
+                                                                  i, 0] + self.pedal_turn_in_one_cycle  # - 0.05
+                        self.nlp[0].x_bounds[key].max[i, 0] = self.nlp[0].x_bounds["q"].max[
+                                                                  i, 0] + self.pedal_turn_in_one_cycle  # + 0.05
+                else:
+                    self.nlp[0].x_bounds[key].min[i, 0] = states[key][i][self.nodes_per_cycle]
+                    self.nlp[0].x_bounds[key].max[i, 0] = states[key][i][self.nodes_per_cycle]
         # --- Inform the past cycle stimulation time into the new one --- #
         self.update_stim()
         return True
@@ -119,11 +123,11 @@ class MyCyclicNMPC(FesNmpcMsk):
         # --- Print bounds and initial guesses for debugg purpose --- #
         if self.debugg_bounds:
             for key in states.keys():
-                if key=="q" or key=="qdot":
-                    self.plot_initial_guess(data=self.nlp[0].x_init[key].init,
-                                        current_bounds=self.nlp[0].x_bounds[key],
-                                        past_bounds=self.previous_bounds[key],
-                                        key=key)
+                # if key=="q" or key=="qdot":
+                self.plot_initial_guess(data=self.nlp[0].x_init[key].init,
+                                    current_bounds=self.nlp[0].x_bounds[key],
+                                    past_bounds=self.previous_bounds[key],
+                                    key=key)
         return True
 
 
@@ -182,41 +186,6 @@ class MyCyclicNMPC(FesNmpcMsk):
         self.nlp[0].x_init[key].init[i, :] = values
         return True
 
-
-    def get_initial_guess_values(self, states, key, index=0, delta=False):
-        """
-        Build the next-window initial guess by repeating the *first-cycle* trajectory
-        and shifting by a robust cycle delta. For angles (wheel q row), use unwrap.
-        No off-by-one: the first cycle is nodes [0..Np].
-        """
-        Np = self.nodes_per_cycle  # nodes per cycle
-        base = states[key][index, : Np + 1]  # inclusive end
-
-        # robust cycle delta
-        if key == "q" and index == states[key].shape[0] - 1:
-            # unwrap on the wheel only
-            base_unwrap = np.unwrap(base)
-            delta_cycle = base_unwrap[-1] - base_unwrap[0]
-        else:
-            delta_cycle = base[-1] - base[0] if delta else 0.0
-
-        # tile cycles WITHOUT duplicating the boundary nodes
-        pieces = []
-        for c in range(self.n_cycles_simultaneous):
-            # for cycles after the first, drop the first node to avoid duplicate at stitch points
-            seg = (base + (c + 1) * delta_cycle)
-            if c > 0:
-                seg = seg[1:]
-            pieces.append(seg)
-
-        # final node = last sample of the last seg (already included)
-        ig = np.concatenate(pieces, axis=0)
-
-        # safety shape: should be (Np * n_cycles_simultaneous + 1,)
-        # If you’re not using collocation, replace Np by cycle_len above.
-        return ig
-
-
     def _correct_init_guess_to_fit_bounds(self, corrected_input="states"):
         corrected_data_input = self.nlp[0].x_init if corrected_input == "states" else self.nlp[0].u_init if corrected_input == "controls" else None
         corrected_bound_input = self.nlp[0].x_bounds if corrected_input == "states" else self.nlp[0].u_bounds if corrected_input == "controls" else None
@@ -271,9 +240,8 @@ class MyCyclicNMPC(FesNmpcMsk):
 
             labeled = False
             for j in range(data.shape[1]):
-                label_count = 0
                 if data[:, :][i][j] < current_min_bounds[j] or data[:, :][i][j] > current_max_bounds[j]:
-                    axs[0].scatter(current_time_index[j], data[:, :][i][j], color="red", s=10, label="out of bounds" if label_count == 0 else None)
+                    axs[0].scatter(current_time_index[j], data[:, :][i][j], color="red", s=10, label="out of bounds" if not labeled else None)
                     labeled = True
             axs[0].legend()
 
@@ -376,20 +344,21 @@ def prepare_nmpc(
     )
 
         # --- Set states scaling --- #
-    # x_scaling = set_x_scaling(bio_model=model)  # Less efficient
+    x_scaling = set_x_scaling(bio_model=model)  # Less efficient
 
     # --- Set controls --- #
     u_bounds, u_init, u_scaling = set_u_bounds_and_init(model, window_n_shooting, init_file_path=initial_guess_path)
 
-    # --- Set constraints --- #  # TODO: Clean q and qdot fixed position when divergence corrected
+    # --- Set constraints --- #
     constraints = set_constraints(model,
                                   end_first_cycle_node=cycle_len,
                                   pedal_target=x_init["q"].init[2][0],
                                   pedal_speed_target=x_init["qdot"].init[2][0])
 
-    # --- Set objective --- #  # TODO: Clean q and qdot fixed position when divergence corrected
+    # --- Set objective --- #
     objective_functions = set_objective_functions(minimize_force, minimize_fatigue, minimize_control, cost_fun_weight,
-                                                  x_init["q"].init[2][-1])
+                                                  target=x_init["q"].init[2][-1],
+                                                  )
 
     # --- Update model for resisitive torque --- #
     model = updating_model(model=model, external_force_set=external_force_set, parameters=ParameterList(use_sx=use_sx))
@@ -474,6 +443,7 @@ def set_q_qdot_init(n_shooting: int, pedal_config: dict, turn_number: int, ode_s
             x_init.add("qdot", qdot_guess, interpolation=InterpolationType.EACH_FRAME)
         else:
             raise RuntimeError("ode_solver must be COLLOCATION or RK4")
+
     return x_init
 
 
@@ -501,42 +471,22 @@ def set_x_bounds(model, x_init: InitialGuessList, n_shooting: int, n_cycle_simul
 
     # --- Setting q bounds --- #
     q_x_bounds = model.bounds_from_ranges("q")
-    x_min_bound = []
-    x_max_bound = []
-        # --- Transforming CONSTANT_WITH_FIRST_AND_LAST_DIFFERENT bounds into EACH_FRAME or ALL_POINTS --- #
-    for i in range(q_x_bounds.min.shape[0]):
-        x_min_bound.append([q_x_bounds.min[i][0]] * (n_shooting + 1))
-        x_max_bound.append([q_x_bounds.max[i][0]] * (n_shooting + 1))
 
         # --- First: enter general bound values in radiant --- #
     arm_q = [0, 1.5]  # Arm min_max q bound in radiant
     forarm_q = [0.5, 2.5]  # Forarm min_max q bound in radiant
     slack = 0.05  # Wheel rotation slack
     wheel_q = [x_init["q"].init[2][-1] - slack, x_init["q"].init[2][0] + slack]  # Wheel min_max q bound in radiant
-    for i in range(len(x_min_bound[0])):
-        x_min_bound[0][i] = arm_q[0]
-        x_max_bound[0][i] = arm_q[1]
-        x_min_bound[1][i] = forarm_q[0]
-        x_max_bound[1][i] = forarm_q[1]
-        x_min_bound[2][i] = wheel_q[0]
-        x_max_bound[2][i] = wheel_q[1]
 
-        # --- Second: set wheel first node bound values --- #
-    x_min_bound[2][0] = x_init["q"].init[2][0]
-    x_max_bound[2][0] = x_init["q"].init[2][0]
+        # --- Second: set general bound values in radiant, CONSTANT_WITH_FIRST_AND_LAST_DIFFERENT mandatory for qdot --- #
+    q_x_bounds.min[0] = [arm_q[0], arm_q[0], arm_q[0]]
+    q_x_bounds.max[0] = [arm_q[1], arm_q[1], arm_q[1]]
+    q_x_bounds.min[1] = [forarm_q[0], forarm_q[0], forarm_q[0]]
+    q_x_bounds.max[1] = [forarm_q[1], forarm_q[1], forarm_q[1]]
+    q_x_bounds.min[2] = [x_init["q"].init[2][0], wheel_q[0] - 2, x_init["q"].init[2][-1]-slack]
+    q_x_bounds.max[2] = [x_init["q"].init[2][0], wheel_q[1] + 2, x_init["q"].init[2][-1]+slack]
 
-        # --- Third: restrain wheel position at the end of the first cycle --- #
-    # first_cycle_n_shooting = int(n_shooting / n_cycle_simultanous)  # Node number at the end of the first cycle
-    # cycle = - 2 * np.pi  # One wheel turn
-    # intermediate_slack = 0.05  # Wheel rotation slack
-    # x_min_bound[2][first_cycle_n_shooting] = x_init["q"].init[2][0] + cycle - intermediate_slack
-    # x_max_bound[2][first_cycle_n_shooting] = x_init["q"].init[2][0] + cycle + intermediate_slack
-
-        # --- Forth: restrain wheel position at last node --- #
-    x_min_bound[2][-1] = x_init["q"].init[2][-1] - slack
-    x_max_bound[2][-1] = x_init["q"].init[2][-1] + slack
-
-    x_bounds.add(key="q", min_bound=x_min_bound, max_bound=x_max_bound, phase=0, interpolation=interpolation_type)
+    x_bounds.add(key="q", bounds=q_x_bounds, phase=0, interpolation=InterpolationType.CONSTANT_WITH_FIRST_AND_LAST_DIFFERENT)
 
     # --- Setting qdot bounds --- #
     qdot_x_bounds = model.bounds_from_ranges("qdot")
@@ -544,15 +494,15 @@ def set_x_bounds(model, x_init: InitialGuessList, n_shooting: int, n_cycle_simul
         # --- First: enter general bound values in radiant --- #
     arm_qdot = [-10, 10]  # Arm min_max qdot bound in radiant
     forarm_qdot = [-14, 10]  # Forarm min_max qdot bound in radiant
-    wheel_qdot = [-2 * np.pi - 2, -2 * np.pi + 2]  # Wheel min_max qdot bound in radiant
+    wheel_qdot = [-2 * np.pi - 10, -2 * np.pi + 10]  # Wheel min_max qdot bound in radiant
 
-    # --- Second: set general bound values in radiant, CONSTANT_WITH_FIRST_AND_LAST_DIFFERENT mandatory for qdot --- #
+        # --- Second: set general bound values in radiant, CONSTANT_WITH_FIRST_AND_LAST_DIFFERENT mandatory for qdot --- #
     qdot_x_bounds.min[0] = [arm_qdot[0], arm_qdot[0], arm_qdot[0]]
     qdot_x_bounds.max[0] = [arm_qdot[1], arm_qdot[1], arm_qdot[1]]
     qdot_x_bounds.min[1] = [forarm_qdot[0], forarm_qdot[0], forarm_qdot[0]]
     qdot_x_bounds.max[1] = [forarm_qdot[1], forarm_qdot[1], forarm_qdot[1]]
-    qdot_x_bounds.min[2] = [wheel_qdot[0], wheel_qdot[0], wheel_qdot[0]]
-    qdot_x_bounds.max[2] = [wheel_qdot[1], wheel_qdot[1], wheel_qdot[1]]
+    qdot_x_bounds.min[2] = [-2*np.pi, wheel_qdot[0], wheel_qdot[0]]
+    qdot_x_bounds.max[2] = [-2*np.pi, wheel_qdot[1], wheel_qdot[1]]
 
     x_bounds.add(key="qdot", bounds=qdot_x_bounds, phase=0, interpolation=InterpolationType.CONSTANT_WITH_FIRST_AND_LAST_DIFFERENT)
 
@@ -563,7 +513,8 @@ def set_x_scaling(bio_model)->VariableScalingList:
     x_scaling = VariableScalingList()
     model_list = bio_model.muscles_dynamics_model
     prefix_key_list = ["Cn_", "A_", "Tau1_", "Km_"]
-    scaling_value_list = [1/100, 1000, 1/100, 1/10]
+    # scaling_value_list = [1/100, 1000, 1/100, 1/10]
+    scaling_value_list = [100, 1/1000, 100, 10]
     for i in range(len(model_list)):
         for j in range(len(prefix_key_list)):
             key = prefix_key_list[j] + model_list[i].muscle_name
@@ -621,6 +572,7 @@ def set_constraints(bio_model, end_first_cycle_node, pedal_target, pedal_speed_t
         node=Node.START,
         axes=[Axis.X, Axis.Y],
     )
+
     return constraints
 
 
@@ -663,6 +615,7 @@ def set_objective_functions(minimize_force, minimize_fatigue, minimize_control, 
             target=target,
             quadratic=True,
         )
+
     # --- Set regulation cost function --- #
     else:
         objective_functions.add(
@@ -670,32 +623,10 @@ def set_objective_functions(minimize_force, minimize_fatigue, minimize_control, 
             key="q",
             index=2,
             node=Node.END,
-            weight=1e-3,
+            weight=1e-2,
             target=target,
             quadratic=True,
         )
-
-    # objective_functions.add(
-    #     ObjectiveFcn.Mayer.MINIMIZE_STATE,
-    #     key="q",
-    #     index=2,
-    #     node=Node.END,
-    #     # weight=1e-3,
-    #     weight=1e6,
-    #     target=target,
-    #     quadratic=True,
-    # )
-
-    # objective_functions.add(
-    #     ObjectiveFcn.Mayer.MINIMIZE_STATE,
-    #     key="qdot",
-    #     index=2,
-    #     node=Node.ALL,
-    #     weight=1,
-    #     # weight=10000,
-    #     target=-2*np.pi,
-    #     quadratic=True,
-    # )
 
     # WIP
     # objective_functions.add(
@@ -907,17 +838,13 @@ def run_optim(mhe_info, cycling_info, simulation_conditions, model_path, save_so
 
     def update_functions(_nmpc: MultiCyclicNonlinearModelPredictiveControl, cycle_idx: int, _sol: Solution):
         print("Optimized window n°" + str(cycle_idx))
-        if cycle_idx>0: # and _sol.status != 0:
-            plot_mhe_graphs(_sol)
         return cycle_idx < mhe_info["n_cycles"]  # True if there are still some cycle to perform
 
     # Add the penalty cost function plot
     nmpc.add_plot_penalty(CostType.ALL)
-    nmpc.add_plot_penalty()
-    nmpc.add_plot_ipopt_outputs()
-    # Solve the optimal control problem
 
-    solver = Solver.IPOPT(show_online_optim=False, _max_iter=1000, show_options=dict(show_bounds=True))
+    # Set solver for the optimal control problem
+    solver = Solver.IPOPT(show_online_optim=False, _max_iter=10000, show_options=dict(show_bounds=True))
     solver.set_warm_start_init_point("yes")
     solver.set_mu_init(1e-2)
     solver.set_tol(1e-6)
@@ -925,6 +852,7 @@ def run_optim(mhe_info, cycling_info, simulation_conditions, model_path, save_so
     solver.set_constr_viol_tol(1e-6)
     # solver.set_linear_solver("ma57")
 
+    # Solve the optimal control problem
     sol = nmpc.solve_fes_nmpc(
         update_functions,
         solver=solver,
@@ -938,6 +866,8 @@ def run_optim(mhe_info, cycling_info, simulation_conditions, model_path, save_so
 
     sol[0].animate(viewer="pyorerun")
     plot_mhe_graphs(sol[0])
+    # for i in range(len(sol[1])):
+    #     sol[1][i].graphs(show_bounds=True)
 
     # Saving the data in a pickle file
     if save_sol:
@@ -945,6 +875,29 @@ def run_optim(mhe_info, cycling_info, simulation_conditions, model_path, save_so
 
 
 def plot_mhe_graphs(sol):
+    def plot_bounds(key, index, subplot_index, data, time):
+        current_bounds = sol.ocp.nlp[0].x_bounds[key]
+        if current_bounds.min.shape[1] == states[key].shape[1]:
+            current_min_bounds = current_bounds.min[:, :][index][:-1]
+            current_max_bounds = current_bounds.max[:, :][index][:-1]
+        else:
+            current_min_bounds = [current_bounds.min[index][0],
+                                  *[current_bounds.min[index][1]] * (states[key].shape[1] - 3),
+                                  current_bounds.min[index][2]]
+            current_max_bounds = [current_bounds.max[index][0],
+                                  *[current_bounds.max[index][1]] * (states[key].shape[1] - 3),
+                                  current_bounds.max[index][2]]
+
+        axs[subplot_index_list[subplot_index][0], subplot_index_list[subplot_index][1]].plot(time, current_min_bounds)
+        axs[subplot_index_list[subplot_index][0], subplot_index_list[subplot_index][1]].plot(time, current_max_bounds)
+
+        labeled = False
+        for j in range(data.shape[0]):
+            if data[j] < current_min_bounds[j] or data[j] > current_max_bounds[j]:
+                axs[subplot_index_list[index][0], subplot_index_list[index][1]].scatter(time[j], data[j], color="red", s=10,
+                               label="out of bounds" if not labeled else None)
+                labeled = True
+
     states = sol.stepwise_states(to_merge=SolutionMerge.NODES)
     controls = sol.stepwise_controls(to_merge=SolutionMerge.NODES)
     time = sol.stepwise_time(to_merge=SolutionMerge.NODES).T[0]
@@ -969,10 +922,13 @@ def plot_mhe_graphs(sol):
             for i in range(3):
                 axs[subplot_index_list[i][0], subplot_index_list[i][1]].plot(time[:-1], states[key[0]][i][:-1])
                 axs[subplot_index_list[i][0], subplot_index_list[i][1]].set_title(key[0] + f" index_{i}")
+                plot_bounds(key[0], index=i, subplot_index=i, data=states[key[0]][i][:-1], time=time[:-1])
         else:
             for i in range(len(key)):
                 axs[subplot_index_list[i][0], subplot_index_list[i][1]].plot(time[:-1], states[key[i]][0][:-1])
                 axs[subplot_index_list[i][0], subplot_index_list[i][1]].set_title(key[i])
+                plot_bounds(key[i], index=0, subplot_index=i, data=states[key[i]][0][:-1], time=time[:-1])
+
         for ax in axs.flat:
             ax.set(xlabel='Time (s)', ylabel=y_axis_labels[j])
         j += 1
@@ -1003,19 +959,19 @@ def main():
     model_path = "../../model_msk/Wu_Shoulder_Model_mod_kev_v2.bioMod"
 
     # --- MHE parameters --- #
-    n_cycles_simultaneous = [5]  # , 3, 4, 5]
+    n_cycles_simultaneous = [2]  # , 3, 4, 5]
     ode_solver = OdeSolver.COLLOCATION(polynomial_degree=3, method="radau")
     # ode_solver = OdeSolver.RK4(n_integration_steps=5)
     mhe_info = {
         "cycle_duration": 1,
         "n_cycles_to_advance": 1,
-        "n_cycles": 5,
+        "n_cycles": 6,
         "ode_solver": ode_solver,
         "use_sx": False
     }
 
     # --- Bike parameters --- #
-    resistive_torque = 0
+    resistive_torque = -0.5
     cycling_info = {"pedal_config": {"x_center": 0.35, "y_center": 0.0, "radius": 0.1},
                     "resistive_torque": {"Segment_application": "wheel", "torque": np.array([0, 0, resistive_torque])}}
 
