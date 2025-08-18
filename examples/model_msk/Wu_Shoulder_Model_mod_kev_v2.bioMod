@@ -371,7 +371,7 @@ musclegroup humerus_to_clavicle
     InsertionParent        humerus
 endmusclegroup
 
-    muscle    DELT1
+    muscle    Delt_ant
         type   degroote
         statetype   degroote
         musclegroup    humerus_to_clavicle
@@ -385,9 +385,9 @@ endmusclegroup
         pennationAngle    0.383972435439
     endmuscle
 
-        viapoint    DELT1-P3
+        viapoint    Delt_ant-P3
             parent    clavicle
-            muscle    DELT1
+            muscle    Delt_ant
             musclegroup    humerus_to_clavicle
             position    0.0065313002029060031 -0.0094779193120770842 0.13982975906663883
         endviapoint
@@ -430,7 +430,7 @@ musclegroup scapula_to_humerus
     InsertionParent        humerus
 endmusclegroup
 
-    muscle    DELT3
+    muscle    Delt_post
         type   degroote
         statetype   degroote
         musclegroup    scapula_to_humerus
@@ -442,15 +442,15 @@ endmusclegroup
         pennationAngle    0.31415926535900002
     endmuscle
 
-        viapoint    DELT3-P2
+        viapoint    Delt_post-P2
             parent    scapula
-            muscle    DELT3
+            muscle    Delt_post
             musclegroup    scapula_to_humerus
             position    -0.062898647187902362 -0.030163357415442696 0.0059772801399230954
         endviapoint
-        viapoint    DELT3-P2_0
+        viapoint    Delt_post-P2_0
             parent    humerus
-            muscle    DELT3
+            muscle    Delt_post
             musclegroup    scapula_to_humerus
             position    -0.01858449942332752 -0.049701999661954994 0.012320282465481228
         endviapoint
@@ -462,7 +462,7 @@ musclegroup scapula_to_radius
     InsertionParent        ulna
 endmusclegroup
 
-    muscle    bic_l
+    muscle    Biceps
         type   degroote
         statetype   degroote
         musclegroup    scapula_to_radius
@@ -474,51 +474,51 @@ endmusclegroup
         pennationAngle    0
     endmuscle
 
-        viapoint    bic_l-P2
+        viapoint    Biceps-P2
             parent    humerus
-            muscle    bic_l
+            muscle    Biceps
             musclegroup    scapula_to_radius
             position    0.0116344 0.029984 -0.0026990899999999999
         endviapoint
-        viapoint    bic_l-P3
+        viapoint    Biceps-P3
             parent    humerus
-            muscle    bic_l
+            muscle    Biceps
             musclegroup    scapula_to_radius
             position    0.0223001 0.018556300000000001 0.00039180299999999998
         endviapoint
-        viapoint    bic_l-P4
+        viapoint    Biceps-P4
             parent    humerus
-            muscle    bic_l
+            muscle    Biceps
             musclegroup    scapula_to_radius
             position    0.029886099999999999 2.17669e-05 0.00016325199999999999
         endviapoint
-        viapoint    bic_l-P5
+        viapoint    Biceps-P5
             parent    humerus
-            muscle    bic_l
+            muscle    Biceps
             musclegroup    scapula_to_radius
             position    0.013506300000000001 -0.041444099999999998 -0.0048757799999999997
         endviapoint
-        viapoint    bic_l-P6
+        viapoint    Biceps-P6
             parent    humerus
-            muscle    bic_l
+            muscle    Biceps
             musclegroup    scapula_to_radius
             position    0.012570400000000001 -0.084564200000000006 -0.0025902500000000001
         endviapoint
-        viapoint    bic_l-P7
+        viapoint    Biceps-P7
             parent    humerus
-            muscle    bic_l
+            muscle    Biceps
             musclegroup    scapula_to_radius
             position    0.018534399999999999 -0.13196099999999999 0.000261203
         endviapoint
-        viapoint    bic_l-P8
+        viapoint    Biceps-P8
             parent    humerus
-            muscle    bic_l
+            muscle    Biceps
             musclegroup    scapula_to_radius
             position    0.0248144 -0.19089400000000001 -0.0068565700000000002
         endviapoint
-        viapoint    bic_l-P9
+        viapoint    Biceps-P9
             parent    humerus
-            muscle    bic_l
+            muscle    Biceps
             musclegroup    scapula_to_radius
             position    0.023584999999999998 -0.29429899999999998 -0.0112797
         endviapoint
@@ -572,7 +572,7 @@ musclegroup scapula_to_ulna
     InsertionParent        ulna
 endmusclegroup
 
-    muscle    tric_long
+    muscle    Triceps
         type   degroote
         statetype   degroote
         musclegroup    scapula_to_ulna
@@ -584,15 +584,15 @@ endmusclegroup
         pennationAngle    0.2094
     endmuscle
 
-        viapoint    tric_long-P2
+        viapoint    Triceps-P2
             parent    humerus
-            muscle    tric_long
+            muscle    Triceps
             musclegroup    scapula_to_ulna
             position    -0.020547800000000001 -0.26594699999999999 -0.0091203099999999995
         endviapoint
-        viapoint    tric_long-P3
+        viapoint    Triceps-P3
             parent    humerus
-            muscle    tric_long
+            muscle    Triceps
             musclegroup    scapula_to_ulna
             position    -0.018969799999999998 -0.29120699999999999 -0.0131472
         endviapoint
