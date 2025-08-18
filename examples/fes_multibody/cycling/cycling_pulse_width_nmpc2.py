@@ -494,7 +494,7 @@ def set_x_bounds(model, x_init: InitialGuessList, n_shooting: int, n_cycle_simul
         # --- First: enter general bound values in radiant --- #
     arm_qdot = [-10, 10]  # Arm min_max qdot bound in radiant
     forarm_qdot = [-14, 10]  # Forarm min_max qdot bound in radiant
-    wheel_qdot = [-2 * np.pi - 10, -2 * np.pi + 10]  # Wheel min_max qdot bound in radiant
+    wheel_qdot = [-2 * np.pi - 2, -2 * np.pi + 2]  # Wheel min_max qdot bound in radiant
 
         # --- Second: set general bound values in radiant, CONSTANT_WITH_FIRST_AND_LAST_DIFFERENT mandatory for qdot --- #
     qdot_x_bounds.min[0] = [arm_qdot[0], arm_qdot[0], arm_qdot[0]]
@@ -668,6 +668,19 @@ def set_fes_model(model_path, stim_time):
                     muscle_name=muscle,
                     sum_stim_truncation=6
                 ) for muscle in muscle_name_list]
+
+    parameter_dict = {"Delt_ant":{"Fmax": 144, "a_scale": 2988.4, "alpha_a":-3.3 * 10e-2},
+                      "Delt_post":{"Fmax": 29, "a_scale": 692.4, "alpha_a":-2.7 * 10e-2},
+                      "Biceps": {"Fmax": 130, "a_scale": 3769.8, "alpha_a": -3.8 * 10e-2},
+                      "Triceps": {"Fmax": 323, "a_scale": 5357.3, "alpha_a": -3.4 * 10e-2},
+                      }
+
+    for model in muscles_model:
+        muscle_name = model.muscle_name
+        model.a_scale = parameter_dict[muscle_name]["a_scale"]
+        model.a_rest = parameter_dict[muscle_name]["a_scale"]
+        model.fmax = parameter_dict[muscle_name]["Fmax"]
+        model.alpha_a = parameter_dict[muscle_name]["alpha_a"]
 
     # Create MSK FES-driven model
     fes_model = FesMskModel(
@@ -866,8 +879,8 @@ def run_optim(mhe_info, cycling_info, simulation_conditions, model_path, save_so
 
     sol[0].animate(viewer="pyorerun")
     plot_mhe_graphs(sol[0])
-    # for i in range(len(sol[1])):
-    #     sol[1][i].graphs(show_bounds=True)
+    for i in range(len(sol[1])):
+        sol[1][i].graphs(show_bounds=True)
 
     # Saving the data in a pickle file
     if save_sol:
@@ -942,10 +955,6 @@ def plot_mhe_graphs(sol):
 
     for ax in axs.flat:
         ax.set(xlabel='Time (s)', ylabel="pulse width (us)")
-
-
-    # Todo :  Add bounds, with out of bounds in red
-    # Todo : Add convergence status, constraints, objective functions, and other relevant information
 
     plt.show()
 
