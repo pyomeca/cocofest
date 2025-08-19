@@ -55,15 +55,9 @@ class MyCyclicNMPC(FesNmpcMsk):
             if isinstance(self.nlp[0].dynamics_type.ode_solver, OdeSolver.COLLOCATION)
             else 1
         )
-        self.initial_wheel_position = self.nlp[0].x_bounds["q"].min[-1][0]
-        self.actual_cycle = 0
         self.pedal_turn_in_one_cycle = 2 * np.pi  # One mhe cycle simulates on pedal turn
-        self.polynomial_order = (
-            self.nlp[0].dynamics_type.ode_solver.polynomial_degree + 1
-            if isinstance(self.nlp[0].dynamics_type.ode_solver, OdeSolver.COLLOCATION)
-            else 1
-        )
         self.debugg_bounds = False
+        self.previous_bounds = None
 
 
     def advance_window_bounds_states(self, sol, n_cycles_simultaneous=None, **extra):
@@ -83,7 +77,7 @@ class MyCyclicNMPC(FesNmpcMsk):
         # --- States are bounded to match the last node of the cycle to ensure continuity between window --- #
         for key in states_keys:
             for i in range(states[key].shape[0]):
-                # --- Only doing wheel to prevent overconstraining the system --- #
+                # --- Only doing wheel to prevent over constraining the system --- #
                 if key == "q" or key == "qdot":
                     if i == 2:
                         self.nlp[0].x_bounds[key].min[i, 0] = states[key][i][self.nodes_per_cycle]
@@ -146,7 +140,7 @@ class MyCyclicNMPC(FesNmpcMsk):
                     "max": ub.max[:, :self.nodes_per_cycle].copy(),
                 }
 
-        # --- Set intial guess for controls --- #
+        # --- Set initial guess for controls --- #
         for key in controls.keys():
             self.set_init_cyclical(controls, key, 0, False)
         self._correct_init_guess_to_fit_bounds(corrected_input="controls")  # This function is called to move init guess within the bounds if not in bounds
@@ -230,12 +224,12 @@ class MyCyclicNMPC(FesNmpcMsk):
             fig.suptitle("Bounds and initial guess of " + key + " " + "index n°" + str(i), size=14, weight="bold")
 
             current_time_index = list(np.linspace(0, self.n_cycles_simultaneous, data[:,:][i].shape[0]))
-            axs[0].plot(current_time_index,data[:, :][i], label="Intial guess", color="black", lw=3)
+            axs[0].plot(current_time_index,data[:, :][i], label="Initial guess", color="black", lw=3)
             axs[0].plot(current_time_index,current_min_bounds, linestyle="-", label="Current bound", color="grey", lw=1)
             axs[0].plot(current_time_index,current_max_bounds, linestyle="-", color="grey", lw=1)
 
             past_time_index = np.linspace(-1, 0, self.nodes_per_cycle)
-            axs[0].plot(past_time_index, past_min_bounds, linestyle="-", label="Pervious bound", color="lightcoral", lw=1)
+            axs[0].plot(past_time_index, past_min_bounds, linestyle="-", label="Previous bound", color="lightcoral", lw=1)
             axs[0].plot(past_time_index, past_max_bounds, linestyle="-", color="lightcoral", lw=1)
 
             labeled = False
@@ -338,29 +332,25 @@ def prepare_nmpc(
         model=model,
         x_init=x_init,
         n_shooting=window_n_shooting,
-        n_cycle_simultanous=n_cycles_simultaneous,
         ode_solver=ode_solver,
         init_file_path = initial_guess_path,
     )
 
         # --- Set states scaling --- #
-    x_scaling = set_x_scaling(bio_model=model)  # Less efficient
+    # x_scaling = set_x_scaling(bio_model=model)  # Less efficient
 
     # --- Set controls --- #
     u_bounds, u_init, u_scaling = set_u_bounds_and_init(model, window_n_shooting, init_file_path=initial_guess_path)
 
     # --- Set constraints --- #
-    constraints = set_constraints(model,
-                                  end_first_cycle_node=cycle_len,
-                                  pedal_target=x_init["q"].init[2][0],
-                                  pedal_speed_target=x_init["qdot"].init[2][0])
+    constraints = set_constraints(model)
 
     # --- Set objective --- #
     objective_functions = set_objective_functions(minimize_force, minimize_fatigue, minimize_control, cost_fun_weight,
                                                   target=x_init["q"].init[2][-1],
                                                   )
 
-    # --- Update model for resisitive torque --- #
+    # --- Update model for resistive torque --- #
     model = updating_model(model=model, external_force_set=external_force_set, parameters=ParameterList(use_sx=use_sx))
 
     return MyCyclicNMPC(
@@ -425,7 +415,7 @@ def set_q_qdot_init(n_shooting: int, pedal_config: dict, turn_number: int, ode_s
         n_shooting = n_shooting * (ode_solver.polynomial_degree + 1) if isinstance(ode_solver,
                                                                                    OdeSolver.COLLOCATION) else n_shooting
         # --- Run inverse kinematics --- #
-        q_guess, qdot_guess, qddotguess = inverse_kinematics_cycling(
+        q_guess, qdot_guess, qddot_guess = inverse_kinematics_cycling(
             biorbd_model_path,
             n_shooting,
             x_center=pedal_config["x_center"],
@@ -447,14 +437,14 @@ def set_q_qdot_init(n_shooting: int, pedal_config: dict, turn_number: int, ode_s
     return x_init
 
 
-def set_x_bounds(model, x_init: InitialGuessList, n_shooting: int, n_cycle_simultanous: int, ode_solver: OdeSolver, init_file_path: str)-> tuple[BoundsList, InitialGuessList]:
+def set_x_bounds(model, x_init: InitialGuessList, n_shooting: int, ode_solver: OdeSolver, init_file_path: str)-> tuple[BoundsList, InitialGuessList]:
     # --- Set interpolation type according to ode_solver type --- #
     interpolation_type = InterpolationType.EACH_FRAME
     if isinstance(ode_solver, OdeSolver.COLLOCATION):
         n_shooting = n_shooting * (ode_solver.polynomial_degree + 1)
         interpolation_type = InterpolationType.ALL_POINTS
 
-    # --- Initialize default FES bounds and intial guess --- #
+    # --- Initialize default FES bounds and initial guess --- #
     x_bounds, x_init_fes = OcpFesMsk.set_x_bounds_fes(model)
 
     # --- Getting initial guesses from initialization file if entered --- #
@@ -474,15 +464,15 @@ def set_x_bounds(model, x_init: InitialGuessList, n_shooting: int, n_cycle_simul
 
         # --- First: enter general bound values in radiant --- #
     arm_q = [0, 1.5]  # Arm min_max q bound in radiant
-    forarm_q = [0.5, 2.5]  # Forarm min_max q bound in radiant
+    forearm_q = [0.5, 2.5]  # Forearm min_max q bound in radiant
     slack = 0.05  # Wheel rotation slack
     wheel_q = [x_init["q"].init[2][-1] - slack, x_init["q"].init[2][0] + slack]  # Wheel min_max q bound in radiant
 
         # --- Second: set general bound values in radiant, CONSTANT_WITH_FIRST_AND_LAST_DIFFERENT mandatory for qdot --- #
     q_x_bounds.min[0] = [arm_q[0], arm_q[0], arm_q[0]]
     q_x_bounds.max[0] = [arm_q[1], arm_q[1], arm_q[1]]
-    q_x_bounds.min[1] = [forarm_q[0], forarm_q[0], forarm_q[0]]
-    q_x_bounds.max[1] = [forarm_q[1], forarm_q[1], forarm_q[1]]
+    q_x_bounds.min[1] = [forearm_q[0], forearm_q[0], forearm_q[0]]
+    q_x_bounds.max[1] = [forearm_q[1], forearm_q[1], forearm_q[1]]
     q_x_bounds.min[2] = [x_init["q"].init[2][0], wheel_q[0] - 2, x_init["q"].init[2][-1]-slack]
     q_x_bounds.max[2] = [x_init["q"].init[2][0], wheel_q[1] + 2, x_init["q"].init[2][-1]+slack]
 
@@ -493,14 +483,14 @@ def set_x_bounds(model, x_init: InitialGuessList, n_shooting: int, n_cycle_simul
 
         # --- First: enter general bound values in radiant --- #
     arm_qdot = [-10, 10]  # Arm min_max qdot bound in radiant
-    forarm_qdot = [-14, 10]  # Forarm min_max qdot bound in radiant
+    forearm_qdot = [-14, 10]  # Forearm min_max qdot bound in radiant
     wheel_qdot = [-2 * np.pi - 3, -2 * np.pi + 3]  # Wheel min_max qdot bound in radiant
 
         # --- Second: set general bound values in radiant, CONSTANT_WITH_FIRST_AND_LAST_DIFFERENT mandatory for qdot --- #
     qdot_x_bounds.min[0] = [arm_qdot[0], arm_qdot[0], arm_qdot[0]]
     qdot_x_bounds.max[0] = [arm_qdot[1], arm_qdot[1], arm_qdot[1]]
-    qdot_x_bounds.min[1] = [forarm_qdot[0], forarm_qdot[0], forarm_qdot[0]]
-    qdot_x_bounds.max[1] = [forarm_qdot[1], forarm_qdot[1], forarm_qdot[1]]
+    qdot_x_bounds.min[1] = [forearm_qdot[0], forearm_qdot[0], forearm_qdot[0]]
+    qdot_x_bounds.max[1] = [forearm_qdot[1], forearm_qdot[1], forearm_qdot[1]]
     qdot_x_bounds.min[2] = [wheel_qdot[0], wheel_qdot[0], wheel_qdot[0]]
     qdot_x_bounds.max[2] = [wheel_qdot[1], wheel_qdot[1], wheel_qdot[1]]
 
@@ -513,8 +503,7 @@ def set_x_scaling(bio_model)->VariableScalingList:
     x_scaling = VariableScalingList()
     model_list = bio_model.muscles_dynamics_model
     prefix_key_list = ["Cn_", "A_", "Tau1_", "Km_"]
-    # scaling_value_list = [1/100, 1000, 1/100, 1/10]
-    scaling_value_list = [100, 1/1000, 100, 10]
+    scaling_value_list = [1/100, 1000, 1/100, 1/10]
     for i in range(len(model_list)):
         for j in range(len(prefix_key_list)):
             key = prefix_key_list[j] + model_list[i].muscle_name
@@ -556,7 +545,7 @@ def set_u_bounds_and_init(bio_model, n_shooting, init_file_path):
     )
 
 
-def set_constraints(bio_model, end_first_cycle_node, pedal_target, pedal_speed_target):
+def set_constraints(bio_model):
     constraints = ConstraintList()
     # --- Constraining wheel center position to a fix position --- #
     constraints.add(
@@ -705,11 +694,11 @@ def create_simulation_list(
 ) -> list[dict]:
 
     def make_file_paths(
-        n_cycles: int,
+        num_cycles: int,
         w_force:  float,
         w_fatigue: float,
         w_control: float,
-        ode_solver: OdeSolver,
+        solver_type: OdeSolver,
     ) -> tuple[str, str]:
 
         parts = []
@@ -718,19 +707,19 @@ def create_simulation_list(
         if w_control: parts.append(f"{int(w_control*100)}_control")
         weight_suffix = "_".join(parts)
 
-        if isinstance(ode_solver, OdeSolver.COLLOCATION):
-            solver_suffix = f"collocation_{ode_solver.polynomial_degree}_{ode_solver.method}"
-        elif isinstance(ode_solver, OdeSolver.RK4):
-            solver_suffix = f"rk4_{ode_solver.n_integration_steps}"
+        if isinstance(solver_type, OdeSolver.COLLOCATION):
+            solver_suffix = f"collocation_{solver_type.polynomial_degree}_{solver_type.method}"
+        elif isinstance(solver_type, OdeSolver.RK4):
+            solver_suffix = f"rk4_{solver_type.n_integration_steps}"
         else:
             raise RuntimeError("ode_solver must be COLLOCATION or RK4")
 
         full_suffix = f"{weight_suffix}_{solver_suffix}_with_init"
-        pkl = str(Path("result") / f"{n_cycles}_cycle" / f"{n_cycles}_min_{full_suffix}.pkl")
-        init = str(Path("result/initial_guess") / f"{n_cycles}_initial_guess_{solver_suffix}.pkl")
+        pkl = str(Path("result") / f"{num_cycles}_cycle" / f"{num_cycles}_min_{full_suffix}.pkl")
+        init = str(Path("result/initial_guess") / f"{num_cycles}_initial_guess_{solver_suffix}.pkl")
         init = init if os.path.exists(init) else None
         if init is None:
-            print("No initial guess file for n_cycle: " + str(n_cycles) + " and solver: " + str(solver_suffix))
+            print("No initial guess file for n_cycle: " + str(num_cycles) + " and solver: " + str(solver_suffix))
         return pkl, init
 
     sims = []
@@ -824,9 +813,9 @@ def run_initial_guess(mhe_info, cycling_info, model_path, stimulation, n_cycles_
                   simulation_conditions=simulation_conditions,
                   model_path=model_path,
                   save_sol=save_sol,
-                  run_initial_guess=True)
+                  is_initial_guess=True)
 
-def run_optim(mhe_info, cycling_info, simulation_conditions, model_path, save_sol, run_initial_guess=False):
+def run_optim(mhe_info, cycling_info, simulation_conditions, model_path, save_sol, is_initial_guess=False):
     # --- Set FES model --- #
     stim_time = list(
         np.linspace(
@@ -880,17 +869,17 @@ def run_optim(mhe_info, cycling_info, simulation_conditions, model_path, save_so
     )
 
     # sol[0].animate(viewer="pyorerun")
-    plot_mhe_graphs(sol[0])
+    # plot_mhe_graphs(sol[0])
     # for i in range(len(sol[1])):
     #     sol[1][i].graphs(show_bounds=True)
 
     # Saving the data in a pickle file
     if save_sol:
-        save_sol_in_pkl(sol, simulation_conditions, is_initial_guess=run_initial_guess)
+        save_sol_in_pkl(sol, simulation_conditions, is_initial_guess=is_initial_guess)
 
 
 def plot_mhe_graphs(sol):
-    def plot_bounds(key, index, subplot_index, data, time):
+    def plot_bounds(key, index, subplot_index, data, bound_time):
         current_bounds = sol.ocp.nlp[0].x_bounds[key]
         if current_bounds.min.shape[1] == states[key].shape[1]:
             current_min_bounds = current_bounds.min[:, :][index][:-1]
@@ -903,15 +892,15 @@ def plot_mhe_graphs(sol):
                                   *[current_bounds.max[index][1]] * (states[key].shape[1] - 3),
                                   current_bounds.max[index][2]]
 
-        axs[subplot_index_list[subplot_index][0], subplot_index_list[subplot_index][1]].plot(time, current_min_bounds)
-        axs[subplot_index_list[subplot_index][0], subplot_index_list[subplot_index][1]].plot(time, current_max_bounds)
+        axs[subplot_index_list[subplot_index][0], subplot_index_list[subplot_index][1]].plot(bound_time, current_min_bounds)
+        axs[subplot_index_list[subplot_index][0], subplot_index_list[subplot_index][1]].plot(bound_time, current_max_bounds)
 
-        labeled = False
-        for j in range(data.shape[0]):
-            if data[j] < current_min_bounds[j] or data[j] > current_max_bounds[j]:
-                axs[subplot_index_list[index][0], subplot_index_list[index][1]].scatter(time[j], data[j], color="red", s=10,
-                               label="out of bounds" if not labeled else None)
-                labeled = True
+        # labeled = False
+        # for k in range(data.shape[0]):
+        #     if data[k] < current_min_bounds[k] or data[k] > current_max_bounds[k]:
+        #         axs[subplot_index_list[index][0], subplot_index_list[index][1]].scatter(bound_time[k], data[k], color="red", s=10,
+        #                        label="out of bounds" if not labeled else None)
+        #         labeled = True
 
     states = sol.stepwise_states(to_merge=SolutionMerge.NODES)
     controls = sol.stepwise_controls(to_merge=SolutionMerge.NODES)
@@ -937,12 +926,12 @@ def plot_mhe_graphs(sol):
             for i in range(3):
                 axs[subplot_index_list[i][0], subplot_index_list[i][1]].plot(time[:-1], states[key[0]][i][:-1])
                 axs[subplot_index_list[i][0], subplot_index_list[i][1]].set_title(key[0] + f" index_{i}")
-                plot_bounds(key[0], index=i, subplot_index=i, data=states[key[0]][i][:-1], time=time[:-1])
+                plot_bounds(key[0], index=i, subplot_index=i, data=states[key[0]][i][:-1], bound_time=time[:-1])
         else:
             for i in range(len(key)):
                 axs[subplot_index_list[i][0], subplot_index_list[i][1]].plot(time[:-1], states[key[i]][0][:-1])
                 axs[subplot_index_list[i][0], subplot_index_list[i][1]].set_title(key[i])
-                plot_bounds(key[i], index=0, subplot_index=i, data=states[key[i]][0][:-1], time=time[:-1])
+                plot_bounds(key[i], index=0, subplot_index=i, data=states[key[i]][0][:-1], bound_time=time[:-1])
 
         for ax in axs.flat:
             ax.set(xlabel='Time (s)', ylabel=y_axis_labels[j])
@@ -982,7 +971,7 @@ def main():
     }
 
     # --- Bike parameters --- #
-    resistive_torque = -0.3
+    resistive_torque = -0.25
     cycling_info = {"pedal_config": {"x_center": 0.35, "y_center": 0.0, "radius": 0.1},
                     "resistive_torque": {"Segment_application": "wheel", "torque": np.array([0, 0, resistive_torque])}}
 
