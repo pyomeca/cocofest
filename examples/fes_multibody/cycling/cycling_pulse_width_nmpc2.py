@@ -455,7 +455,7 @@ def set_x_bounds(model, x_init: InitialGuessList, n_shooting: int, ode_solver: O
 
     # --- Setting FES initial guesses --- #
     for key in x_init_fes.keys():
-        initial_guess = data[key] if data else np.array([[x_init_fes[key].init[0][0]] * (n_shooting + 1)])
+        initial_guess = data[key] if init_file_path else np.array([[x_init_fes[key].init[0][0]] * (n_shooting + 1)])
         x_init.add(key=key, initial_guess=initial_guess, phase=0, interpolation=interpolation_type)
 
     # --- Setting q bounds --- #
