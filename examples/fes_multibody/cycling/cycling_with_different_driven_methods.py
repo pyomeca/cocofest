@@ -349,7 +349,7 @@ def set_state_bounds(
     # --- First: enter general bound values in radiant --- #
     arm_qdot = [-10, 10]  # Arm min_max qdot bound in radiant
     forarm_qdot = [-14, 10]  # Forarm min_max qdot bound in radiant
-    wheel_qdot = [-2 * np.pi - 2, -2 * np.pi + 2]  # Wheel min_max qdot bound in radiant
+    wheel_qdot = [-2 * np.pi - 3, -2 * np.pi + 3]  # Wheel min_max qdot bound in radiant
 
     # --- Second: set general bound values in radiant, CONSTANT_WITH_FIRST_AND_LAST_DIFFERENT mandatory for qdot --- #
     qdot_x_bounds.min[0] = [arm_qdot[0], arm_qdot[0], arm_qdot[0]]
@@ -515,10 +515,10 @@ def main():
             sum_stim_truncation=6
         ) for muscle in muscle_name_list]
 
-        parameter_dict = {"Delt_ant": {"Fmax": 144, "a_scale": 2988.4, "alpha_a": -3.3 * 10e-2},
-                          "Delt_post": {"Fmax": 29, "a_scale": 692.4, "alpha_a": -2.7 * 10e-2},
-                          "Biceps": {"Fmax": 130, "a_scale": 3769.8, "alpha_a": -3.8 * 10e-2},
-                          "Triceps": {"Fmax": 323, "a_scale": 5357.3, "alpha_a": -3.4 * 10e-2},
+        parameter_dict = {"Delt_ant": {"Fmax": 144, "a_scale": 2988.4, "alpha_a": -5.4 * 10e-2, "tau_fat": 104},
+                          "Delt_post": {"Fmax": 29, "a_scale": 692.4, "alpha_a": -1.92 * 10e-1, "tau_fat": 86},
+                          "Biceps": {"Fmax": 130, "a_scale": 2769.8, "alpha_a": -6.7 * 10e-2, "tau_fat": 121},
+                          "Triceps": {"Fmax": 323, "a_scale": 5357.3, "alpha_a": -3.1 * 10e-2, "tau_fat": 109},
                           }
 
         for model in muscles_model:
@@ -527,6 +527,7 @@ def main():
             model.a_rest = parameter_dict[muscle_name]["a_scale"]
             model.fmax = parameter_dict[muscle_name]["Fmax"]
             model.alpha_a = parameter_dict[muscle_name]["alpha_a"]
+            model.tau_fat = parameter_dict[muscle_name]["tau_fat"]
 
         stim_time = list(np.linspace(0, final_time, 33 * final_time + 1)[:-1])
         model = FesMskModel(

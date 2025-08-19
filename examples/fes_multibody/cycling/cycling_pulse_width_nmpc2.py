@@ -501,8 +501,8 @@ def set_x_bounds(model, x_init: InitialGuessList, n_shooting: int, n_cycle_simul
     qdot_x_bounds.max[0] = [arm_qdot[1], arm_qdot[1], arm_qdot[1]]
     qdot_x_bounds.min[1] = [forarm_qdot[0], forarm_qdot[0], forarm_qdot[0]]
     qdot_x_bounds.max[1] = [forarm_qdot[1], forarm_qdot[1], forarm_qdot[1]]
-    qdot_x_bounds.min[2] = [-2*np.pi, wheel_qdot[0], wheel_qdot[0]]
-    qdot_x_bounds.max[2] = [-2*np.pi, wheel_qdot[1], wheel_qdot[1]]
+    qdot_x_bounds.min[2] = [wheel_qdot[0], wheel_qdot[0], wheel_qdot[0]]
+    qdot_x_bounds.max[2] = [wheel_qdot[1], wheel_qdot[1], wheel_qdot[1]]
 
     x_bounds.add(key="qdot", bounds=qdot_x_bounds, phase=0, interpolation=InterpolationType.CONSTANT_WITH_FIRST_AND_LAST_DIFFERENT)
 
@@ -669,10 +669,10 @@ def set_fes_model(model_path, stim_time):
                     sum_stim_truncation=6
                 ) for muscle in muscle_name_list]
 
-    parameter_dict = {"Delt_ant":{"Fmax": 144, "a_scale": 2988.4, "alpha_a":-3.3 * 10e-2},
-                      "Delt_post":{"Fmax": 29, "a_scale": 692.4, "alpha_a":-2.7 * 10e-2},
-                      "Biceps": {"Fmax": 130, "a_scale": 3769.8, "alpha_a": -3.8 * 10e-2},
-                      "Triceps": {"Fmax": 323, "a_scale": 5357.3, "alpha_a": -3.4 * 10e-2},
+    parameter_dict = {"Delt_ant": {"Fmax": 144, "a_scale": 2988.4, "alpha_a": -5.4 * 10e-2, "tau_fat": 104},
+                      "Delt_post": {"Fmax": 29, "a_scale": 692.4, "alpha_a": -1.92 * 10e-1, "tau_fat": 86},
+                      "Biceps": {"Fmax": 130, "a_scale": 2769.8, "alpha_a": -6.7 * 10e-2, "tau_fat": 121},
+                      "Triceps": {"Fmax": 323, "a_scale": 5357.3, "alpha_a": -3.1 * 10e-2, "tau_fat": 109},
                       }
 
     for model in muscles_model:
@@ -681,6 +681,7 @@ def set_fes_model(model_path, stim_time):
         model.a_rest = parameter_dict[muscle_name]["a_scale"]
         model.fmax = parameter_dict[muscle_name]["Fmax"]
         model.alpha_a = parameter_dict[muscle_name]["alpha_a"]
+        model.tau_fat = parameter_dict[muscle_name]["tau_fat"]
 
     # Create MSK FES-driven model
     fes_model = FesMskModel(
@@ -878,10 +879,10 @@ def run_optim(mhe_info, cycling_info, simulation_conditions, model_path, save_so
         max_consecutive_failing=1,
     )
 
-    sol[0].animate(viewer="pyorerun")
+    # sol[0].animate(viewer="pyorerun")
     plot_mhe_graphs(sol[0])
-    for i in range(len(sol[1])):
-        sol[1][i].graphs(show_bounds=True)
+    # for i in range(len(sol[1])):
+    #     sol[1][i].graphs(show_bounds=True)
 
     # Saving the data in a pickle file
     if save_sol:
@@ -975,13 +976,13 @@ def main():
     mhe_info = {
         "cycle_duration": 1,
         "n_cycles_to_advance": 1,
-        "n_cycles": 6,
+        "n_cycles": 50,
         "ode_solver": ode_solver,
         "use_sx": False
     }
 
     # --- Bike parameters --- #
-    resistive_torque = -0.5
+    resistive_torque = -0.3
     cycling_info = {"pedal_config": {"x_center": 0.35, "y_center": 0.0, "radius": 0.1},
                     "resistive_torque": {"Segment_application": "wheel", "torque": np.array([0, 0, resistive_torque])}}
 
