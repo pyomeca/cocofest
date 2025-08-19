@@ -760,8 +760,6 @@ def save_sol_in_pkl(sol, simulation_conditions, is_initial_guess=False, torque=N
 
     dictionary = {
         "time": time,
-        "states": states,
-        "controls": controls,
         "stim_time": stim_time,
         "solving_time_per_ocp": solving_time_per_ocp,
         "objective_values_per_ocp": objective_values_per_ocp,
@@ -775,9 +773,17 @@ def save_sol_in_pkl(sol, simulation_conditions, is_initial_guess=False, torque=N
         "polynomial_order": solution.ocp.nlp[0].dynamics_type.ode_solver.polynomial_degree,
         "applied_torque": torque
     }
+
+    for key in states.keys():
+        dictionary[key] = states[key]
+    for key in controls.keys():
+        dictionary[key] = controls[key]
+
     pickle_file_name = simulation_conditions["pickle_file_path"]
     with open(pickle_file_name, "wb") as file:
         pickle.dump(dictionary, file)
+
+    np.savez_compressed(str(pickle_file_name)[:-4] + ".npz", **dictionary)
     print(simulation_conditions["pickle_file_path"])
 
 def run_initial_guess(mhe_info, cycling_info, model_path, stimulation, n_cycles_simultaneous, save_sol=True):
