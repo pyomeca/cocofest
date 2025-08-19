@@ -3,6 +3,7 @@ This example will do an optimal control program of a 100 steps hand cycling moti
 muscle driven / FES driven dynamics and includes a resistive torque at the handle.
 """
 
+from sys import platform
 import matplotlib.pyplot as plt
 import numpy as np
 
@@ -348,7 +349,7 @@ def set_state_bounds(
     # --- First: enter general bound values in radiant --- #
     arm_qdot = [-10, 10]  # Arm min_max qdot bound in radiant
     forarm_qdot = [-14, 10]  # Forarm min_max qdot bound in radiant
-    wheel_qdot = [-2 * np.pi - 3, -2 * np.pi + 3]  # Wheel min_max qdot bound in radiant
+    wheel_qdot = [-2 * np.pi - 2, -2 * np.pi + 2]  # Wheel min_max qdot bound in radiant
 
     # --- Second: set general bound values in radiant, CONSTANT_WITH_FIRST_AND_LAST_DIFFERENT mandatory for qdot --- #
     qdot_x_bounds.min[0] = [arm_qdot[0], arm_qdot[0], arm_qdot[0]]
@@ -561,7 +562,11 @@ def main():
     ocp.add_plot_penalty(CostType.ALL)
 
     # Solve the optimal control problem
-    sol = ocp.solve(Solver.IPOPT(show_online_optim=False, _max_iter=10000, show_options=dict(show_bounds=True)))
+    linear_solver = "ma57" if platform == "linux" else "mumps"
+    sol = ocp.solve(Solver.IPOPT(show_online_optim=False,
+                                 _max_iter=10000,
+                                 show_options=dict(show_bounds=True),
+                                 _linear_solver=linear_solver))
     sol.print_cost()
     sol.animate(viewer="pyorerun")
     sol.graphs(show_bounds=True)

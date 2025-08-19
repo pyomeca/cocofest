@@ -4,7 +4,7 @@ This example will perform an optimal control program moving time horizon for a h
 
 import os
 import pickle
-
+from sys import platform
 from itertools import product
 from pathlib import Path
 
@@ -494,7 +494,7 @@ def set_x_bounds(model, x_init: InitialGuessList, n_shooting: int, n_cycle_simul
         # --- First: enter general bound values in radiant --- #
     arm_qdot = [-10, 10]  # Arm min_max qdot bound in radiant
     forarm_qdot = [-14, 10]  # Forarm min_max qdot bound in radiant
-    wheel_qdot = [-2 * np.pi - 2, -2 * np.pi + 2]  # Wheel min_max qdot bound in radiant
+    wheel_qdot = [-2 * np.pi - 3, -2 * np.pi + 3]  # Wheel min_max qdot bound in radiant
 
         # --- Second: set general bound values in radiant, CONSTANT_WITH_FIRST_AND_LAST_DIFFERENT mandatory for qdot --- #
     qdot_x_bounds.min[0] = [arm_qdot[0], arm_qdot[0], arm_qdot[0]]
@@ -863,7 +863,8 @@ def run_optim(mhe_info, cycling_info, simulation_conditions, model_path, save_so
     solver.set_tol(1e-6)
     solver.set_dual_inf_tol(1e-6)
     solver.set_constr_viol_tol(1e-6)
-    # solver.set_linear_solver("ma57")
+    linear_solver = "ma57" if platform == "linux" else "mumps"
+    solver.set_linear_solver(linear_solver)
 
     # Solve the optimal control problem
     sol = nmpc.solve_fes_nmpc(
