@@ -368,7 +368,7 @@ def prepare_nmpc(
         u_bounds=u_bounds,
         u_init=u_init,
         u_scaling=u_scaling,
-        n_threads=32,
+        n_threads=48,
         use_sx=use_sx,
     )
 
@@ -739,7 +739,7 @@ def create_simulation_list(
         })
     return sims
 
-def save_sol_in_pkl(sol, simulation_conditions, is_initial_guess=False):
+def save_sol_in_pkl(sol, simulation_conditions, is_initial_guess=False, torque=None):
     solution = sol[0] if not is_initial_guess else sol[1][0]
     time = solution.stepwise_time(to_merge=[SolutionMerge.NODES]).T[0]
     states = solution.stepwise_states(to_merge=[SolutionMerge.NODES])
@@ -752,6 +752,12 @@ def save_sol_in_pkl(sol, simulation_conditions, is_initial_guess=False):
     total_average_solving_time_per_iter = average(average_solving_time_per_iter_list)
     number_of_turns_before_failing = len(sol[1]) - 1 + simulation_conditions["n_cycles_simultaneous"]
     convergence_status = [sol[1][i].status for i in range(len(sol[1]))]
+
+    # --- Convert all data into lists for compatibility across Python versions --- #
+    time = time.tolist()
+    states = {key: value.tolist() for key, value in states.items()}
+    controls = {key: value.tolist() for key, value in controls.items()}
+
     dictionary = {
         "time": time,
         "states": states,
@@ -767,6 +773,7 @@ def save_sol_in_pkl(sol, simulation_conditions, is_initial_guess=False):
         "total_n_shooting": solution.ocp.n_shooting,
         "n_shooting_per_cycle": int(solution.ocp.n_shooting / (simulation_conditions["n_cycles_simultaneous"] - 1)),
         "polynomial_order": solution.ocp.nlp[0].dynamics_type.ode_solver.polynomial_degree,
+        "applied_torque": torque
     }
     pickle_file_name = simulation_conditions["pickle_file_path"]
     with open(pickle_file_name, "wb") as file:
@@ -847,7 +854,7 @@ def run_optim(mhe_info, cycling_info, simulation_conditions, model_path, save_so
     nmpc.add_plot_penalty(CostType.ALL)
 
     # Set solver for the optimal control problem
-    solver = Solver.IPOPT(show_online_optim=False, _max_iter=10000, show_options=dict(show_bounds=True))
+    solver = Solver.IPOPT(show_online_optim=False, _max_iter=1000, show_options=dict(show_bounds=True))
     solver.set_warm_start_init_point("yes")
     solver.set_mu_init(1e-2)
     solver.set_tol(1e-6)
@@ -875,7 +882,8 @@ def run_optim(mhe_info, cycling_info, simulation_conditions, model_path, save_so
 
     # Saving the data in a pickle file
     if save_sol:
-        save_sol_in_pkl(sol, simulation_conditions, is_initial_guess=is_initial_guess)
+        save_sol_in_pkl(sol, simulation_conditions, is_initial_guess=is_initial_guess,
+                        torque=cycling_info["resistive_torque"]["torque"][-1])
 
 
 def plot_mhe_graphs(sol):
@@ -965,13 +973,13 @@ def main():
     mhe_info = {
         "cycle_duration": 1,
         "n_cycles_to_advance": 1,
-        "n_cycles": 50,
+        "n_cycles": 3000,
         "ode_solver": ode_solver,
         "use_sx": False
     }
 
     # --- Bike parameters --- #
-    resistive_torque = -0.25
+    resistive_torque = -0.263
     cycling_info = {"pedal_config": {"x_center": 0.35, "y_center": 0.0, "radius": 0.1},
                     "resistive_torque": {"Segment_application": "wheel", "torque": np.array([0, 0, resistive_torque])}}
 
