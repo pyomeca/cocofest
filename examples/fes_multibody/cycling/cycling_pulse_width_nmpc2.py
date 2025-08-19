@@ -404,8 +404,8 @@ def set_q_qdot_init(n_shooting: int, pedal_config: dict, turn_number: int, ode_s
     if init_file_path:
         with open(init_file_path, "rb") as file:
             data = pickle.load(file)
-        q_guess = data["states"]["q"]
-        qdot_guess = data["states"]["qdot"]
+        q_guess = data["q"]
+        qdot_guess = data["qdot"]
         x_init.add("q", q_guess, interpolation=InterpolationType.ALL_POINTS)
         x_init.add("qdot", qdot_guess, interpolation=InterpolationType.ALL_POINTS)
     else:
@@ -452,11 +452,10 @@ def set_x_bounds(model, x_init: InitialGuessList, n_shooting: int, ode_solver: O
     if init_file_path:
         with open(init_file_path, "rb") as file:
             data = pickle.load(file)
-            states = data["states"]
 
     # --- Setting FES initial guesses --- #
     for key in x_init_fes.keys():
-        initial_guess = states[key] if states else np.array([[x_init_fes[key].init[0][0]] * (n_shooting + 1)])
+        initial_guess = data[key] if data else np.array([[x_init_fes[key].init[0][0]] * (n_shooting + 1)])
         x_init.add(key=key, initial_guess=initial_guess, phase=0, interpolation=interpolation_type)
 
     # --- Setting q bounds --- #
@@ -518,13 +517,11 @@ def set_u_bounds_and_init(bio_model, n_shooting, init_file_path):
     if init_file_path:
         with open(init_file_path, "rb") as file:
             data = pickle.load(file)
-        u_guess = data["controls"]
-    else:
-        u_guess = None
+
     for model in models:
         key = "last_pulse_width_" + str(model.muscle_name)
-        if u_guess:
-            initial_guess = data["controls"][key]
+        if init_file_path:
+            initial_guess = data[key]
         else:
             initial_guess = np.array([[model.pd0] * n_shooting])
         u_init.add(
@@ -966,14 +963,14 @@ def plot_mhe_graphs(sol):
 def main():
     # --- Simulation configuration --- #
     save_sol = True
-    get_initial_guess = False
+    get_initial_guess = True
 
     # --- Model choice --- #
     # model_path = "../../model_msk/simplified_UL_Seth_2D_cycling.bioMod"
     model_path = "../../model_msk/Wu_Shoulder_Model_mod_kev_v2.bioMod"
 
     # --- MHE parameters --- #
-    n_cycles_simultaneous = [2]  # , 3, 4, 5]
+    n_cycles_simultaneous = [2, 3, 4, 5]
     ode_solver = OdeSolver.COLLOCATION(polynomial_degree=3, method="radau")
     # ode_solver = OdeSolver.RK4(n_integration_steps=5)
     mhe_info = {
