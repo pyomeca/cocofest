@@ -192,16 +192,6 @@ def set_objective_functions(model: BiorbdModel | FesMskModel, dynamics_type: str
         quadratic=True,
     )
 
-    objective_functions.add(
-        ObjectiveFcn.Lagrange.MINIMIZE_STATE,
-        key="qdot",
-        index=2,
-        node=Node.ALL,
-        weight=1e2,
-        target=-2*np.pi,
-        quadratic=True,
-    )
-
     return objective_functions
 
 
@@ -299,7 +289,6 @@ def set_state_bounds(
     model: BiorbdModel | FesMskModel,
     x_init: InitialGuessList,
     n_shooting: int,
-    turn_number: int,
     ode_solver: OdeSolver,
 ) -> tuple[BoundsList, InitialGuessList]:
     """
@@ -415,6 +404,7 @@ def prepare_ocp(
     dynamics_type: str = "torque_driven",
     use_sx: bool = True,
     ode_solver: OdeSolver = OdeSolver.RK4(n_integration_steps=10),
+    torque: int | float = -1,
 ) -> OptimalControlProgram:
     """
     Prepare the optimal control program (OCP) with the provided configuration.
@@ -441,7 +431,7 @@ def prepare_ocp(
         An OptimalControlProgram instance configured for the problem.
     """
     # Set external forces (e.g., resistive torque at the handle)
-    numerical_time_series, external_force_set = set_external_forces(n_shooting, torque=-1)
+    numerical_time_series, external_force_set = set_external_forces(n_shooting, torque=torque)
 
     # Set stimulation time in numerical_data_time_series
     if isinstance(model, FesMskModel):
@@ -464,7 +454,6 @@ def prepare_ocp(
         model=model,
         x_init=x_init,
         n_shooting=n_shooting,
-        turn_number=turn_number,
         ode_solver=ode_solver,
     )
 
@@ -491,7 +480,7 @@ def prepare_ocp(
         u_init=u_init,
         u_scaling=u_scaling,
         objective_functions=objective_functions,
-        n_threads=20,
+        n_threads=32,
         constraints=constraints,
         use_sx=False,
         control_type=ControlType.CONSTANT,
@@ -524,6 +513,20 @@ def main():
             muscle_name=muscle,
             sum_stim_truncation=6
         ) for muscle in muscle_name_list]
+
+        parameter_dict = {"Delt_ant": {"Fmax": 144, "a_scale": 2988.4, "alpha_a": -3.3 * 10e-2},
+                          "Delt_post": {"Fmax": 29, "a_scale": 692.4, "alpha_a": -2.7 * 10e-2},
+                          "Biceps": {"Fmax": 130, "a_scale": 3769.8, "alpha_a": -3.8 * 10e-2},
+                          "Triceps": {"Fmax": 323, "a_scale": 5357.3, "alpha_a": -3.4 * 10e-2},
+                          }
+
+        for model in muscles_model:
+            muscle_name = model.muscle_name
+            model.a_scale = parameter_dict[muscle_name]["a_scale"]
+            model.a_rest = parameter_dict[muscle_name]["a_scale"]
+            model.fmax = parameter_dict[muscle_name]["Fmax"]
+            model.alpha_a = parameter_dict[muscle_name]["alpha_a"]
+
         stim_time = list(np.linspace(0, final_time, 33 * final_time + 1)[:-1])
         model = FesMskModel(
             name=None,
@@ -551,13 +554,14 @@ def main():
         use_sx=False,
         ode_solver=OdeSolver.COLLOCATION(polynomial_degree=3, method="radau"),
         # ode_solver=OdeSolver.RK4(n_integration_steps=5)
+        torque=-0.3
     )
 
     # Add the penalty cost function plot
     ocp.add_plot_penalty(CostType.ALL)
 
     # Solve the optimal control problem
-    sol = ocp.solve(Solver.IPOPT(show_online_optim=False, _max_iter=1000, show_options=dict(show_bounds=True)))
+    sol = ocp.solve(Solver.IPOPT(show_online_optim=False, _max_iter=10000, show_options=dict(show_bounds=True)))
     sol.print_cost()
     sol.animate(viewer="pyorerun")
     sol.graphs(show_bounds=True)
