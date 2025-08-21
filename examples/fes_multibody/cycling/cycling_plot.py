@@ -104,7 +104,7 @@ def plot_data(data_list, conditions, update_dict=None):
         axd[str(layout_index)].clear()
 
     # Plot circular force plot
-    axd = create_circular_subplots(data_list, axd, fig, layout, color_list, frame=frame)
+    axd = create_circular_subplots(data_list, axd, fig, color_list, frame=frame)
 
     # Plot muscle fatigue
     axd = create_bar_subplots(data_list, axd, key="a", layout_index=2, color_list=color_list, conditions=conditions, frame=frame)
@@ -147,7 +147,7 @@ def create_layout(data_list):
     return layout_str
 
 
-def create_circular_force_plot(data, axis, fig, index_update=0, f_max=0, color=None, frame=0, fmax=None, alpha=1.0):
+def create_circular_force_plot(data, axis, color=None, frame=0, fmax=None, alpha=1.0):
     layout_index = 1
 
     s_min, s_max = _safe_cycle_slice(len(data["q"]), data["slice_index"], frame)
@@ -176,12 +176,12 @@ def create_circular_force_plot(data, axis, fig, index_update=0, f_max=0, color=N
         layout_index += 4
     return axis
 
-def create_circular_subplots(data_list, axis, fig, layout, color_list, frame):
+def create_circular_subplots(data_list, axis, fig, color_list, frame):
     f_max_dict = get_max_per_key(data_list, "force")
     axis = init_circular_graphs(axis, fig, keys=data_list[0]["force"].keys())
     for i in range(len(data_list)):
         a = _condition_alpha(data_list[i], frame)
-        axis = create_circular_force_plot(data=data_list[i], axis=axis, fig=fig, color=color_list[i], frame=frame, fmax=f_max_dict, alpha=a)
+        axis = create_circular_force_plot(data=data_list[i], axis=axis, color=color_list[i], frame=frame, fmax=f_max_dict, alpha=a)
     axis["1"].set_title("Force", fontsize=15, fontweight='bold', pad=20)
     return axis
 
