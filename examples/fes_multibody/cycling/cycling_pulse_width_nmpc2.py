@@ -720,8 +720,8 @@ def create_simulation_list(
         return pkl, init
 
     sims = []
-    for n_cycles, stim, (w_f, w_fat, w_c) in product(
-        n_cycles_simultaneous, stimulation, cost_fun_weight
+    for (n_cycles, stim), (w_f, w_fat, w_c) in product(
+        zip(n_cycles_simultaneous, stimulation), cost_fun_weight
     ):
         pkl_path, init_path = make_file_paths(n_cycles, w_f, w_fat, w_c, ode_solver)
         sims.append({
@@ -766,7 +766,7 @@ def save_sol_in_pkl(sol, simulation_conditions, is_initial_guess=False, torque=N
         "average_solving_time_per_iter_list": average_solving_time_per_iter_list,
         "total_average_solving_time_per_iter": total_average_solving_time_per_iter,
         "total_n_shooting": solution.ocp.n_shooting,
-        "n_shooting_per_cycle": int(solution.ocp.n_shooting / (simulation_conditions["n_cycles_simultaneous"] - 1)),
+        "n_shooting_per_cycle": int(solution.ocp.n_shooting / len(sol[1])),
         "polynomial_order": solution.ocp.nlp[0].dynamics_type.ode_solver.polynomial_degree,
         "applied_torque": torque
     }
@@ -963,7 +963,7 @@ def plot_mhe_graphs(sol):
 def main():
     # --- Simulation configuration --- #
     save_sol = True
-    get_initial_guess = True
+    get_initial_guess = False
 
     # --- Model choice --- #
     # model_path = "../../model_msk/simplified_UL_Seth_2D_cycling.bioMod"
@@ -976,7 +976,7 @@ def main():
     mhe_info = {
         "cycle_duration": 1,
         "n_cycles_to_advance": 1,
-        "n_cycles": 3000,
+        "n_cycles": 5,
         "ode_solver": ode_solver,
         "use_sx": False
     }
