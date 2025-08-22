@@ -240,7 +240,7 @@ But if you use `Cocofest` in your research, please kindly cite this zenodo link 
     <td align="center">
       <a href="https://github.com/pyomeca/pyorerun">
         <video
-          src="docs/assets/pyorerun.mp4"
+          src="https://github.com/Kev1CO/cocofest/simulation_processing/docs/assets/pyorerun.mp4"
           width="120"
           autoplay
           muted
@@ -254,7 +254,7 @@ But if you use `Cocofest` in your research, please kindly cite this zenodo link 
     </td>
     <td align="center">
       <a href="https://github.com/pyomeca/biobuddy">
-        <img src="docs/assets/BioBuddy.gif" alt="Biobuddy logo" height="56"><br>
+        <img src="https://github.com/Kev1CO/cocofest/blob/simulation_processing/docs/assets/BioBuddy.gif" alt="Biobuddy logo" height="56"><br>
       </a>
     </td>
   </tr>
