@@ -215,8 +215,8 @@ def set_x_init(n_shooting: int, pedal_config: dict, turn_number: int, ode_solver
     """
     x_init = InitialGuessList()
     # Path to the biomechanical model used for inverse kinematics
-    # biorbd_model_path = "../../model_msk/simplified_UL_Seth_2D_cycling_for_inverse_kinematics.bioMod"
-    biorbd_model_path = "../../model_msk/Wu_Shoulder_Model_mod_kev_inverse_dyn.bioMod"
+    # biorbd_model_path = "../../model_msk/Seth/Modified_UL_Seth_2D_Cycling_for_IK.bioMod"
+    biorbd_model_path = "../../model_msk/Wu/Modified_Wu_Shoulder_Model_Cycling_for_IK.bioMod"
 
     n_shooting = n_shooting * (ode_solver.polynomial_degree + 1) if isinstance(ode_solver,
                                                                                OdeSolver.COLLOCATION) else n_shooting
@@ -496,8 +496,8 @@ def main():
     dynamics_type = "fes_driven"  # Available options: "torque_driven", "muscle_driven", "fes_driven"
     # dynamics_type = "torque_driven"
     # dynamics_type = "muscle_driven"
-    # model_path = "../../model_msk/simplified_UL_Seth_2D_cycling.bioMod"
-    model_path = "../../model_msk/Wu_Shoulder_Model_mod_kev_v2.bioMod"
+    # model_path = "../../model_msk/Seth/Modified_UL_Seth_2D_Cycling.bioMod"
+    model_path = "../../model_msk/Wu/Modified_Wu_Shoulder_Model_Cycling.bioMod"
     final_time = 2
     turn_number = 2
     pedal_config = {"x_center": 0.35, "y_center": 0.0, "radius": 0.1}

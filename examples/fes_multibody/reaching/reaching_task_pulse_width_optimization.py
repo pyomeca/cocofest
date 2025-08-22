@@ -77,7 +77,7 @@ def initialize_model():
     stim_time = list(np.round(np.linspace(0, 1.5, 61), 3))[:-1]
     model = FesMskModel(
         name=None,
-        biorbd_path="../../model_msk/arm26.bioMod",
+        biorbd_path="../../model_msk/Arm26/arm26_with_reaching_target.bioMod",
         stim_time=stim_time,
         muscles_model=fes_muscle_models,
         activate_force_length_relationship=True,

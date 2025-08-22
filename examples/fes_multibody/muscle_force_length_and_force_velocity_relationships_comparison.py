@@ -21,7 +21,7 @@ for i in range(2):
 
     model = FesMskModel(
         name=None,
-        biorbd_path="../model_msk/arm26_biceps_1dof.bioMod",
+        biorbd_path="../model_msk/Arm26/arm26_biceps_1dof.bioMod",
         muscles_model=[DingModelPulseWidthFrequencyWithFatigue(muscle_name="BIClong")],
         activate_force_length_relationship=activate_force_length_relationship[i],
         activate_force_velocity_relationship=activate_force_length_relationship[i],

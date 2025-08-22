@@ -132,7 +132,7 @@ def main():
     )
     model = FesMskModel(
         name=None,
-        biorbd_path="../../model_msk/arm26_biceps_triceps.bioMod",
+        biorbd_path="../../model_msk/Arm26/arm26_biceps_triceps.bioMod",
         muscles_model=[biceps, triceps],
         activate_force_length_relationship=True,
         activate_force_velocity_relationship=True,

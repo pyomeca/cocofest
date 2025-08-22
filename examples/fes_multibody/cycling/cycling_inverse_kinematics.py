@@ -22,7 +22,7 @@ def main(show_plot=True, animate=True):
     radius = 0.1
 
     # Load a predefined model
-    model = biorbd.Model("../../model_msk/simplified_UL_Seth_2D_cycling_for_inverse_kinematics.bioMod")
+    model = biorbd.Model("../../model_msk/Seth/Modified_UL_Seth_2D_Cycling_for_IK.bioMod")
 
     # Define the marker target to match
     z = model.markers(np.array([0] * model.nbQ()))[0].to_array()[2]
@@ -75,7 +75,7 @@ def main(show_plot=True, animate=True):
 
     # pyorerun animation
     if animate:
-        biorbd_model = biorbd.Model("../../model_msk/simplified_UL_Seth_2D_cycling.bioMod")
+        biorbd_model = biorbd.Model("../../model_msk/Seth/Modified_UL_Seth_2D_Cycling.bioMod")
         prr_model = BiorbdModel.from_biorbd_object(biorbd_model)
 
         nb_seconds = 1

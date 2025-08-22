@@ -7,12 +7,6 @@ segment base
     // meshfile mesh/ground_ribs.vtp
 endsegment
 
-    // Markers
-    marker    target
-        parent    base
-        position    0.15 0.15 0.17
-    endmarker
-
 segment r_humerus_translation
     parent base
     RTinMatrix    1
@@ -128,12 +122,6 @@ segment r_ulna_radius_hand
     meshfile mesh/arm_r_ulna.vtp
 endsegment
 
-    marker    COM_hand
-        parent    r_ulna_radius_hand
-        position    0 -0.181479 0
-    endmarker
-
-
 
 // MUSCLE DEFINITION
 
@@ -152,7 +140,7 @@ endmusclegroup
         tendonSlackLength    0.14299999999999999
         pennationAngle    0.20943951
         maxVelocity    10
-
+	
         fatigueParameters
             Type Xia
             fatiguerate 0.01

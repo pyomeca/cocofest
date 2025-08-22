@@ -8,6 +8,7 @@ from bioptim import NonLinearProgram, OptimalControlProgram
 class FesModel(ABC):
     def __init__(self):
         self.stim_time = None
+        self.previous_stim = None
 
     @abstractmethod
     def set_a_rest(self, model, a_rest: MX | float):

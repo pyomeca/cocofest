@@ -324,9 +324,9 @@ def animate_results(data_list, conditions, frames, save_path):
     plt.close(fig)
 
 if __name__ == "__main__":
-    data_list = process_data(["result/o/2_min_100_force_collocation_3_radau_with_init.npz",
-                              "result/o/2_min_100_fatigue_collocation_3_radau_with_init.npz",
-                              "result/o/2_min_100_control_collocation_3_radau_with_init.npz",
+    data_list = process_data(["wu_result/2_cycle/2_min_100_force_collocation_3_radau_with_init.npz",
+                              "wu_result/2_cycle/2_min_100_fatigue_collocation_3_radau_with_init.npz",
+                              "wu_result/2_cycle/2_min_100_control_collocation_3_radau_with_init.npz",
                               ])
     conditions = ["min force", "min fatigue", "min control"]
 
@@ -336,6 +336,6 @@ if __name__ == "__main__":
         data_list=data_list,
         conditions=conditions,
         frames=np.arange(0, max_cycle, 1),
-        save_path="results_animation1.gif"
+        save_path="results_animation.gif"
     )
 

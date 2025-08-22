@@ -22,7 +22,6 @@ gravity	0 0 -9.8000000000000007
             0.0    0.7555    0.0
             0.0    0.0    1.4314
         com    0 -0.0024948851425305404 0
-        //meshfile Geometry/thorax_decimate.vtp
     endsegment
 
 // Information about clavicle segment
@@ -105,7 +104,6 @@ gravity	0 0 -9.8000000000000007
             0.0    0.0    0.0
             0.0    0.0    0.0
         com    -0.012720499999999999 0.0084954100000000001 0.065984600000000004
-        //meshfile Geometry/clavicle_decimate.vtp
     endsegment
 
 // Information about scapula segment
@@ -167,7 +165,6 @@ gravity	0 0 -9.8000000000000007
             0.0    0.0    0.0
             0.0    0.0    0.0
         com    -0.071999999999999995 -0.039 -0.065000000000000002
-        //meshfile Geometry/scapula_decimate.vtp
     endsegment
 
 // Information about humerus segment
