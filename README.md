@@ -221,34 +221,17 @@ But if you use `Cocofest` in your research, please kindly cite this zenodo link 
 
 
 
-# <img src="https://avatars.githubusercontent.com/u/36738416?s=200&v=4" width="25">  Other Pyomeca projects
+# <img src="https://avatars.githubusercontent.com/u/36738416?s=200&v=4" width="25">  Other related projects <img src="https://scontent.fyhu1-1.fna.fbcdn.net/v/t39.30808-6/240117475_303524718237413_7302566587299370891_n.jpg?_nc_cat=110&ccb=1-7&_nc_sid=6ee11a&_nc_ohc=vbfAVuTc8bkQ7kNvwG1bGjd&_nc_oc=AdlEeHrA1FqKtR5dXVCZM6TpjCwkhEzj_1yzCDK-ZBR2eMPBDI8Cu7J5aen7t9hq3Ug&_nc_zt=23&_nc_ht=scontent.fyhu1-1.fna&_nc_gid=-lp-gVTFx0pQ2fYPRo8_hg&oh=00_AfUVCOpekroSjSDwthOnEl8fCL22Tnp9uwq9WxrojnP2_g&oe=68AEA8DE" width="25"> 
 
 [//]: other-projects
 
-<table>
-  <tr>
-    <td align="center">
-      <a href="https://github.com/pyomeca/bioptim">
-        <img src="https://raw.githubusercontent.com/pyomeca/biorbd_design/main/logo_png/bioptim_full.png" alt="Bioptim logo" height="56"><br>
-      </a>
-    </td>
-    <td align="center">
-      <a href="https://github.com/pyomeca/biorbd">
-        <img src="https://raw.githubusercontent.com/pyomeca/biorbd_design/main/logo_png/biorbd_full.png" alt="Biorbd logo" height="56"><br>
-      </a>
-    </td>
-    <td align="center">
-      <a href="https://github.com/pyomeca/pyorerun">
-        <img src="docs/assets/Pyorerun.gif" alt="Biobuddy logo" height="56"><br>
-      </a>
-    </td>
-    <td align="center">
-      <a href="https://github.com/pyomeca/biobuddy">
-        <img src="docs/assets/BioBuddy.gif" alt="Biobuddy logo" height="56"><br>
-      </a>
-    </td>
-  </tr>
-</table>
+<a href="https://github.com/pyomeca/bioptim"> <img src="https://raw.githubusercontent.com/pyomeca/biorbd_design/main/logo_png/bioptim_full.png" alt="Bioptim logo" height="56"> </a>
+&nbsp;&nbsp;&nbsp;
+<a href="https://github.com/pyomeca/biorbd"> <img src="https://raw.githubusercontent.com/pyomeca/biorbd_design/main/logo_png/biorbd_full.png" alt="Biorbd logo" height="56"> </a>
+&nbsp;&nbsp;&nbsp;
+<a href="https://github.com/pyomeca/pyorerun"><img src="docs/assets/Pyorerun.gif" alt="Biobuddy logo" height="56"></a>
+&nbsp;&nbsp;&nbsp;&nbsp;
+<a href="https://github.com/pyomeca/biobuddy"> <img src="docs/assets/BioBuddy.gif" alt="Biobuddy logo" height="56"> </a>
 
 [//]: other-projects
 
@@ -256,6 +239,7 @@ But if you use `Cocofest` in your research, please kindly cite this zenodo link 
 
 ## Funding
 <a href="https://regroupementinter.com/fr/mandat/160-optistim/"><img src="https://regroupementinter.com/wp-content/uploads/2023/11/INTER_logo-600x208.png" title="INTER" width="100"></a>
+&nbsp;&nbsp;&nbsp;
 <a href="https://frq.gouv.qc.ca"><img src="https://cmqtr.qc.ca/wp-content/uploads/2022/09/FRQNT-logo-frqnt-COULEURS.png" title="FRQNT" width="100"></a>
 
 ## <img src="docs/cocofest_logo.png" width="30"> Logo design
