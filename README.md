@@ -239,21 +239,12 @@ But if you use `Cocofest` in your research, please kindly cite this zenodo link 
     </td>
     <td align="center">
       <a href="https://github.com/pyomeca/pyorerun">
-        <video
-          src="https://raw.githubusercontent.com/Kev1CO/cocofest/simulation_processing/docs/assets/pyorerun.mp4"
-          width="120"
-          autoplay
-          muted
-          loop
-          playsinline
-          preload="metadata">
-          Your browser does not support the video tag.
-        </video><br>
+        <img src="docs/assets/Pyorerun.gif" alt="Biobuddy logo" height="56"><br>
       </a>
     </td>
     <td align="center">
       <a href="https://github.com/pyomeca/biobuddy">
-        <img src="https://raw.githubusercontent.com/Kev1CO/cocofest/simulation_processing/docs/assets/BioBuddy.gif" alt="Biobuddy logo" height="56"><br>
+        <img src="docs/assets/BioBuddy.gif" alt="Biobuddy logo" height="56"><br>
       </a>
     </td>
   </tr>
@@ -262,5 +253,10 @@ But if you use `Cocofest` in your research, please kindly cite this zenodo link 
 [//]: other-projects
 
 # Acknowledgements
-The software development was supported by Ingénierie de technologies interactives en réadaptation [INTER #160 OptiStim](https://regroupementinter.com/fr/mandat/160-optistim/).
-The Cocofest [logo](docs/cocofest_logo.png) has been design by [MaxMV](https://www.instagram.com/maxmvpainting/)
+
+## Funding
+<a href="https://regroupementinter.com/fr/mandat/160-optistim/"><img src="https://regroupementinter.com/wp-content/uploads/2023/11/INTER_logo-600x208.png" title="INTER" width="100"></a>
+<a href="https://frq.gouv.qc.ca"><img src="https://cmqtr.qc.ca/wp-content/uploads/2022/09/FRQNT-logo-frqnt-COULEURS.png" title="FRQNT" width="100"></a>
+
+## <img src="docs/cocofest_logo.png" width="30"> Logo design
+<a href="https://www.instagram.com/maxmvpainting/"><img src="https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcQrO9f_QqjajojjcNJo8FDUdROLwLx-SQ7uVw&s" title="MaxMV" width="65"></a>
