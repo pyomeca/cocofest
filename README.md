@@ -12,27 +12,16 @@ Supports predictive musculoskeletal simulation driven by FES, initial value prob
 [![Made-with-python](https://img.shields.io/badge/Made%20with-Python%203.11-1f425f.svg?style=for-the-badge)](https://www.python.org/)
 [![OS](https://img.shields.io/badge/OS-windows%20%7C%20linux-blue?style=for-the-badge)]()
 [![Last commit](https://img.shields.io/github/last-commit/pyomeca/cocofest.svg?style=for-the-badge)]()
-
 [![Coverage](https://img.shields.io/codecov/c/github/pyomeca/cocofest?style=for-the-badge&logo=codecov&branch=main&token=GPBRI2U4CO)](https://codecov.io/gh/pyomeca/cocofest)
 [![Maintainability](https://img.shields.io/badge/Maintainability-B-green?style=for-the-badge&logo=codeclimate)](https://qlty.sh/gh/pyomeca/projects/cocofest)
 [![Tests](https://img.shields.io/github/actions/workflow/status/pyomeca/cocofest/run_tests_win.yml?branch=main&style=for-the-badge&label=Tests&logo=githubactions)](https://github.com/pyomeca/cocofest/actions/workflows/run_tests_win.yml)
-
-[![Discord](https://img.shields.io/discord/1340640457327247460.svg?label=chat&logo=discord&color=7289DA&style=for-the-badge)](https://discord.gg/Ux7BkdjQFW)
+[![Discord](https://img.shields.io/discord/1340640457327247460.svg?label=chat&logo=discord&color=7289DA&style=for-the-badge)](https://discord.gg/s3g2ATpvDs)
 [![Licence](https://img.shields.io/github/license/pyomeca/cocofest.svg?style=for-the-badge)](https://opensource.org/licenses/MIT)
 
 </div>
 
-# About Cocofest
-
-<img src="docs/cocofest_logo.png" align="right" alt="" width="300">
-
-`Cocofest` : Custom Optimal Control Optimization for Functional Electrical STimulation, is an optimal control program (OCP) package for functional electrical stimulation (FES).
-It is based on the [bioptim](https://github.com/pyomeca/bioptim) framework for the optimal control construction.
-Bioptim uses [biorbd](https://github.com/pyomeca/biorbd) a biomechanics library and benefits from the powerful algorithmic diff provided by [CasADi](https://web.casadi.org/).
-To solve the OCP, the robust solver [Ipopt](https://github.com/coin-or/Ipopt) has been implemented.
-
-
-# Table of Contents 
+<details>
+<summary><kbd>Table of contents</kbd></summary>
 
 [How to install Cocofest](#how-to-install)
 
@@ -60,12 +49,29 @@ To solve the OCP, the robust solver [Ipopt](https://github.com/coin-or/Ipopt) ha
 
 [Citing](#citing)
 
+<br/>
+</details>
 
-# How to install 
+## About
+
+<img src="docs/cocofest_logo.png" align="right" alt="" width="300">
+
+`Cocofest` : Custom Optimal Control Optimization for Functional Electrical STimulation, is an optimal control program (OCP) package for functional electrical stimulation (FES).
+It is based on the [bioptim](https://github.com/pyomeca/bioptim) framework for the optimal control construction.
+Bioptim uses [biorbd](https://github.com/pyomeca/biorbd) a biomechanics library and benefits from the powerful algorithmic diff provided by [CasADi](https://web.casadi.org/).
+To solve the OCP, the robust solver [Ipopt](https://github.com/coin-or/Ipopt) has been implemented.
+
+
+> \[!IMPORTANT]
+>
+> Don't forget to <img src="https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fthepracticaldev.s3.amazonaws.com%2Fi%2F2nn6mhp57inp6rdxarzt.png" align="center" width="80" alt="Star the repository"> **the repository** to show your support and help us grow the community!
+
+
+## How to install 
 Currently, no anaconda installation is available. The installation must be done from the sources.
 Cloning the repository is the first step to be able to use the package.
 
-## Dependencies
+### Dependencies
 `Cocofest` relies on several libraries. 
 Follows the steps to install everything you need to use `Cocofest`.
 </br>
@@ -98,45 +104,45 @@ python setup.py install
 You are now ready to use `Cocofest`!
 
 
-# Available FES models
+## Available FES models
 The available FES models are likely to increase so stay tune.
-## Veltink1992
+### Veltink1992
 Veltink, P. H., Chizeck, H. J., Crago, P. E., & El-Bialy, A. (1992).
 Nonlinear joint angle control for artificially stimulated muscle.
 IEEE Transactions on Biomedical Engineering, 39(4), 368-380.
 
-## Riener1998
+### Riener1998
 Riener, R., & Veltink, P. H. (1998).
 A model of muscle fatigue during electrical stimulation.
 IEEE Transactions on Biomedical Engineering, 45(1), 105-113.
 
-## Ding2003
+### Ding2003
 Ding, J., Wexler, A. S., & Binder-Macleod, S. A. (2003).
 Mathematical models for fatigue minimization during functional electrical stimulation.
 Journal of Electromyography and Kinesiology, 13(6), 575-588.
 
-## Ding2007
+### Ding2007
 Ding, J., Chou, L. W., Kesar, T. M., Lee, S. C., Johnston, T. E., Wexler, A. S., & Binder‐Macleod, S. A. (2007).
 Mathematical model that predicts the force–intensity and force–frequency relationships after spinal cord injuries.
 Muscle & Nerve: Official Journal of the American Association of Electrodiagnostic Medicine, 36(2), 214-222.
 
-## Marion2009
+### Marion2009
 Marion, M. S., Wexler, A. S., Hull, M. L., & Binder‐Macleod, S. A. (2009).
 Predicting the effect of muscle length on fatigue during electrical stimulation.
 Muscle & Nerve: Official Journal of the American Association of Electrodiagnostic Medicine, 40(4), 573-581.
 
-## Marion2013
+### Marion2013
 Marion, M. S., Wexler, A. S., & Hull, M. L. (2013).
 Predicting non-isometric fatigue induced by electrical stimulation pulse trains as a function of pulse duration.
 Journal of neuroengineering and rehabilitation, 10, 1-16.
 
-## Hmed2018
+### Hmed2018
 Hmed, A. B., Bakir, T., Sakly, A., & Binczak, S. (2018, July).
 A new mathematical force model that predicts the force-pulse amplitude relationship of human skeletal muscle.
 In 2018 40th Annual International Conference of the IEEE Engineering in Medicine and Biology Society (EMBC) (pp. 3485-3488). IEEE.
 
 
-# Create your own FES OCP
+## Create your own FES OCP
 You can create your own FES OCP by following the steps below:
 1. Create a new python file
 2. Import the desired model from `Cocofest` (e.g. Ding2003) and the fes_ocp class
@@ -164,9 +170,9 @@ ocp = OcpFes().prepare_ocp(...,
 result = ocp.solve()
 ```
 
-# Examples
+## Examples
 You can find all the available examples in the [examples](https://github.com/pyomeca/cocofest/tree/main/examples) file.
-## Musculoskeletal model driven by FES models
+### Musculoskeletal model driven by FES models
 The following example is a musculoskeletal model driven by the Ding2007 FES model.
 The objective function is to reach a 90° forearm position and 0° arm position at the movement end.
 The stimulation last 1s and the stimulation frequency is 10Hz.
@@ -178,9 +184,9 @@ The optimized parameter are each stimulation pulse width.
 
 
 
-# Other functionalities
+## Other functionalities
 
-## Initital value problem
+### Initital value problem
 You can also compute the models form initial value problem.
 For that, use the IvpFes class to build the computed problem.
 
@@ -195,7 +201,7 @@ ivp = IvpFes(fes_parameters, ivp_parameters)
 result, time = ivp.integrate()
 ```
 
-## Summation truncation
+### Summation truncation
 The summation truncation is an integer parameter that can be added to the model.
 It will truncate the stimulation apparition list used for the calcium summation.
 The integer number defines the stimulation number to keep prior this summation calculation (e.g only the 5 past stimulation will be included).
@@ -205,25 +211,20 @@ ocp = OcpFes().prepare_ocp(model=DingModelFrequency(sum_stim_truncation=5))
 ```
 
 
-## Contributors
-
-[//]: contributor-picture
+### Contributors
 
 <a href="https://github.com/Kev1CO"><img src="https://avatars.githubusercontent.com/u/78259038?v=4" title="Kev1CO" width="50" height="50"></a>
 <a href="https://github.com/Ipuch"><img src="https://avatars.githubusercontent.com/u/40755537?v=4" title="Ipuch" width="50" height="50"></a>
 <a href="https://github.com/Florine353"><img src="https://avatars.githubusercontent.com/u/112490846?v=4" title="Florine353" width="50" height="50"></a>
 
-[//]: contributor-picture
 
-# Citing
+## Citing
 `Cocofest` is not yet published in a journal.
 But if you use `Cocofest` in your research, please kindly cite this zenodo link [10.5281/zenodo.10427934](https://doi.org/10.5281/zenodo.10427934).
 
 
 
-# <img src="https://avatars.githubusercontent.com/u/36738416?s=200&v=4" width="25">  Other related projects <img src="https://scontent.fyhu1-1.fna.fbcdn.net/v/t39.30808-6/240117475_303524718237413_7302566587299370891_n.jpg?_nc_cat=110&ccb=1-7&_nc_sid=6ee11a&_nc_ohc=vbfAVuTc8bkQ7kNvwG1bGjd&_nc_oc=AdlEeHrA1FqKtR5dXVCZM6TpjCwkhEzj_1yzCDK-ZBR2eMPBDI8Cu7J5aen7t9hq3Ug&_nc_zt=23&_nc_ht=scontent.fyhu1-1.fna&_nc_gid=-lp-gVTFx0pQ2fYPRo8_hg&oh=00_AfUVCOpekroSjSDwthOnEl8fCL22Tnp9uwq9WxrojnP2_g&oe=68AEA8DE" width="25"> 
-
-[//]: other-projects
+## <img src="https://avatars.githubusercontent.com/u/36738416?s=200&v=4" width="25">  Other related projects <img src="https://scontent.fyhu1-1.fna.fbcdn.net/v/t39.30808-6/240117475_303524718237413_7302566587299370891_n.jpg?_nc_cat=110&ccb=1-7&_nc_sid=6ee11a&_nc_ohc=vbfAVuTc8bkQ7kNvwG1bGjd&_nc_oc=AdlEeHrA1FqKtR5dXVCZM6TpjCwkhEzj_1yzCDK-ZBR2eMPBDI8Cu7J5aen7t9hq3Ug&_nc_zt=23&_nc_ht=scontent.fyhu1-1.fna&_nc_gid=-lp-gVTFx0pQ2fYPRo8_hg&oh=00_AfUVCOpekroSjSDwthOnEl8fCL22Tnp9uwq9WxrojnP2_g&oe=68AEA8DE" width="25"> 
 
 <table>
   <tr>
@@ -246,30 +247,13 @@ But if you use `Cocofest` in your research, please kindly cite this zenodo link 
   </tr>
 </table>
 
-<p align="center">
-  <a href="https://github.com/pyomeca/bioptim">
-    <img src="https://raw.githubusercontent.com/pyomeca/biorbd_design/main/logo_png/bioptim_full.png" alt="Bioptim" height="56">
-  </a>&nbsp;&nbsp;&nbsp;
-  <a href="https://github.com/pyomeca/biorbd">
-    <img src="https://raw.githubusercontent.com/pyomeca/biorbd_design/main/logo_png/biorbd_full.png" alt="Biorbd" height="56">
-  </a>&nbsp;&nbsp;&nbsp;
-  <a href="https://github.com/pyomeca/pyorerun">
-    <img src="./docs/assets/pyorerun.gif" alt="Pyorerun" height="56">
-  </a>&nbsp;&nbsp;&nbsp;
-  <a href="https://github.com/pyomeca/biobuddy">
-    <img src="./docs/assets/BioBuddy.gif" alt="Biobuddy" height="56">
-  </a>
-</p>
 
+## Acknowledgements
 
-[//]: other-projects
-
-# Acknowledgements
-
-## Funding
+### Funding
 <a href="https://regroupementinter.com/fr/mandat/160-optistim/"><img src="https://regroupementinter.com/wp-content/uploads/2023/11/INTER_logo-600x208.png" title="INTER" width="100"></a>
 &nbsp;&nbsp;&nbsp;
 <a href="https://frq.gouv.qc.ca"><img src="https://cmqtr.qc.ca/wp-content/uploads/2022/09/FRQNT-logo-frqnt-COULEURS.png" title="FRQNT" width="100"></a>
 
-## <img src="docs/cocofest_logo.png" width="30"> Logo design
+### <img src="docs/cocofest_logo.png" width="30"> Logo design
 <a href="https://www.instagram.com/maxmvpainting/"><img src="https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcQrO9f_QqjajojjcNJo8FDUdROLwLx-SQ7uVw&s" title="MaxMV" width="65"></a>
