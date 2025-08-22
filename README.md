@@ -210,8 +210,8 @@ ocp = OcpFes().prepare_ocp(model=DingModelFrequency(sum_stim_truncation=5))
 [//]: contributor-picture
 
 <a href="https://github.com/Kev1CO"><img src="https://avatars.githubusercontent.com/u/78259038?v=4" title="Kev1CO" width="50" height="50"></a>
-<a href="https://github.com/Ipuch"><img src="https://avatars.githubusercontent.com/u/40755537?v=4" title="iddan" width="50" height="50"></a>
-<a href="https://github.com/Florine353"><img src="https://avatars.githubusercontent.com/u/112490846?v=4" title="tupe12334" width="50" height="50"></a>
+<a href="https://github.com/Ipuch"><img src="https://avatars.githubusercontent.com/u/40755537?v=4" title="Ipuch" width="50" height="50"></a>
+<a href="https://github.com/Florine353"><img src="https://avatars.githubusercontent.com/u/112490846?v=4" title="Florine353" width="50" height="50"></a>
 
 [//]: contributor-picture
 
@@ -240,7 +240,7 @@ But if you use `Cocofest` in your research, please kindly cite this zenodo link 
     <td align="center">
       <a href="https://github.com/pyomeca/pyorerun">
         <video
-          src="https://user-images.githubusercontent.com/40755537/your-stable-video.mp4"
+          src="docs/assets/pyorerun.mp4"
           width="120"
           autoplay
           muted
@@ -254,16 +254,13 @@ But if you use `Cocofest` in your research, please kindly cite this zenodo link 
     </td>
     <td align="center">
       <a href="https://github.com/pyomeca/biobuddy">
-        <img src="https://private-user-images.githubusercontent.com/50926485/430719335-c8689155-0b26-4e13-835c-cdb6696e1acb.gif?jwt=eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpc3MiOiJnaXRodWIuY29tIiwiYXVkIjoicmF3LmdpdGh1YnVzZXJjb250ZW50LmNvbSIsImtleSI6ImtleTUiLCJleHAiOjE3NTU4OTQzODQsIm5iZiI6MTc1NTg5NDA4NCwicGF0aCI6Ii81MDkyNjQ4NS80MzA3MTkzMzUtYzg2ODkxNTUtMGIyNi00ZTEzLTgzNWMtY2RiNjY5NmUxYWNiLmdpZj9YLUFtei1BbGdvcml0aG09QVdTNC1ITUFDLVNIQTI1NiZYLUFtei1DcmVkZW50aWFsPUFLSUFWQ09EWUxTQTUzUFFLNFpBJTJGMjAyNTA4MjIlMkZ1cy1lYXN0LTElMkZzMyUyRmF3czRfcmVxdWVzdCZYLUFtei1EYXRlPTIwMjUwODIyVDIwMjEyNFomWC1BbXotRXhwaXJlcz0zMDAmWC1BbXotU2lnbmF0dXJlPTliMGI3OGY2YmYxNzE0YjU2ZGVmNmJhZGE4OWRhZGIyYjY2ODgzMjUxMTUwOTNlYWFhZWI3YjA2MzZiMzQzZDImWC1BbXotU2lnbmVkSGVhZGVycz1ob3N0In0.tb-3hotxpMyk0pyQRlKoxN-RAZljkOiUZbGt14-SZ34" alt="Biobuddy logo" height="56"><br>
+        <img src="docs/assets/BioBuddy.gif" alt="Biobuddy logo" height="56"><br>
       </a>
     </td>
   </tr>
 </table>
 
 [//]: other-projects
-
-
-https://www.facebook.com/photo/?fbid=303524708237414&set=a.303524698237415
 
 # Acknowledgements
 The software development was supported by Ingénierie de technologies interactives en réadaptation [INTER #160 OptiStim](https://regroupementinter.com/fr/mandat/160-optistim/).
