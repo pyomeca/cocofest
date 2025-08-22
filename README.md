@@ -1,19 +1,36 @@
-<img align="right" width="400" src="docs/cocofest_logo.png">
+<div align="center"><a name="readme-top"></a>
 
-# COCOFEST
+<p align="center"> 
+  <img src="docs/image2.svg" alt="HAR Logo">
+</p>
+
+# Cocofest
+
+An Open-Source Python Package for Functional Electrical Stimulation Optimization in Optimal Control.<br/> 
+Supports predictive musculoskeletal simulation driven by FES, initial value problems, and FES model identification.
+
+[![Made-with-python](https://img.shields.io/badge/Made%20with-Python%203.11-1f425f.svg?style=for-the-badge)](https://www.python.org/)
+[![OS](https://img.shields.io/badge/OS-windows%20%7C%20linux-blue?style=for-the-badge)]()
+[![Last commit](https://img.shields.io/github/last-commit/pyomeca/cocofest.svg?style=for-the-badge)]()
+
+[![Coverage](https://img.shields.io/codecov/c/github/pyomeca/cocofest?style=for-the-badge&logo=codecov&branch=main&token=GPBRI2U4CO)](https://codecov.io/gh/pyomeca/cocofest)
+[![Maintainability](https://img.shields.io/badge/Maintainability-B-green?style=for-the-badge&logo=codeclimate)](https://qlty.sh/gh/pyomeca/projects/cocofest)
+[![Tests](https://img.shields.io/github/actions/workflow/status/pyomeca/cocofest/run_tests_win.yml?branch=main&style=for-the-badge&label=Tests&logo=githubactions)](https://github.com/pyomeca/cocofest/actions/workflows/run_tests_win.yml)
+
+[![Discord](https://img.shields.io/discord/1340640457327247460.svg?label=chat&logo=discord&color=7289DA&style=for-the-badge)](https://discord.gg/Ux7BkdjQFW)
+[![Licence](https://img.shields.io/github/license/pyomeca/cocofest.svg?style=for-the-badge)](https://opensource.org/licenses/MIT)
+
+</div>
+
+# About Cocofest
+
+<img src="docs/cocofest_logo.png" align="right" alt="" width="300">
 
 `Cocofest` : Custom Optimal Control Optimization for Functional Electrical STimulation, is an optimal control program (OCP) package for functional electrical stimulation (FES).
 It is based on the [bioptim](https://github.com/pyomeca/bioptim) framework for the optimal control construction.
 Bioptim uses [biorbd](https://github.com/pyomeca/biorbd) a biomechanics library and benefits from the powerful algorithmic diff provided by [CasADi](https://web.casadi.org/).
 To solve the OCP, the robust solver [Ipopt](https://github.com/coin-or/Ipopt) has been implemented.
 
-## Status
-
-| Type          | Status                                                                                                                                                                  |
-|---------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| License       | <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/license-MIT-success" alt="License"/></a>                                           |
-| Code coverage | [![codecov](https://codecov.io/gh/pyomeca/cocofest/graph/badge.svg?token=GPBRI2U4CO)](https://codecov.io/gh/pyomeca/cocofest)                                     |
-| Code climate  | <a href="https://codeclimate.com/github/pyomeca/cocofest/maintainability"><img src="https://api.codeclimate.com/v1/badges/68cd9855a07be8bfb8c5/maintainability" /></a>  |
 
 # Table of Contents 
 
@@ -188,9 +205,65 @@ ocp = OcpFes().prepare_ocp(model=DingModelFrequency(sum_stim_truncation=5))
 ```
 
 
+## Contributors
+
+[//]: contributor-picture
+
+<a href="https://github.com/Kev1CO"><img src="https://avatars.githubusercontent.com/u/78259038?v=4" title="Kev1CO" width="50" height="50"></a>
+<a href="https://github.com/Ipuch"><img src="https://avatars.githubusercontent.com/u/40755537?v=4" title="iddan" width="50" height="50"></a>
+<a href="https://github.com/Florine353"><img src="https://avatars.githubusercontent.com/u/112490846?v=4" title="tupe12334" width="50" height="50"></a>
+
+[//]: contributor-picture
+
 # Citing
 `Cocofest` is not yet published in a journal.
 But if you use `Cocofest` in your research, please kindly cite this zenodo link [10.5281/zenodo.10427934](https://doi.org/10.5281/zenodo.10427934).
+
+
+
+# <img src="https://avatars.githubusercontent.com/u/36738416?s=200&v=4" width="25">  Other Pyomeca projects
+
+[//]: other-projects
+
+<table>
+  <tr>
+    <td align="center">
+      <a href="https://github.com/pyomeca/bioptim">
+        <img src="https://raw.githubusercontent.com/pyomeca/biorbd_design/main/logo_png/bioptim_full.png" alt="Bioptim logo" height="56"><br>
+      </a>
+    </td>
+    <td align="center">
+      <a href="https://github.com/pyomeca/biorbd">
+        <img src="https://raw.githubusercontent.com/pyomeca/biorbd_design/main/logo_png/biorbd_full.png" alt="Biorbd logo" height="56"><br>
+      </a>
+    </td>
+    <td align="center">
+      <a href="https://github.com/pyomeca/pyorerun">
+        <video
+          src="https://user-images.githubusercontent.com/40755537/your-stable-video.mp4"
+          width="120"
+          autoplay
+          muted
+          loop
+          playsinline
+          preload="metadata">
+          <!-- Fallback text -->
+          Your browser does not support the video tag.
+        </video><br>
+      </a>
+    </td>
+    <td align="center">
+      <a href="https://github.com/pyomeca/biobuddy">
+        <img src="https://private-user-images.githubusercontent.com/50926485/430719335-c8689155-0b26-4e13-835c-cdb6696e1acb.gif?jwt=eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpc3MiOiJnaXRodWIuY29tIiwiYXVkIjoicmF3LmdpdGh1YnVzZXJjb250ZW50LmNvbSIsImtleSI6ImtleTUiLCJleHAiOjE3NTU4OTQzODQsIm5iZiI6MTc1NTg5NDA4NCwicGF0aCI6Ii81MDkyNjQ4NS80MzA3MTkzMzUtYzg2ODkxNTUtMGIyNi00ZTEzLTgzNWMtY2RiNjY5NmUxYWNiLmdpZj9YLUFtei1BbGdvcml0aG09QVdTNC1ITUFDLVNIQTI1NiZYLUFtei1DcmVkZW50aWFsPUFLSUFWQ09EWUxTQTUzUFFLNFpBJTJGMjAyNTA4MjIlMkZ1cy1lYXN0LTElMkZzMyUyRmF3czRfcmVxdWVzdCZYLUFtei1EYXRlPTIwMjUwODIyVDIwMjEyNFomWC1BbXotRXhwaXJlcz0zMDAmWC1BbXotU2lnbmF0dXJlPTliMGI3OGY2YmYxNzE0YjU2ZGVmNmJhZGE4OWRhZGIyYjY2ODgzMjUxMTUwOTNlYWFhZWI3YjA2MzZiMzQzZDImWC1BbXotU2lnbmVkSGVhZGVycz1ob3N0In0.tb-3hotxpMyk0pyQRlKoxN-RAZljkOiUZbGt14-SZ34" alt="Biobuddy logo" height="56"><br>
+      </a>
+    </td>
+  </tr>
+</table>
+
+[//]: other-projects
+
+
+https://www.facebook.com/photo/?fbid=303524708237414&set=a.303524698237415
 
 # Acknowledgements
 The software development was supported by Ingénierie de technologies interactives en réadaptation [INTER #160 OptiStim](https://regroupementinter.com/fr/mandat/160-optistim/).
