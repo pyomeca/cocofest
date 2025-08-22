@@ -246,6 +246,22 @@ But if you use `Cocofest` in your research, please kindly cite this zenodo link 
   </tr>
 </table>
 
+<p align="center">
+  <a href="https://github.com/pyomeca/bioptim">
+    <img src="https://raw.githubusercontent.com/pyomeca/biorbd_design/main/logo_png/bioptim_full.png" alt="Bioptim" height="56">
+  </a>&nbsp;&nbsp;&nbsp;
+  <a href="https://github.com/pyomeca/biorbd">
+    <img src="https://raw.githubusercontent.com/pyomeca/biorbd_design/main/logo_png/biorbd_full.png" alt="Biorbd" height="56">
+  </a>&nbsp;&nbsp;&nbsp;
+  <a href="https://github.com/pyomeca/pyorerun">
+    <img src="./docs/assets/pyorerun.gif" alt="Pyorerun" height="56">
+  </a>&nbsp;&nbsp;&nbsp;
+  <a href="https://github.com/pyomeca/biobuddy">
+    <img src="./docs/assets/BioBuddy.gif" alt="Biobuddy" height="56">
+  </a>
+</p>
+
+
 [//]: other-projects
 
 # Acknowledgements
