@@ -1,8 +1,8 @@
 """
-This example will do a 33 stimulation example with Ding's 2007 frequency model.
-This ocp was build to produce an elbow motion from 5 to 120 degrees.
-The stimulation frequency is fixed at 33hz and the pulse width is optimized to satisfy the flexion while minimizing
-elbow residual torque control.
+This example will do a 10 stimulation example with Ding's 2003 frequency model associated to Hmed's 2018 work.
+This ocp was build to produce a elbow motion from 5 to 120 degrees.
+The stimulation frequency will be optimized between 10 and 100 Hz and pulse intensity between minimal sensitivity
+threshold and 130mA to satisfy the flexion and minimizing required elbow torque control.
 """
 
 import numpy as np
@@ -14,12 +14,11 @@ from bioptim import (
     ObjectiveFcn,
     OptimalControlProgram,
     ControlType,
-    ParameterList,
 )
-from cocofest import DingModelPulseWidthFrequencyWithFatigue, OcpFesMsk, FesMskModel, CustomObjective
+from cocofest import DingModelPulseIntensityFrequencyWithFatigue, OcpFesMsk, FesMskModel, CustomObjective
 
 
-def prepare_ocp(model: FesMskModel, final_time: float, external_force: dict, msk_info: dict):
+def prepare_ocp(model: FesMskModel, final_time: float, external_force: dict, msk_info: dict, pi_max: int = 130):
     muscle_model = model.muscles_dynamics_model[0]
     n_shooting = muscle_model.get_n_shooting(final_time)
     numerical_time_series, external_force_set = OcpFesMsk.get_numerical_time_series_for_external_forces(
@@ -43,9 +42,15 @@ def prepare_ocp(model: FesMskModel, final_time: float, external_force: dict, msk
     )
 
     x_bounds, x_init = OcpFesMsk.set_x_bounds(model, msk_info)
-    u_bounds, u_init = OcpFesMsk.set_u_bounds(model, msk_info["with_residual_torque"], max_bound=0.0006)
+    u_bounds, u_init = OcpFesMsk.set_u_bounds(model, msk_info["with_residual_torque"], max_bound=pi_max)
 
     objective_functions = ObjectiveList()
+    objective_functions.add(
+        ObjectiveFcn.Lagrange.MINIMIZE_CONTROL,
+        key="tau",
+        weight=1000,
+        quadratic=True,
+    )
     objective_functions.add(
         CustomObjective.minimize_overall_muscle_force_production,
         custom_type=ObjectiveFcn.Lagrange,
@@ -53,7 +58,22 @@ def prepare_ocp(model: FesMskModel, final_time: float, external_force: dict, msk
         quadratic=True,
     )
 
-    model = OcpFesMsk.update_model(model, parameters=ParameterList(use_sx=True), external_force_set=external_force_set)
+    # --- Set parameters (required for intensity models) --- #
+    use_sx = True
+    parameters, parameters_bounds, parameters_init = OcpFesMsk.build_parameters(
+        model=model,
+        max_pulse_intensity=pi_max,
+        use_sx=use_sx,
+    )
+
+    # --- Set constraints (required for intensity models) --- #
+    constraints = OcpFesMsk.set_constraints(
+        model,
+        n_shooting,
+        stim_idx_at_node_list,
+    )
+
+    model = OcpFesMsk.update_model(model, parameters=parameters, external_force_set=external_force_set)
 
     return OptimalControlProgram(
         bio_model=[model],
@@ -65,23 +85,27 @@ def prepare_ocp(model: FesMskModel, final_time: float, external_force: dict, msk
         x_bounds=x_bounds,
         u_init=u_init,
         u_bounds=u_bounds,
+        parameters=parameters,
+        parameter_bounds=parameters_bounds,
+        parameter_init=parameters_init,
+        constraints=constraints,
         control_type=ControlType.CONSTANT,
         use_sx=True,
         n_threads=20,
     )
 
 
-def main(plot=True, biorbd_path="../model_msk/arm26_biceps_1dof.bioMod"):
+def main(plot=True, biorbd_path="../../msk_models/Arm26/arm26_biceps_1dof.bioMod"):
     simulation_ending_time = 1
     model = FesMskModel(
         name=None,
         biorbd_path=biorbd_path,
-        muscles_model=[DingModelPulseWidthFrequencyWithFatigue(muscle_name="BIClong", sum_stim_truncation=10)],
+        muscles_model=[DingModelPulseIntensityFrequencyWithFatigue(muscle_name="BIClong")],
         stim_time=list(np.linspace(0, simulation_ending_time, 34)[:-1]),
         activate_force_length_relationship=True,
         activate_force_velocity_relationship=True,
         activate_passive_force_relationship=True,
-        activate_residual_torque=False,
+        activate_residual_torque=True,
         external_force_set=None,  # External forces will be added later
     )
 
@@ -92,13 +116,14 @@ def main(plot=True, biorbd_path="../model_msk/arm26_biceps_1dof.bioMod"):
     }
 
     msk_info = {
-        "with_residual_torque": False,
+        "with_residual_torque": True,
         "bound_type": "start_end",
         "bound_data": [[5], [120]],
     }
 
     ocp = prepare_ocp(
         model=model,
+        pi_max=130,
         final_time=simulation_ending_time,
         external_force=resistive_torque,
         msk_info=msk_info,

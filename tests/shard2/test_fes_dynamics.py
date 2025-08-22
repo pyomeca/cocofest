@@ -12,8 +12,8 @@ from cocofest import (
     FesMskModel,
 )
 
-from examples.model_msk import init as model_path
-from examples.fes_multibody.elbow_flexion import elbow_flexion_minimize_fatigue as ocp_module
+from examples.msk_models import init as model_path
+from examples.fes_multibody.elbow_flexion import elbow_flexion_task as ocp_module
 
 biomodel_folder = os.path.dirname(model_path.__file__)
 biorbd_model_path = biomodel_folder + "/arm26_biceps_triceps.bioMod"

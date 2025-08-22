@@ -410,8 +410,8 @@ def set_q_qdot_init(n_shooting: int, pedal_config: dict, turn_number: int, ode_s
         x_init.add("qdot", qdot_guess, interpolation=InterpolationType.ALL_POINTS)
     else:
         # --- Chose the biorbd model to init the inverse kinematics --- #
-        biorbd_model_path = "../../model_msk/Wu/Modified_Wu_Shoulder_Model_Cycling_for_IK.bioMod"
-        # biorbd_model_path = "../../model_msk/Seth/Modified_UL_Seth_2D_Cycling_for_IK.bioMod"
+        biorbd_model_path = "../../msk_models/Wu/Modified_Wu_Shoulder_Model_Cycling_for_IK.bioMod"
+        # biorbd_model_path = "../../msk_models/Seth/Modified_UL_Seth_2D_Cycling_for_IK.bioMod"
         n_shooting = n_shooting * (ode_solver.polynomial_degree + 1) if isinstance(ode_solver,
                                                                                    OdeSolver.COLLOCATION) else n_shooting
         # --- Run inverse kinematics --- #
@@ -966,8 +966,8 @@ def main():
     get_initial_guess = False
 
     # --- Model choice --- #
-    # model_path = "../../model_msk/Seth/Modified_UL_Seth_2D_Cycling.bioMod"
-    model_path = "../../model_msk/Wu/Modified_Wu_Shoulder_Model_Cycling.bioMod"
+    # model_path = "../../msk_models/Seth/Modified_UL_Seth_2D_Cycling.bioMod"
+    model_path = "../../msk_models/Wu/Modified_Wu_Shoulder_Model_Cycling.bioMod"
 
     # --- MHE parameters --- #
     n_cycles_simultaneous = [2, 3, 4, 5]

@@ -66,7 +66,7 @@ def prepare_ocp(model, final_time: float, resistive_torque, msk_info):
     )
 
 
-def main(plot=True, biorbd_path="../model_msk/arm26_biceps_1dof.bioMod"):
+def main(plot=True, biorbd_path="../../msk_models/Arm26/arm26_biceps_1dof.bioMod"):
     simulation_ending_time = 1
     model = FesMskModel(
         name=None,

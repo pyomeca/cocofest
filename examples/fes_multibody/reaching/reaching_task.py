@@ -77,7 +77,7 @@ def initialize_model():
     stim_time = list(np.round(np.linspace(0, 1.5, 61), 3))[:-1]
     model = FesMskModel(
         name=None,
-        biorbd_path="../../model_msk/Arm26/arm26_with_reaching_target.bioMod",
+        biorbd_path="../../msk_models/Arm26/arm26_with_reaching_target.bioMod",
         stim_time=stim_time,
         muscles_model=fes_muscle_models,
         activate_force_length_relationship=True,
@@ -106,7 +106,7 @@ def prepare_ocp(
         model,
         numerical_time_series=numerical_data_time_series,
         ode_solver=OdeSolver.RK4(n_integration_steps=5),
-        with_contact=False,
+        contact_type=[],
     )
 
     x_bounds, x_init = OcpFesMsk.set_x_bounds(model, msk_info)

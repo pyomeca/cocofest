@@ -7,11 +7,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 from bioptim import SolutionMerge, ObjectiveList, ObjectiveFcn, OptimalControlProgram, ControlType, OdeSolver, Node
-from cocofest import (
-    ModelMaker,
-    FourierSeries,
-    OcpFes,
-)
+from cocofest import ModelMaker, FourierSeries, OcpFes
 
 
 def prepare_ocp(model, final_time, pi_max, force_tracking):
@@ -95,17 +91,18 @@ def main(plot=True):
         fourier_fun = FourierSeries()
         fourier_coef = fourier_fun.compute_real_fourier_coeffs(time, force, 50)
         y_approx = FourierSeries().fit_func_by_fourier_series_with_real_coeffs(time, fourier_coef)
-        plt.title("Comparison between given and simulated force after parameter optimization")
-        plt.plot(time, force, color="red", label="force from file")
-        plt.plot(time, y_approx, color="orange", label="force after fourier transform")
+        # plt.title("Comparison between given and simulated force after parameter optimization")
+        plt.plot(time, force, color="grey", label="Force to track", lw=0.5)
+        # plt.plot(time, y_approx, color="orange", label="force after fourier transform")
         plt.plot(
             sol_time,
             sol_merged["F"].squeeze(),
-            color="blue",
-            label="force from optimized stimulation",
+            color="red",
+            label="Optimized force profile",
+            lw=2,
         )
-        plt.xlabel("Time (s)")
-        plt.ylabel("Force (N)")
+        plt.xlabel("Time (s)", fontsize=14, fontweight="bold", color="black")
+        plt.ylabel("Force (N)", fontsize=14, fontweight="bold", color="black")
         plt.legend()
         plt.show()
 

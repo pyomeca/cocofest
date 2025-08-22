@@ -29,7 +29,7 @@ MULTIBODY_EXAMPLE_MODULES = [
     "examples.getting_started.pulse_intensity_optimization_multibody",
     "examples.getting_started.pulse_width_optimization_multibody",
 ]
-from examples.model_msk import init as model_path
+from examples.msk_models import init as model_path
 
 biomodel_folder = os.path.dirname(model_path.__file__)
 biorbd_model_path = biomodel_folder + "/arm26_biceps_1dof.bioMod"
@@ -43,9 +43,9 @@ def test_multibody_examples(module_name):
 
 # List of examples to test
 EXAMPLE_MODEL = [
-    "examples.fes_model_comparison.marion2009_example",
-    "examples.fes_model_comparison.marion2013_example",
-    "examples.fes_model_comparison.veltink1992_example",
+    "examples.other_fes_models.marion2009_example",
+    "examples.other_fes_models.marion2013_example",
+    "examples.other_fes_models.veltink1992_example",
 ]
 
 
@@ -54,7 +54,7 @@ EXAMPLE_MODEL = [
 @pytest.mark.parametrize("with_fatigue", [False, True])
 def test_examples(module_name, with_pulse_width, with_fatigue):
     ocp_module = importlib.import_module(module_name)
-    if module_name == "examples.fes_model_comparison.veltink1992_example":
+    if module_name == "examples.other_fes_models.veltink1992_example":
         if with_pulse_width:
             return
         ocp_module.main(with_fatigue=with_fatigue, plot=False)
