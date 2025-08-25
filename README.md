@@ -1,13 +1,14 @@
 <div align="center"><a name="readme-top"></a>
 
 <p align="center"> 
-  <img src="docs/image2.svg" alt="HAR Logo">
+  <img src="docs/assets/02.png" alt="HAR Logo">
 </p>
 
 # Cocofest
 
-An Open-Source Python Package for Functional Electrical Stimulation Optimization in Optimal Control.<br/> 
-Supports predictive musculoskeletal simulation driven by FES, initial value problems, and FES model identification.
+An Open-Source Python Package for Functional Electrical Stimulation (FES) Optimization in Optimal Control.<br/>
+Supports predictive musculoskeletal simulation driven by FES, initial value problems, and FES model identification.<br/>
+"Prototype today’s FES to power tomorrow’s rehab."
 
 [![Made-with-python](https://img.shields.io/badge/Made%20with-Python%203.11-1f425f.svg?style=for-the-badge)](https://www.python.org/)
 [![OS](https://img.shields.io/badge/OS-windows%20%7C%20linux-blue?style=for-the-badge)]()
@@ -23,16 +24,11 @@ Supports predictive musculoskeletal simulation driven by FES, initial value prob
 <details>
 <summary><kbd>Table of contents</kbd></summary>
 
+[About](#about)
+
 [How to install Cocofest](#how-to-install)
 
-<details>
-<summary><a href="#available-fes-models">Available FES models</a></summary>
-
-- [Ding2003](#ding2003)
-- [Ding2007](#ding2007)
-- [Hmed2018](#hmed2018)
-
-</details>
+[Available FES models](#available-fes-models)
 
 [Create your own FES OCP](#create-your-own-fes-ocp)
 
@@ -52,22 +48,47 @@ Supports predictive musculoskeletal simulation driven by FES, initial value prob
 <br/>
 </details>
 
-## About
+<br />
 
-<img src="docs/cocofest_logo.png" align="right" alt="" width="300">
+---
 
-`Cocofest` : Custom Optimal Control Optimization for Functional Electrical STimulation, is an optimal control program (OCP) package for functional electrical stimulation (FES).
-It is based on the [bioptim](https://github.com/pyomeca/bioptim) framework for the optimal control construction.
-Bioptim uses [biorbd](https://github.com/pyomeca/biorbd) a biomechanics library and benefits from the powerful algorithmic diff provided by [CasADi](https://web.casadi.org/).
-To solve the OCP, the robust solver [Ipopt](https://github.com/coin-or/Ipopt) has been implemented.
+<br />
 
+<h1>
+  <img src="docs/cocofest_logo.png" width="100" alt="Logo"
+       style="vertical-align: middle; margin-right: .5rem;" />
+  About
+</h1>
+
+
+Functional electrical stimulation (FES) is a neurorehabilitation technique that promotes motor recovery after neurological injury.
+By delivering coordinated electrical pulses to targeted muscles, FES elicits functional movements such as walking, reaching, and grasping.
+Because responses to stimulation vary across individuals and muscle groups, most FES protocols still rely on empirically tuned parameters.
+These settings can cause over stimulation, early muscle fatigue on-set, and reduce therapeutic gains.
+
+Advanced control approaches like optimal control-driven FES can improve FES rehabilitation efficiency by personalizing stimulation parameters to a specific task and patient.
+Therefore, we designed `Cocofest` (Custom Optimal COntrol for Functional Electrical STimulation) an open-source Python package for optimal control-driven FES.
+`Cocofest` relies on [bioptim](https://github.com/pyomeca/bioptim), an optimal control program framework for biomechanics.
+[bioptim](https://github.com/pyomeca/bioptim) uses [biorbd](https://github.com/pyomeca/biorbd) a biomechanics library, benefits from powerful algorithmic differentiation provided by [CasADi](https://web.casadi.org/)
+and robust solver like [Ipopt](https://github.com/coin-or/Ipopt).
+</br>
 
 > \[!IMPORTANT]
 >
 > Don't forget to <img src="https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fthepracticaldev.s3.amazonaws.com%2Fi%2F2nn6mhp57inp6rdxarzt.png" align="center" width="80" alt="Star the repository"> **the repository** to show your support and help us grow the community!
 
+<br />
 
-## How to install 
+---
+
+<br />
+
+<h1>
+  <img src="docs/assets/b.png" width="100" alt="Logo"
+       style="vertical-align: middle; margin-right: .5rem;" />
+  Installation
+</h1>
+
 Currently, no anaconda installation is available. The installation must be done from the sources.
 Cloning the repository is the first step to be able to use the package.
 
@@ -85,11 +106,6 @@ Then, activate the environment
 conda activate YOUR_ENV_NAME
 ```
 
-This step will allow you to install the dependencies in the environment much quicker
-```bash:
-conda install -cconda-forge conda-libmamba-solver
-```
-
 After, install the dependencies
 ```bash
 conda install numpy matplotlib pytest casadi biorbd pyorerun -cconda-forge --solver=libmamba
@@ -103,90 +119,88 @@ python setup.py install
 
 You are now ready to use `Cocofest`!
 
-
-## Available FES models
-The available FES models are likely to increase so stay tune.
-### Veltink1992
-Veltink, P. H., Chizeck, H. J., Crago, P. E., & El-Bialy, A. (1992).
-Nonlinear joint angle control for artificially stimulated muscle.
-IEEE Transactions on Biomedical Engineering, 39(4), 368-380.
-
-### Riener1998
-Riener, R., & Veltink, P. H. (1998).
-A model of muscle fatigue during electrical stimulation.
-IEEE Transactions on Biomedical Engineering, 45(1), 105-113.
-
-### Ding2003
-Ding, J., Wexler, A. S., & Binder-Macleod, S. A. (2003).
-Mathematical models for fatigue minimization during functional electrical stimulation.
-Journal of Electromyography and Kinesiology, 13(6), 575-588.
-
-### Ding2007
-Ding, J., Chou, L. W., Kesar, T. M., Lee, S. C., Johnston, T. E., Wexler, A. S., & Binder‐Macleod, S. A. (2007).
-Mathematical model that predicts the force–intensity and force–frequency relationships after spinal cord injuries.
-Muscle & Nerve: Official Journal of the American Association of Electrodiagnostic Medicine, 36(2), 214-222.
-
-### Marion2009
-Marion, M. S., Wexler, A. S., Hull, M. L., & Binder‐Macleod, S. A. (2009).
-Predicting the effect of muscle length on fatigue during electrical stimulation.
-Muscle & Nerve: Official Journal of the American Association of Electrodiagnostic Medicine, 40(4), 573-581.
-
-### Marion2013
-Marion, M. S., Wexler, A. S., & Hull, M. L. (2013).
-Predicting non-isometric fatigue induced by electrical stimulation pulse trains as a function of pulse duration.
-Journal of neuroengineering and rehabilitation, 10, 1-16.
-
-### Hmed2018
-Hmed, A. B., Bakir, T., Sakly, A., & Binczak, S. (2018, July).
-A new mathematical force model that predicts the force-pulse amplitude relationship of human skeletal muscle.
-In 2018 40th Annual International Conference of the IEEE Engineering in Medicine and Biology Society (EMBC) (pp. 3485-3488). IEEE.
+<h1>
+  <img src="docs/assets/b.png" width="100" alt="Logo"
+       style="vertical-align: middle; margin-right: .5rem;" />
+  Features
+</h1>
 
 
-## Create your own FES OCP
-You can create your own FES OCP by following the steps below:
-1. Create a new python file
-2. Import the desired model from `Cocofest` (e.g. Ding2003) and the fes_ocp class
 
-```python
-from cocofest import DingModelFrequency, OcpFes
-```
+## 📊 Available FES models 📉
+All models are implemented at the muscle actuator level, making them applicable to a wide range of problems regardless of the specific optimal control problem.
 
-3. Create your own optimal control problem by adding the stimulation pulse number, the number of shooting points,
-the final simulation time, the objective function
-(for this example, the force at the end of the simulation must be the closest to 100N), 
-the minimum and maximum time between two stimulation pulse, the time bimapping
-(If True, will act like a frequency at constant pulse interval).
+| **Model Name**  | **Citation**                                                                                                                                                                                                                     | **Description / Focus**                                             |
+| --------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------- |
+| **Veltink1992** | Veltink, P. H., Chizeck, H. J., Crago, P. E., & El-Bialy, A. (1992). *Nonlinear joint angle control for artificially stimulated muscle*. IEEE Transactions on Biomedical Engineering, 39(4), 368–380.                            | Nonlinear control of joint angles via electrical stimulation.       |
+| **Riener1996**  | Riener, R., Quintern, J., & Schmidt, G. (1996). *Biomechanical model of the human knee evaluated by neuromuscular stimulation*. Journal of Biomechanics, 29(9), 1157–1167.                                                       | Biomechanical knee model validated using neuromuscular stimulation. |
+| **Ding2003**    | Ding, J., Wexler, A. S., & Binder-Macleod, S. A. (2003). *Mathematical models for fatigue minimization during functional electrical stimulation*. Journal of Electromyography and Kinesiology, 13(6), 575–588.                   | Focus on mathematical models for minimising fatigue.                |
+| **Ding2007**    | Ding, J., Chou, L. W., Kesar, T. M., et al. (2007). *Mathematical model that predicts the force–intensity and force–frequency relationships after spinal cord injuries*. Muscle & Nerve, 36(2), 214–222.                         | Predicts force–intensity and force–frequency responses post-SCI.    |
+| **Marion2009**  | Marion, M. S., Wexler, A. S., Hull, M. L., & Binder-Macleod, S. A. (2009). *Predicting the effect of muscle length on fatigue during electrical stimulation*. Muscle & Nerve, 40(4), 573–581.                                    | Examines muscle length impact on fatigue under stimulation.         |
+| **Marion2013**  | Marion, M. S., Wexler, A. S., & Hull, M. L. (2013). *Predicting non-isometric fatigue induced by electrical stimulation pulse trains as a function of pulse duration*. Journal of NeuroEngineering and Rehabilitation, 10, 1–16. | Predicts non-isometric fatigue based on pulse duration.             |
+| **Hmed2018**    | Hmed, A. B., Bakir, T., Sakly, A., & Binczak, S. (2018). *A new mathematical force model that predicts the force-pulse amplitude relationship of human skeletal muscle*. In IEEE EMBC, pp. 3485–3488.                            | Models the relationship between pulse amplitude and force.          |
 
-```python
-ocp = OcpFes().prepare_ocp(...,
-                         n_stim=10,
-                         n_shooting=20,
-                         ...,)
-```
+> \[!NOTE]
+>
+> It is possible to implement more FES models into Cocofest.
+> Adventurous enough to code it by yourself, we are looking forward to read your [pull request](how-to-contribute).
+> Feel free to reach out on discord or submit an issue if you need help.
 
-4. Solve you OCP
+## 🦴 Musculoskeletal model driven by FES 💪
 
-```python
-result = ocp.solve()
-```
+In conventional Hill-type muscle model, muscle force ($F_m$) is the product of a the muscle activation, $F_{max}$ the maximal
+isometric muscle force, $f_l$ the force-length, $f_v$ the force-velocity and $f_{pas}$ the passive force-length relationship:
+$$
+F_m(t) = a(t)\, F_{\max}\, f_l(\tilde{l}_m)\, f_v(\tilde{v}_m) + f_{pas}(\tilde{l}_m)
+$$
+`Cocofest` replaces $a(t)×F_{max}$ by the force obtained using [FES models](#available-fes-models).
+This approach allows motions driven-FES simulations, meanwhile benefiting from musculoskeletal model properties (e.g., muscle insertion, weight, inertial).
 
-## Examples
-You can find all the available examples in the [examples](https://github.com/pyomeca/cocofest/tree/main/examples) file.
-### Musculoskeletal model driven by FES models
-The following example is a musculoskeletal model driven by the Ding2007 FES model.
-The objective function is to reach a 90° forearm position and 0° arm position at the movement end.
-The stimulation last 1s and the stimulation frequency is 10Hz.
-The optimized parameter are each stimulation pulse width.
+> \[!NOTE]
+>
+> Used force-length ($f_l$), force-velocity ($f_v$) and passive force-length ($f_{pas}$) are those published by [De Groot et al., (2016)](https://link.springer.com/article/10.1007/s10439-016-1591-9).
+> Those relationships can be activated or not when initializing your OCP. Modification to the following [file](cocofest/models/hill_coefficients.py) can be done to have more/different relationships. 
+
+### 💻 A short musculoskeletal FES-driven example
+The following example displays a reaching task using the [Arm26](https://opensimconfluence.atlassian.net/wiki/spaces/OpenSim/pages/53090607/Musculoskeletal+Models) model driven by the [Ding2007](https://onlinelibrary.wiley.com/doi/full/10.1002/mus.20806) FES model.
+
+$$
+\begin{aligned}
+\min_{x(\cdot),\,u(\cdot)} \quad 
+& \int_{0}^{T} \sum_{i=1}^{n} F_{m,i}(t)\,dt \\[4pt]
+\text{s.t.}\quad
+& q_{\text{arm}}(t) \in [-0.5,\; 3.14], && \forall t \in [0,T],\\
+& q_{\text{forearm}}(t) \in [0,\; 3.14], && \forall t \in [0,T],\\
+& \text{(last node)}\;\; \|p_{\text{hand\_marker}}(T) - p_{\text{target\_marker}}\| \le \varepsilon,\\
+& u(t) = \begin{bmatrix} \mathrm{pw}_1(t)\\ \mathrm{pw}_2(t)\\ \vdots\\ \mathrm{pw}_n(t) \end{bmatrix}
+\;\; \text{(pulse widths per muscle)}.
+\end{aligned}
+$$
 
 <p align="center">
-  <img width="500" src=docs/arm_flexion.gif>
+  <img width="500" src=docs/reaching.gif>
 </p>
 
+> \[!NOTE]
+>
+> This optimization was solved in 6.7 second on a computer with an AMD Ryzen Threadripper PRO 7965WXs x 48 processor. <br>
+> Additional information: frequency = 30Hz, n_shooting = 30, step = 0.33s, final time = 1s, integration = Collocation radau method, polynomial_order = 3, solver = IPOPT.
 
+You can find more examples of musculoskeletal model driven by FES in the following [file](https://github.com/pyomeca/cocofest/tree/main/examples/fes_multibody).
 
-## Other functionalities
+## Moving time horizons
 
-### Initital value problem
+`Cocofest` supports moving time horizons.
+
+### 💻 A short MHE hand cycling FES-driven example
+
+## Identification
+
+`Cocofest` supports FES model identification using optimal control.
+
+### 💻 A short model identification example
+
+## Initital value problem
 You can also compute the models form initial value problem.
 For that, use the IvpFes class to build the computed problem.
 
@@ -201,28 +215,32 @@ ivp = IvpFes(fes_parameters, ivp_parameters)
 result, time = ivp.integrate()
 ```
 
-### Summation truncation
+## Summation truncation
 The summation truncation is an integer parameter that can be added to the model.
 It will truncate the stimulation apparition list used for the calcium summation.
 The integer number defines the stimulation number to keep prior this summation calculation (e.g only the 5 past stimulation will be included).
+
+It has already been implemented in [Ref]
 
 ```python
 ocp = OcpFes().prepare_ocp(model=DingModelFrequency(sum_stim_truncation=5))
 ```
 
 
-### Contributors
+### 🤝 Contributors
 
 <a href="https://github.com/Kev1CO"><img src="https://avatars.githubusercontent.com/u/78259038?v=4" title="Kev1CO" width="50" height="50"></a>
 <a href="https://github.com/Ipuch"><img src="https://avatars.githubusercontent.com/u/40755537?v=4" title="Ipuch" width="50" height="50"></a>
 <a href="https://github.com/Florine353"><img src="https://avatars.githubusercontent.com/u/112490846?v=4" title="Florine353" width="50" height="50"></a>
 
 
-## Citing
+## 📝 Citing
 `Cocofest` is not yet published in a journal.
 But if you use `Cocofest` in your research, please kindly cite this zenodo link [10.5281/zenodo.10427934](https://doi.org/10.5281/zenodo.10427934).
 
-
+## 📚 Cited in
+> \[!NOTE]
+> If you used `Cocofest` in your research, please let us know by submitting an issue or a pull request to add your publication to this list.
 
 ## <img src="https://avatars.githubusercontent.com/u/36738416?s=200&v=4" width="25">  Other related projects <img src="https://scontent.fyhu1-1.fna.fbcdn.net/v/t39.30808-6/240117475_303524718237413_7302566587299370891_n.jpg?_nc_cat=110&ccb=1-7&_nc_sid=6ee11a&_nc_ohc=vbfAVuTc8bkQ7kNvwG1bGjd&_nc_oc=AdlEeHrA1FqKtR5dXVCZM6TpjCwkhEzj_1yzCDK-ZBR2eMPBDI8Cu7J5aen7t9hq3Ug&_nc_zt=23&_nc_ht=scontent.fyhu1-1.fna&_nc_gid=-lp-gVTFx0pQ2fYPRo8_hg&oh=00_AfUVCOpekroSjSDwthOnEl8fCL22Tnp9uwq9WxrojnP2_g&oe=68AEA8DE" width="25"> 
 
@@ -244,16 +262,21 @@ But if you use `Cocofest` in your research, please kindly cite this zenodo link 
       <a href="https://github.com/pyomeca/biobuddy"><img src="docs/assets/BioBuddy.gif" alt="Biobuddy" height="56">
       </a>
     </td>
+    <td align="center">
+      <a href="https://github.com/s2mLab/pyScienceMode">
+        <img src="https://raw.githubusercontent.com/s2mLab/pyScienceMode/main/docs/how_to_use_pysciencemode.png" alt="pyScienceMode" height="56">
+      </a>
+    </td>
   </tr>
 </table>
 
 
-## Acknowledgements
+## 🙏 Acknowledgements
 
-### Funding
+### 🌱 Funding
 <a href="https://regroupementinter.com/fr/mandat/160-optistim/"><img src="https://regroupementinter.com/wp-content/uploads/2023/11/INTER_logo-600x208.png" title="INTER" width="100"></a>
 &nbsp;&nbsp;&nbsp;
 <a href="https://frq.gouv.qc.ca"><img src="https://cmqtr.qc.ca/wp-content/uploads/2022/09/FRQNT-logo-frqnt-COULEURS.png" title="FRQNT" width="100"></a>
 
-### <img src="docs/cocofest_logo.png" width="30"> Logo design
+### <img src="docs/cocofest_logo.png" width="30"> Logo and assets design
 <a href="https://www.instagram.com/maxmvpainting/"><img src="https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcQrO9f_QqjajojjcNJo8FDUdROLwLx-SQ7uVw&s" title="MaxMV" width="65"></a>
