@@ -11,13 +11,35 @@ import numpy as np
 from skopt import gp_minimize
 from skopt.space import Real
 from skopt.utils import use_named_args
+from casadi import MX, vertcat
 
 from bioptim import (
     ObjectiveList, ObjectiveFcn, Node,
-    CostType, MultiCyclicCycleSolutions, Solver, OdeSolver,
+    CostType, MultiCyclicCycleSolutions, Solver, OdeSolver, PenaltyController
 )
 
 import cycling_pulse_width_mhe as base
+
+
+def minimize_muscle_fatigue(controller: PenaltyController, key) -> MX:
+    """
+    Minimize the muscle fatigue.
+
+    Parameters
+    ----------
+    controller: PenaltyController
+        The penalty node elements
+
+    Returns
+    -------
+    The force scaling factor difference
+    """
+    muscle_name_list = controller.model.bio_model.muscle_names
+    muscle_model = controller.model.muscles_dynamics_model
+    muscle_index = muscle_name_list.index(key[2:])  # key is like "A_muscleName"
+    muscle_a_scale_rest = muscle_model[muscle_index].a_scale
+    muscle_fatigue = vertcat(1 - (controller.states[key].cx / muscle_a_scale_rest))
+    return muscle_fatigue
 
 
 def set_objective_functions(muscle_fatigue_key, cost_fun_weight, target):
@@ -38,10 +60,11 @@ def set_objective_functions(muscle_fatigue_key, cost_fun_weight, target):
 
     for key, w in zip(muscle_fatigue_key, weights):
         objective_functions.add(
-            ObjectiveFcn.Lagrange.MINIMIZE_STATE,
+            minimize_muscle_fatigue,
+            custom_type=ObjectiveFcn.Lagrange,
             key=key,
             node=Node.ALL,
-            weight=-w,  # maximize the force scaling factor acting like fatigue apparition
+            weight=10000 * w,
             quadratic=True,
         )
 
