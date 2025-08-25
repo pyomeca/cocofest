@@ -7,6 +7,7 @@ The files will contain the time, states, controls and parameters of the ocp.
 
 import numpy as np
 
+import bioptim
 from bioptim import (
     Axis,
     ConstraintFcn,
@@ -17,64 +18,31 @@ from bioptim import (
     ObjectiveFcn,
     OptimalControlProgram,
     ControlType,
+    Node,
+    InitialGuessList,
 )
 
 from cocofest import (
-    DingModelPulseWidthFrequencyWithFatigue,
+    DingModelPulseWidthFrequency,
     OcpFesMsk,
     FesMskModel,
     CustomObjective,
 )
 
 
-def initialize_model():
-    # Scaling alpha_a and a_scale parameters for each muscle proportionally to the muscle PCSA and fiber type 2 proportion
-    # Fiber type proportion from [1]
-    biceps_fiber_type_2_proportion = 0.607
-    triceps_fiber_type_2_proportion = 0.465
-    brachioradialis_fiber_type_2_proportion = 0.457
-    alpha_a_proportion_list = [
-        biceps_fiber_type_2_proportion,
-        biceps_fiber_type_2_proportion,
-        triceps_fiber_type_2_proportion,
-        triceps_fiber_type_2_proportion,
-        triceps_fiber_type_2_proportion,
-        brachioradialis_fiber_type_2_proportion,
-    ]
-
-    # PCSA (cm²) from [2]
-    triceps_pcsa = 28.3
-    biceps_pcsa = 12.7
-    brachioradialis_pcsa = 11.6
-    triceps_a_scale_proportion = 1
-    biceps_a_scale_proportion = biceps_pcsa / triceps_pcsa
-    brachioradialis_a_scale_proportion = brachioradialis_pcsa / triceps_pcsa
-    a_scale_proportion_list = [
-        biceps_a_scale_proportion,
-        biceps_a_scale_proportion,
-        triceps_a_scale_proportion,
-        triceps_a_scale_proportion,
-        triceps_a_scale_proportion,
-        brachioradialis_a_scale_proportion,
-    ]
-
+def initialize_model(final_time):
     # Build the functional electrical stimulation models according
     # to number and name of muscle in the musculoskeletal model used
     fes_muscle_models = [
-        DingModelPulseWidthFrequencyWithFatigue(muscle_name="BIClong", sum_stim_truncation=10),
-        DingModelPulseWidthFrequencyWithFatigue(muscle_name="BICshort", sum_stim_truncation=10),
-        DingModelPulseWidthFrequencyWithFatigue(muscle_name="TRIlong", sum_stim_truncation=10),
-        DingModelPulseWidthFrequencyWithFatigue(muscle_name="TRIlat", sum_stim_truncation=10),
-        DingModelPulseWidthFrequencyWithFatigue(muscle_name="TRImed", sum_stim_truncation=10),
-        DingModelPulseWidthFrequencyWithFatigue(muscle_name="BRA", sum_stim_truncation=10),
+        DingModelPulseWidthFrequency(muscle_name="BIClong", sum_stim_truncation=6),
+        DingModelPulseWidthFrequency(muscle_name="BICshort", sum_stim_truncation=6),
+        DingModelPulseWidthFrequency(muscle_name="TRIlong", sum_stim_truncation=6),
+        DingModelPulseWidthFrequency(muscle_name="TRIlat", sum_stim_truncation=6),
+        DingModelPulseWidthFrequency(muscle_name="TRImed", sum_stim_truncation=6),
+        DingModelPulseWidthFrequency(muscle_name="BRA", sum_stim_truncation=6),
     ]
 
-    # Applying the scaling
-    for i in range(len(fes_muscle_models)):
-        fes_muscle_models[i].alpha_a = fes_muscle_models[i].alpha_a * alpha_a_proportion_list[i]
-        fes_muscle_models[i].a_scale = fes_muscle_models[i].a_scale * a_scale_proportion_list[i]
-
-    stim_time = list(np.round(np.linspace(0, 1.5, 61), 3))[:-1]
+    stim_time = list(np.linspace(0,final_time,30, endpoint=False))
     model = FesMskModel(
         name=None,
         biorbd_path="../../msk_models/Arm26/arm26_with_reaching_target.bioMod",
@@ -92,9 +60,6 @@ def prepare_ocp(
     model: FesMskModel,
     final_time: float,
     max_bound: float,
-    msk_info: dict,
-    minimize_force: bool = False,
-    minimize_fatigue: bool = False,
 ):
     muscle_model = model.muscles_dynamics_model[0]
     n_shooting = muscle_model.get_n_shooting(final_time)
@@ -105,37 +70,55 @@ def prepare_ocp(
     dynamics = OcpFesMsk.declare_dynamics(
         model,
         numerical_time_series=numerical_data_time_series,
-        ode_solver=OdeSolver.RK4(n_integration_steps=5),
+        ode_solver=OdeSolver.COLLOCATION(polynomial_degree=3, method="radau"),
         contact_type=[],
     )
 
-    x_bounds, x_init = OcpFesMsk.set_x_bounds(model, msk_info)
-    u_bounds, u_init = OcpFesMsk.set_u_bounds(model, msk_info["with_residual_torque"], max_bound=max_bound)
+    # --- Initialize default FES bounds and initial guess --- #
+    x_bounds, x_init_fes = OcpFesMsk.set_x_bounds_fes(model)
+
+    # --- Setting q bounds --- #
+    q_x_bounds = model.bounds_from_ranges("q")
+
+    arm_q = [-0.5, 3.14]
+    forearm_q = [0, 3.15]
+
+    q_x_bounds.min[0] = [0, arm_q[0], arm_q[0]]
+    q_x_bounds.max[0] = [0, arm_q[1], arm_q[1]]
+    q_x_bounds.min[1] = [forearm_q[0], forearm_q[0], forearm_q[0]]
+    q_x_bounds.max[1] = [forearm_q[0], forearm_q[1], forearm_q[1]]
+
+    x_bounds.add(key="q", bounds=q_x_bounds, phase=0)
+
+    # --- Setting u bounds --- #
+    u_bounds = bioptim.BoundsList()
+    u_init = InitialGuessList()
+
+    models = model.muscles_dynamics_model
+    for individual_model in models:
+        key = "last_pulse_width_" + str(individual_model.muscle_name)
+        u_bounds.add(
+            key=key,
+            min_bound=[individual_model.pd0],
+            max_bound=[max_bound],
+            phase=0,
+        )
 
     objective_functions = ObjectiveList()
-    if minimize_force:
-        objective_functions.add(
-            CustomObjective.minimize_overall_muscle_force_production,
-            custom_type=ObjectiveFcn.Lagrange,
-            weight=1,
-            quadratic=True,
-        )
-    if minimize_fatigue:
-        objective_functions.add(
-            CustomObjective.minimize_overall_muscle_fatigue,
-            custom_type=ObjectiveFcn.Lagrange,
-            weight=1,
-            quadratic=True,
-        )
+    objective_functions.add(
+        CustomObjective.minimize_overall_muscle_force_production,
+        custom_type=ObjectiveFcn.Lagrange,
+        weight=1,
+        quadratic=True,
+    )
 
-    # Step time of 1ms -> 1sec / (40Hz * 25) = 0.001s
     constraint = ConstraintList()
     constraint.add(
         ConstraintFcn.SUPERIMPOSE_MARKERS,
         first_marker="COM_hand",
         second_marker="reaching_target",
         phase=0,
-        node=40,
+        node=Node.END,
         axes=[Axis.X, Axis.Y],
     )
 
@@ -145,35 +128,28 @@ def prepare_ocp(
         n_shooting=n_shooting,
         phase_time=final_time,
         objective_functions=objective_functions,
-        x_init=x_init,
+        x_init=x_init_fes,
         x_bounds=x_bounds,
         u_init=u_init,
         u_bounds=u_bounds,
+        constraints=constraint,
         control_type=ControlType.CONSTANT,
-        use_sx=True,
+        use_sx=False,
         n_threads=20,
     )
 
 
 def main():
-    model = initialize_model()
-    for i in range(2):
-        ocp = prepare_ocp(
-            model=model,
-            final_time=1.5,
-            max_bound=0.0006,
-            msk_info={
-                "with_residual_torque": False,
-                "bound_type": "start_end",
-                "bound_data": [[0, 5], [0, 5]],
-            },
-            minimize_force=(i == 0),
-            minimize_fatigue=(i == 1),
-        )
+    final_time = 1
+    model = initialize_model(final_time)
+    ocp = prepare_ocp(
+        model=model,
+        final_time=final_time,
+        max_bound=0.0006)
 
-        sol = ocp.solve(Solver.IPOPT(_max_iter=10000))
-        sol.graphs(show_bounds=False)
-        sol.animate(viewer="pyorerun")
+    sol = ocp.solve(Solver.IPOPT(_max_iter=10000))
+    sol.animate(viewer="pyorerun")
+    sol.graphs(show_bounds=True)
 
 
 if __name__ == "__main__":
