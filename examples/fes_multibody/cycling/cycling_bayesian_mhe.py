@@ -6,6 +6,7 @@ This example will perform a bayesian optimization on an optimal control program 
 from pathlib import Path
 from sys import platform
 
+import pickle
 import numpy as np
 from skopt import gp_minimize
 from skopt.space import Real
@@ -231,6 +232,30 @@ def bayes_optimize_weights(
     tmp_model = base.set_fes_model(model_path, stim_time_tmp)
     muscle_names = [m.muscle_name for m in tmp_model.muscles_dynamics_model]
 
+    log_dir = Path("result/bo")
+    log_dir.mkdir(parents=True, exist_ok=True)
+    bo_log = {}  # dict[index] = {'metric': float, muscle_1: w1, ...}
+
+    def _save_logs_snapshot():
+        """Persist logs after each iteration (both pickle + npz)."""
+        # 1) Pickle of the dict
+        with open(log_dir / "bo_iter_log.pkl", "wb") as f:
+            pickle.dump(bo_log, f)
+        # 2) NPZ object (dict) + also a numeric NPZ for convenient loading
+        np.savez_compressed(log_dir / "bo_iter_log.npz", bo_log=np.array([bo_log], dtype=object))
+        if bo_log:
+            # Numeric arrays (weights matrix + metrics), same row order as sorted indices
+            idx = np.array(sorted(bo_log.keys()))
+            metrics = np.array([float(bo_log[i]["metric"]) for i in idx], dtype=float)
+            weights_mat = np.array([[float(bo_log[i][name]) for name in muscle_names] for i in idx], dtype=float)
+            np.savez_compressed(
+                log_dir / "bo_iter_arrays.npz",
+                iteration=idx,
+                muscle_names=np.array(muscle_names),
+                weights=weights_mat,
+                metric=metrics,
+            )
+
     # Search space
     if use_simplex:
         space = [Real(-5.0, 5.0, name=f"z_{n}") for n in muscle_names]
@@ -267,7 +292,13 @@ def bayes_optimize_weights(
         # --- Avoid float-as-key noise --- #
         key = tuple([round(float(v), 8) for v in weights])
         if key in _cache:
-            return _cache[key]
+            loss = _cache[key]
+            i = len(bo_log)
+            entry = {name: float(w) for name, w in zip(muscle_names, weights)}
+            entry["metric"] = float(-loss) if np.isfinite(loss) else float("nan")
+            bo_log[i] = entry
+            _save_logs_snapshot()
+            return loss
 
         # --- Build per-run simulation_conditions --- #
         sim_cond = dict(sim_cond_template)
@@ -285,11 +316,19 @@ def bayes_optimize_weights(
                 return_metric=True,
             )
             loss = -float(metric)  # maximize metric
+
         except Exception as e:
             print(f"[BO] NMPC failed for weights={weights} -> {e}")
             loss = 1e6
 
         _cache[key] = loss
+
+        i = len(bo_log)  # iteration index
+        entry = {name: float(w) for name, w in zip(muscle_names, weights)}
+        entry["metric"] = float(metric)
+        bo_log[i] = entry
+        _save_logs_snapshot()
+
         return loss
 
     print(f"[BO] Optimizing {len(muscle_names)} weights over {n_calls} evaluations...")
@@ -337,7 +376,7 @@ def main_bayes():
     mhe_info = {
         "cycle_duration": 1,
         "n_cycles_to_advance": 1,
-        "n_cycles": 5,
+        "n_cycles": 3000,
         "ode_solver": ode_solver,
         "use_sx": False,
     }
@@ -357,7 +396,7 @@ def main_bayes():
         model_path=model_path,
         stimulation_frequency=30,
         n_cycles_simultaneous_for_bo=n_cycle_simultaneous,
-        n_calls=6,
+        n_calls=10,
         n_initial_points=6,
         random_state=42,
         weight_bounds_log=(1e-4, 1e2),
@@ -370,5 +409,27 @@ def main_bayes():
         print(f"{k}: {v:.6g}")
 
 
+def read_pickle_file(file_type="pkl", is_numeric=False):
+    bo = None
+    if file_type == "pkl":
+        bo = pickle.load(open(Path("result/bo/bo_iter_log.pkl"), "rb"))
+
+    if file_type == "npz" and not is_numeric:
+        bo = np.load("result/bo/bo_iter_log.npz", allow_pickle=True)["bo_log"].item()
+
+    if file_type == "npz" and is_numeric:
+        arr = np.load("result/bo/bo_iter_arrays.npz", allow_pickle=False)
+        iteration = arr["iteration"]
+        muscle_names = [s for s in arr["muscle_names"]]
+        weights = arr["weights"]  # shape (n_iter, n_muscles)
+        metric = arr["metric"]  # shape (n_iter,)
+        bo = {}
+        for k, iter_id in enumerate(iteration):
+            entry = {"metric": float(metric[k])}
+            entry.update({name: float(weights[k, j]) for j, name in enumerate(muscle_names)})
+            bo[int(iter_id)] = entry
+    print(bo)
+
 if __name__ == "__main__":
     main_bayes()
+    read_pickle_file(file_type="pkl", is_numeric=False)
