@@ -1,21 +1,21 @@
 <div align="center"><a name="readme-top"></a>
 
 <p align="center"> 
-  <img src="docs/assets/02.png" alt="HAR Logo">
+  <img src="docs/assets/04.png" alt="HAR Logo">
 </p>
 
 # Cocofest
 
 An Open-Source Python Package for Functional Electrical Stimulation (FES) Optimization in Optimal Control.<br/>
-Supports predictive musculoskeletal simulation driven by FES, initial value problems, and FES model identification.<br/>
+Supports predictive musculoskeletal simulation driven by FES, moving time horizon, initial value problems, and FES model identification.<br/>
 "Prototype today’s FES to power tomorrow’s rehab."
 
 [![Made-with-python](https://img.shields.io/badge/Made%20with-Python%203.11-1f425f.svg?style=for-the-badge)](https://www.python.org/)
 [![OS](https://img.shields.io/badge/OS-windows%20%7C%20linux-blue?style=for-the-badge)]()
-[![Last commit](https://img.shields.io/github/last-commit/pyomeca/cocofest.svg?style=for-the-badge)]()
+[![Last commit](https://img.shields.io/github/last-commit/pyomeca/cocofest.svg?style=for-the-badge)]()<br/>
 [![Coverage](https://img.shields.io/codecov/c/github/pyomeca/cocofest?style=for-the-badge&logo=codecov&branch=main&token=GPBRI2U4CO)](https://codecov.io/gh/pyomeca/cocofest)
 [![Maintainability](https://img.shields.io/badge/Maintainability-B-green?style=for-the-badge&logo=codeclimate)](https://qlty.sh/gh/pyomeca/projects/cocofest)
-[![Tests](https://img.shields.io/github/actions/workflow/status/pyomeca/cocofest/run_tests_win.yml?branch=main&style=for-the-badge&label=Tests&logo=githubactions)](https://github.com/pyomeca/cocofest/actions/workflows/run_tests_win.yml)
+[![Tests](https://img.shields.io/github/actions/workflow/status/pyomeca/cocofest/run_tests_win.yml?branch=main&style=for-the-badge&label=Tests&logo=githubactions)](https://github.com/pyomeca/cocofest/actions/workflows/run_tests_win.yml)<br/>
 [![Discord](https://img.shields.io/discord/1340640457327247460.svg?label=chat&logo=discord&color=7289DA&style=for-the-badge)](https://discord.gg/s3g2ATpvDs)
 [![Licence](https://img.shields.io/github/license/pyomeca/cocofest.svg?style=for-the-badge)](https://opensource.org/licenses/MIT)
 
@@ -48,18 +48,16 @@ Supports predictive musculoskeletal simulation driven by FES, initial value prob
 <br/>
 </details>
 
-<br />
+<p align="center"> 
+  <img src="docs/assets/image.png" alt="HAR Logo">
+</p>
 
----
-
-<br />
 
 <h1>
   <img src="docs/cocofest_logo.png" width="100" alt="Logo"
        style="vertical-align: middle; margin-right: .5rem;" />
   About
 </h1>
-
 
 Functional electrical stimulation (FES) is a neurorehabilitation technique that promotes motor recovery after neurological injury.
 By delivering coordinated electrical pulses to targeted muscles, FES elicits functional movements such as walking, reaching, and grasping.
@@ -75,13 +73,12 @@ and robust solver like [Ipopt](https://github.com/coin-or/Ipopt).
 
 > \[!IMPORTANT]
 >
+> This package should not be used for rehabilitation,only for research purposes. </br>
 > Don't forget to <img src="https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fthepracticaldev.s3.amazonaws.com%2Fi%2F2nn6mhp57inp6rdxarzt.png" align="center" width="80" alt="Star the repository"> **the repository** to show your support and help us grow the community!
 
-<br />
-
----
-
-<br />
+<p align="center"> 
+  <img src="docs/assets/image.png" alt="HAR Logo">
+</p>
 
 <h1>
   <img src="docs/assets/b.png" width="100" alt="Logo"
@@ -118,6 +115,10 @@ python setup.py install
 ```
 
 You are now ready to use `Cocofest`!
+
+<p align="center"> 
+  <img src="docs/assets/image.png" alt="HAR Logo">
+</p>
 
 <h1>
   <img src="docs/assets/b.png" width="100" alt="Logo"
@@ -178,27 +179,52 @@ $$
 $$
 
 <p align="center">
-  <img width="500" src=docs/reaching.gif>
+  <img width="500" src=docs/reaching.gif> <br>
+  Figure 1: Motion performed for the reaching task and associated muscle force production.
 </p>
 
 > \[!NOTE]
 >
 > This optimization was solved in 6.7 second on a computer with an AMD Ryzen Threadripper PRO 7965WXs x 48 processor. <br>
-> Additional information: frequency = 30Hz, n_shooting = 30, step = 0.33s, final time = 1s, integration = Collocation radau method, polynomial_order = 3, solver = IPOPT.
+> Additional information: frequency = 30Hz, n_shooting = 30, step = 0.033s, final time = 1s, integration = Collocation radau method, polynomial_order = 3, solver = IPOPT.
 
 You can find more examples of musculoskeletal model driven by FES in the following [file](https://github.com/pyomeca/cocofest/tree/main/examples/fes_multibody).
 
-## Moving time horizons
+## 🚀 Moving time horizons ⏳
 
-`Cocofest` supports moving time horizons.
+For longer time span simulation and apprehend muscle fatigue apparition, `Cocofest` implements moving time horizons (MHE).
 
 ### 💻 A short MHE hand cycling FES-driven example
 
-## Identification
+$$
+\begin{aligned}
+\min_{x(\cdot),\,u(\cdot)} \quad 
+& \int_{0}^{T} \sum_{i=1}^{n} F_{m,i}(t)\,dt \\[4pt]
+\text{s.t.}\quad
+& q_{\text{arm}}(t) \in [0,\; 1.5], && \forall t \in [0,T],\\
+& q_{\text{forearm}}(t) \in [0.5,\; 2.5], && \forall t \in [0,T],\\
+& q_{\text{pedal}}(t) \in [0,\; 6.28], && \forall t \in [0,T],\\
+& \text{(first node)}\;\; \|center_{wheel}(t0) - [0.35 ; 0]\| \le \varepsilon,\\
+& \text{(first node)}\;\; \|\dot{center_{wheel}}(t0) - 0\| \le \varepsilon,\\
+& \text{(last node)}\;\; \|q_{\text{pedal}}(T) - 6.28\| \le \varepsilon,\\
+& u(t) = \begin{bmatrix} \mathrm{pw}_1(t)\\ \mathrm{pw}_2(t)\\ \vdots\\ \mathrm{pw}_n(t) \end{bmatrix}
+\;\; \text{(pulse widths per muscle)}.
+\end{aligned}
+$$
 
-`Cocofest` supports FES model identification using optimal control.
+<p align="center">
+  <img width="500" src=docs/cycling.gif> <br>
+  Figure 2: Motion performed for the cycling task, muscle force contribution per section inspired by
+  <a href="https://www.frontiersin.org/journals/sports-and-active-living/articles/10.3389/fspor.2025.1581301/full">
+    Quittmann et al. (2025)
+  </a>
+  and muscle force production above 10% of the maximal force.
+</p>
 
-### 💻 A short model identification example
+> \[!NOTE]
+>
+> This optimization was solved in 1.02 second on a computer with an AMD Ryzen Threadripper PRO 7965WXs x 48 processor. <br>
+> Additional information: frequency = 30Hz, n_shooting = 60, step = 0.033s, final time = 2s, integration = Collocation radau method, polynomial_order = 3, solver = IPOPT, simultaneous turn per optimization = 2. 
 
 ## Initital value problem
 You can also compute the models form initial value problem.
@@ -215,16 +241,48 @@ ivp = IvpFes(fes_parameters, ivp_parameters)
 result, time = ivp.integrate()
 ```
 
-## Summation truncation
-The summation truncation is an integer parameter that can be added to the model.
-It will truncate the stimulation apparition list used for the calcium summation.
-The integer number defines the stimulation number to keep prior this summation calculation (e.g only the 5 past stimulation will be included).
+## 🔎 Identification 🆔
 
-It has already been implemented in [Ref]
+To personalize FES models to simulated or experimental force, `Cocofest` supports model identification using optimal control.
+
+### 💻 A short model identification example
+$$
+\begin{aligned}
+\min_{x(\cdot),\,p(\cdot),} \quad 
+& \int_{0}^{T} \ F(t) - F_{sim/exp}(t)\,dt \\[4pt]
+\text{s.t.}\quad
+& u(t) = \begin{bmatrix} \mathrm{pw}_1(t)\\ \mathrm{pw}_2(t)\\ \vdots\\ \mathrm{pw}_n(t) \end{bmatrix} \in \begin{bmatrix} \mathrm{pw}_{exp1}(t)\\ \mathrm{pw}_{exp2}(t)\\ \vdots\\ \mathrm{pw}_{expn}(t) \end{bmatrix}.
+\end{aligned}
+$$
+
+<p align="center">
+  <img width="500" src=docs/identification.gif> <br>
+  Figure 3: Model identification optimization
+</p>
+
+> \[!NOTE]
+>
+> This optimization was solved in 0.343 second on a computer with an AMD Ryzen Threadripper PRO 7965WXs x 48 processor. <br>
+> Additional information: frequency = 33Hz, n_shooting = 66, step = 0.03s, final time = 2s, integration = Runge-Kutta 4, integration steps = 10, solver = IPOPT. 
+
+
+## Summation truncation
+
+`Cocofest` also incorporates the recent numerical truncation method to speed up convergence.
+This method limits the number of past stimulations considered in the dynamics to reduce the dependency on time-varying states.
 
 ```python
-ocp = OcpFes().prepare_ocp(model=DingModelFrequency(sum_stim_truncation=5))
+model = ModelMaker.create_model("ding2007", stim_time=stim_time, sum_stim_truncation=10)
 ```
+
+> \[!TIPS]
+>
+> To determine the value to use for `sum_stim_truncation`, you can refer to [Tiago et al. (2025)](https://inria.hal.science/hal-05165086/) or [Co et al. (2024)](https://umontreal.scholaris.ca/items/a94c280a-98dc-48ad-888c-e11c7c6a0d55).
+
+
+<p align="center"> 
+  <img src="docs/assets/image.png" alt="HAR Logo">
+</p>
 
 
 ### 🤝 Contributors
@@ -280,3 +338,7 @@ But if you use `Cocofest` in your research, please kindly cite this zenodo link 
 
 ### <img src="docs/cocofest_logo.png" width="30"> Logo and assets design
 <a href="https://www.instagram.com/maxmvpainting/"><img src="https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcQrO9f_QqjajojjcNJo8FDUdROLwLx-SQ7uVw&s" title="MaxMV" width="65"></a>
+
+<p align="center"> 
+  <img src="docs/assets/image.png" alt="HAR Logo">
+</p>
