@@ -165,9 +165,7 @@ This approach allows motions driven-FES simulations, meanwhile benefiting from m
 ### 💻 A short musculoskeletal FES-driven example
 The following example displays a reaching task using the [Arm26](https://opensimconfluence.atlassian.net/wiki/spaces/OpenSim/pages/53090607/Musculoskeletal+Models) model driven by the [Ding2007](https://onlinelibrary.wiley.com/doi/full/10.1002/mus.20806) FES model.
 
-<br/>
-
-$$
+```math
 \begin{aligned}
 \min_{x(\cdot),\,u(\cdot)} \quad 
 & \int_{0}^{T} \sum_{i=1}^{n} F_{m,i}(t)\,dt \\[4pt]
@@ -180,9 +178,7 @@ $$
 \end{bmatrix}
 \;\; \text{(pulse widths per muscle)}.
 \end{aligned}
-$$
-
-<br/>
+```
 
 <p align="center">
   <img width="800" src=docs/assets/reaching.gif> <br>
@@ -202,7 +198,7 @@ For longer time span simulation and apprehend muscle fatigue apparition, `Cocofe
 
 ### 💻 A short MHE hand cycling FES-driven example
 
-$$
+```math
 \begin{aligned}
 \min_{x(\cdot),\,u(\cdot)} \quad 
 & \int_{0}^{T} \sum_{i=1}^{n} F_{m,i}(t)\,dt \\[4pt]
@@ -217,7 +213,7 @@ $$
 & u(t) = \begin{bmatrix} \mathrm{pw}_{1}(t)\\ \mathrm{pw}_{2}(t)\\ \vdots\\ \mathrm{pw}_{n}(t) \end{bmatrix}
 \;\; \text{(pulse widths per muscle)}.
 \end{aligned}
-$$
+```
 
 <p align="center">
   <img width="800" src=docs/assets/cycling.gif> <br>
@@ -257,7 +253,7 @@ To personalize FES models to simulated or experimental force, `Cocofest` support
 
 ### 💻 A short model identification example
 
-$$
+```math
 \begin{aligned}
 \min_{x(\cdot),\,p(\cdot)} \quad 
 & \int_{0}^{T} \bigl(F(t) - F_{\text{sim/exp}}(t)\bigr)\,dt \\[4pt]
@@ -265,7 +261,7 @@ $$
 & u(t) = \begin{bmatrix} \mathrm{pw}_{1}(t)\\ \mathrm{pw}_{2}(t)\\ \vdots\\ \mathrm{pw}_{n}(t) \end{bmatrix}
 = \begin{bmatrix} \mathrm{pw}_{\text{exp}1}(t)\\ \mathrm{pw}_{\text{exp}2}(t)\\ \vdots\\ \mathrm{pw}_{\text{exp}n}(t) \end{bmatrix}.
 \end{aligned}
-$$
+```
 
 <p align="center">
   <img width="800" src=docs/assets/identification.gif> <br>
