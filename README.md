@@ -170,22 +170,24 @@ $$
 \min_{x(\cdot),\,u(\cdot)} \quad 
 & \int_{0}^{T} \sum_{i=1}^{n} F_{m,i}(t)\,dt \\[4pt]
 \text{s.t.}\quad
-& q_{\text{arm}}(t) \in [-0.5,\; 3.14], && \forall t \in [0,T],\\
-& q_{\text{forearm}}(t) \in [0,\; 3.14], && \forall t \in [0,T],\\
+& q_{\text{arm}}(t) \in [-0.5,\, 3.14], && \forall t \in [0,T],\\
+& q_{\text{forearm}}(t) \in [0,\, 3.14], && \forall t \in [0,T],\\
 & \text{(last node)}\;\; \|p_{\text{hand\_marker}}(T) - p_{\text{target\_marker}}\| \le \varepsilon,\\
-& u(t) = \begin{bmatrix} \mathrm{pw}_1(t)\\ \mathrm{pw}_2(t)\\ \vdots\\ \mathrm{pw}_n(t) \end{bmatrix}
+& u(t) = \begin{bmatrix}
+  \mathrm{pw}_{1}(t)\\ \mathrm{pw}_{2}(t)\\ \vdots\\ \mathrm{pw}_{n}(t)
+\end{bmatrix}
 \;\; \text{(pulse widths per muscle)}.
 \end{aligned}
 $$
 
 <p align="center">
-  <img width="500" src=docs/assets/reaching.gif> <br>
+  <img width="800" src=docs/assets/reaching.gif> <br>
   Figure 1: Motion performed for the reaching task and associated muscle force production.
 </p>
 
 > \[!NOTE]
 >
-> This optimization was solved in 6.7 second on a computer with an AMD Ryzen Threadripper PRO 7965WXs x 48 processor. <br>
+> Solved in 6.7 second, computer with an AMD Ryzen Threadripper PRO 7965WXs x 48 processor. <br>
 > Additional information: frequency = 30Hz, n_shooting = 30, step = 0.033s, final time = 1s, integration = Collocation radau method, polynomial_order = 3, solver = IPOPT.
 
 You can find more examples of musculoskeletal model driven by FES in the following [file](https://github.com/pyomeca/cocofest/tree/main/examples/fes_multibody).
@@ -201,19 +203,20 @@ $$
 \min_{x(\cdot),\,u(\cdot)} \quad 
 & \int_{0}^{T} \sum_{i=1}^{n} F_{m,i}(t)\,dt \\[4pt]
 \text{s.t.}\quad
-& q_{\text{arm}}(t) \in [0,\; 1.5], && \forall t \in [0,T],\\
-& q_{\text{forearm}}(t) \in [0.5,\; 2.5], && \forall t \in [0,T],\\
-& q_{\text{pedal}}(t) \in [0,\; 6.28], && \forall t \in [0,T],\\
-& \text{(first node)}\;\; \|center_{wheel}(t0) - [0.35 ; 0]\| \le \varepsilon,\\
-& \text{(first node)}\;\; \|\dot{center_{wheel}}(t0) - 0\| \le \varepsilon,\\
-& \text{(last node)}\;\; \|q_{\text{pedal}}(T) - 6.28\| \le \varepsilon,\\
-& u(t) = \begin{bmatrix} \mathrm{pw}_1(t)\\ \mathrm{pw}_2(t)\\ \vdots\\ \mathrm{pw}_n(t) \end{bmatrix}
+& q_{\text{arm}}(t) \in [0,\, 1.5], && \forall\, t \in [0,T],\\
+& q_{\text{forearm}}(t) \in [0.5,\, 2.5], && \forall\, t \in [0,T],\\
+& q_{\text{pedal}}(t) \in [0,\, 6.28], && \forall\, t \in [0,T],\\
+& \text{(first node)}\;\; \left\|\,\mathrm{center}_{\text{wheel}}(t_{0}) -
+\begin{bmatrix} 0.35 \\ 0 \end{bmatrix}\right\| \le \varepsilon,\\
+& \text{(first node)}\;\; \left\|\,\dot{\mathrm{center}}_{\text{wheel}}(t_{0}) - 0\right\| \le \varepsilon,\\
+& \text{(last node)}\;\; \left\|\,q_{\text{pedal}}(T) - 6.28\right\| \le \varepsilon,\\
+& u(t) = \begin{bmatrix} \mathrm{pw}_{1}(t)\\ \mathrm{pw}_{2}(t)\\ \vdots\\ \mathrm{pw}_{n}(t) \end{bmatrix}
 \;\; \text{(pulse widths per muscle)}.
 \end{aligned}
 $$
 
 <p align="center">
-  <img width="500" src=docs/assets/cycling.gif> <br>
+  <img width="800" src=docs/assets/cycling.gif> <br>
   Figure 2: Motion performed for the cycling task, muscle force contribution per section inspired by
   <a href="https://www.frontiersin.org/journals/sports-and-active-living/articles/10.3389/fspor.2025.1581301/full">
     Quittmann et al. (2025)
@@ -223,7 +226,7 @@ $$
 
 > \[!NOTE]
 >
-> This optimization was solved in 1.02 second on a computer with an AMD Ryzen Threadripper PRO 7965WXs x 48 processor. <br>
+> Solved in 1.02 second, computer with an AMD Ryzen Threadripper PRO 7965WXs x 48 processor. <br>
 > Additional information: frequency = 30Hz, n_shooting = 60, step = 0.033s, final time = 2s, integration = Collocation radau method, polynomial_order = 3, solver = IPOPT, simultaneous turn per optimization = 2. 
 
 ## 🎯 Initial value problem ⏩
@@ -249,23 +252,25 @@ result, time = ivp.integrate()
 To personalize FES models to simulated or experimental force, `Cocofest` supports model identification using optimal control.
 
 ### 💻 A short model identification example
+
 $$
 \begin{aligned}
-\min_{x(\cdot),\,p(\cdot),} \quad 
-& \int_{0}^{T} \ F(t) - F_{sim/exp}(t)\,dt \\[4pt]
+\min_{x(\cdot),\,p(\cdot)} \quad 
+& \int_{0}^{T} \bigl(F(t) - F_{\text{sim/exp}}(t)\bigr)\,dt \\[4pt]
 \text{s.t.}\quad
-& u(t) = \begin{bmatrix} \mathrm{pw}_1(t)\\ \mathrm{pw}_2(t)\\ \vdots\\ \mathrm{pw}_n(t) \end{bmatrix} \in \begin{bmatrix} \mathrm{pw}_{exp1}(t)\\ \mathrm{pw}_{exp2}(t)\\ \vdots\\ \mathrm{pw}_{expn}(t) \end{bmatrix}.
+& u(t) = \begin{bmatrix} \mathrm{pw}_{1}(t)\\ \mathrm{pw}_{2}(t)\\ \vdots\\ \mathrm{pw}_{n}(t) \end{bmatrix}
+= \begin{bmatrix} \mathrm{pw}_{\text{exp}1}(t)\\ \mathrm{pw}_{\text{exp}2}(t)\\ \vdots\\ \mathrm{pw}_{\text{exp}n}(t) \end{bmatrix}.
 \end{aligned}
 $$
 
 <p align="center">
-  <img width="500" src=docs/assets/identification.gif> <br>
+  <img width="800" src=docs/assets/identification.gif> <br>
   Figure 3: Model identification optimization
 </p>
 
 > \[!NOTE]
 >
-> This optimization was solved in 0.343 second on a computer with an AMD Ryzen Threadripper PRO 7965WXs x 48 processor. <br>
+> Solved in 0.343 second, computer with an AMD Ryzen Threadripper PRO 7965WXs x 48 processor. <br>
 > Additional information: frequency = 33Hz, n_shooting = 66, step = 0.03s, final time = 2s, integration = Runge-Kutta 4, integration steps = 10, solver = IPOPT. 
 
 
