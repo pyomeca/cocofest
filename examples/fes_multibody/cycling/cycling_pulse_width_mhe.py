@@ -84,9 +84,9 @@ class MyCyclicNMPC(FesNmpcMsk):
                         self.nlp[0].x_bounds[key].max[i, 0] = states[key][i][self.nodes_per_cycle]
                     if key == "q" and i == 2:
                         self.nlp[0].x_bounds[key].min[i, 0] = self.nlp[0].x_bounds["q"].min[
-                                                                  i, 0] + self.pedal_turn_in_one_cycle  # - 0.05
+                                                                  i, 0] + self.pedal_turn_in_one_cycle
                         self.nlp[0].x_bounds[key].max[i, 0] = self.nlp[0].x_bounds["q"].max[
-                                                                  i, 0] + self.pedal_turn_in_one_cycle  # + 0.05
+                                                                  i, 0] + self.pedal_turn_in_one_cycle
                 else:
                     self.nlp[0].x_bounds[key].min[i, 0] = states[key][i][self.nodes_per_cycle]
                     self.nlp[0].x_bounds[key].max[i, 0] = states[key][i][self.nodes_per_cycle]
@@ -117,7 +117,6 @@ class MyCyclicNMPC(FesNmpcMsk):
         # --- Print bounds and initial guesses for debugg purpose --- #
         if self.debugg_bounds:
             for key in states.keys():
-                # if key=="q" or key=="qdot":
                 self.plot_initial_guess(data=self.nlp[0].x_init[key].init,
                                     current_bounds=self.nlp[0].x_bounds[key],
                                     past_bounds=self.previous_bounds[key],
@@ -256,24 +255,6 @@ class MyCyclicNMPC(FesNmpcMsk):
             plt.show()
 
 
-# WIP
-# def task_performance_coefficient_cost_fun(controller: PenaltyController):
-#     F0 = vertcat(
-#             *[controller.model.muscles_dynamics_model[i].fmax for i in range(len(controller.model.muscles_dynamics_model))]
-#         )
-#     force_state = vertcat(
-#         *[controller.states["F_" + controller.model.muscles_dynamics_model[i].muscle_name].cx for i in
-#           range(len(controller.model.muscles_dynamics_model))]
-#     )
-#     fatigue_state = vertcat(
-#             *[controller.states["A_" + controller.model.muscles_dynamics_model[i].muscle_name].cx for i in range(len(controller.model.muscles_dynamics_model))]
-#         )
-#     rested_state = vertcat(
-#             *[controller.model.muscles_dynamics_model[i].a_scale for i in range(len(controller.model.muscles_dynamics_model))]
-#         )
-#
-#     return (1-(fatigue_state/rested_state)) - (force_state/F0)
-
 #-------------------#
 #   OCP functions   #
 #-------------------#
@@ -392,7 +373,7 @@ def set_dynamics(model, numerical_time_series, ode_solver):
         expand_dynamics=True,
         phase_dynamics=PhaseDynamics.SHARED_DURING_THE_PHASE,
         numerical_data_timeseries=numerical_time_series,
-        contact_type=[ContactType.RIGID_EXPLICIT],  # empty list for no contact
+        contact_type=[ContactType.RIGID_EXPLICIT],
         phase=0,
         ode_solver=ode_solver,
     )
@@ -614,15 +595,6 @@ def set_objective_functions(minimize_force, minimize_fatigue, minimize_control, 
             quadratic=True,
         )
 
-    # WIP
-    # objective_functions.add(
-    #     task_performance_coefficient_cost_fun,
-    #     custom_type=ObjectiveFcn.Mayer,
-    #     node=Node.ALL,
-    #     weight=1e-3,
-    #     quadratic=True,
-    # )
-
     return objective_functions
 
 
@@ -655,10 +627,29 @@ def set_fes_model(model_path, stim_time):
                     sum_stim_truncation=6
                 ) for muscle in muscle_name_list]
 
-    parameter_dict = {"Delt_ant": {"Fmax": 144, "a_scale": 2988.4, "alpha_a": -5.4 * 10e-2, "tau_fat": 104},
-                      "Delt_post": {"Fmax": 29, "a_scale": 692.4, "alpha_a": -1.92 * 10e-1, "tau_fat": 86},
-                      "Biceps": {"Fmax": 130, "a_scale": 2769.8, "alpha_a": -6.7 * 10e-2, "tau_fat": 121},
-                      "Triceps": {"Fmax": 323, "a_scale": 5357.3, "alpha_a": -3.1 * 10e-2, "tau_fat": 109},
+    # --- Muscle parameter scaling --- #
+    # Values from Ding et al. 2007 + Ding et al. 2003 for fatigue, based on the rectus femoris muscle
+    # Note: these values were scaled on PCSA and fiber proportion to match biceps, triceps, and deltoids muscles
+
+    # ------------------------------------------------------ #
+    # Muscle         |  PCSA (cm²) | Fiber proportion (I/II) |
+    # ------------------------------------------------------ #
+    # Rectus femoris |    10.8     |          35/65          |
+    # Biceps         |    7.33     |          38/62          |
+    # Triceps        |    15.56    |          44/56          |
+    # Delt_ant       |    2.54     |          47/53          |
+    # Delt_post      |    2.73     |          56/44          |
+    # ------------------------------------------------------ #
+
+    # The scaling was done as follows (a_scale_RF=4920; alpha_a_RF=-4.0*10e-2;: tau_fat_RF=127):
+    # a_scale = a_scale_RF * PCSA_muscle / PCSA_RF
+    # alpha_a = (alpha_a_RF * Fiber_prop_II_muscle / Fiber_prop_II_RF) * (a_scale_RF / a_scale_muscle)
+    # tau_fat = (tau_fat_RF * Fiber_prop_II_muscle / Fiber_prop_II_RF) * (a_scale_RF / a_scale_muscle)
+
+    parameter_dict = {"Biceps": {"Fmax": 149, "a_scale": 3314.7, "alpha_a": -5.6 * 10e-2, "tau_fat": 179.6},
+                      "Triceps": {"Fmax": 617, "a_scale": 7036.3, "alpha_a": -2.4 * 10e-2, "tau_fat": 76.2},
+                      "Delt_ant": {"Fmax": 48, "a_scale": 1148.6, "alpha_a": - 1.4 * 10e-1, "tau_fat": 445.5},
+                      "Delt_post": {"Fmax": 51, "a_scale": 1234.5, "alpha_a": - 1.1 * 10e-1, "tau_fat": 342.7},
                       }
 
     for model in muscles_model:
@@ -878,10 +869,8 @@ def run_optim(mhe_info, cycling_info, simulation_conditions, model_path, save_so
         max_consecutive_failing=1,
     )
 
-    # sol[0].animate(viewer="pyorerun")
-    # plot_mhe_graphs(sol[0])
-    # for i in range(len(sol[1])):
-    #     sol[1][i].graphs(show_bounds=True)
+    sol[0].animate(viewer="pyorerun")
+    sol[0].graphs()
 
     # Saving the data in a pickle file
     if save_sol:
@@ -889,120 +878,37 @@ def run_optim(mhe_info, cycling_info, simulation_conditions, model_path, save_so
                         torque=cycling_info["resistive_torque"]["torque"][-1])
 
 
-def plot_mhe_graphs(sol):
-    def plot_bounds(key, index, subplot_index, data, bound_time):
-        current_bounds = sol.ocp.nlp[0].x_bounds[key]
-        if current_bounds.min.shape[1] == states[key].shape[1]:
-            current_min_bounds = current_bounds.min[:, :][index][:-1]
-            current_max_bounds = current_bounds.max[:, :][index][:-1]
-        else:
-            current_min_bounds = [current_bounds.min[index][0],
-                                  *[current_bounds.min[index][1]] * (states[key].shape[1] - 3),
-                                  current_bounds.min[index][2]]
-            current_max_bounds = [current_bounds.max[index][0],
-                                  *[current_bounds.max[index][1]] * (states[key].shape[1] - 3),
-                                  current_bounds.max[index][2]]
-
-        axs[subplot_index_list[subplot_index][0], subplot_index_list[subplot_index][1]].plot(bound_time, current_min_bounds)
-        axs[subplot_index_list[subplot_index][0], subplot_index_list[subplot_index][1]].plot(bound_time, current_max_bounds)
-
-        # labeled = False
-        # for k in range(data.shape[0]):
-        #     if data[k] < current_min_bounds[k] or data[k] > current_max_bounds[k]:
-        #         axs[subplot_index_list[index][0], subplot_index_list[index][1]].scatter(bound_time[k], data[k], color="red", s=10,
-        #                        label="out of bounds" if not labeled else None)
-        #         labeled = True
-
-    states = sol.stepwise_states(to_merge=SolutionMerge.NODES)
-    controls = sol.stepwise_controls(to_merge=SolutionMerge.NODES)
-    time = sol.stepwise_time(to_merge=SolutionMerge.NODES).T[0]
-
-    q_key = ["q"]
-    qdot_key = ["qdot"]
-    cn_key = [key for key in states.keys() if "Cn_" in key]
-    f_key = [key for key in states.keys() if "F_" in key]
-    a_key = [key for key in states.keys() if "A_" in key]
-    tau1_key = [key for key in states.keys() if "Tau1_" in key]
-    km_key = [key for key in states.keys() if "Km_" in key]
-    control_key = list(controls.keys())
-
-    key_list = [q_key, qdot_key, cn_key, f_key, a_key, tau1_key, km_key]
-    subplot_index_list = [[0, 0], [0, 1], [1, 0], [1, 1]]
-    y_axis_labels = [
-        "rad", "rad/s", "(-)", "N", "N/s", "s", "(-)"]
-    j = 0
-    for key in key_list:
-        fig, axs = plt.subplots(2, 2)
-        if key == ["q"] or key == ["qdot"]:
-            for i in range(3):
-                axs[subplot_index_list[i][0], subplot_index_list[i][1]].plot(time[:-1], states[key[0]][i][:-1])
-                axs[subplot_index_list[i][0], subplot_index_list[i][1]].set_title(key[0] + f" index_{i}")
-                plot_bounds(key[0], index=i, subplot_index=i, data=states[key[0]][i][:-1], bound_time=time[:-1])
-        else:
-            for i in range(len(key)):
-                axs[subplot_index_list[i][0], subplot_index_list[i][1]].plot(time[:-1], states[key[i]][0][:-1])
-                axs[subplot_index_list[i][0], subplot_index_list[i][1]].set_title(key[i])
-                plot_bounds(key[i], index=0, subplot_index=i, data=states[key[i]][0][:-1], bound_time=time[:-1])
-
-        for ax in axs.flat:
-            ax.set(xlabel='Time (s)', ylabel=y_axis_labels[j])
-        j += 1
-        plt.show()
-
-    fig, axs = plt.subplots(2, 2)
-    for i in range(len(control_key)):
-        control_val = [v for v in controls[control_key[i]][0] for _ in range(4)]
-        axs[subplot_index_list[i][0], subplot_index_list[i][1]].plot(time[:-1], control_val)
-        axs[subplot_index_list[i][0], subplot_index_list[i][1]].set_title(control_key[i])
-
-    for ax in axs.flat:
-        ax.set(xlabel='Time (s)', ylabel="pulse width (us)")
-
-    plt.show()
-
-def main():
+def main(stimulation_frequency, n_total_cycle, n_cycles_simultaneous, resistive_torque, cost_fun_weight, init_guess, save):
     # --- Simulation configuration --- #
-    save_sol = True
-    get_initial_guess = False
+    save_sol = save
+    get_initial_guess = init_guess
 
     # --- Model choice --- #
-    # model_path = "../../msk_models/Seth/Modified_UL_Seth_2D_Cycling.bioMod"
     model_path = "../../msk_models/Wu/Modified_Wu_Shoulder_Model_Cycling.bioMod"
+    # model_path = "../../msk_models/Seth/Modified_UL_Seth_2D_Cycling.bioMod"
 
     # --- MHE parameters --- #
-    n_cycles_simultaneous = [2, 3, 4, 5]
     ode_solver = OdeSolver.COLLOCATION(polynomial_degree=3, method="radau")
     # ode_solver = OdeSolver.RK4(n_integration_steps=5)
     mhe_info = {
         "cycle_duration": 1,
         "n_cycles_to_advance": 1,
-        "n_cycles": 5,
+        "n_cycles": n_total_cycle,
         "ode_solver": ode_solver,
         "use_sx": False
     }
 
     # --- Bike parameters --- #
-    resistive_torque = -0.263
     cycling_info = {"pedal_config": {"x_center": 0.35, "y_center": 0.0, "radius": 0.1},
                     "resistive_torque": {"Segment_application": "wheel", "torque": np.array([0, 0, resistive_torque])}}
 
-    # --- Build cost function weight parameters --- #
-    cost_function_weight = [
-        (1, 0, 0), (0, 1, 0), (0, 0, 1),
-        (0.75, 0.25, 0), (0.5, 0.5, 0), (0.25, 0.75, 0),
-        (0.75, 0, 0.25), (0.5, 0, 0.5), (0.25, 0, 0.75),
-        (0, 0.75, 0.25), (0, 0.5, 0.5), (0, 0.25, 0.75),
-        (1/3, 1/3, 1/3),
-    ]  # (min_force, min_fatigue, min_control)
-
     # --- Build simulation list --- #
-    stimulation_frequency = 30
     stimulation = [stimulation_frequency * i for i in n_cycles_simultaneous]
 
     # --- Build the simulation conditions list --- #
     simulation_conditions_list = create_simulation_list(n_cycles_simultaneous=n_cycles_simultaneous,
                                                         stimulation=stimulation,
-                                                        cost_fun_weight=cost_function_weight,
+                                                        cost_fun_weight=cost_fun_weight,
                                                         ode_solver=mhe_info["ode_solver"])
 
     # --- Run the initial guess optimization --- #
@@ -1025,4 +931,20 @@ def main():
                   save_sol=save_sol)
 
 if __name__ == "__main__":
-    main()
+
+    # --- Build cost function weight parameters --- #
+    # cost_function_weight = [
+    #     (1, 0, 0), (0, 1, 0), (0, 0, 1),
+    #     (0.75, 0.25, 0), (0.5, 0.5, 0), (0.25, 0.75, 0),
+    #     (0.75, 0, 0.25), (0.5, 0, 0.5), (0.25, 0, 0.75),
+    #     (0, 0.75, 0.25), (0, 0.5, 0.5), (0, 0.25, 0.75),
+    #     (1 / 3, 1 / 3, 1 / 3),
+    # ]
+
+    main(stimulation_frequency=30,
+         n_total_cycle=1,
+         n_cycles_simultaneous=[2], # [2, 3, 4, 5]
+         resistive_torque=-0.3, # (N.m)
+         cost_fun_weight=[(1, 0, 0)], # (min_force, min_fatigue, min_control)
+         init_guess=False,
+         save=False)

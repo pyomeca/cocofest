@@ -515,10 +515,10 @@ def main():
             sum_stim_truncation=6
         ) for muscle in muscle_name_list]
 
-        parameter_dict = {"Delt_ant": {"Fmax": 144, "a_scale": 2988.4, "alpha_a": -5.4 * 10e-2, "tau_fat": 104},
-                          "Delt_post": {"Fmax": 29, "a_scale": 692.4, "alpha_a": -1.92 * 10e-1, "tau_fat": 86},
-                          "Biceps": {"Fmax": 130, "a_scale": 2769.8, "alpha_a": -6.7 * 10e-2, "tau_fat": 121},
-                          "Triceps": {"Fmax": 323, "a_scale": 5357.3, "alpha_a": -3.1 * 10e-2, "tau_fat": 109},
+        parameter_dict = {"Biceps": {"Fmax": 149, "a_scale": 3314.7, "alpha_a": -5.6 * 10e-2, "tau_fat": 179.6},
+                          "Triceps": {"Fmax": 617, "a_scale": 7036.3, "alpha_a": -2.4 * 10e-2, "tau_fat": 76.2},
+                          "Delt_ant": {"Fmax": 48, "a_scale": 1148.6, "alpha_a": - 1.4 * 10e-1, "tau_fat": 445.5},
+                          "Delt_post": {"Fmax": 51, "a_scale": 1234.5, "alpha_a": - 1.1 * 10e-1, "tau_fat": 342.7},
                           }
 
         for model in muscles_model:
