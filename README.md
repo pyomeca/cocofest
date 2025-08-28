@@ -179,7 +179,7 @@ $$
 $$
 
 <p align="center">
-  <img width="500" src=docs/reaching.gif> <br>
+  <img width="500" src=docs/assets/reaching.gif> <br>
   Figure 1: Motion performed for the reaching task and associated muscle force production.
 </p>
 
@@ -213,7 +213,7 @@ $$
 $$
 
 <p align="center">
-  <img width="500" src=docs/cycling.gif> <br>
+  <img width="500" src=docs/assets/cycling.gif> <br>
   Figure 2: Motion performed for the cycling task, muscle force contribution per section inspired by
   <a href="https://www.frontiersin.org/journals/sports-and-active-living/articles/10.3389/fspor.2025.1581301/full">
     Quittmann et al. (2025)
@@ -226,9 +226,12 @@ $$
 > This optimization was solved in 1.02 second on a computer with an AMD Ryzen Threadripper PRO 7965WXs x 48 processor. <br>
 > Additional information: frequency = 30Hz, n_shooting = 60, step = 0.033s, final time = 2s, integration = Collocation radau method, polynomial_order = 3, solver = IPOPT, simultaneous turn per optimization = 2. 
 
-## Initital value problem
-You can also compute the models form initial value problem.
-For that, use the IvpFes class to build the computed problem.
+## 🎯 Initial value problem ⏩
+
+The initial value problem feature enables forward nonlinear dynamic integration to simulate the model’s behavior from given initial state and controls (i.e., series of pulse trains). 
+This also permits comparison between FES models without using optimal control methods.
+
+For that, the IvpFes class is used to build the problem.
 
 ```python
 from cocofest import IvpFes, DingModelFrequencyWithFatigue
@@ -256,7 +259,7 @@ $$
 $$
 
 <p align="center">
-  <img width="500" src=docs/identification.gif> <br>
+  <img width="500" src=docs/assets/identification.gif> <br>
   Figure 3: Model identification optimization
 </p>
 
@@ -266,7 +269,7 @@ $$
 > Additional information: frequency = 33Hz, n_shooting = 66, step = 0.03s, final time = 2s, integration = Runge-Kutta 4, integration steps = 10, solver = IPOPT. 
 
 
-## Summation truncation
+## ✂️ Summation truncation ⚡
 
 `Cocofest` also incorporates the recent numerical truncation method to speed up convergence.
 This method limits the number of past stimulations considered in the dynamics to reduce the dependency on time-varying states.
@@ -275,7 +278,7 @@ This method limits the number of past stimulations considered in the dynamics to
 model = ModelMaker.create_model("ding2007", stim_time=stim_time, sum_stim_truncation=10)
 ```
 
-> \[!TIPS]
+> \[!TIP]
 >
 > To determine the value to use for `sum_stim_truncation`, you can refer to [Tiago et al. (2025)](https://inria.hal.science/hal-05165086/) or [Co et al. (2024)](https://umontreal.scholaris.ca/items/a94c280a-98dc-48ad-888c-e11c7c6a0d55).
 
@@ -284,8 +287,18 @@ model = ModelMaker.create_model("ding2007", stim_time=stim_time, sum_stim_trunca
   <img src="docs/assets/image.png" alt="HAR Logo">
 </p>
 
+<h1>
+  <img src="docs/assets/b.png" width="100" alt="Logo"
+       style="vertical-align: middle; margin-right: .5rem;" />
+  Other
+</h1>
 
-### 🤝 Contributors
+## 🤝 How to contribute
+
+
+
+
+## 🤝 Contributors
 
 <a href="https://github.com/Kev1CO"><img src="https://avatars.githubusercontent.com/u/78259038?v=4" title="Kev1CO" width="50" height="50"></a>
 <a href="https://github.com/Ipuch"><img src="https://avatars.githubusercontent.com/u/40755537?v=4" title="Ipuch" width="50" height="50"></a>
