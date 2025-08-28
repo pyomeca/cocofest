@@ -59,7 +59,7 @@ Supports predictive musculoskeletal simulation driven by FES, moving time horizo
 
 
 <h1 align="center">
-  <img src="docs/cocofest_logo.png" width="100" alt="Logo"
+  <img src="docs/assets/cocofest_logo.png" width="100" alt="Logo"
        style="vertical-align: middle; margin-right: .5rem;" />
   About
 </h1>
@@ -367,7 +367,7 @@ Meanwhile, if you use `Cocofest`, please cite the following zenodo link: [10.528
 &nbsp;&nbsp;&nbsp;
 <a href="https://frq.gouv.qc.ca"><img src="https://cmqtr.qc.ca/wp-content/uploads/2022/09/FRQNT-logo-frqnt-COULEURS.png" title="FRQNT" width="100"></a>
 
-### <img src="docs/cocofest_logo.png" width="30"> Logo and assets design
+### <img src="docs/assets/cocofest_logo.png" width="30"> Logo and assets design
 <a href="https://www.instagram.com/maxmvpainting/"><img src="https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcQrO9f_QqjajojjcNJo8FDUdROLwLx-SQ7uVw&s" title="MaxMV" width="65"></a>
 
 <p align="center"> 
