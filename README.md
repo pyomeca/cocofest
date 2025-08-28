@@ -165,6 +165,8 @@ This approach allows motions driven-FES simulations, meanwhile benefiting from m
 ### 💻 A short musculoskeletal FES-driven example
 The following example displays a reaching task using the [Arm26](https://opensimconfluence.atlassian.net/wiki/spaces/OpenSim/pages/53090607/Musculoskeletal+Models) model driven by the [Ding2007](https://onlinelibrary.wiley.com/doi/full/10.1002/mus.20806) FES model.
 
+<br/>
+
 $$
 \begin{aligned}
 \min_{x(\cdot),\,u(\cdot)} \quad 
@@ -179,6 +181,8 @@ $$
 \;\; \text{(pulse widths per muscle)}.
 \end{aligned}
 $$
+
+<br/>
 
 <p align="center">
   <img width="800" src=docs/assets/reaching.gif> <br>
