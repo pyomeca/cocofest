@@ -1,4 +1,4 @@
-<div align="center"><a name="readme-top"></a>
+<div align="center"><a name="readme"></a>
 
 <p align="center"> 
   <img src="docs/assets/04.png" alt="HAR Logo">
@@ -7,7 +7,7 @@
 # Cocofest
 
 An Open-Source Python Package for Functional Electrical Stimulation (FES) Optimization in Optimal Control.<br/>
-Supports predictive musculoskeletal simulation driven by FES, moving time horizon, initial value problems, and FES model identification.<br/>
+Supports predictive musculoskeletal simulation driven by FES, moving time horizon, and model identification.<br/>
 "Prototype today’s FES to power tomorrow’s rehab."
 
 [![Made-with-python](https://img.shields.io/badge/Made%20with-Python%203.11-1f425f.svg?style=for-the-badge)](https://www.python.org/)
@@ -24,28 +24,33 @@ Supports predictive musculoskeletal simulation driven by FES, moving time horizo
 <details>
 <summary><kbd>Table of contents</kbd></summary>
 
-[About](#about)
+[About](#-about)
 
-[How to install Cocofest](#how-to-install)
-
-[Available FES models](#available-fes-models)
-
-[Create your own FES OCP](#create-your-own-fes-ocp)
-
-[Examples](#examples)
-- [Musculoskeletal model driven by FES models](#musculoskeletal-model-driven-by-FES-models)
-
+[Installation](#-installation)
 <details>
-<summary><a href="#other-functionalities">Other functionalities</a></summary>
+<summary><a href="#features">Features</a></summary>
 
-- [Initial value problem](#initital-value-problem)
-- [Summation truncation](#summation-truncation)
-
+- [Available FES models](#-available-fes-models-)
+- [Musculoskeletal model driven by FES](#-musculoskeletal-model-driven-by-fes-)
+- [Moving time horizons](#-moving-time-horizons-)
+- [Identification](#-identification-)
+- [Initial value problem](#-initial-value-problem-)
+- [Summation truncation](#-summation-truncation-)
 </details>
 
-[Citing](#citing)
+<br>
 
-<br/>
+<details>
+<summary><a href="#other">Other</a></summary>
+
+- [Want to contribute?](#-want-to-contribute-)
+- [Contributors](#-contributors-)
+- [Citing](#-citing)
+- [Cited in](#-cited-in)
+- [Other related projects](#other-related-projects)
+- [Acknowledgements](#-acknowledgements)
+</details>
+
 </details>
 
 <p align="center"> 
@@ -53,7 +58,7 @@ Supports predictive musculoskeletal simulation driven by FES, moving time horizo
 </p>
 
 
-<h1>
+<h1 align="center">
   <img src="docs/cocofest_logo.png" width="100" alt="Logo"
        style="vertical-align: middle; margin-right: .5rem;" />
   About
@@ -73,14 +78,15 @@ and robust solver like [Ipopt](https://github.com/coin-or/Ipopt).
 
 > \[!IMPORTANT]
 >
-> This package should not be used for rehabilitation,only for research purposes. </br>
-> Don't forget to <img src="https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fthepracticaldev.s3.amazonaws.com%2Fi%2F2nn6mhp57inp6rdxarzt.png" align="center" width="80" alt="Star the repository"> **the repository** to show your support and help us grow the community!
+> This package should not be used for rehabilitation, only for research purposes. </br>
+> Don't forget to <a href="https://github.com/pyomeca/cocofest/stargazers"><img src="https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fthepracticaldev.s3.amazonaws.com%2Fi%2F2nn6mhp57inp6rdxarzt.png" align="center" width="80" alt="Star the repository">
+      </a> **the repository** to show your support and help us grow the community!
 
 <p align="center"> 
   <img src="docs/assets/image.png" alt="HAR Logo">
 </p>
 
-<h1>
+<h1 align="center">
   <img src="docs/assets/b.png" width="100" alt="Logo"
        style="vertical-align: middle; margin-right: .5rem;" />
   Installation
@@ -105,7 +111,7 @@ conda activate YOUR_ENV_NAME
 
 After, install the dependencies
 ```bash
-conda install numpy matplotlib pytest casadi biorbd pyorerun -cconda-forge --solver=libmamba
+conda install numpy matplotlib pytest casadi biorbd pyorerun -cconda-forge
 ```
 
 Finally, install the bioptim setup.py file located in your cocofest/external/bioptim folder
@@ -120,7 +126,7 @@ You are now ready to use `Cocofest`!
   <img src="docs/assets/image.png" alt="HAR Logo">
 </p>
 
-<h1>
+<h1 align="center">
   <img src="docs/assets/b.png" width="100" alt="Logo"
        style="vertical-align: middle; margin-right: .5rem;" />
   Features
@@ -151,10 +157,10 @@ All models are implemented at the muscle actuator level, making them applicable 
 
 In conventional Hill-type muscle model, muscle force ($F_m$) is the product of a the muscle activation, $F_{max}$ the maximal
 isometric muscle force, $f_l$ the force-length, $f_v$ the force-velocity and $f_{pas}$ the passive force-length relationship:
-$$
+```math
 F_m(t) = a(t)\, F_{\max}\, f_l(\tilde{l}_m)\, f_v(\tilde{v}_m) + f_{pas}(\tilde{l}_m)
-$$
-`Cocofest` replaces $a(t)×F_{max}$ by the force obtained using [FES models](#available-fes-models).
+```
+`Cocofest` replaces $a(t)$ × $F_{max}$ by the force obtained using [FES models](#available-fes-models).
 This approach allows motions driven-FES simulations, meanwhile benefiting from musculoskeletal model properties (e.g., muscle insertion, weight, inertial).
 
 > \[!NOTE]
@@ -169,7 +175,7 @@ The following example displays a reaching task using the [Arm26](https://opensim
 \begin{aligned}
 \min_{x(\cdot),\,u(\cdot)} \quad 
 & \int_{0}^{T} \sum_{i=1}^{n} F_{m,i}(t)\,dt \\[4pt]
-\text{s.t.}\quad
+\text{s.t.:}\quad
 & q_{\text{arm}}(t) \in [-0.5,\, 3.14], && \forall t \in [0,T],\\
 & q_{\text{forearm}}(t) \in [0,\, 3.14], && \forall t \in [0,T],\\
 & \text{(last node)}\;\; \|p_{\text{hand\_marker}}(T) - p_{\text{target\_marker}}\| \le \varepsilon,\\
@@ -179,6 +185,8 @@ The following example displays a reaching task using the [Arm26](https://opensim
 \;\; \text{(pulse widths per muscle)}.
 \end{aligned}
 ```
+
+<br>
 
 <p align="center">
   <img width="800" src=docs/assets/reaching.gif> <br>
@@ -202,7 +210,7 @@ For longer time span simulation and apprehend muscle fatigue apparition, `Cocofe
 \begin{aligned}
 \min_{x(\cdot),\,u(\cdot)} \quad 
 & \int_{0}^{T} \sum_{i=1}^{n} F_{m,i}(t)\,dt \\[4pt]
-\text{s.t.}\quad
+\text{s.t.:}\quad
 & q_{\text{arm}}(t) \in [0,\, 1.5], && \forall\, t \in [0,T],\\
 & q_{\text{forearm}}(t) \in [0.5,\, 2.5], && \forall\, t \in [0,T],\\
 & q_{\text{pedal}}(t) \in [0,\, 6.28], && \forall\, t \in [0,T],\\
@@ -214,6 +222,8 @@ For longer time span simulation and apprehend muscle fatigue apparition, `Cocofe
 \;\; \text{(pulse widths per muscle)}.
 \end{aligned}
 ```
+
+<br>
 
 <p align="center">
   <img width="800" src=docs/assets/cycling.gif> <br>
@@ -257,7 +267,7 @@ To personalize FES models to simulated or experimental force, `Cocofest` support
 \begin{aligned}
 \min_{x(\cdot),\,p(\cdot)} \quad 
 & \int_{0}^{T} \bigl(F(t) - F_{\text{sim/exp}}(t)\bigr)\,dt \\[4pt]
-\text{s.t.}\quad
+\text{s.t.:}\quad
 & u(t) = \begin{bmatrix} \mathrm{pw}_{1}(t)\\ \mathrm{pw}_{2}(t)\\ \vdots\\ \mathrm{pw}_{n}(t) \end{bmatrix}
 = \begin{bmatrix} \mathrm{pw}_{\text{exp}1}(t)\\ \mathrm{pw}_{\text{exp}2}(t)\\ \vdots\\ \mathrm{pw}_{\text{exp}n}(t) \end{bmatrix}.
 \end{aligned}
@@ -292,18 +302,20 @@ model = ModelMaker.create_model("ding2007", stim_time=stim_time, sum_stim_trunca
   <img src="docs/assets/image.png" alt="HAR Logo">
 </p>
 
-<h1>
+<h1 align="center">
   <img src="docs/assets/b.png" width="100" alt="Logo"
        style="vertical-align: middle; margin-right: .5rem;" />
   Other
 </h1>
 
-## 🤝 How to contribute
+## 🙌 Want to contribute? 🛠️
 
+We are always looking for new contributors to help us improve `Cocofest`. <br>
+Feel free to check our [contributing guidelines](docs/contributing.md) to get started.
 
+Don't know where to start? [Issues](https://github.com/pyomeca/cocofest/issues) tagged with "Good first issues" are a great place to begin!
 
-
-## 🤝 Contributors
+## 🤝 Contributors 🤜🤛
 
 <a href="https://github.com/Kev1CO"><img src="https://avatars.githubusercontent.com/u/78259038?v=4" title="Kev1CO" width="50" height="50"></a>
 <a href="https://github.com/Ipuch"><img src="https://avatars.githubusercontent.com/u/40755537?v=4" title="Ipuch" width="50" height="50"></a>
@@ -311,8 +323,8 @@ model = ModelMaker.create_model("ding2007", stim_time=stim_time, sum_stim_trunca
 
 
 ## 📝 Citing
-`Cocofest` is not yet published in a journal.
-But if you use `Cocofest` in your research, please kindly cite this zenodo link [10.5281/zenodo.10427934](https://doi.org/10.5281/zenodo.10427934).
+`Cocofest` is not yet published. <br>
+Meanwhile, if you use `Cocofest`, please cite the following zenodo link: [10.5281/zenodo.10427934](https://doi.org/10.5281/zenodo.10427934).
 
 ## 📚 Cited in
 > \[!NOTE]
