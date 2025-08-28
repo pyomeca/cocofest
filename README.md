@@ -160,6 +160,7 @@ isometric muscle force, $f_l$ the force-length, $f_v$ the force-velocity and $f_
 ```math
 F_m(t) = a(t)\, F_{\max}\, f_l(\tilde{l}_m)\, f_v(\tilde{v}_m) + f_{pas}(\tilde{l}_m)
 ```
+<br>
 `Cocofest` replaces $a(t)$ × $F_{max}$ by the force obtained using [FES models](#available-fes-models).
 This approach allows motions driven-FES simulations, meanwhile benefiting from musculoskeletal model properties (e.g., muscle insertion, weight, inertial).
 
@@ -330,7 +331,7 @@ Meanwhile, if you use `Cocofest`, please cite the following zenodo link: [10.528
 > \[!NOTE]
 > If you used `Cocofest` in your research, please let us know by submitting an issue or a pull request to add your publication to this list.
 
-## <img src="https://avatars.githubusercontent.com/u/36738416?s=200&v=4" width="25">  Other related projects <img src="https://scontent.fyhu1-1.fna.fbcdn.net/v/t39.30808-6/240117475_303524718237413_7302566587299370891_n.jpg?_nc_cat=110&ccb=1-7&_nc_sid=6ee11a&_nc_ohc=vbfAVuTc8bkQ7kNvwG1bGjd&_nc_oc=AdlEeHrA1FqKtR5dXVCZM6TpjCwkhEzj_1yzCDK-ZBR2eMPBDI8Cu7J5aen7t9hq3Ug&_nc_zt=23&_nc_ht=scontent.fyhu1-1.fna&_nc_gid=-lp-gVTFx0pQ2fYPRo8_hg&oh=00_AfUVCOpekroSjSDwthOnEl8fCL22Tnp9uwq9WxrojnP2_g&oe=68AEA8DE" width="25"> 
+## <img src="https://avatars.githubusercontent.com/u/36738416?s=200&v=4" width="25">  Other related projects <img src="https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcRV1sVJMT3ICWt09iYCfGOXjQhhW1ryMehoBw&s" width="25"> 
 
 <table>
   <tr>
