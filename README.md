@@ -62,6 +62,8 @@ Supports predictive musculoskeletal simulation driven by FES, moving time horizo
   <img src="docs/assets/cocofest_logo.png" width="100" alt="Logo"
        style="vertical-align: middle; margin-right: .5rem;" />
   About
+ <img src="docs/assets/cocofest_logo.png" width="100" alt="Logo"
+       style="vertical-align: middle; margin-right: .5rem;" />
 </h1>
 
 Functional electrical stimulation (FES) is a neurorehabilitation technique that promotes motor recovery after neurological injury.
@@ -78,9 +80,9 @@ and robust solver like [Ipopt](https://github.com/coin-or/Ipopt).
 
 > \[!IMPORTANT]
 >
-> This package should not be used for rehabilitation, only for research purposes. </br>
-> Don't forget to <a href="https://github.com/pyomeca/cocofest/stargazers"><img src="https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fthepracticaldev.s3.amazonaws.com%2Fi%2F2nn6mhp57inp6rdxarzt.png" align="center" width="80" alt="Star the repository">
-      </a> **the repository** to show your support and help us grow the community!
+> `Cocofest` as no clinical clearance and should not be used for rehabilitation purposes. </br>
+> Don't forget to <a href="https://github.com/pyomeca/cocofest/stargazers"><img src="https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fthepracticaldev.s3.amazonaws.com%2Fi%2F2nn6mhp57inp6rdxarzt.png" align="center" width="80" alt="Star the repository"> </a>
+> the repository to show your support and help us grow the community!
 
 <p align="center"> 
   <img src="docs/assets/image.png" alt="HAR Logo">
@@ -90,6 +92,8 @@ and robust solver like [Ipopt](https://github.com/coin-or/Ipopt).
   <img src="docs/assets/b.png" width="100" alt="Logo"
        style="vertical-align: middle; margin-right: .5rem;" />
   Installation
+  <img src="docs/assets/b.png" width="100" alt="Logo"
+       style="vertical-align: middle; margin-right: .5rem;" />
 </h1>
 
 Currently, no anaconda installation is available. The installation must be done from the sources.
@@ -130,6 +134,8 @@ You are now ready to use `Cocofest`!
   <img src="docs/assets/b.png" width="100" alt="Logo"
        style="vertical-align: middle; margin-right: .5rem;" />
   Features
+  <img src="docs/assets/b.png" width="100" alt="Logo"
+       style="vertical-align: middle; margin-right: .5rem;" />
 </h1>
 
 
@@ -137,15 +143,15 @@ You are now ready to use `Cocofest`!
 ## 📊 Available FES models 📉
 All models are implemented at the muscle actuator level, making them applicable to a wide range of problems regardless of the specific optimal control problem.
 
-| **Model Name**  | **Citation**                                                                                                                                                                                                                     | **Description / Focus**                                             |
-| --------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------- |
-| **Veltink1992** | Veltink, P. H., Chizeck, H. J., Crago, P. E., & El-Bialy, A. (1992). *Nonlinear joint angle control for artificially stimulated muscle*. IEEE Transactions on Biomedical Engineering, 39(4), 368–380.                            | Nonlinear control of joint angles via electrical stimulation.       |
-| **Riener1996**  | Riener, R., Quintern, J., & Schmidt, G. (1996). *Biomechanical model of the human knee evaluated by neuromuscular stimulation*. Journal of Biomechanics, 29(9), 1157–1167.                                                       | Biomechanical knee model validated using neuromuscular stimulation. |
-| **Ding2003**    | Ding, J., Wexler, A. S., & Binder-Macleod, S. A. (2003). *Mathematical models for fatigue minimization during functional electrical stimulation*. Journal of Electromyography and Kinesiology, 13(6), 575–588.                   | Focus on mathematical models for minimising fatigue.                |
-| **Ding2007**    | Ding, J., Chou, L. W., Kesar, T. M., et al. (2007). *Mathematical model that predicts the force–intensity and force–frequency relationships after spinal cord injuries*. Muscle & Nerve, 36(2), 214–222.                         | Predicts force–intensity and force–frequency responses post-SCI.    |
-| **Marion2009**  | Marion, M. S., Wexler, A. S., Hull, M. L., & Binder-Macleod, S. A. (2009). *Predicting the effect of muscle length on fatigue during electrical stimulation*. Muscle & Nerve, 40(4), 573–581.                                    | Examines muscle length impact on fatigue under stimulation.         |
-| **Marion2013**  | Marion, M. S., Wexler, A. S., & Hull, M. L. (2013). *Predicting non-isometric fatigue induced by electrical stimulation pulse trains as a function of pulse duration*. Journal of NeuroEngineering and Rehabilitation, 10, 1–16. | Predicts non-isometric fatigue based on pulse duration.             |
-| **Hmed2018**    | Hmed, A. B., Bakir, T., Sakly, A., & Binczak, S. (2018). *A new mathematical force model that predicts the force-pulse amplitude relationship of human skeletal muscle*. In IEEE EMBC, pp. 3485–3488.                            | Models the relationship between pulse amplitude and force.          |
+| **Model Name**  | **Citation**                                                                                                                                                                                                                                    | **Description / Focus**                                             |
+| --------------- |-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------| ------------------------------------------------------------------- |
+| **Veltink1992** | Veltink, P. H., Chizeck, H. J., Crago, P. E., & El-Bialy, A. (1992). *Nonlinear joint angle control for artificially stimulated muscle*. IEEE Transactions on Biomedical Engineering, 39(4), 368–380.                                           | Nonlinear control of joint angles via electrical stimulation.       |
+| **Riener1996**  | Riener, R., Quintern, J., & Schmidt, G. (1996). *Biomechanical model of the human knee evaluated by neuromuscular stimulation*. Journal of Biomechanics, 29(9), 1157–1167.                                                                      | Biomechanical knee model validated using neuromuscular stimulation. |
+| **Ding2003**    | Ding, J., Wexler, A. S., & Binder-Macleod, S. A. (2003). *Mathematical models for fatigue minimization during functional electrical stimulation*. Journal of Electromyography and Kinesiology, 13(6), 575–588.                                  | Focus on mathematical models for minimising fatigue.                |
+| **Ding2007**    | Ding, J., Chou, L. W., Kesar, T. M., et al. (2007). *Mathematical model that predicts the force–intensity and force–frequency relationships after spinal cord injuries*. Muscle & Nerve, 36(2), 214–222.                                        | Predicts force–intensity and force–frequency responses post-SCI.    |
+| **Marion2009**  | Marion, M. S., Wexler, A. S., Hull, M. L., & Binder-Macleod, S. A. (2009). *Predicting the effect of muscle length on fatigue during electrical stimulation*. Muscle & Nerve, 40(4), 573–581.                                                   | Examines muscle length impact on fatigue under stimulation.         |
+| **Marion2013**  | Marion, M. S., Wexler, A. S., & Hull, M. L. (2013). *Predicting non-isometric fatigue induced by electrical stimulation pulse trains as a function of pulse duration*. Journal of NeuroEngineering and Rehabilitation, 10, 1–16.                | Predicts non-isometric fatigue based on pulse duration.             |
+| **Hmed2018**    | Hmed, A. B., Bakir, T., Garnier, Y. M., Sakly, A., Lepers, R., & Binczak, S. (2018). An approach to a muscle force model with force-pulse amplitude relationship of human quadriceps muscles. Computers in Biology and Medicine, 101, 218-228.  | Models the relationship between pulse amplitude and force.          |
 
 > \[!NOTE]
 >
@@ -307,6 +313,8 @@ model = ModelMaker.create_model("ding2007", stim_time=stim_time, sum_stim_trunca
   <img src="docs/assets/b.png" width="100" alt="Logo"
        style="vertical-align: middle; margin-right: .5rem;" />
   Other
+  <img src="docs/assets/b.png" width="100" alt="Logo"
+       style="vertical-align: middle; margin-right: .5rem;" />
 </h1>
 
 ## 🙌 Want to contribute? 🛠️
