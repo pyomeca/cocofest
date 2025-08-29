@@ -236,15 +236,22 @@ def bayes_optimize_weights(
     n_calls=20,
     n_initial_points=6,
     random_state=42,
-    weight_bounds_log=(1e-4, 1e2),   # per-muscle (log-uniform)
+    weight_bounds_log=(1e-4, 1e2),
     use_simplex=False,
     init_guess_file_path=None,
+    fixed_weights=None,
 ):
     """
     Bayesian optimize per-muscle weights on A_* (fatigue/activation states).
     Maximizes #turns before failing (we minimize its negative).
+
     If use_simplex=True, weights are softmax(x) and sum to 1 (relative importance).
+    'fixed_weights' lets you pin certain muscles to a given value (e.g., {"delt_ant": 1.0}).
+    NOTE: With use_simplex=True, fixed weights reduce the free mass (1 - sum_fixed).
     """
+
+    fixed_weights = dict(fixed_weights or {})
+
     # Build a temp model to get muscle order
     stim_time_tmp = list(np.linspace(
         0,
@@ -255,19 +262,30 @@ def bayes_optimize_weights(
     tmp_model = base.set_fes_model(model_path, stim_time_tmp)
     muscle_names = [m.muscle_name for m in tmp_model.muscles_dynamics_model]
 
+    # Validate fixed keys
+    invalid = [k for k in fixed_weights.keys() if k not in muscle_names]
+    if invalid:
+        raise ValueError(f"fixed_weights contains unknown muscles: {invalid}. "
+                         f"Known muscles: {muscle_names}")
+
+    # Split free vs fixed
+    free_names = [n for n in muscle_names if n not in fixed_weights]
+    fixed_sum = float(sum(fixed_weights.values()))
+
+    if use_simplex and fixed_sum >= 1.0 - 1e-12:
+        print("[BO] Warning: use_simplex=True but sum of fixed weights >= 1. "
+              "Free weights will be (almost) zero.")
+
     log_dir = Path("result/bo")
     log_dir.mkdir(parents=True, exist_ok=True)
     bo_log = {}  # dict[index] = {'metric': float, muscle_1: w1, ...}
 
     def _save_logs_snapshot():
         """Persist logs after each iteration (both pickle + npz)."""
-        # 1) Pickle of the dict
         with open(log_dir / "bo_iter_log.pkl", "wb") as f:
             pickle.dump(bo_log, f)
-        # 2) NPZ object (dict) + also a numeric NPZ for convenient loading
         np.savez_compressed(log_dir / "bo_iter_log.npz", bo_log=np.array([bo_log], dtype=object))
         if bo_log:
-            # Numeric arrays (weights matrix + metrics), same row order as sorted indices
             idx = np.array(sorted(bo_log.keys()))
             metrics = np.array([float(bo_log[i]["metric"]) for i in idx], dtype=float)
             weights_mat = np.array([[float(bo_log[i][name]) for name in muscle_names] for i in idx], dtype=float)
@@ -279,12 +297,14 @@ def bayes_optimize_weights(
                 metric=metrics,
             )
 
-    # Search space
+    # --- Define search space only over FREE muscles --- #
     if use_simplex:
-        space = [Real(-5.0, 5.0, name=f"z_{n}") for n in muscle_names]
+        space = [Real(-5.0, 5.0, name=f"z_{n}") for n in free_names]
+        free_param_names = [f"z_{n}" for n in free_names]
     else:
         space = [Real(weight_bounds_log[0], weight_bounds_log[1], prior="log-uniform", name=f"w_{n}")
-                 for n in muscle_names]
+                 for n in free_names]
+        free_param_names = [f"w_{n}" for n in free_names]
 
     # Template simulation conditions for each BO eval
     stim_count = stimulation_frequency * n_cycles_simultaneous_for_bo
@@ -296,23 +316,41 @@ def bayes_optimize_weights(
         "init_guess_file_path": init_guess_file_path,
     }
 
-    def _vector_to_weights(x):
+    def _compose_full_weights(free_vec):
+        """
+        Turn a vector 'free_vec' (ordered as free_names) into the full ordered
+        weight list aligned with 'muscle_names', inserting fixed weights.
+        Handles simplex case by allocating remaining mass to the free muscles.
+        """
         if use_simplex:
-            z = np.array(x) - np.max(x)
-            w = np.exp(z)
-            w = w / (np.sum(w) + 1e-12)
-            return w.tolist()
-        return list(x)
+            # softmax over free variables, then scale by remaining mass
+            z = np.array(free_vec) - (np.max(free_vec) if len(free_vec) else 0.0)
+            w_free = np.exp(z) if len(z) else np.array([])
+            w_free = w_free / (np.sum(w_free) + 1e-12) if len(w_free) else w_free
+            remaining = max(1e-12, 1.0 - fixed_sum)  # remaining simplex mass
+            w_free = w_free * remaining
+        else:
+            w_free = np.array(free_vec, dtype=float)
+
+        full = []
+        j = 0
+        for name in muscle_names:
+            if name in fixed_weights:
+                full.append(float(fixed_weights[name]))
+            else:
+                full.append(float(w_free[j]))
+                j += 1
+        return full
 
     _cache = {}
 
     @use_named_args(space)
     def objective(**kwargs):
-        # --- Extract vector in the muscle order --- #
-        x = [kwargs[k] for k in (sorted(kwargs.keys(), key=lambda s: muscle_names.index(s.split("_", 1)[1])))]
-        weights = _vector_to_weights(x)
+        # Extract free vector in the consistent order
+        x_free = [kwargs[k] for k in free_param_names] if free_param_names else []
+        weights = _compose_full_weights(x_free)
 
-        # --- Avoid float-as-key noise --- #
+        # Cache by full weight tuple to avoid duplicate work
         key = tuple([round(float(v), 8) for v in weights])
         if key in _cache:
             loss = _cache[key]
@@ -323,12 +361,10 @@ def bayes_optimize_weights(
             _save_logs_snapshot()
             return loss
 
-        # --- Build per-run simulation_conditions --- #
         sim_cond = dict(sim_cond_template)
         sim_cond["cost_fun_weight"] = weights
 
         try:
-            # --- Run the MHE with the given weights and obtain optimization metric (num_turns_before_failing) --- #
             print(f"[BO] Running NMPC with weights: {weights} for muscles: {muscle_names}")
             metric = run_optim_bo(
                 mhe_info=mhe_info,
@@ -339,35 +375,36 @@ def bayes_optimize_weights(
                 return_metric=True,
             )
             loss = -float(metric)  # maximize metric
-
         except Exception as e:
             print(f"[BO] NMPC failed for weights={weights} -> {e}")
             loss = 1e6
+            metric = float("nan")
 
         _cache[key] = loss
 
-        i = len(bo_log)  # iteration index
+        i = len(bo_log)
         entry = {name: float(w) for name, w in zip(muscle_names, weights)}
-        entry["metric"] = float(metric)
+        entry["metric"] = float(metric) if np.isfinite(metric) else float("nan")
         bo_log[i] = entry
         _save_logs_snapshot()
 
         return loss
 
-    print(f"[BO] Optimizing {len(muscle_names)} weights over {n_calls} evaluations...")
+    print(f"[BO] Optimizing {len(free_names)} free weights (of {len(muscle_names)}) over {n_calls} evaluations...")
     res = gp_minimize(
         func=objective,
         dimensions=space,
         n_calls=n_calls,
-        n_initial_points=n_initial_points,
+        n_initial_points=min(n_initial_points, max(1, len(space))),  # guard when few frees
         acq_func="EI",
         random_state=random_state,
         verbose=True,
     )
 
-    best_w = _vector_to_weights(res.x)
+    # Compose full best weights (include fixed)
+    best_full_w = _compose_full_weights(res.x if len(space) else [])
     best_metric = -res.fun
-    best_w_dict = {name: w for name, w in zip(muscle_names, best_w)}
+    best_w_dict = {name: w for name, w in zip(muscle_names, best_full_w)}
 
     print("\n[BO] Done.")
     print("[BO] Best metric (turns before failing):", best_metric)
@@ -376,7 +413,7 @@ def bayes_optimize_weights(
 
     # Confirm best with a saved final run
     final_sim_cond = dict(sim_cond_template)
-    final_sim_cond["cost_fun_weight"] = best_w
+    final_sim_cond["cost_fun_weight"] = best_full_w
     final_sim_cond["pickle_file_path"] = Path("result/bo/bo_best.pkl")
 
     final_metric, final_sol = run_optim_bo(
@@ -425,6 +462,7 @@ def main_bayes():
         weight_bounds_log=(1e-4, 1e2),
         use_simplex=False,
         init_guess_file_path=init_guess,
+        fixed_weights={"Delt_ant": 1.0},
     )
 
     print("\nSuggested BO weights:")
