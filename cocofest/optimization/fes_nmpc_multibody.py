@@ -13,7 +13,6 @@ from bioptim import (
     MultiCyclicCycleSolutions,
     ExternalForceSetTimeSeries,
     ControlType,
-    OdeSolver,
 )
 from .fes_nmpc import FesNmpc
 from ..models.dynamical_model import FesMskModel

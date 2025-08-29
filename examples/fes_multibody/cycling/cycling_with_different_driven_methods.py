@@ -4,7 +4,6 @@ muscle driven / FES driven dynamics and includes a resistive torque at the handl
 """
 
 from sys import platform
-import matplotlib.pyplot as plt
 import numpy as np
 
 from bioptim import (

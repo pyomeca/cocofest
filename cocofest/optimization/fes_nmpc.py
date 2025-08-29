@@ -4,10 +4,8 @@ from casadi import SX
 from bioptim import (
     MultiCyclicNonlinearModelPredictiveControl,
     MultiCyclicCycleSolutions,
-    OdeSolver,
     OptimalControlProgram,
     InitialGuessList,
-    InterpolationType,
     ParameterList,
     VariableScaling,
     Solution,
