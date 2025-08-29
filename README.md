@@ -96,14 +96,14 @@ and robust solver like [Ipopt](https://github.com/coin-or/Ipopt).
        style="vertical-align: middle; margin-right: .5rem;" />
 </h1>
 
-Currently, no anaconda installation is available. The installation must be done from the sources.
-Cloning the repository is the first step to be able to use the package.
+Currently, no anaconda installation is available. The installation must be done from the sources. <br>
+**Cloning** the repository is the first step to be able to use the package.
 
 ### Dependencies
 `Cocofest` relies on several libraries. 
-Follows the steps to install everything you need to use `Cocofest`.
+So carefully follow these steps to get everything installed to use `Cocofest`.
 </br>
-First, you need to create a new conda environment
+First, create a new conda environment
 ```bash
 conda create -n YOUR_ENV_NAME python=3.11
 ```
@@ -115,7 +115,7 @@ conda activate YOUR_ENV_NAME
 
 After, install the dependencies
 ```bash
-conda install numpy matplotlib pytest casadi biorbd pyorerun -cconda-forge
+conda install numpy matplotlib pytest casadi biorbd pyorerun -c conda-forge
 ```
 
 Finally, install the bioptim setup.py file located in your cocofest/external/bioptim folder
