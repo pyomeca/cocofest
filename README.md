@@ -1,7 +1,7 @@
 <div align="center"><a name="readme"></a>
 
 <p align="center"> 
-  <img src="docs/assets/04.png" alt="HAR Logo">
+  <img src="https://cdnb.artstation.com/p/assets/images/images/091/412/725/large/max_mv-04-03.jpg?1756739925" alt="HAR Logo">
 </p>
 
 # Cocofest
@@ -62,8 +62,6 @@ Supports predictive musculoskeletal simulation driven by FES, moving time horizo
   <img src="docs/assets/cocofest_logo.png" width="100" alt="Logo"
        style="vertical-align: middle; margin-right: .5rem;" />
   About
- <img src="docs/assets/cocofest_logo.png" width="100" alt="Logo"
-       style="vertical-align: middle; margin-right: .5rem;" />
 </h1>
 
 Functional electrical stimulation (FES) is a neurorehabilitation technique that promotes motor recovery after neurological injury.
@@ -92,8 +90,6 @@ and robust solver like [Ipopt](https://github.com/coin-or/Ipopt).
   <img src="docs/assets/b.png" width="100" alt="Logo"
        style="vertical-align: middle; margin-right: .5rem;" />
   Installation
-  <img src="docs/assets/b.png" width="100" alt="Logo"
-       style="vertical-align: middle; margin-right: .5rem;" />
 </h1>
 
 Currently, no anaconda installation is available. The installation must be done from the sources. <br>
@@ -134,13 +130,11 @@ You are now ready to use `Cocofest`!
   <img src="docs/assets/b.png" width="100" alt="Logo"
        style="vertical-align: middle; margin-right: .5rem;" />
   Features
-  <img src="docs/assets/b.png" width="100" alt="Logo"
-       style="vertical-align: middle; margin-right: .5rem;" />
 </h1>
 
 
 
-## 📊 Available FES models 📉
+## 📊 Available FES models
 All models are implemented at the muscle actuator level, making them applicable to a wide range of problems regardless of the specific optimal control problem.
 
 | **Model Name**  | **Citation**                                                                                                                                                                                                                                    | **Description / Focus**                                             |
@@ -159,7 +153,7 @@ All models are implemented at the muscle actuator level, making them applicable 
 > Adventurous enough to code it by yourself, we are looking forward to read your [pull request](how-to-contribute).
 > Feel free to reach out on discord or submit an issue if you need help.
 
-## 🦴 Musculoskeletal model driven by FES 💪
+## 🦴 Musculoskeletal model driven by FES
 
 In conventional Hill-type muscle model, muscle force ($F_m$) is the product of a the muscle activation, $F_{max}$ the maximal
 isometric muscle force, $f_l$ the force-length, $f_v$ the force-velocity and $f_{pas}$ the passive force-length relationship:
@@ -207,7 +201,7 @@ The following example displays a reaching task using the [Arm26](https://opensim
 
 You can find more examples of musculoskeletal model driven by FES in the following [file](https://github.com/pyomeca/cocofest/tree/main/examples/fes_multibody).
 
-## 🚀 Moving time horizons ⏳
+## ⏳ Moving time horizons
 
 For longer time span simulation and apprehend muscle fatigue apparition, `Cocofest` implements moving time horizons (MHE).
 
@@ -246,7 +240,7 @@ For longer time span simulation and apprehend muscle fatigue apparition, `Cocofe
 > Solved in 1.02 second, computer with an AMD Ryzen Threadripper PRO 7965WXs x 48 processor. <br>
 > Additional information: frequency = 30Hz, n_shooting = 60, step = 0.033s, final time = 2s, integration = Collocation radau method, polynomial_order = 3, solver = IPOPT, simultaneous turn per optimization = 2. 
 
-## 🎯 Initial value problem ⏩
+## 🎯 Initial value problem
 
 The initial value problem feature enables forward nonlinear dynamic integration to simulate the model’s behavior from given initial state and controls (i.e., series of pulse trains). 
 This also permits comparison between FES models without using optimal control methods.
@@ -264,7 +258,7 @@ ivp = IvpFes(fes_parameters, ivp_parameters)
 result, time = ivp.integrate()
 ```
 
-## 🔎 Identification 🆔
+## 🔎 Identification
 
 To personalize FES models to simulated or experimental force, `Cocofest` supports model identification using optimal control.
 
@@ -291,7 +285,7 @@ To personalize FES models to simulated or experimental force, `Cocofest` support
 > Additional information: frequency = 33Hz, n_shooting = 66, step = 0.03s, final time = 2s, integration = Runge-Kutta 4, integration steps = 10, solver = IPOPT. 
 
 
-## ✂️ Summation truncation ⚡
+## ✂️ Summation truncation
 
 `Cocofest` also incorporates the recent numerical truncation method to speed up convergence.
 This method limits the number of past stimulations considered in the dynamics to reduce the dependency on time-varying states.
@@ -317,14 +311,14 @@ model = ModelMaker.create_model("ding2007", stim_time=stim_time, sum_stim_trunca
        style="vertical-align: middle; margin-right: .5rem;" />
 </h1>
 
-## 🙌 Want to contribute? 🛠️
+## 🙌 Want to contribute?
 
 We are always looking for new contributors to help us improve `Cocofest`. <br>
 Feel free to check our [contributing guidelines](docs/contributing.md) to get started.
 
 Don't know where to start? [Issues](https://github.com/pyomeca/cocofest/issues) tagged with "Good first issues" are a great place to begin!
 
-## 🤝 Contributors 🤜🤛
+## 🤝 Contributors
 
 <a href="https://github.com/Kev1CO"><img src="https://avatars.githubusercontent.com/u/78259038?v=4" title="Kev1CO" width="50" height="50"></a>
 <a href="https://github.com/Ipuch"><img src="https://avatars.githubusercontent.com/u/40755537?v=4" title="Ipuch" width="50" height="50"></a>
