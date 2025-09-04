@@ -32,7 +32,9 @@ def prepare_ocp(model: FesModel, final_time: float, pw_max: float, force_trackin
     """
     # --- Set dynamics --- #
     n_shooting = model.get_n_shooting(final_time=final_time)  # Create the number of shooting points for the OCP
-    time_series, stim_idx_at_node_list = model.get_numerical_data_time_series(n_shooting, final_time)  # Retrieve time and indexes at which occurs the stimulation for the FES dynamic
+    time_series, stim_idx_at_node_list = model.get_numerical_data_time_series(
+        n_shooting, final_time
+    )  # Retrieve time and indexes at which occurs the stimulation for the FES dynamic
     dynamics = OcpFes.declare_dynamics(
         model,
         time_series,
@@ -48,7 +50,7 @@ def prepare_ocp(model: FesModel, final_time: float, pw_max: float, force_trackin
 
     # --- Set objective functions --- #
     objective_functions = ObjectiveList()
-    force_to_track = force_tracking[np.newaxis,:]  # Reshape list to track to match Bioptim's target size
+    force_to_track = force_tracking[np.newaxis, :]  # Reshape list to track to match Bioptim's target size
     objective_functions.add(
         ObjectiveFcn.Mayer.TRACK_STATE,
         key="F",
@@ -101,7 +103,15 @@ def main(plot=True):
 
         bar_width = final_time / stim
         for i in range(sol_control["last_pulse_width"].shape[1]):
-            axs[1].bar(final_time * (i/stim), sol_control["last_pulse_width"][0][i] * 10e5, width=bar_width, align='edge', color='blue', alpha=0.3, edgecolor='black')
+            axs[1].bar(
+                final_time * (i / stim),
+                sol_control["last_pulse_width"][0][i] * 10e5,
+                width=bar_width,
+                align="edge",
+                color="blue",
+                alpha=0.3,
+                edgecolor="black",
+            )
 
         axs[1].set_ylabel("Pulse width (µs)", fontsize=14, fontweight="bold", color="black")
         axs[1].set_xlabel("Time (s)", fontsize=14, fontweight="bold", color="black")

@@ -26,7 +26,10 @@ class CustomObjective:
         muscle_name_list = controller.model.bio_model.muscle_names
         muscle_model = controller.model.muscles_dynamics_model
         muscle_fatigue = vertcat(
-            *[1-(controller.states["A_" + muscle_name_list[x]].cx / muscle_model[x].a_scale) for x in range(len(muscle_name_list))]
+            *[
+                1 - (controller.states["A_" + muscle_name_list[x]].cx / muscle_model[x].a_scale)
+                for x in range(len(muscle_name_list))
+            ]
         )
         return muscle_fatigue
 
@@ -47,7 +50,10 @@ class CustomObjective:
         muscle_name_list = controller.model.bio_model.muscle_names
         muscle_model = controller.model.muscles_dynamics_model
         muscle_force = vertcat(
-            *[controller.states["F_" + muscle_name_list[x]].cx / muscle_model[x].fmax for x in range(len(muscle_name_list))]
+            *[
+                controller.states["F_" + muscle_name_list[x]].cx / muscle_model[x].fmax
+                for x in range(len(muscle_name_list))
+            ]
         )
         return muscle_force
 
@@ -70,7 +76,8 @@ class CustomObjective:
             if isinstance(controller.model.muscles_dynamics_model[0], DingModelPulseWidthFrequency):
                 stim_charge = vertcat(
                     *[
-                        controller.controls["last_pulse_width_" + muscle_name_list[x]].cx / controller.ocp.nlp[0].u_bounds["last_pulse_width_" + muscle_name_list[x]].max[0][0]
+                        controller.controls["last_pulse_width_" + muscle_name_list[x]].cx
+                        / controller.ocp.nlp[0].u_bounds["last_pulse_width_" + muscle_name_list[x]].max[0][0]
                         for x in range(len(muscle_name_list))
                     ]
                 )

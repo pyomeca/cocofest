@@ -14,8 +14,14 @@ from skopt.utils import use_named_args
 from casadi import MX, vertcat
 
 from bioptim import (
-    ObjectiveList, ObjectiveFcn, Node,
-    CostType, MultiCyclicCycleSolutions, Solver, OdeSolver, PenaltyController
+    ObjectiveList,
+    ObjectiveFcn,
+    Node,
+    CostType,
+    MultiCyclicCycleSolutions,
+    Solver,
+    OdeSolver,
+    PenaltyController,
 )
 
 import cycling_pulse_width_mhe as base
@@ -80,6 +86,7 @@ def set_objective_functions(muscle_fatigue_key, cost_fun_weight, target):
     )
 
     return objective_functions
+
 
 def prepare_nmpc_bo(
     model,
@@ -216,8 +223,7 @@ def run_optim_bo(
     if save_sol:
         Path("result/bo").mkdir(parents=True, exist_ok=True)
         base.save_sol_in_pkl(
-            sol, sim_cond, is_initial_guess=False,
-            torque=cycling_info["resistive_torque"]["torque"][-1]
+            sol, sim_cond, is_initial_guess=False, torque=cycling_info["resistive_torque"]["torque"][-1]
         )
 
     if return_metric or return_solution:
@@ -253,28 +259,28 @@ def bayes_optimize_weights(
     fixed_weights = dict(fixed_weights or {})
 
     # Build a temp model to get muscle order
-    stim_time_tmp = list(np.linspace(
-        0,
-        mhe_info["cycle_duration"] * n_cycles_simultaneous_for_bo,
-        stimulation_frequency * n_cycles_simultaneous_for_bo,
-        endpoint=False,
-    ))
+    stim_time_tmp = list(
+        np.linspace(
+            0,
+            mhe_info["cycle_duration"] * n_cycles_simultaneous_for_bo,
+            stimulation_frequency * n_cycles_simultaneous_for_bo,
+            endpoint=False,
+        )
+    )
     tmp_model = base.set_fes_model(model_path, stim_time_tmp)
     muscle_names = [m.muscle_name for m in tmp_model.muscles_dynamics_model]
 
     # Validate fixed keys
     invalid = [k for k in fixed_weights.keys() if k not in muscle_names]
     if invalid:
-        raise ValueError(f"fixed_weights contains unknown muscles: {invalid}. "
-                         f"Known muscles: {muscle_names}")
+        raise ValueError(f"fixed_weights contains unknown muscles: {invalid}. " f"Known muscles: {muscle_names}")
 
     # Split free vs fixed
     free_names = [n for n in muscle_names if n not in fixed_weights]
     fixed_sum = float(sum(fixed_weights.values()))
 
     if use_simplex and fixed_sum >= 1.0 - 1e-12:
-        print("[BO] Warning: use_simplex=True but sum of fixed weights >= 1. "
-              "Free weights will be (almost) zero.")
+        print("[BO] Warning: use_simplex=True but sum of fixed weights >= 1. " "Free weights will be (almost) zero.")
 
     log_dir = Path("result/bo")
     log_dir.mkdir(parents=True, exist_ok=True)
@@ -302,8 +308,9 @@ def bayes_optimize_weights(
         space = [Real(-5.0, 5.0, name=f"z_{n}") for n in free_names]
         free_param_names = [f"z_{n}" for n in free_names]
     else:
-        space = [Real(weight_bounds_log[0], weight_bounds_log[1], prior="log-uniform", name=f"w_{n}")
-                 for n in free_names]
+        space = [
+            Real(weight_bounds_log[0], weight_bounds_log[1], prior="log-uniform", name=f"w_{n}") for n in free_names
+        ]
         free_param_names = [f"w_{n}" for n in free_names]
 
     # Template simulation conditions for each BO eval
@@ -456,7 +463,7 @@ def main_bayes():
         model_path=model_path,
         stimulation_frequency=30,
         n_cycles_simultaneous_for_bo=n_cycle_simultaneous,
-        n_calls=10,
+        n_calls=100,
         n_initial_points=6,
         random_state=42,
         weight_bounds_log=(1e-4, 1e2),
@@ -490,6 +497,7 @@ def read_pickle_file(file_type="pkl", is_numeric=False):
             entry.update({name: float(weights[k, j]) for j, name in enumerate(muscle_names)})
             bo[int(iter_id)] = entry
     print(bo)
+
 
 if __name__ == "__main__":
     main_bayes()

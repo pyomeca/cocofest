@@ -42,7 +42,7 @@ def initialize_model(final_time):
         DingModelPulseWidthFrequency(muscle_name="BRA", sum_stim_truncation=6),
     ]
 
-    stim_time = list(np.linspace(0,final_time,30, endpoint=False))
+    stim_time = list(np.linspace(0, final_time, 30, endpoint=False))
     model = FesMskModel(
         name=None,
         biorbd_path="../../msk_models/Arm26/arm26_with_reaching_target.bioMod",
@@ -142,10 +142,7 @@ def prepare_ocp(
 def main():
     final_time = 1
     model = initialize_model(final_time)
-    ocp = prepare_ocp(
-        model=model,
-        final_time=final_time,
-        max_bound=0.0006)
+    ocp = prepare_ocp(model=model, final_time=final_time, max_bound=0.0006)
 
     sol = ocp.solve(Solver.IPOPT(_max_iter=10000))
     sol.animate(viewer="pyorerun")

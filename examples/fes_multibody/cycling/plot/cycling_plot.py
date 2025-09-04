@@ -19,6 +19,7 @@ def _safe_cycle_slice(total_len, slice_index, frame):
     last_start = max(0, (total_len - 1) // slice_index * slice_index)
     return last_start, total_len
 
+
 def _safe_cycle_index(length, slice_index, frame):
     """
     Returns a safe index for a scalar read at the beginning of a cycle.
@@ -28,6 +29,7 @@ def _safe_cycle_index(length, slice_index, frame):
         return 0
     idx = frame * slice_index
     return idx if idx < length else length - 1
+
 
 def _condition_alpha(data_entry, frame, active_alpha=1.0, inactive_alpha=0.25):
     """Lower alpha once the condition has failed (i.e., its cycles are exhausted)."""
@@ -77,13 +79,16 @@ def process_data(file_path_list):
 
         # Get the index to slice for each cycle
         # data_dictionary["slice_index"] = data["n_shooting_per_cycle"] * (data["polynomial_order"] + 1)
-        data_dictionary["slice_index"] = int(data["total_n_shooting"]/(len(data["solving_time_per_ocp"]))) * (data["polynomial_order"] + 1)  # Temporary fix
+        data_dictionary["slice_index"] = int(data["total_n_shooting"] / (len(data["solving_time_per_ocp"]))) * (
+            data["polynomial_order"] + 1
+        )  # Temporary fix
         data_dictionary["number_of_turns_before_failing"] = int(data["number_of_turns_before_failing"])
         data_dictionary["solving_time_per_ocp"] = data["solving_time_per_ocp"]
 
         data_list.append(data_dictionary)
 
     return data_list
+
 
 def plot_data(data_list, conditions, update_dict=None):
     """
@@ -107,16 +112,24 @@ def plot_data(data_list, conditions, update_dict=None):
     axd = create_circular_subplots(data_list, axd, fig, color_list, frame=frame)
 
     # Plot muscle fatigue
-    axd = create_bar_subplots(data_list, axd, key="a", layout_index=2, color_list=color_list, conditions=conditions, frame=frame)
+    axd = create_bar_subplots(
+        data_list, axd, key="a", layout_index=2, color_list=color_list, conditions=conditions, frame=frame
+    )
 
     # Plot Tau1
-    axd = create_bar_subplots(data_list, axd, key="tau1", layout_index=3, color_list=color_list, conditions=conditions, frame=frame)
+    axd = create_bar_subplots(
+        data_list, axd, key="tau1", layout_index=3, color_list=color_list, conditions=conditions, frame=frame
+    )
 
     # Plot Km
-    axd = create_bar_subplots(data_list, axd, key="km", layout_index=4, color_list=color_list, conditions=conditions, frame=frame)
+    axd = create_bar_subplots(
+        data_list, axd, key="km", layout_index=4, color_list=color_list, conditions=conditions, frame=frame
+    )
 
     # Plot number of turns before failing
-    axd = create_n_cycle_before_failure_plot(data_list, axd, layout_index=layout[-1][-1], index=frame, color_list=color_list)
+    axd = create_n_cycle_before_failure_plot(
+        data_list, axd, layout_index=layout[-1][-1], index=frame, color_list=color_list
+    )
 
     # Set legend
     axd = set_legend(data_list, axd, conditions, color_list, layout_index=layout, frame=frame)
@@ -128,6 +141,7 @@ def plot_data(data_list, conditions, update_dict=None):
     else:
         plt.show()
 
+
 def create_layout(data_list):
     """
     Creates a layout for the plots based on the data list.
@@ -137,11 +151,10 @@ def create_layout(data_list):
     cycling_info_layout = [1, 2, 2, 2, 2]
 
     layout = [
-             [val + i * 4 for val in plot_layout]
-              + [cycling_info_layout[i] + number_of_muscle * 4]
-         for i in range(number_of_muscle)
-         for _ in range(2)
-        ]
+        [val + i * 4 for val in plot_layout] + [cycling_info_layout[i] + number_of_muscle * 4]
+        for i in range(number_of_muscle)
+        for _ in range(2)
+    ]
 
     layout_str = [[str(n) for n in row] for row in layout]
     return layout_str
@@ -158,7 +171,9 @@ def create_circular_force_plot(data, axis, color=None, frame=0, fmax=None, alpha
         axis[str(layout_index)].set_xticks(ticks)
         axis[str(layout_index)].set_yticklabels([])
         axis[str(layout_index)].set_rlim(0, fmax[key])
-        axis[str(layout_index)].set_ylabel(key + "\n" + "Fmax = " + str(int(fmax[key])) + "N", fontsize=18, labelpad=80, fontweight='bold')
+        axis[str(layout_index)].set_ylabel(
+            key + "\n" + "Fmax = " + str(int(fmax[key])) + "N", fontsize=18, labelpad=80, fontweight="bold"
+        )
 
         # Slice safely
         q_slice = data["q"][s_min:s_max]
@@ -176,14 +191,18 @@ def create_circular_force_plot(data, axis, color=None, frame=0, fmax=None, alpha
         layout_index += 4
     return axis
 
+
 def create_circular_subplots(data_list, axis, fig, color_list, frame):
     f_max_dict = get_max_per_key(data_list, "force")
     axis = init_circular_graphs(axis, fig, keys=data_list[0]["force"].keys())
     for i in range(len(data_list)):
         a = _condition_alpha(data_list[i], frame)
-        axis = create_circular_force_plot(data=data_list[i], axis=axis, color=color_list[i], frame=frame, fmax=f_max_dict, alpha=a)
-    axis["1"].set_title("Force", fontsize=15, fontweight='bold', pad=20)
+        axis = create_circular_force_plot(
+            data=data_list[i], axis=axis, color=color_list[i], frame=frame, fmax=f_max_dict, alpha=a
+        )
+    axis["1"].set_title("Force", fontsize=15, fontweight="bold", pad=20)
     return axis
+
 
 def get_max_per_key(data_list, tag):
     temp_list = []
@@ -196,33 +215,38 @@ def get_max_per_key(data_list, tag):
     max_dict = {key: max([temp_list[i][key] for i in range(len(data_list))]) for key in temp_list[0].keys()}
     return max_dict
 
+
 def init_circular_graphs(axis, fig, keys):
     layout_index = 1
     for key in keys:
         bbox = axis[str(layout_index)].get_position()
         fig.delaxes(axis[str(layout_index)])
-        axis[str(layout_index)] = fig.add_axes(bbox, projection='polar')
-        axis[str(layout_index)].set_theta_zero_location('E')
+        axis[str(layout_index)] = fig.add_axes(bbox, projection="polar")
+        axis[str(layout_index)].set_theta_zero_location("E")
         axis[str(layout_index)].set_theta_direction(-1)
         layout_index += 4
     return axis
+
 
 def create_bar_subplots(data_list, axis, key, layout_index, color_list, conditions, frame=0):
     max_dict = get_max_per_key(data_list, key)
     for i in range(len(data_list)):
         alpha = _condition_alpha(data_list[i], frame)
-        axis = create_bar_plot(data=data_list[i][key],
-                               axis=axis,
-                               index=i,
-                               color=color_list[i],
-                               layout_index=layout_index,
-                               max_y=max_dict,
-                               key=key,
-                               conditions=conditions,
-                               slice_index=data_list[i]["slice_index"],
-                               frame=frame,
-                               alpha=alpha)
+        axis = create_bar_plot(
+            data=data_list[i][key],
+            axis=axis,
+            index=i,
+            color=color_list[i],
+            layout_index=layout_index,
+            max_y=max_dict,
+            key=key,
+            conditions=conditions,
+            slice_index=data_list[i]["slice_index"],
+            frame=frame,
+            alpha=alpha,
+        )
     return axis
+
 
 def create_bar_plot(data, axis, index, color, layout_index, max_y, key, conditions, slice_index, frame, alpha=1.0):
     muscle_names = list(data.keys())
@@ -236,25 +260,37 @@ def create_bar_plot(data, axis, index, color, layout_index, max_y, key, conditio
         axis[str(layout_index)].bar(index, height, color=color, alpha=alpha)
         axis[str(layout_index)].set_xticks([])
         if i == 0:
-            title = "Force scaling factor A (N/s)" if key == "a" else "Time force decay Tau1 (s)" if key == "tau1" else "Cross-bridges to calcium Km (-)"
-            axis[str(layout_index)].set_title(title, fontsize=13, fontweight='bold', pad=20)
+            title = (
+                "Force scaling factor A (N/s)"
+                if key == "a"
+                else "Time force decay Tau1 (s)" if key == "tau1" else "Cross-bridges to calcium Km (-)"
+            )
+            axis[str(layout_index)].set_title(title, fontsize=13, fontweight="bold", pad=20)
         if i == len(muscle_names) - 1:
             axis[str(layout_index)].set_xticks(range(len(data_list)))
             axis[str(layout_index)].set_xticklabels(conditions, fontsize=12, rotation=65)
         layout_index += 4
     return axis
 
+
 def create_n_cycle_before_failure_plot(data_list, axis, layout_index, index, color_list):
     axis[str(layout_index)].set_xticks([])
-    axis[str(layout_index)].set_title("Turns before failing", fontsize=13, fontweight='bold', pad=20)
+    axis[str(layout_index)].set_title("Turns before failing", fontsize=13, fontweight="bold", pad=20)
     axis[str(layout_index)].set_xticks(range(len(data_list)))
     axis[str(layout_index)].set_xticklabels(conditions, fontsize=12, rotation=65)
-    axis[str(layout_index)].set_ylim([0, max(data_list[i]["number_of_turns_before_failing"] for i in range(len(data_list))) + 1])
+    axis[str(layout_index)].set_ylim(
+        [0, max(data_list[i]["number_of_turns_before_failing"] for i in range(len(data_list))) + 1]
+    )
     for i in range(len(data_list)):
-        height = index + 1 if data_list[i]["number_of_turns_before_failing"] > index + 1 else data_list[i]["number_of_turns_before_failing"]
+        height = (
+            index + 1
+            if data_list[i]["number_of_turns_before_failing"] > index + 1
+            else data_list[i]["number_of_turns_before_failing"]
+        )
         alpha = _condition_alpha(data_list[i], index)
         axis[str(layout_index)].bar(i, height, color=color_list[i], alpha=alpha)
     return axis
+
 
 def set_legend(data_list, axis, conditions, colors, layout_index, frame):
     """
@@ -262,7 +298,7 @@ def set_legend(data_list, axis, conditions, colors, layout_index, frame):
     """
     cycle = frame
     index = layout_index[0][-1]
-    axis[index].axis('off')
+    axis[index].axis("off")
 
     square_size = 0.08
     start_y = 0.85
@@ -271,35 +307,66 @@ def set_legend(data_list, axis, conditions, colors, layout_index, frame):
     x0 = 0.10
     value_x = 0.92
 
-    axis[index].text(value_x, start_y + 0.2, f"Time to solve cycle {cycle} (s)",
-            transform=axis[index].transAxes, ha="right", va="bottom",
-            fontsize=12, fontweight="bold")
+    axis[index].text(
+        value_x,
+        start_y + 0.2,
+        f"Time to solve cycle {cycle} (s)",
+        transform=axis[index].transAxes,
+        ha="right",
+        va="bottom",
+        fontsize=12,
+        fontweight="bold",
+    )
 
     # Draw entries
-    for i, (label, color) in enumerate(zip(conditions, colors[:len(conditions)])):
+    for i, (label, color) in enumerate(zip(conditions, colors[: len(conditions)])):
         y = start_y - i * y_step
 
         if i < len(data_list) and "solving_time_per_ocp" in data_list[i]:
-            value = float(data_list[i]["solving_time_per_ocp"][cycle]) if cycle < len(data_list[i]["solving_time_per_ocp"]) else float(data_list[i]["solving_time_per_ocp"][-1])
+            value = (
+                float(data_list[i]["solving_time_per_ocp"][cycle])
+                if cycle < len(data_list[i]["solving_time_per_ocp"])
+                else float(data_list[i]["solving_time_per_ocp"][-1])
+            )
         else:
             value = float("nan")
 
         alpha = _condition_alpha(data_list[i], frame)
 
         # Square
-        square = mpatches.Rectangle((x0, y), square_size, square_size,
-                                    transform=axis[index].transAxes,
-                                    facecolor=color, edgecolor='black',
-                                    clip_on=False, alpha=alpha)  # NEW
+        square = mpatches.Rectangle(
+            (x0, y),
+            square_size,
+            square_size,
+            transform=axis[index].transAxes,
+            facecolor=color,
+            edgecolor="black",
+            clip_on=False,
+            alpha=alpha,
+        )  # NEW
         axis[index].add_patch(square)
 
         # Text
-        axis[index].text(x0 + square_size + text_offset, y + square_size / 2, label,
-                transform=axis[index].transAxes, va='center', ha='left', fontsize=12)
+        axis[index].text(
+            x0 + square_size + text_offset,
+            y + square_size / 2,
+            label,
+            transform=axis[index].transAxes,
+            va="center",
+            ha="left",
+            fontsize=12,
+        )
 
         # Value
-        axis[index].text(value_x, y + square_size / 2, f"{value:.2f}",
-                transform=axis[index].transAxes, va="center", ha="right", fontsize=12)
+        axis[index].text(
+            value_x,
+            y + square_size / 2,
+            f"{value:.2f}",
+            transform=axis[index].transAxes,
+            va="center",
+            ha="right",
+            fontsize=12,
+        )
 
     return axis
 
@@ -316,26 +383,23 @@ def animate_results(data_list, conditions, frames, save_path):
         print("Frame:", fr)
         return []
 
-    anim = animation.FuncAnimation(fig, update,
-                                   frames=frames,
-                                   interval=1,
-                                   blit=False)
-    anim.save(save_path, writer='pillow')
+    anim = animation.FuncAnimation(fig, update, frames=frames, interval=1, blit=False)
+    anim.save(save_path, writer="pillow")
     plt.close(fig)
 
+
 if __name__ == "__main__":
-    data_list = process_data(["wu_result/2_cycle/2_min_100_force_collocation_3_radau_with_init.npz",
-                              "wu_result/2_cycle/2_min_100_fatigue_collocation_3_radau_with_init.npz",
-                              "wu_result/2_cycle/2_min_100_control_collocation_3_radau_with_init.npz",
-                              ])
+    data_list = process_data(
+        [
+            "wu_result/2_cycle/2_min_100_force_collocation_3_radau_with_init.npz",
+            "wu_result/2_cycle/2_min_100_fatigue_collocation_3_radau_with_init.npz",
+            "wu_result/2_cycle/2_min_100_control_collocation_3_radau_with_init.npz",
+        ]
+    )
     conditions = ["min force", "min fatigue", "min control"]
 
     max_cycle = max([data["number_of_turns_before_failing"] for data in data_list])
 
     animate_results(
-        data_list=data_list,
-        conditions=conditions,
-        frames=np.arange(0, max_cycle, 1),
-        save_path="results_animation.gif"
+        data_list=data_list, conditions=conditions, frames=np.arange(0, max_cycle, 1), save_path="results_animation.gif"
     )
-

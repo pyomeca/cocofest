@@ -168,8 +168,7 @@ class FesNmpcMsk(FesNmpc):
             parameter_bounds=self.parameter_bounds,
         )
         a_init = InitialGuessList()
-        return Solution.from_initial_guess(solution_ocp,
-                                           [np.array([dt]), x_init, u_init_for_solution, p_init, a_init])
+        return Solution.from_initial_guess(solution_ocp, [np.array([dt]), x_init, u_init_for_solution, p_init, a_init])
 
     def create_model_from_list(self, models: list):
         if isinstance(models[0], BiorbdModel):

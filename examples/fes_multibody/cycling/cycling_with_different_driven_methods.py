@@ -217,8 +217,9 @@ def set_x_init(n_shooting: int, pedal_config: dict, turn_number: int, ode_solver
     # biorbd_model_path = "../../msk_models/Seth/Modified_UL_Seth_2D_Cycling_for_IK.bioMod"
     biorbd_model_path = "../../msk_models/Wu/Modified_Wu_Shoulder_Model_Cycling_for_IK.bioMod"
 
-    n_shooting = n_shooting * (ode_solver.polynomial_degree + 1) if isinstance(ode_solver,
-                                                                               OdeSolver.COLLOCATION) else n_shooting
+    n_shooting = (
+        n_shooting * (ode_solver.polynomial_degree + 1) if isinstance(ode_solver, OdeSolver.COLLOCATION) else n_shooting
+    )
 
     q_guess, qdot_guess, qddotguess = inverse_kinematics_cycling(
         biorbd_model_path,
@@ -280,7 +281,7 @@ def set_u_bounds_and_init(
                 key = "last_pulse_width_" + str(model.muscle_name)
                 u_init.add(key=key, initial_guess=[model.pd0], phase=0)
                 u_bounds.add(key=key, min_bound=[model.pd0], max_bound=[0.0006], phase=0)
-                u_scaling.add(key=key, scaling=[1/400])
+                u_scaling.add(key=key, scaling=[1 / 400])
 
     return u_init, u_bounds, u_scaling
 
@@ -312,7 +313,7 @@ def set_state_bounds(
         interpolation_type = InterpolationType.ALL_POINTS
 
     # --- Initialize default FES bounds and intial guess --- #
-    if hasattr(model, 'muscles_dynamics_model'):
+    if hasattr(model, "muscles_dynamics_model"):
         x_bounds, x_init_fes = OcpFesMsk.set_x_bounds_fes(model)
 
         # --- Setting FES initial guesses --- #
@@ -339,8 +340,9 @@ def set_state_bounds(
     q_x_bounds.min[2] = [x_init["q"].init[2][0], wheel_q[0] - 2, x_init["q"].init[2][-1] - slack]
     q_x_bounds.max[2] = [x_init["q"].init[2][0], wheel_q[1] + 2, x_init["q"].init[2][-1] + slack]
 
-    x_bounds.add(key="q", bounds=q_x_bounds, phase=0,
-                 interpolation=InterpolationType.CONSTANT_WITH_FIRST_AND_LAST_DIFFERENT)
+    x_bounds.add(
+        key="q", bounds=q_x_bounds, phase=0, interpolation=InterpolationType.CONSTANT_WITH_FIRST_AND_LAST_DIFFERENT
+    )
 
     # --- Setting qdot bounds --- #
     qdot_x_bounds = model.bounds_from_ranges("qdot")
@@ -358,8 +360,12 @@ def set_state_bounds(
     qdot_x_bounds.min[2] = [wheel_qdot[0], wheel_qdot[0], wheel_qdot[0]]
     qdot_x_bounds.max[2] = [wheel_qdot[1], wheel_qdot[1], wheel_qdot[1]]
 
-    x_bounds.add(key="qdot", bounds=qdot_x_bounds, phase=0,
-                 interpolation=InterpolationType.CONSTANT_WITH_FIRST_AND_LAST_DIFFERENT)
+    x_bounds.add(
+        key="qdot",
+        bounds=qdot_x_bounds,
+        phase=0,
+        interpolation=InterpolationType.CONSTANT_WITH_FIRST_AND_LAST_DIFFERENT,
+    )
 
     return x_bounds, x_init
 
@@ -442,7 +448,9 @@ def prepare_ocp(
 
     # Set dynamics based on the chosen dynamics type
     dynamics = set_dynamics(
-        model, numerical_time_series, dynamics_type_str=dynamics_type,
+        model,
+        numerical_time_series,
+        dynamics_type_str=dynamics_type,
         ode_solver=ode_solver,
     )
 
@@ -509,16 +517,17 @@ def main():
         # Set FES model (set to Ding et al. 2007 + fatigue, for now)
         dummy_biomodel = BiorbdModel(model_path)
         muscle_name_list = dummy_biomodel.muscle_names
-        muscles_model = [DingModelPulseWidthFrequencyWithFatigue(
-            muscle_name=muscle,
-            sum_stim_truncation=6
-        ) for muscle in muscle_name_list]
+        muscles_model = [
+            DingModelPulseWidthFrequencyWithFatigue(muscle_name=muscle, sum_stim_truncation=6)
+            for muscle in muscle_name_list
+        ]
 
-        parameter_dict = {"Biceps": {"Fmax": 149, "a_scale": 3314.7, "alpha_a": -5.6 * 10e-2, "tau_fat": 179.6},
-                          "Triceps": {"Fmax": 617, "a_scale": 7036.3, "alpha_a": -2.4 * 10e-2, "tau_fat": 76.2},
-                          "Delt_ant": {"Fmax": 48, "a_scale": 1148.6, "alpha_a": - 1.4 * 10e-1, "tau_fat": 445.5},
-                          "Delt_post": {"Fmax": 51, "a_scale": 1234.5, "alpha_a": - 1.1 * 10e-1, "tau_fat": 342.7},
-                          }
+        parameter_dict = {
+            "Biceps": {"Fmax": 149, "a_scale": 3314.7, "alpha_a": -5.6 * 10e-2, "tau_fat": 179.6},
+            "Triceps": {"Fmax": 617, "a_scale": 7036.3, "alpha_a": -2.4 * 10e-2, "tau_fat": 76.2},
+            "Delt_ant": {"Fmax": 48, "a_scale": 1148.6, "alpha_a": -1.4 * 10e-1, "tau_fat": 445.5},
+            "Delt_post": {"Fmax": 51, "a_scale": 1234.5, "alpha_a": -1.1 * 10e-1, "tau_fat": 342.7},
+        }
 
         for model in muscles_model:
             muscle_name = model.muscle_name
@@ -555,7 +564,7 @@ def main():
         use_sx=False,
         ode_solver=OdeSolver.COLLOCATION(polynomial_degree=3, method="radau"),
         # ode_solver=OdeSolver.RK4(n_integration_steps=5)
-        torque=-0.3
+        torque=-0.3,
     )
 
     # Add the penalty cost function plot
@@ -563,10 +572,11 @@ def main():
 
     # Solve the optimal control problem
     linear_solver = "ma57" if platform == "linux" else "mumps"
-    sol = ocp.solve(Solver.IPOPT(show_online_optim=False,
-                                 _max_iter=10000,
-                                 show_options=dict(show_bounds=True),
-                                 _linear_solver=linear_solver))
+    sol = ocp.solve(
+        Solver.IPOPT(
+            show_online_optim=False, _max_iter=10000, show_options=dict(show_bounds=True), _linear_solver=linear_solver
+        )
+    )
     sol.print_cost()
     sol.animate(viewer="pyorerun")
     sol.graphs(show_bounds=True)

@@ -32,7 +32,6 @@ def prepare_ocp(model, final_time, pw_max=0.0006):
     x_bounds = OcpFes.set_x_bounds(model)
     x_init = OcpFes.set_x_init(model)
 
-
     x_bounds.add(
         key="theta",
         min_bound=np.array([[90, 0, 0]]),
