@@ -127,19 +127,22 @@ class OcpFes:
                 interpolation=InterpolationType.CONSTANT_WITH_FIRST_AND_LAST_DIFFERENT,
             )
 
+        return x_bounds
+
+    @staticmethod
+    def set_x_init(model):
+        variable_bound_list = model.name_dof
         x_init = InitialGuessList()
         for j in range(len(variable_bound_list)):
             x_init.add(variable_bound_list[j], model.standard_rest_values()[j])
 
-        return x_bounds, x_init
+        return x_init
 
     @staticmethod
     def set_u_bounds(model, max_bound: int | float):
         u_bounds = BoundsList()  # Controls bounds
-        u_init = InitialGuessList()  # Controls initial guess
 
         if isinstance(model, DingModelPulseWidthFrequency):
-            u_init.add(key="last_pulse_width", initial_guess=[0], phase=0)
             min_pulse_width = model.pd0 if isinstance(model.pd0, int | float) else 0
             u_bounds.add(
                 "last_pulse_width",
@@ -149,7 +152,6 @@ class OcpFes:
             )
 
         if isinstance(model, DingModelPulseIntensityFrequency):
-            u_init.add(key="pulse_intensity", initial_guess=[0] * model.sum_stim_truncation, phase=0)
             min_pulse_intensity = (
                 model.min_pulse_intensity() if isinstance(model.min_pulse_intensity(), int | float) else 0
             )
@@ -160,7 +162,19 @@ class OcpFes:
                 interpolation=InterpolationType.CONSTANT,
             )
 
-        return u_bounds, u_init
+        return u_bounds
+
+    @staticmethod
+    def set_u_init(model):
+        u_init = InitialGuessList()  # Controls initial guess
+
+        if isinstance(model, DingModelPulseWidthFrequency):
+            u_init.add(key="last_pulse_width", initial_guess=[0], phase=0)
+
+        if isinstance(model, DingModelPulseIntensityFrequency):
+            u_init.add(key="pulse_intensity", initial_guess=[0] * model.sum_stim_truncation, phase=0)
+
+        return u_init
 
     # TODO: Remove this method
     @staticmethod

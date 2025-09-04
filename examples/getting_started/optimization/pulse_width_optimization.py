@@ -18,8 +18,10 @@ def prepare_ocp(model, final_time, pw_max):
     )
 
     # --- Set initial guesses and bounds for states and controls --- #
-    x_bounds, x_init = OcpFes.set_x_bounds(model)
-    u_bounds, u_init = OcpFes.set_u_bounds(model, max_bound=pw_max)
+    x_bounds = OcpFes.set_x_bounds(model)
+    x_init = OcpFes.set_x_init(model)
+    u_bounds = OcpFes.set_u_bounds(model, max_bound=pw_max)
+    u_init = OcpFes.set_u_init(model)
 
     # --- Set objective functions --- #
     objective_functions = ObjectiveList()

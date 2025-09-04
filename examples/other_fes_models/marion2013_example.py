@@ -29,7 +29,10 @@ def prepare_ocp(model, final_time, pw_max=0.0006):
     dynamics = OcpFes.declare_dynamics(model, numerical_data_time_series)
 
     # --- Set initial guesses and bounds for states and controls --- #
-    x_bounds, x_init = OcpFes.set_x_bounds(model)
+    x_bounds = OcpFes.set_x_bounds(model)
+    x_init = OcpFes.set_x_init(model)
+
+
     x_bounds.add(
         key="theta",
         min_bound=np.array([[90, 0, 0]]),
@@ -43,7 +46,8 @@ def prepare_ocp(model, final_time, pw_max=0.0006):
         interpolation=InterpolationType.CONSTANT_WITH_FIRST_AND_LAST_DIFFERENT,
     )
     if isinstance(model, Marion2013ModelPulseWidthFrequency):
-        u_bounds, u_init = OcpFes.set_u_bounds(model, max_bound=pw_max)
+        u_bounds = OcpFes.set_u_bounds(model, max_bound=pw_max)
+        u_init = OcpFes.set_u_init(model)
     else:
         u_bounds, u_init = BoundsList(), InitialGuessList()
 

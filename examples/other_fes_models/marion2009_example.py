@@ -26,9 +26,12 @@ def prepare_ocp(model, final_time, pw_max=0.0006):
     dynamics = OcpFes.declare_dynamics(model, numerical_data_time_series)
 
     # --- Set initial guesses and bounds for states and controls --- #
-    x_bounds, x_init = OcpFes.set_x_bounds(model)
+    x_bounds = OcpFes.set_x_bounds(model)
+    x_init = OcpFes.set_x_init(model)
+
     if isinstance(model, Marion2009ModelPulseWidthFrequency):
-        u_bounds, u_init = OcpFes.set_u_bounds(model, max_bound=pw_max)
+        u_bounds = OcpFes.set_u_bounds(model, max_bound=pw_max)
+        u_init = OcpFes.set_u_init(model)
     else:
         u_bounds, u_init = BoundsList(), InitialGuessList()
 

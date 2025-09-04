@@ -52,8 +52,11 @@ def prepare_nmpc(
 
     dynamics = OcpFes.declare_dynamics(model, numerical_data_time_series, ode_solver)
 
-    x_bounds, x_init_fes = OcpFes.set_x_bounds(model)
-    u_bounds, u_init = OcpFes.set_u_bounds(model, max_pulse_width)
+    x_bounds = OcpFes.set_x_bounds(model)
+    x_init_fes = OcpFes.set_x_init(model)
+    u_bounds = OcpFes.set_u_bounds(model, max_bound=max_pulse_width)
+    u_init = OcpFes.set_u_init(model)
+
     if isinstance(ode_solver, OdeSolver.COLLOCATION):
         x_init = InitialGuessList()
         for key in x_init_fes.keys():

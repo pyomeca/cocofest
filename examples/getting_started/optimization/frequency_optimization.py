@@ -17,7 +17,8 @@ def prepare_ocp(model, final_time):
     )
 
     # --- Set initial guesses and bounds for states --- #
-    x_bounds, x_init = OcpFes.set_x_bounds(model)
+    x_bounds = OcpFes.set_x_bounds(model)
+    x_init = OcpFes.set_x_init(model)
 
     # --- Set objective functions --- #
     objective_functions = ObjectiveList()
