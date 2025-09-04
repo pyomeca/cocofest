@@ -30,7 +30,7 @@ from cocofest import (
 )
 
 
-def initialize_model(final_time):
+def initialize_model(final_time, model_path):
     # Build the functional electrical stimulation models according
     # to number and name of muscle in the musculoskeletal model used
     fes_muscle_models = [
@@ -45,7 +45,7 @@ def initialize_model(final_time):
     stim_time = list(np.linspace(0, final_time, 30, endpoint=False))
     model = FesMskModel(
         name=None,
-        biorbd_path="../../msk_models/Arm26/arm26_with_reaching_target.bioMod",
+        biorbd_path=model_path,
         stim_time=stim_time,
         muscles_model=fes_muscle_models,
         activate_force_length_relationship=True,
@@ -139,14 +139,15 @@ def prepare_ocp(
     )
 
 
-def main():
+def main(plot=True, model_path="../../msk_models/Arm26/arm26_with_reaching_target.bioMod"):
     final_time = 1
-    model = initialize_model(final_time)
+    model = initialize_model(final_time, model_path)
     ocp = prepare_ocp(model=model, final_time=final_time, max_bound=0.0006)
 
     sol = ocp.solve(Solver.IPOPT(_max_iter=10000))
-    sol.animate(viewer="pyorerun")
-    sol.graphs(show_bounds=True)
+    if plot:
+        sol.animate(viewer="pyorerun")
+        sol.graphs(show_bounds=True)
 
 
 if __name__ == "__main__":

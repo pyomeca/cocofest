@@ -495,7 +495,7 @@ def prepare_ocp(
     )
 
 
-def main():
+def main(plot=True, model_path: str = "../../msk_models/Wu/Modified_Wu_Shoulder_Model_Cycling.bioMod"):
     """
     Main function to configure and solve the optimal control problem.
     """
@@ -504,7 +504,7 @@ def main():
     # dynamics_type = "torque_driven"
     # dynamics_type = "muscle_driven"
     # model_path = "../../msk_models/Seth/Modified_UL_Seth_2D_Cycling.bioMod"
-    model_path = "../../msk_models/Wu/Modified_Wu_Shoulder_Model_Cycling.bioMod"
+    # model_path = "../../msk_models/Wu/Modified_Wu_Shoulder_Model_Cycling.bioMod"
     final_time = 2
     turn_number = 2
     pedal_config = {"x_center": 0.35, "y_center": 0.0, "radius": 0.1}
@@ -578,8 +578,9 @@ def main():
         )
     )
     sol.print_cost()
-    sol.animate(viewer="pyorerun")
-    sol.graphs(show_bounds=True)
+    if plot:
+        sol.animate(viewer="pyorerun")
+        sol.graphs(show_bounds=True)
 
 
 if __name__ == "__main__":

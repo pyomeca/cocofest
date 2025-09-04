@@ -117,7 +117,7 @@ def prepare_ocp(
     )
 
 
-def main():
+def main(plot=True, model_path="../../msk_models/Arm26/arm26_biceps_triceps.bioMod"):
     # --- Define the fes model --- #
     fes_model_type = "ding2007_with_fatigue"
     stim_time = list(np.linspace(0, 1, 11))[:-1]
@@ -132,7 +132,7 @@ def main():
     )
     model = FesMskModel(
         name=None,
-        biorbd_path="../../msk_models/Arm26/arm26_biceps_triceps.bioMod",
+        biorbd_path=model_path,
         muscles_model=[biceps, triceps],
         activate_force_length_relationship=True,
         activate_force_velocity_relationship=True,
@@ -157,8 +157,9 @@ def main():
     sol = ocp.solve()
 
     # --- Show results from solution --- #
-    sol.graphs(show_bounds=True)
-    sol.animate(viewer="pyorerun")
+    if plot:
+        sol.graphs(show_bounds=True)
+        sol.animate(viewer="pyorerun")
 
 
 if __name__ == "__main__":
