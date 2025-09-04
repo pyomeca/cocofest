@@ -350,7 +350,7 @@ Meanwhile, if you use `Cocofest`, please cite the following zenodo link: [10.528
       </a>
     </td>
     <td align="center">
-      <a href="https://github.com/pyomeca/biobuddy"><img src="docs/assets/BioBuddy.gif" alt="Biobuddy" height="56">
+      <a href="https://github.com/pyomeca/biobuddy"><img src="https://github.com/user-attachments/assets/c8689155-0b26-4e13-835c-cdb6696e1acb" alt="Biobuddy" height="56">
       </a>
     </td>
     <td align="center">
