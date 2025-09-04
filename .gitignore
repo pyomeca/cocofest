@@ -8,7 +8,7 @@ __pycache__/
 external/bioptim
 
 example/*.pkl
-example/fes_multibody/cycling/plot
-example/fes_multibody/cycling/result
+**/cycling/plot/
+**/cycling/result/
 
 *.pkl
