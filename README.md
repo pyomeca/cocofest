@@ -24,9 +24,9 @@ Supports predictive musculoskeletal simulation driven by FES, moving time horizo
 <details>
 <summary><kbd>Table of contents</kbd></summary>
 
-[About](#-about)
+[About](#about)
 
-[Installation](#-installation)
+[Installation](#installation)
 <details>
 <summary><a href="#features">Features</a></summary>
 
@@ -59,10 +59,15 @@ Supports predictive musculoskeletal simulation driven by FES, moving time horizo
 
 
 <h1 align="center">
-  <img src="docs/assets/cocofest_logo.png" width="100" alt="Logo"
+  <img src="docs/assets/cocofest_logo.png" width="150" alt="Logo"
        style="vertical-align: middle; margin-right: .5rem;" />
   About
 </h1>
+
+<h1 align="center"><img src="docs/assets/cocofest_logo.png" width="150" alt="about"> &nbsp; About</h1>
+
+
+
 
 Functional electrical stimulation (FES) is a neurorehabilitation technique that promotes motor recovery after neurological injury.
 By delivering coordinated electrical pulses to targeted muscles, FES elicits functional movements such as walking, reaching, and grasping.
@@ -91,6 +96,9 @@ and robust solver like [Ipopt](https://github.com/coin-or/Ipopt).
        style="vertical-align: middle; margin-right: .5rem;" />
   Installation
 </h1>
+
+<h1 align="center"><img src=https://cdnb.artstation.com/p/assets/images/images/091/554/681/large/max_mv-02.jpg?1757104575" width="100" alt="Logo"> &nbsp; Installation</h1>
+
 
 Currently, no anaconda installation is available. The installation must be done from the sources. <br>
 **Cloning** the repository is the first step to be able to use the package.
@@ -131,6 +139,9 @@ You are now ready to use `Cocofest`!
        style="vertical-align: middle; margin-right: .5rem;" />
   Features
 </h1>
+
+<h1 align="center"><img src="https://cdna.artstation.com/p/assets/images/images/091/554/680/large/max_mv-01.jpg?1757104570" width="100" alt="Logo"> &nbsp; Features</h1>
+
 
 
 ## 📊 Available FES models
@@ -308,6 +319,9 @@ model = ModelMaker.create_model("ding2007", stim_time=stim_time, sum_stim_trunca
        style="vertical-align: middle; margin-right: .5rem;" />
   Other
 </h1>
+
+<h1 align="center"><img src="https://cdna.artstation.com/p/assets/images/images/091/554/682/large/max_mv-03.jpg?1757104580" width="100" alt="Logo"> &nbsp; Other</h1>
+
 
 ## 🙌 Want to contribute?
 
