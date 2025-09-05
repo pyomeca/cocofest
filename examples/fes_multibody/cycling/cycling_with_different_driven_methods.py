@@ -195,7 +195,9 @@ def set_objective_functions(model: BiorbdModel | FesMskModel, dynamics_type: str
     return objective_functions
 
 
-def set_x_init(n_shooting: int, pedal_config: dict, turn_number: int, ode_solver) -> InitialGuessList:
+def set_x_init(
+    n_shooting: int, pedal_config: dict, turn_number: int, ode_solver: OdeSolver, model_path: str
+) -> InitialGuessList:
     """
     Set the initial guess for the state variables based on inverse kinematics.
 
@@ -207,6 +209,10 @@ def set_x_init(n_shooting: int, pedal_config: dict, turn_number: int, ode_solver
         Dictionary with keys "x_center", "y_center", and "radius".
     turn_number: int
         Number of complete turns.
+    ode_solver: OdeSolver
+        The ODE solver used in the optimal control problem.
+    model_path
+        Path to the biomechanical model used for inverse kinematics.
 
     Returns
     -------
@@ -214,15 +220,13 @@ def set_x_init(n_shooting: int, pedal_config: dict, turn_number: int, ode_solver
     """
     x_init = InitialGuessList()
     # Path to the biomechanical model used for inverse kinematics
-    # biorbd_model_path = "../../msk_models/Seth/Modified_UL_Seth_2D_Cycling_for_IK.bioMod"
-    biorbd_model_path = "../../msk_models/Wu/Modified_Wu_Shoulder_Model_Cycling_for_IK.bioMod"
 
     n_shooting = (
         n_shooting * (ode_solver.polynomial_degree + 1) if isinstance(ode_solver, OdeSolver.COLLOCATION) else n_shooting
     )
 
     q_guess, qdot_guess, qddotguess = inverse_kinematics_cycling(
-        biorbd_model_path,
+        model_path,
         n_shooting,
         x_center=pedal_config["x_center"],
         y_center=pedal_config["y_center"],
@@ -411,6 +415,7 @@ def prepare_ocp(
     use_sx: bool = True,
     ode_solver: OdeSolver = OdeSolver.RK4(n_integration_steps=10),
     torque: int | float = -1,
+    initial_guess_model_path: str = None,
 ) -> OptimalControlProgram:
     """
     Prepare the optimal control program (OCP) with the provided configuration.
@@ -455,7 +460,9 @@ def prepare_ocp(
     )
 
     # Set initial guess for state variables
-    x_init = set_x_init(n_shooting, pedal_config, turn_number, ode_solver=ode_solver)
+    x_init = set_x_init(
+        n_shooting, pedal_config, turn_number, ode_solver=ode_solver, model_path=initial_guess_model_path
+    )
 
     # Define state bounds
     x_bounds, x_init = set_state_bounds(
@@ -495,16 +502,24 @@ def prepare_ocp(
     )
 
 
-def main(plot=True, model_path: str = "../../msk_models/Wu/Modified_Wu_Shoulder_Model_Cycling.bioMod"):
+def main(
+    plot=True,
+    model_path: str = "../../msk_models/Wu/Modified_Wu_Shoulder_Model_Cycling.bioMod",
+    initial_guess_model_path: str = "../../msk_models/Wu/Modified_Wu_Shoulder_Model_Cycling_for_IK.bioMod",
+):
     """
     Main function to configure and solve the optimal control problem.
     """
     # --- Configuration --- #
     dynamics_type = "fes_driven"  # Available options: "torque_driven", "muscle_driven", "fes_driven"
+    # --- Supplementary available configurations --- #
     # dynamics_type = "torque_driven"
     # dynamics_type = "muscle_driven"
     # model_path = "../../msk_models/Seth/Modified_UL_Seth_2D_Cycling.bioMod"
     # model_path = "../../msk_models/Wu/Modified_Wu_Shoulder_Model_Cycling.bioMod"
+    # IK_biorbd_model_path = "../../msk_models/Seth/Modified_UL_Seth_2D_Cycling_for_IK.bioMod"
+    # IK_biorbd_model_path = "../../msk_models/Wu/Modified_Wu_Shoulder_Model_Cycling_for_IK.bioMod"
+
     final_time = 2
     turn_number = 2
     pedal_config = {"x_center": 0.35, "y_center": 0.0, "radius": 0.1}
@@ -565,6 +580,7 @@ def main(plot=True, model_path: str = "../../msk_models/Wu/Modified_Wu_Shoulder_
         ode_solver=OdeSolver.COLLOCATION(polynomial_degree=3, method="radau"),
         # ode_solver=OdeSolver.RK4(n_integration_steps=5)
         torque=-0.3,
+        initial_guess_model_path=initial_guess_model_path,
     )
 
     # Add the penalty cost function plot
