@@ -1,7 +1,7 @@
 <div align="center"><a name="readme"></a>
 
 <p align="center"> 
-  <img src="https://cdnb.artstation.com/p/assets/images/images/091/412/725/large/max_mv-04-03.jpg?1756739925" alt="HAR Logo">
+  <img src="https://cdna.artstation.com/p/assets/images/images/091/422/672/large/max_mv-04-04.jpg?1756758714" alt="HAR Logo">
 </p>
 
 # Cocofest
@@ -87,7 +87,7 @@ and robust solver like [Ipopt](https://github.com/coin-or/Ipopt).
 </p>
 
 <h1 align="center">
-  <img src="docs/assets/b.png" width="100" alt="Logo"
+  <img src="https://cdnb.artstation.com/p/assets/images/images/091/554/681/large/max_mv-02.jpg?1757104575" width="100" alt="Logo"
        style="vertical-align: middle; margin-right: .5rem;" />
   Installation
 </h1>
@@ -127,7 +127,7 @@ You are now ready to use `Cocofest`!
 </p>
 
 <h1 align="center">
-  <img src="docs/assets/b.png" width="100" alt="Logo"
+  <img src="https://cdna.artstation.com/p/assets/images/images/091/554/680/large/max_mv-01.jpg?1757104570" width="100" alt="Logo"
        style="vertical-align: middle; margin-right: .5rem;" />
   Features
 </h1>
@@ -304,11 +304,9 @@ model = ModelMaker.create_model("ding2007", stim_time=stim_time, sum_stim_trunca
 </p>
 
 <h1 align="center">
-  <img src="docs/assets/b.png" width="100" alt="Logo"
+  <img src="https://cdna.artstation.com/p/assets/images/images/091/554/682/large/max_mv-03.jpg?1757104580" width="100" alt="Logo"
        style="vertical-align: middle; margin-right: .5rem;" />
   Other
-  <img src="docs/assets/b.png" width="100" alt="Logo"
-       style="vertical-align: middle; margin-right: .5rem;" />
 </h1>
 
 ## 🙌 Want to contribute?
