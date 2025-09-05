@@ -155,7 +155,7 @@ All models are implemented at the muscle actuator level, making them applicable 
 
 ## 🦴 Musculoskeletal model driven by FES
 
-In conventional Hill-type muscle model, muscle force ($F_m$) is the product of a the muscle activation, $F_{max}$ the maximal
+In conventional Hill-type muscle model, muscle force ($F_m$) is the product of $a$ the muscle activation, $F_{max}$ the maximal
 isometric muscle force, $f_l$ the force-length, $f_v$ the force-velocity and $f_{pas}$ the passive force-length relationship:
 ```math
 F_m(t) = a(t)\, F_{\max}\, f_l(\tilde{l}_m)\, f_v(\tilde{v}_m) + f_{pas}(\tilde{l}_m)
