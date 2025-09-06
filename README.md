@@ -325,7 +325,7 @@ Don't know where to start? [Issues](https://github.com/pyomeca/cocofest/issues) 
 <a id="citing"></a>
 ## 📝 Citing
 `Cocofest` is not yet published. <br>
-Meanwhile, if you use `Cocofest`, please cite the following zenodo link: [10.5281/zenodo.10427934](https://doi.org/10.5281/zenodo.10427934).
+Meanwhile, if you use `Cocofest`, please cite the following zenodo link: [10.5281/zenodo.17068808](https://doi.org/10.5281/zenodo.17068808).
 
 <a id="cited-in"></a>
 ## 📚 Cited in
