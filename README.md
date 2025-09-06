@@ -55,17 +55,6 @@ Supports predictive musculoskeletal simulation driven by FES, moving time horizo
   About
 </h1>
 
-<h1 align="center">About <img src="docs/assets/cocofest_logo.png" width="150" alt=""></h1>
-
-
-<h2 align="center">
-  <span style="display:inline-flex;align-items:center;gap:.5rem">
-    <img src="docs/assets/cocofest_logo.png" width="150" alt="Cocofest logo">
-    <span>About</span>
-  </span>
-</h2>
-
-
 Functional electrical stimulation (FES) is a neurorehabilitation technique that promotes motor recovery after neurological injury.
 By delivering coordinated electrical pulses to targeted muscles, FES elicits functional movements such as walking, reaching, and grasping.
 Because responses to stimulation vary across individuals and muscle groups, most FES protocols still rely on empirically tuned parameters.
