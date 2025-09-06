@@ -5,17 +5,10 @@ __pycache__/
 
 .pytest_cache
 
-
-examples/data/debug.py
-
 external/bioptim
 
 example/*.pkl
-example/fes_multibody_cycling/*.pkl
-example/reaching_task/*.pkl
-example/minimize_fatigue/*.pkl
-
-example/minimize_fatigue/result_file/*.pkl
-examples/nmpc/results/*.pkl
+**/cycling/plot/
+**/cycling/result/
 
 *.pkl

@@ -12,6 +12,7 @@ from bioptim import (
     DynamicsEvaluation,
     ParameterList,
     ContactType,
+    OdeSolver,
 )
 
 from ..models.fes_model import FesModel
@@ -199,9 +200,16 @@ class FesMskModel(BiorbdModel):
         ddq = nlp.model.forward_dynamics(with_contact=with_contact)(
             q, qdot, total_torque, external_forces, parameters
         )  # q, qdot, tau, external_forces, parameters
+
         dxdt = vertcat(dxdt_muscle_list, dq, ddq)
 
-        return DynamicsEvaluation(dxdt=dxdt, defects=None)
+        defects = None
+        if isinstance(nlp.dynamics_type.ode_solver, OdeSolver.COLLOCATION):
+            slope_q = DynamicsFunctions.get(nlp.states_dot["q"], nlp.states_dot.scaled.cx)
+            slope_qdot = DynamicsFunctions.get(nlp.states_dot["qdot"], nlp.states_dot.scaled.cx)
+            defects = vertcat(slope_q, slope_qdot) * nlp.dt - vertcat(dq, ddq) * nlp.dt
+
+        return DynamicsEvaluation(dxdt=dxdt, defects=defects)
 
     @staticmethod
     def muscles_joint_torque(

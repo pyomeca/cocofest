@@ -1,0 +1,317 @@
+version 4
+
+// File extracted from /simplified_UL_Seth.osim
+
+//Publication : Holzbaur, K.R.S., Murray, W.M., Delp, S.L. A Model of the Upper Extremity for Simulating Musculoskeletal Surgery and Analyzing Neuromuscular Control. Annals of Biomedical Engineering, vol 33, pp 829�840, 2005
+
+//Credit : The OpenSim Development Team (Reinbolt, J; Seth, A; Habib, A; Hamner, S) adapted from a model originally created by Kate Holzbaur (11/22/04) License: Creative Commons (CCBY 3.0). You are free to distribute, remix, tweak, and build upon this work, even commercially, as long as you credit us for the original creation. http://creativecommons.org/licenses/by/3.0/
+
+//Force units : N
+
+//Length units : meters
+
+
+gravity	0 -9.8065999999999995 0
+
+// SEGMENT DEFINITION
+
+// Information about ground segment
+    segment base
+        // meshfile mesh/ground_ribs.vtp
+    endsegment
+
+// Information about r_humerus segment
+	// Segment
+	segment r_humerus_parent_offset
+		parent ground 
+		RTinMatrix	0
+		RT	0 0 0	xyz	-0.017545000000000002 -0.0070000000000000001 0.17000000000000001
+	endsegment
+
+	// Segments to define transformation axis.
+	// Segment
+	segment r_humerus_translation
+		parent r_humerus_parent_offset 
+		RTinMatrix	1
+		RT
+			1.0		0.0		0.0		0
+			0.0		1.0		0.0		0
+			0.0		0.0		1.0		0
+			0		0		0		1
+	endsegment
+
+	// Segment
+	segment r_humerus_r_shoulder_elev
+		parent r_humerus_translation 
+		RTinMatrix	1
+		RT
+			0.0		0.9742134877644554		-0.22562819029947306		0
+			0.0		0.22562819029947306		0.9742134877644554		0
+			1.0		0.0		0.0		0
+			0		0		0		1
+		rotations x
+		// ranges
+				// -1.5707963300000001 3.1415926500000002
+	endsegment
+
+	// Segment
+	segment r_humerus_rotation_1
+		parent r_humerus_r_shoulder_elev 
+		RTinMatrix	1
+		RT
+			0.3202200433178924		0.0		0.9473431922262845		0
+			0.9229145154086816		0.22562819029947306		-0.31196268525280896		0
+			-0.21374733005454244		0.9742134877644554		0.07225066887143494		0
+			0		0		0		1
+		// ranges
+				// -1.5707963300000001 3.1415926500000002
+	endsegment
+
+	// Segment
+	segment r_humerus_rotation_2
+		parent r_humerus_rotation_1 
+		RTinMatrix	1
+		RT
+			-0.11023328985988975		0.239847133577542		0.9645319975621869		0
+			0.9086290430758694		0.4176041930812351		3.215689717199417e-17		0
+			-0.4027926065429889		0.8764017859609867		-0.26396595552968144		0
+			0		0		0		1
+		// ranges
+				// -1.5707963300000001 3.1415926500000002
+	endsegment
+
+
+    // Segment to cancel transformation bases effect.
+	// Segment
+	segment r_humerus_reset_axis
+		parent r_humerus_rotation_2 
+		RTinMatrix	1
+		RT
+			0.02455350920984932		0.9086290430758699		-0.4168817425415886		0
+			-0.053423868694632774		0.41760419308123525		0.907057125088971		0
+			0.9982700112891202		-6.626002070608912e-17		0.05879612709030681		0
+			0		0		0		1
+	endsegment
+
+
+    //True segment where are applied inertial values.
+	// Segment
+	segment r_humerus
+		parent r_humerus_reset_axis 
+		RTinMatrix	0
+		RT	-0.0	 0.0	 -0.0	xyz	-0.0	 -0.0	 -0.0
+		mass	1.8645719999999999
+		inertia
+			0.01481	0	0
+			0	0.0045510000000000004	0
+			0	0	0.013193
+		com	0 -0.18049599999999999 0
+		meshfile	Geometry/arm_r_humerus.vtp
+		meshcolor	1 1 1
+		meshscale	1 1 1
+	endsegment
+
+// Information about r_ulna_radius_hand segment
+	// Segment
+	segment r_ulna_radius_hand_parent_offset
+		parent r_humerus
+		RTinMatrix	0
+		RT	0 0 0	xyz	0.0061000000000000004 -0.29039999999999999 -0.0123
+	endsegment
+
+	// Segments to define transformation axis.
+	// Segment
+	segment r_ulna_radius_hand_translation
+		parent r_ulna_radius_hand_parent_offset
+		RTinMatrix	1
+		RT
+			1.0		0.0		0.0		0
+			0.0		1.0		0.0		0
+			0.0		0.0		1.0		0
+			0		0		0		1
+	endsegment
+
+	// Segment
+	segment r_ulna_radius_hand_r_elbow_flex
+		parent r_ulna_radius_hand_translation
+		RTinMatrix	1
+		RT
+			0.0		0.9943667684025684		-0.10599400877706615		0
+			0.0		0.10599400877706615		0.9943667684025684		0
+			1.0		0.0		0.0		0
+			0		0		0		1
+		rotations x
+		// ranges
+				// 0 2.2689280300000001
+	endsegment
+
+	// Segment
+	segment r_ulna_radius_hand_rotation_1
+		parent r_ulna_radius_hand_r_elbow_flex
+		RTinMatrix	1
+		RT
+			0.599826531139275		0.0		0.8001300722641441		0
+			0.7956227542590106		0.10599400877706615		-0.5964475693710836		0
+			-0.08480899390236027		0.9943667684025684		0.06357801860629346		0
+			0		0		0		1
+		// ranges
+				// 0 2.2689280300000001
+	endsegment
+
+	// Segment
+	segment r_ulna_radius_hand_rotation_2
+		parent r_ulna_radius_hand_rotation_1
+		RTinMatrix	1
+		RT
+			-0.30883962129007886		0.5590053477601999		0.7695005584773144		0
+			0.8752974673577487		0.48358488772614744		3.731366476053312e-18		0
+			-0.3721188411764598		0.6735418899655664		-0.6386461387208893		0
+			0		0		0		1
+		// ranges
+				// 0 2.2689280300000001
+	endsegment
+
+
+    // Segment to cancel transformation bases effect.
+	// Segment
+	segment r_ulna_radius_hand_reset_axis
+		parent r_ulna_radius_hand_rotation_2
+		RTinMatrix	1
+		RT
+			-0.023905114826418966		0.8752974673577489		-0.4829936739981656		0
+			0.04326869386437471		0.4835848877261475		0.8742273597263815		0
+			0.9987774354761958		-3.65932388392008e-17		-0.04943313042477962		0
+			0		0		0		1
+	endsegment
+
+	// Segment
+    //True segment where are applied inertial values.
+	// Segment
+	segment r_ulna_radius_hand
+		parent r_ulna_radius_hand_reset_axis
+		RTinMatrix	0
+		RT	0	 0	 0	xyz	0	 0	 0
+		mass	1.5343150000000001
+		inertia
+			0.019281	0	0
+			0	0.0015709999999999999	0
+			0	0	0.020062
+		com	0 -0.181479 0
+		meshfile	Geometry/arm_r_ulna.vtp
+		meshcolor	1 1 1
+		meshscale	1 1 1
+	endsegment
+
+	marker    hand
+        parent    r_ulna_radius_hand
+        position    0.04 -0.32 0.075
+    endmarker
+
+// MUSCLE DEFINIION
+
+// base > r_humerus
+musclegroup ground_to_r_humerus
+	OriginParent	base
+	InsertionParent	r_humerus
+endmusclegroup
+
+	muscle	DeltoideusClavicle_A
+		type	hill
+		statetype	degroote
+		musclegroup	ground_to_r_humerus
+		OriginPosition	-0.016 0.027 0.105
+		InsertionPosition	0.0066436613177381703 -0.10980522018450981 0.0011474186050816253
+		optimalLength	0.094
+		maximalForce	707.70000000000005
+		tendonSlackLength	0.087999999999999995
+		pennationAngle	0.087266460000000004
+		maxVelocity	10
+	endmuscle
+
+		viapoint	DeltoideusClavicle2-P2
+			parent	base
+			muscle	DeltoideusClavicle_A
+			musclegroup	ground_to_r_humerus
+			position	0.023 0.017000000000000001 0.14599999999999999
+		endviapoint
+
+	muscle	DeltoideusScapula_P
+		type	hill
+		statetype	degroote
+		musclegroup	ground_to_r_humerus
+		OriginPosition	-0.064000000000000001 0.02 0.13
+		InsertionPosition	-0.0047659122508031749 -0.086162511515571069 0.0062390724151510932
+		optimalLength	0.094899999999999998
+		maximalForce	1324.4000000000001
+		tendonSlackLength	0.075999999999999998
+		pennationAngle	0.087266460000000004
+		maxVelocity	10
+	endmuscle
+
+		viapoint	DeltoideusScapulaPost2-P2
+			parent	base
+			muscle	DeltoideusScapula_P
+			musclegroup	ground_to_r_humerus
+			position	-0.060999999999999999 -0.0050000000000000001 0.16500000000000001
+		endviapoint
+
+// base > r_ulna_radius_hand
+musclegroup ground_to_r_ulna_radius_hand
+	OriginParent	base
+	InsertionParent	r_ulna_radius_hand
+endmusclegroup
+
+	muscle	TRIlong
+		type	hill
+		statetype	degroote
+		musclegroup	ground_to_r_ulna_radius_hand
+		OriginPosition	-0.042000000000000003 -0.028000000000000001 0.14299999999999999
+		InsertionPosition	-0.021000000000000001 -0.028000000000000001 0.027
+		optimalLength	0.0969
+		maximalForce	1580.5999999999999
+		tendonSlackLength	0.2412
+		pennationAngle	0.17453299999999999
+		maxVelocity	10
+	endmuscle
+
+		viapoint	TRIlong-P2
+			parent	r_humerus
+			muscle	TRIlong
+			musclegroup	ground_to_r_ulna_radius_hand
+			position	-0.01 -0.29 -0.011
+		endviapoint
+
+	muscle	BIC_long
+		type	hill
+		statetype	degroote
+		musclegroup	ground_to_r_ulna_radius_hand
+		OriginPosition	-0.029999999999999999 0.01 0.14499999999999999
+		InsertionPosition	-0.019 -0.059999999999999998 0.027
+		optimalLength	0.1421
+		maximalForce	485.80000000000001
+		tendonSlackLength	0.25679999999999997
+		pennationAngle	0
+		maxVelocity	10
+	endmuscle
+
+		viapoint	BIC_long-P2
+			parent	r_humerus
+			muscle	BIC_long
+			musclegroup	ground_to_r_ulna_radius_hand
+			position	0.011830631116962682 0.02814188158731026 0.020038375639319206
+		endviapoint
+
+	muscle	BIC_brevis
+		type	hill
+		statetype	degroote
+		musclegroup	ground_to_r_ulna_radius_hand
+		OriginPosition	0.001 -0.014999999999999999 0.13400000000000001
+		InsertionPosition	-0.02 -0.059999999999999998 0.029000000000000001
+		optimalLength	0.12640000000000001
+		maximalForce	693
+		tendonSlackLength	0.21199999999999999
+		pennationAngle	0
+		maxVelocity	10
+	endmuscle
+
+/*-------------- WARNINGS---------------
