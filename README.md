@@ -48,7 +48,7 @@ Supports predictive musculoskeletal simulation driven by FES, moving time horizo
   <img src="https://cdnb.artstation.com/p/assets/images/images/091/565/727/large/max_mv-04.jpg?1757152714" alt="">
 </p>
 
-
+<a id="about"></a>
 <h1 align="center">
   <img src="docs/assets/cocofest_logo.png" width="150" alt=""
        style="vertical-align: middle; margin-right: .5rem;" />
