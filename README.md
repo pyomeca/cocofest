@@ -54,7 +54,7 @@ Supports predictive musculoskeletal simulation driven by FES, moving time horizo
 </details>
 
 <p align="center"> 
-  <img src="docs/assets/image.png" alt="HAR Logo">
+  <img src="https://cdnb.artstation.com/p/assets/images/images/091/565/727/large/max_mv-04.jpg?1757152714" alt="HAR Logo">
 </p>
 
 
@@ -88,7 +88,7 @@ and robust solver like [Ipopt](https://github.com/coin-or/Ipopt).
 > the repository to show your support and help us grow the community!
 
 <p align="center"> 
-  <img src="docs/assets/image.png" alt="HAR Logo">
+  <img src="https://cdnb.artstation.com/p/assets/images/images/091/565/727/large/max_mv-04.jpg?1757152714" alt="HAR Logo">
 </p>
 
 <h1 align="center">
@@ -131,7 +131,7 @@ python setup.py install
 You are now ready to use `Cocofest`!
 
 <p align="center"> 
-  <img src="docs/assets/image.png" alt="HAR Logo">
+  <img src="https://cdnb.artstation.com/p/assets/images/images/091/565/727/large/max_mv-04.jpg?1757152714" alt="HAR Logo">
 </p>
 
 <h1 align="center">
@@ -139,6 +139,9 @@ You are now ready to use `Cocofest`!
        style="vertical-align: middle; margin-right: .5rem;" />
   Features
 </h1>
+
+<h1 align="center"><a id="features"></a><img src="https://cdna.artstation.com/p/assets/images/images/091/554/680/large/max_mv-01.jpg?1757104570" width="90" alt=""> Features</h1>
+
 
 <h1 align="center"><img src="https://cdna.artstation.com/p/assets/images/images/091/554/680/large/max_mv-01.jpg?1757104570" width="100" alt="Logo"> &nbsp; Features</h1>
 
@@ -311,7 +314,7 @@ model = ModelMaker.create_model("ding2007", stim_time=stim_time, sum_stim_trunca
 
 
 <p align="center"> 
-  <img src="docs/assets/image.png" alt="HAR Logo">
+  <img src="https://cdnb.artstation.com/p/assets/images/images/091/565/727/large/max_mv-04.jpg?1757152714" alt="HAR Logo">
 </p>
 
 <h1 align="center">
@@ -385,5 +388,5 @@ Meanwhile, if you use `Cocofest`, please cite the following zenodo link: [10.528
 <a href="https://www.instagram.com/maxmvpainting/"><img src="https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcQrO9f_QqjajojjcNJo8FDUdROLwLx-SQ7uVw&s" title="MaxMV" width="65"></a>
 
 <p align="center"> 
-  <img src="docs/assets/image.png" alt="HAR Logo">
+  <img src="https://cdnb.artstation.com/p/assets/images/images/091/565/727/large/max_mv-04.jpg?1757152714" alt="HAR Logo">
 </p>
