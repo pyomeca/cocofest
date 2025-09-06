@@ -77,6 +77,7 @@ and robust solver like [Ipopt](https://github.com/coin-or/Ipopt).
   <img src="https://cdnb.artstation.com/p/assets/images/images/091/565/727/large/max_mv-04.jpg?1757152714" alt="">
 </p>
 
+<a id="installation"></a>
 <h1 align="center">
   <img src="https://cdnb.artstation.com/p/assets/images/images/091/554/681/large/max_mv-02.jpg?1757104575" width="100" alt=""
        style="vertical-align: middle; margin-right: .5rem;" />
@@ -117,12 +118,14 @@ You are now ready to use `Cocofest`!
   <img src="https://cdnb.artstation.com/p/assets/images/images/091/565/727/large/max_mv-04.jpg?1757152714" alt="">
 </p>
 
+<a id="feature"></a>
 <h1 align="center">
   <img src="https://cdna.artstation.com/p/assets/images/images/091/554/680/large/max_mv-01.jpg?1757104570" width="100" alt=""
        style="vertical-align: middle; margin-right: .5rem;" />
   Features
 </h1>
 
+<a id="available-fes-models"></a>
 ## 📊 Available FES models
 All models are implemented at the muscle actuator level, making them applicable to a wide range of problems regardless of the specific optimal control problem.
 
@@ -143,6 +146,7 @@ All models are implemented at the muscle actuator level, making them applicable 
 > Adventurous enough to code it by yourself, we are looking forward to read your [pull request](how-to-contribute).
 > Feel free to reach out on discord or submit an issue if you need help.
 
+<a id="musculoskeletal-model-driven-by-fes"></a>
 ## 🦴 Musculoskeletal model driven by FES
 
 In conventional Hill-type muscle model, muscle force ($F_m$) is the product of $a$ the muscle activation, $F_{max}$ the maximal
@@ -191,6 +195,7 @@ The following example displays a reaching task using the [Arm26](https://opensim
 
 You can find more examples of musculoskeletal model driven by FES in the following [file](https://github.com/pyomeca/cocofest/tree/main/examples/fes_multibody).
 
+<a id="moving-time-horizons"></a>
 ## ⏳ Moving time horizons
 
 For longer time span simulation and apprehend muscle fatigue apparition, `Cocofest` implements moving time horizons (MHE).
@@ -230,6 +235,7 @@ For longer time span simulation and apprehend muscle fatigue apparition, `Cocofe
 > Solved in 1.02 second, computer with an AMD Ryzen Threadripper PRO 7965WXs x 48 processor. <br>
 > Additional information: frequency = 30Hz, n_shooting = 60, step = 0.033s, final time = 2s, integration = Collocation radau method, polynomial_order = 3, solver = IPOPT, simultaneous turn per optimization = 2. 
 
+<a id="initial-value-problem"></a>
 ## 🎯 Initial value problem
 
 The initial value problem feature enables forward nonlinear dynamic integration to simulate the model’s behavior from given initial state and controls (i.e., series of pulse trains). 
@@ -248,6 +254,7 @@ ivp = IvpFes(fes_parameters, ivp_parameters)
 result, time = ivp.integrate()
 ```
 
+<a id="identification"></a>
 ## 🔎 Identification
 
 To personalize FES models to simulated or experimental force, `Cocofest` supports model identification using optimal control.
@@ -274,7 +281,7 @@ To personalize FES models to simulated or experimental force, `Cocofest` support
 > Solved in 0.343 second, computer with an AMD Ryzen Threadripper PRO 7965WXs x 48 processor. <br>
 > Additional information: frequency = 33Hz, n_shooting = 66, step = 0.03s, final time = 2s, integration = Runge-Kutta 4, integration steps = 10, solver = IPOPT. 
 
-
+<a id="summation-truncation"></a>
 ## ✂️ Summation truncation
 
 `Cocofest` also incorporates the recent numerical truncation method to speed up convergence.
@@ -293,12 +300,14 @@ model = ModelMaker.create_model("ding2007", stim_time=stim_time, sum_stim_trunca
   <img src="https://cdnb.artstation.com/p/assets/images/images/091/565/727/large/max_mv-04.jpg?1757152714" alt="">
 </p>
 
+<a id="other"></a>
 <h1 align="center">
   <img src="https://cdna.artstation.com/p/assets/images/images/091/554/682/large/max_mv-03.jpg?1757104580" width="100" alt=""
        style="vertical-align: middle; margin-right: .5rem;" />
   Other
 </h1>
 
+<a id="want-to-contribute"></a>
 ## 🙌 Want to contribute?
 
 We are always looking for new contributors to help us improve `Cocofest`. <br>
@@ -306,21 +315,24 @@ Feel free to check our [contributing guidelines](docs/contributing.md) to get st
 
 Don't know where to start? [Issues](https://github.com/pyomeca/cocofest/issues) tagged with "Good first issues" are a great place to begin!
 
+<a id="contributors"></a>
 ## 🤝 Contributors
 
 <a href="https://github.com/Kev1CO"><img src="https://avatars.githubusercontent.com/u/78259038?v=4" title="Kev1CO" width="50" height="50"></a>
 <a href="https://github.com/Ipuch"><img src="https://avatars.githubusercontent.com/u/40755537?v=4" title="Ipuch" width="50" height="50"></a>
 <a href="https://github.com/Florine353"><img src="https://avatars.githubusercontent.com/u/112490846?v=4" title="Florine353" width="50" height="50"></a>
 
-
+<a id="citing"></a>
 ## 📝 Citing
 `Cocofest` is not yet published. <br>
 Meanwhile, if you use `Cocofest`, please cite the following zenodo link: [10.5281/zenodo.10427934](https://doi.org/10.5281/zenodo.10427934).
 
+<a id="cited-in"></a>
 ## 📚 Cited in
 > \[!NOTE]
 > If you used `Cocofest` in your research, please let us know by submitting an issue or a pull request to add your publication to this list.
 
+<a id="other-related-projects"></a>
 ## <img src="https://avatars.githubusercontent.com/u/36738416?s=200&v=4" width="25">  Other related projects <img src="https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcRV1sVJMT3ICWt09iYCfGOXjQhhW1ryMehoBw&s" width="25"> 
 
 <table>
@@ -349,7 +361,7 @@ Meanwhile, if you use `Cocofest`, please cite the following zenodo link: [10.528
   </tr>
 </table>
 
-
+<a id="acknowledgements"></a>
 ## 🙏 Acknowledgements
 
 ### 🌱 Funding
