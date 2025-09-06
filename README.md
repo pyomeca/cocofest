@@ -1,7 +1,7 @@
 <div align="center"><a name="readme"></a>
 
 <p align="center"> 
-  <img src="https://cdna.artstation.com/p/assets/images/images/091/422/672/large/max_mv-04-04.jpg?1756758714" alt="HAR Logo">
+  <img src="https://cdna.artstation.com/p/assets/images/images/091/422/672/large/max_mv-04-04.jpg?1756758714" alt="">
 </p>
 
 # Cocofest
@@ -54,17 +54,17 @@ Supports predictive musculoskeletal simulation driven by FES, moving time horizo
 </details>
 
 <p align="center"> 
-  <img src="https://cdnb.artstation.com/p/assets/images/images/091/565/727/large/max_mv-04.jpg?1757152714" alt="HAR Logo">
+  <img src="https://cdnb.artstation.com/p/assets/images/images/091/565/727/large/max_mv-04.jpg?1757152714" alt="">
 </p>
 
 
 <h1 align="center">
-  <img src="docs/assets/cocofest_logo.png" width="150" alt="Logo"
+  <img src="docs/assets/cocofest_logo.png" width="150" alt=""
        style="vertical-align: middle; margin-right: .5rem;" />
   About
 </h1>
 
-<h1 align="center"><img src="docs/assets/cocofest_logo.png" width="150" alt="about"> &nbsp; About</h1>
+<h1 align="center"><img src="docs/assets/cocofest_logo.png" width="150" alt=""> &nbsp; About</h1>
 
 
 
@@ -88,16 +88,16 @@ and robust solver like [Ipopt](https://github.com/coin-or/Ipopt).
 > the repository to show your support and help us grow the community!
 
 <p align="center"> 
-  <img src="https://cdnb.artstation.com/p/assets/images/images/091/565/727/large/max_mv-04.jpg?1757152714" alt="HAR Logo">
+  <img src="https://cdnb.artstation.com/p/assets/images/images/091/565/727/large/max_mv-04.jpg?1757152714" alt="">
 </p>
 
 <h1 align="center">
-  <img src="https://cdnb.artstation.com/p/assets/images/images/091/554/681/large/max_mv-02.jpg?1757104575" width="100" alt="Logo"
+  <img src="https://cdnb.artstation.com/p/assets/images/images/091/554/681/large/max_mv-02.jpg?1757104575" width="100" alt=""
        style="vertical-align: middle; margin-right: .5rem;" />
   Installation
 </h1>
 
-<h1 align="center"><img src=https://cdnb.artstation.com/p/assets/images/images/091/554/681/large/max_mv-02.jpg?1757104575" width="100" alt="Logo"> &nbsp; Installation</h1>
+<h1 align="center"><img src=https://cdnb.artstation.com/p/assets/images/images/091/554/681/large/max_mv-02.jpg?1757104575" width="100" alt=""> &nbsp; Installation</h1>
 
 
 Currently, no anaconda installation is available. The installation must be done from the sources. <br>
@@ -131,11 +131,11 @@ python setup.py install
 You are now ready to use `Cocofest`!
 
 <p align="center"> 
-  <img src="https://cdnb.artstation.com/p/assets/images/images/091/565/727/large/max_mv-04.jpg?1757152714" alt="HAR Logo">
+  <img src="https://cdnb.artstation.com/p/assets/images/images/091/565/727/large/max_mv-04.jpg?1757152714" alt="">
 </p>
 
 <h1 align="center">
-  <img src="https://cdna.artstation.com/p/assets/images/images/091/554/680/large/max_mv-01.jpg?1757104570" width="100" alt="Logo"
+  <img src="https://cdna.artstation.com/p/assets/images/images/091/554/680/large/max_mv-01.jpg?1757104570" width="100" alt=""
        style="vertical-align: middle; margin-right: .5rem;" />
   Features
 </h1>
@@ -143,8 +143,7 @@ You are now ready to use `Cocofest`!
 <h1 align="center"><a id="features"></a><img src="https://cdna.artstation.com/p/assets/images/images/091/554/680/large/max_mv-01.jpg?1757104570" width="90" alt=""> Features</h1>
 
 
-<h1 align="center"><img src="https://cdna.artstation.com/p/assets/images/images/091/554/680/large/max_mv-01.jpg?1757104570" width="100" alt="Logo"> &nbsp; Features</h1>
-
+<h1 align="center"><img src="https://cdna.artstation.com/p/assets/images/images/091/554/680/large/max_mv-01.jpg?1757104570" width="100" alt=""> &nbsp; Features</h1>
 
 
 ## 📊 Available FES models
@@ -314,16 +313,16 @@ model = ModelMaker.create_model("ding2007", stim_time=stim_time, sum_stim_trunca
 
 
 <p align="center"> 
-  <img src="https://cdnb.artstation.com/p/assets/images/images/091/565/727/large/max_mv-04.jpg?1757152714" alt="HAR Logo">
+  <img src="https://cdnb.artstation.com/p/assets/images/images/091/565/727/large/max_mv-04.jpg?1757152714" alt="">
 </p>
 
 <h1 align="center">
-  <img src="https://cdna.artstation.com/p/assets/images/images/091/554/682/large/max_mv-03.jpg?1757104580" width="100" alt="Logo"
+  <img src="https://cdna.artstation.com/p/assets/images/images/091/554/682/large/max_mv-03.jpg?1757104580" width="100" alt=""
        style="vertical-align: middle; margin-right: .5rem;" />
   Other
 </h1>
 
-<h1 align="center"><img src="https://cdna.artstation.com/p/assets/images/images/091/554/682/large/max_mv-03.jpg?1757104580" width="100" alt="Logo"> &nbsp; Other</h1>
+<h1 align="center"><img src="https://cdna.artstation.com/p/assets/images/images/091/554/682/large/max_mv-03.jpg?1757104580" width="100" alt=""> &nbsp; Other</h1>
 
 
 ## 🙌 Want to contribute?
@@ -388,5 +387,5 @@ Meanwhile, if you use `Cocofest`, please cite the following zenodo link: [10.528
 <a href="https://www.instagram.com/maxmvpainting/"><img src="https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcQrO9f_QqjajojjcNJo8FDUdROLwLx-SQ7uVw&s" title="MaxMV" width="65"></a>
 
 <p align="center"> 
-  <img src="https://cdnb.artstation.com/p/assets/images/images/091/565/727/large/max_mv-04.jpg?1757152714" alt="HAR Logo">
+  <img src="https://cdnb.artstation.com/p/assets/images/images/091/565/727/large/max_mv-04.jpg?1757152714" alt="">
 </p>
