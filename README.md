@@ -118,7 +118,7 @@ You are now ready to use `Cocofest`!
   <img src="https://cdnb.artstation.com/p/assets/images/images/091/565/727/large/max_mv-04.jpg?1757152714" alt="">
 </p>
 
-<a id="feature"></a>
+<a id="features"></a>
 <h1 align="center">
   <img src="https://cdna.artstation.com/p/assets/images/images/091/554/680/large/max_mv-01.jpg?1757104570" width="100" alt=""
        style="vertical-align: middle; margin-right: .5rem;" />
