@@ -22,36 +22,27 @@ Supports predictive musculoskeletal simulation driven by FES, moving time horizo
 </div>
 
 <details>
-<summary><kbd>Table of contents</kbd></summary>
+  <summary><kbd>Table of contents</kbd></summary>
 
-[About](#about)
-
-[Installation](#installation)
-<details>
-<summary><a href="#features">Features</a></summary>
-
-- [Available FES models](#-available-fes-models-)
-- [Musculoskeletal model driven by FES](#-musculoskeletal-model-driven-by-fes-)
-- [Moving time horizons](#-moving-time-horizons-)
-- [Identification](#-identification-)
-- [Initial value problem](#-initial-value-problem-)
-- [Summation truncation](#-summation-truncation-)
-</details>
-
-<br>
-
-<details>
-<summary><a href="#other">Other</a></summary>
-
-- [Want to contribute?](#-want-to-contribute-)
-- [Contributors](#-contributors-)
-- [Citing](#-citing)
-- [Cited in](#-cited-in)
-- [Other related projects](#other-related-projects)
-- [Acknowledgements](#-acknowledgements)
-</details>
+- [About](#about)
+- [Installation](#installation)
+- [Features](#features)
+  - [Available FES models](#available-fes-models)
+  - [Musculoskeletal model driven by FES](#musculoskeletal-model-driven-by-fes)
+  - [Moving time horizons](#moving-time-horizons)
+  - [Identification](#identification)
+  - [Initial value problem](#initial-value-problem)
+  - [Summation truncation](#summation-truncation)
+- [Other](#other)
+  - [Want to contribute?](#want-to-contribute)
+  - [Contributors](#contributors)
+  - [Citing](#citing)
+  - [Cited in](#cited-in)
+  - [Other related projects](#other-related-projects)
+  - [Acknowledgements](#acknowledgements)
 
 </details>
+
 
 <p align="center"> 
   <img src="https://cdnb.artstation.com/p/assets/images/images/091/565/727/large/max_mv-04.jpg?1757152714" alt="">
@@ -64,9 +55,7 @@ Supports predictive musculoskeletal simulation driven by FES, moving time horizo
   About
 </h1>
 
-<h1 align="center"><img src="docs/assets/cocofest_logo.png" width="150" alt=""> &nbsp; About</h1>
-
-
+<h1 align="center">About <img src="docs/assets/cocofest_logo.png" width="150" alt=""></h1>
 
 
 Functional electrical stimulation (FES) is a neurorehabilitation technique that promotes motor recovery after neurological injury.
@@ -96,9 +85,6 @@ and robust solver like [Ipopt](https://github.com/coin-or/Ipopt).
        style="vertical-align: middle; margin-right: .5rem;" />
   Installation
 </h1>
-
-<h1 align="center"><img src=https://cdnb.artstation.com/p/assets/images/images/091/554/681/large/max_mv-02.jpg?1757104575" width="100" alt=""> &nbsp; Installation</h1>
-
 
 Currently, no anaconda installation is available. The installation must be done from the sources. <br>
 **Cloning** the repository is the first step to be able to use the package.
@@ -139,12 +125,6 @@ You are now ready to use `Cocofest`!
        style="vertical-align: middle; margin-right: .5rem;" />
   Features
 </h1>
-
-<h1 align="center"><a id="features"></a><img src="https://cdna.artstation.com/p/assets/images/images/091/554/680/large/max_mv-01.jpg?1757104570" width="90" alt=""> Features</h1>
-
-
-<h1 align="center"><img src="https://cdna.artstation.com/p/assets/images/images/091/554/680/large/max_mv-01.jpg?1757104570" width="100" alt=""> &nbsp; Features</h1>
-
 
 ## 📊 Available FES models
 All models are implemented at the muscle actuator level, making them applicable to a wide range of problems regardless of the specific optimal control problem.
@@ -321,9 +301,6 @@ model = ModelMaker.create_model("ding2007", stim_time=stim_time, sum_stim_trunca
        style="vertical-align: middle; margin-right: .5rem;" />
   Other
 </h1>
-
-<h1 align="center"><img src="https://cdna.artstation.com/p/assets/images/images/091/554/682/large/max_mv-03.jpg?1757104580" width="100" alt=""> &nbsp; Other</h1>
-
 
 ## 🙌 Want to contribute?
 
