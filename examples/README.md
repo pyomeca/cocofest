@@ -1,1 +1,0 @@
-Examples can be found in {ROOT_FOLDER}/cocofest/examples/
