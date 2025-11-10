@@ -3,7 +3,7 @@ name: cocofest
 channels:
 - conda-forge
 dependencies:
-- biorbd
+- biorbd=1.11.2
 - bioviz
 - python-graphviz
 - pyqtgraph
