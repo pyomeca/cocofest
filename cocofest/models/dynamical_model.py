@@ -4,15 +4,17 @@ import numpy as np
 from casadi import vertcat, MX, SX, Function
 from bioptim import (
     BiorbdModel,
-    ExternalForceSetTimeSeries,
-    OptimalControlProgram,
-    NonLinearProgram,
-    ConfigureProblem,
-    DynamicsFunctions,
+    ConfigureVariables,
     DynamicsEvaluation,
-    ParameterList,
-    ContactType,
+    DynamicsFunctions,
+    ExternalForceSetTimeSeries,
+    FcnEnum,
+    NonLinearProgram,
     OdeSolver,
+    OptimalControlProgram,
+    ParameterList,
+    StateDynamics,
+    States
 )
 
 from ..models.fes_model import FesModel
@@ -26,8 +28,7 @@ from .hill_coefficients import (
     muscle_passive_force_coefficient,
 )
 
-
-class FesMskModel(BiorbdModel):
+class FesMskModel(StateDynamics, BiorbdModel):
     def __init__(
         self,
         name: str = None,
@@ -41,6 +42,7 @@ class FesMskModel(BiorbdModel):
         activate_residual_torque: bool = False,
         parameters: ParameterList = None,
         external_force_set: ExternalForceSetTimeSeries = None,
+        with_contact=False,
     ):
         """
         The custom model that will be used in the optimal control program for the FES-MSK models
@@ -64,8 +66,8 @@ class FesMskModel(BiorbdModel):
         parameters: ParameterList
             The parameters that will be used in the model
         """
-        super().__init__(biorbd_path, parameters=parameters, external_force_set=external_force_set)
-        self.bio_model = BiorbdModel(biorbd_path, parameters=parameters, external_force_set=external_force_set)
+        super().__init__(bio_model=biorbd_path, parameters=parameters, external_force_set=external_force_set)
+
         self._name = name
         self.biorbd_path = biorbd_path
 
@@ -84,14 +86,19 @@ class FesMskModel(BiorbdModel):
             )
             self.muscles_dynamics_model[i].all_stim = self.muscles_dynamics_model[i].previous_stim["time"] + stim_time
 
-        self.bio_stim_model = [self.bio_model] + self.muscles_dynamics_model
-
+        self.bio_stim_model = [self] + self.muscles_dynamics_model
         self.activate_force_length_relationship = activate_force_length_relationship
         self.activate_force_velocity_relationship = activate_force_velocity_relationship
         self.activate_passive_force_relationship = activate_passive_force_relationship
         self.activate_residual_torque = activate_residual_torque
         self.parameters_list = parameters
         self.external_forces_set = external_force_set
+        self.muscles_model = muscles_model
+        self.with_contact = with_contact
+
+        self.state_configuration = [CustomStates.my_muscles_states, States.Q, States.QDOT]
+        self.control_configuration = [CustomStates.my_controls]
+
 
     # ---- Absolutely needed methods ---- #
     def serialize(self) -> tuple[Callable, dict]:
@@ -99,7 +106,7 @@ class FesMskModel(BiorbdModel):
             FesMskModel,
             {
                 "name": self._name,
-                "biorbd_path": self.bio_model.path,
+                "biorbd_path": self.path,
                 "muscles_model": self.muscles_dynamics_model,
                 "stim_time": self.muscles_dynamics_model[0].stim_time,
                 "previous_stim": self.muscles_dynamics_model[0].previous_stim,
@@ -113,10 +120,6 @@ class FesMskModel(BiorbdModel):
         )
 
     # ---- Needed for the example ---- #
-    @property
-    def name_dof(self) -> tuple[str]:
-        return self.bio_model.name_dof
-
     def muscle_name_dof(self, index: int = 0) -> list[str]:
         return self.muscles_dynamics_model[index].name_dof(with_muscle_name=True)
 
@@ -125,14 +128,14 @@ class FesMskModel(BiorbdModel):
         nb_state = 0
         for muscle_model in self.muscles_dynamics_model:
             nb_state += muscle_model.nb_state
-        nb_state += self.bio_model.nb_q
+        nb_state += self.nb_q
         return nb_state
 
     @property
     def name(self) -> None | str:
         return self._name
 
-    def muscle_dynamic(
+    def dynamics(
         self,
         time: MX | SX,
         states: MX | SX,
@@ -141,8 +144,6 @@ class FesMskModel(BiorbdModel):
         algebraic_states: MX | SX,
         numerical_data_timeseries: MX | SX,
         nlp: NonLinearProgram,
-        muscle_models: list[FesModel],
-        state_name_list=None,
     ) -> DynamicsEvaluation:
         """
         The custom dynamics function that provides the derivative of the states: dxdt = f(t, x, u, p, s)
@@ -163,15 +164,10 @@ class FesMskModel(BiorbdModel):
             A list of values to pass to the dynamics at each node. Experimental external forces should be included here.
         nlp: NonLinearProgram
             A reference to the phase
-        muscle_models: list[FesModel]
-            The list of the muscle models
-        state_name_list: list[str]
-            The states names list
         Returns
         -------
         The derivative of the states in the tuple[MX | SX] format
         """
-
         q = DynamicsFunctions.get(nlp.states["q"], states)
         qdot = DynamicsFunctions.get(nlp.states["qdot"], states)
         tau = DynamicsFunctions.get(nlp.controls["tau"], controls) if "tau" in nlp.controls.keys() else 0
@@ -184,8 +180,6 @@ class FesMskModel(BiorbdModel):
             algebraic_states,
             numerical_data_timeseries,
             nlp,
-            muscle_models,
-            state_name_list,
             q,
             qdot,
         )
@@ -193,16 +187,19 @@ class FesMskModel(BiorbdModel):
         # You can directly call biorbd function (as for ddq) or call bioptim accessor (as for dq)
         dq = DynamicsFunctions.compute_qdot(nlp, q, qdot)
         total_torque = muscles_tau + tau if self.activate_residual_torque else muscles_tau
-        external_forces = nlp.get_external_forces(states, controls, algebraic_states, numerical_data_timeseries)
-        with_contact = (
-            True if nlp.model.bio_model.contact_names != () else False
-        )  # TODO: Add a better way of with_contact=True
-        ddq = nlp.model.forward_dynamics(with_contact=with_contact)(
+        external_forces = nlp.get_external_forces("external_forces", states, controls, algebraic_states, numerical_data_timeseries)
+
+        # with_contact = (
+        #     True if nlp.model.bio_model.contact_names != () else False
+        # )  # TODO: Remove once added in supplementary dynamics
+
+        ddq = nlp.model.forward_dynamics(with_contact=self.with_contact)(
             q, qdot, total_torque, external_forces, parameters
         )  # q, qdot, tau, external_forces, parameters
 
         dxdt = vertcat(dxdt_muscle_list, dq, ddq)
 
+        # TODO: Missing defect for FES states
         defects = None
         if isinstance(nlp.dynamics_type.ode_solver, OdeSolver.COLLOCATION):
             slope_q = DynamicsFunctions.get(nlp.states_dot["q"], nlp.states_dot.scaled.cx)
@@ -220,31 +217,29 @@ class FesMskModel(BiorbdModel):
         algebraic_states: MX | SX,
         numerical_data_timeseries: MX | SX,
         nlp: NonLinearProgram,
-        muscle_models: list[FesModel],
-        state_name_list=None,
         q: MX | SX = None,
         qdot: MX | SX = None,
     ):
-
         dxdt_muscle_list = vertcat()
         muscle_forces = vertcat()
         muscle_idx_list = []
+        state_name_list=nlp.states.keys()
 
-        Q = nlp.model.bio_model.q
-        Qdot = nlp.model.bio_model.qdot
+        Q = nlp.model.q
+        Qdot = nlp.model.qdot
 
-        updatedModel = nlp.model.bio_model.model.UpdateKinematicsCustom(Q, Qdot)
-        nlp.model.bio_model.model.updateMuscles(updatedModel, Q, Qdot)
-        updated_muscle_length_jacobian = nlp.model.bio_model.model.musclesLengthJacobian(updatedModel, Q, False).to_mx()
+        updatedModel = nlp.model.model.UpdateKinematicsCustom(Q, Qdot)
+        nlp.model.model.updateMuscles(updatedModel, Q, Qdot)
+        updated_muscle_length_jacobian = nlp.model.model.musclesLengthJacobian(updatedModel, Q, False).to_mx()
         updated_muscle_length_jacobian = Function("musclesLengthJacobian", [Q, Qdot], [updated_muscle_length_jacobian])(
             q, qdot
         )
 
         bio_muscle_names_at_index = []
-        for i in range(len(nlp.model.bio_model.model.muscles())):
-            bio_muscle_names_at_index.append(nlp.model.bio_model.model.muscle(i).name().to_string())
+        for i in range(len(nlp.model.model.muscles())):
+            bio_muscle_names_at_index.append(nlp.model.model.muscle(i).name().to_string())
 
-        for muscle_model in muscle_models:
+        for muscle_model in nlp.model.muscles_dynamics_model:
             muscle_states_idxs = [
                 i for i in range(len(state_name_list)) if muscle_model.muscle_name in state_name_list[i]
             ]
@@ -268,10 +263,10 @@ class FesMskModel(BiorbdModel):
             muscle_force_length_coeff = (
                 muscle_force_length_coefficient(
                     model=updatedModel,
-                    muscle=nlp.model.bio_model.model.muscle(muscle_idx),
+                    muscle=nlp.model.model.muscle(muscle_idx),
                     q=Q,
                 )
-                if nlp.model.activate_force_velocity_relationship
+                if nlp.model.activate_force_length_relationship
                 else 1
             )
             muscle_force_length_coeff = Function("muscle_force_length_coeff", [Q, Qdot], [muscle_force_length_coeff])(
@@ -281,7 +276,7 @@ class FesMskModel(BiorbdModel):
             muscle_force_velocity_coeff = (
                 muscle_force_velocity_coefficient(
                     model=updatedModel,
-                    muscle=nlp.model.bio_model.model.muscle(muscle_idx),
+                    muscle=nlp.model.model.muscle(muscle_idx),
                     q=Q,
                     qdot=Qdot,
                 )
@@ -295,7 +290,7 @@ class FesMskModel(BiorbdModel):
             muscle_passive_force_coeff = (
                 muscle_passive_force_coefficient(
                     model=updatedModel,
-                    muscle=nlp.model.bio_model.model.muscle(muscle_idx),
+                    muscle=nlp.model.model.muscle(muscle_idx),
                     q=Q,
                 )
                 if nlp.model.activate_passive_force_relationship
@@ -313,19 +308,14 @@ class FesMskModel(BiorbdModel):
                 if external_force_in_numerical_data_timeseries
                 else numerical_data_timeseries
             )
-            muscle_dxdt = muscle_model.dynamics(
-                time,
-                muscle_states,
-                muscle_controls,
-                muscle_parameters,
-                algebraic_states,
-                fes_numerical_data_timeseries,
-                nlp,
-                fes_model=muscle_model,
-                force_length_relationship=muscle_force_length_coeff,
-                force_velocity_relationship=muscle_force_velocity_coeff,
-                passive_force_relationship=muscle_passive_force_coeff,
-            ).dxdt
+
+            muscle_model.fes_model = muscle_model
+            muscle_model.force_length_relationship=muscle_force_length_coeff
+            muscle_model.force_velocity_relationship=muscle_force_velocity_coeff
+            muscle_model.passive_force_relationship=muscle_passive_force_coeff
+
+            muscle_dxdt = muscle_model.dynamics(time, muscle_states, muscle_controls, muscle_parameters,
+                                                algebraic_states, fes_numerical_data_timeseries, nlp).dxdt
 
             dxdt_muscle_list = vertcat(dxdt_muscle_list, muscle_dxdt)
             muscle_idx_list.append(muscle_idx)
@@ -400,8 +390,6 @@ class FesMskModel(BiorbdModel):
             algebraic_states,
             numerical_timeseries,
             nlp,
-            nlp.model.muscles_dynamics_model,
-            state_name_list,
             q,
             qdot,
         )
@@ -414,12 +402,16 @@ class FesMskModel(BiorbdModel):
 
         return nlp.model.rigid_contact_forces()(q, qdot, tau, external_forces, nlp.parameters.cx)
 
-    def declare_model_variables(
-        self,
+
+    @staticmethod
+    def declare_model_control(
         ocp: OptimalControlProgram,
         nlp: NonLinearProgram,
         numerical_data_timeseries: dict[str, np.ndarray] = None,
         contact_type: list = (),
+        as_states: bool=False,
+        as_controls: bool=True,
+        as_algebraic_states: bool=False,
     ):
         """
         Tell the program which variables are states and controls.
@@ -434,35 +426,22 @@ class FesMskModel(BiorbdModel):
             A list of values to pass to the dynamics at each node. Experimental external forces should be included here.
         contact_type: list
             The type of contact to be used
+        as_states: bool
+            If the variables are states
+        as_controls: bool
+            If the variables are controls
+        as_algebraic_states: bool
+            If the variables are algebraic states
         """
-
-        state_name_list = StateConfigure().configure_all_muscle_states(self.muscles_dynamics_model, ocp, nlp)
-        ConfigureProblem.configure_q(ocp, nlp, as_states=True, as_controls=False)
-        state_name_list.append("q")
-        ConfigureProblem.configure_qdot(ocp, nlp, as_states=True, as_controls=False)
-        state_name_list.append("qdot")
-        for muscle_model in self.muscles_dynamics_model:
+        for muscle_model in nlp.model.muscles_dynamics_model:
             if isinstance(muscle_model, DingModelPulseWidthFrequency):
                 StateConfigure().configure_last_pulse_width(ocp, nlp, muscle_name=str(muscle_model.muscle_name))
             if isinstance(muscle_model, DingModelPulseIntensityFrequency):
                 StateConfigure().configure_pulse_intensity(
                     ocp, nlp, muscle_name=str(muscle_model.muscle_name), truncation=muscle_model.sum_stim_truncation
                 )
-        if self.activate_residual_torque:
-            ConfigureProblem.configure_tau(ocp, nlp, as_states=False, as_controls=True)
-
-        ConfigureProblem.configure_dynamics_function(
-            ocp,
-            nlp,
-            dyn_func=self.muscle_dynamic,
-            muscle_models=self.muscles_dynamics_model,
-            state_name_list=state_name_list,
-        )
-
-        if ContactType.RIGID_EXPLICIT in contact_type:
-            ConfigureProblem.configure_rigid_contact_function(
-                ocp, nlp, self.forces_from_fes_driven, state_name_list=state_name_list
-            )
+        if nlp.model.activate_residual_torque:
+            ConfigureVariables.configure_tau(ocp, nlp, as_states=False, as_controls=True, as_algebraic_states=False)
 
     @staticmethod
     def _model_sanity(
@@ -503,3 +482,9 @@ def _check_numerical_timeseries_format(numerical_timeseries: np.ndarray, n_shoot
             f"The numerical_data_timeseries should be of format dict[str, np.ndarray] "
             f"where the list is the number of shooting points of the phase "
         )
+
+
+# TODO: Change to future bioptim version
+class CustomStates(FcnEnum):
+    my_muscles_states = (StateConfigure().configure_all_muscle_msk_states,)
+    my_controls = (FesMskModel.declare_model_control,)

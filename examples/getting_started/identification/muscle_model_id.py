@@ -7,6 +7,7 @@ from cocofest import (
     DingModelPulseIntensityFrequency,
     IvpFes,
     OcpFesId,
+    OcpFes,
 )
 from cocofest.identification.identification_method import DataExtraction
 
@@ -71,11 +72,8 @@ def prepare_ocp(
     )
 
     numerical_data_time_series, stim_idx_at_node_list = model.get_numerical_data_time_series(n_shooting, final_time)
-    dynamics = OcpFesId.declare_dynamics(
-        model=model,
-        numerical_data_timeseries=numerical_data_time_series,
-        ode_solver=OdeSolver.RK4(n_integration_steps=10),
-    )
+    dynamics_options = OcpFes.declare_dynamics_options(numerical_time_series=numerical_data_time_series,
+                                                       ode_solver=OdeSolver.RK4(n_integration_steps=10))
 
     x_bounds, x_init = OcpFesId.set_x_bounds(
         model=model,
@@ -107,7 +105,7 @@ def prepare_ocp(
 
     return OptimalControlProgram(
         bio_model=[model],
-        dynamics=dynamics,
+        dynamics=dynamics_options,
         n_shooting=n_shooting,
         phase_time=final_time,
         x_init=x_init,

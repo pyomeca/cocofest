@@ -14,8 +14,6 @@ from bioptim import (
     ConstraintFcn,
     ControlType,
     CostType,
-    DynamicsFcn,
-    DynamicsList,
     ExternalForceSetTimeSeries,
     InitialGuessList,
     InterpolationType,

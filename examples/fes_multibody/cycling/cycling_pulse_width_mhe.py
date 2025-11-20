@@ -18,9 +18,7 @@ from bioptim import (
     BoundsList,
     ConstraintList,
     ConstraintFcn,
-    ContactType,
     CostType,
-    DynamicsList,
     ExternalForceSetTimeSeries,
     InitialGuessList,
     InterpolationType,
@@ -29,7 +27,6 @@ from bioptim import (
     ObjectiveFcn,
     ObjectiveList,
     OdeSolver,
-    PhaseDynamics,
     SolutionMerge,
     Solution,
     Solver,
@@ -333,7 +330,7 @@ def prepare_nmpc(
     )
     numerical_time_series.update(numerical_data_time_series)
     # --- Dynamics --- #
-    dynamics = set_dynamics(model=model, numerical_time_series=numerical_time_series, ode_solver=ode_solver)
+    dynamics_options = set_dynamics_options(numerical_time_series=numerical_time_series, ode_solver=ode_solver)
 
     # --- Set states --- #
     # --- Set q (position and speed) initial guesses --- #
@@ -377,7 +374,7 @@ def prepare_nmpc(
 
     return MyCyclicNMPC(
         bio_model=[model],
-        dynamics=dynamics,
+        dynamics=dynamics_options,
         cycle_len=cycle_len,
         cycle_duration=cycle_duration,
         n_cycles_simultaneous=n_cycles_simultaneous,
@@ -406,19 +403,10 @@ def set_external_forces(n_shooting, external_force_dict, force_name):
     return numerical_time_series, external_force_set
 
 
-def set_dynamics(model, numerical_time_series, ode_solver):
-    dynamics = DynamicsList()
-    dynamics.add(
-        dynamics_type=model.declare_model_variables,
-        dynamic_function=model.muscle_dynamic,
-        expand_dynamics=True,
-        phase_dynamics=PhaseDynamics.SHARED_DURING_THE_PHASE,
-        numerical_data_timeseries=numerical_time_series,
-        contact_type=[ContactType.RIGID_EXPLICIT],
-        phase=0,
-        ode_solver=ode_solver,
-    )
-    return dynamics
+def set_dynamics_options(numerical_time_series, ode_solver):
+    dynamics_options = OcpFesMsk.declare_dynamics_options(numerical_time_series=numerical_time_series,
+                                                          ode_solver=ode_solver)
+    return dynamics_options
 
 
 def set_q_qdot_init(

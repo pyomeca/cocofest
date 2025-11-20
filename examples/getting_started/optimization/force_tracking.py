@@ -35,13 +35,10 @@ def prepare_ocp(model: FesModel, final_time: float, pw_max: float, force_trackin
     time_series, stim_idx_at_node_list = model.get_numerical_data_time_series(
         n_shooting, final_time
     )  # Retrieve time and indexes at which occurs the stimulation for the FES dynamic
-    dynamics = OcpFes.declare_dynamics(
-        model,
-        time_series,
-        ode_solver=OdeSolver.RK4(n_integration_steps=10),
-        # ode_solver=OdeSolver.COLLOCATION(polynomial_degree=3, method="radau"),  # Possibility to use a different solver
-    )
-
+    dynamics_options = OcpFes.declare_dynamics_options(numerical_time_series=time_series,
+                                                       ode_solver=OdeSolver.RK4(n_integration_steps=10)
+                                                       # ode_solver=OdeSolver.COLLOCATION(polynomial_degree=3, method="radau"),  # Possibility to use a different solver)
+                                                       )
     # --- Set initial guesses and bounds for states and controls --- #
     x_bounds = OcpFes.set_x_bounds(model)
     x_init = OcpFes.set_x_init(model)
@@ -61,7 +58,7 @@ def prepare_ocp(model: FesModel, final_time: float, pw_max: float, force_trackin
 
     return OptimalControlProgram(
         bio_model=[model],
-        dynamics=dynamics,
+        dynamics=dynamics_options,
         n_shooting=n_shooting,
         phase_time=final_time,
         objective_functions=objective_functions,

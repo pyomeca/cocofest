@@ -117,7 +117,9 @@ def prepare_nmpc_bo(
     numerical_time_series.update(time_series2)
 
     # --- Dynamics & states --- #
-    dynamics = base.set_dynamics(model=model, numerical_time_series=numerical_time_series, ode_solver=ode_solver)
+    dynamics_options = base.set_dynamics_options(numerical_time_series=numerical_time_series,
+                                                 ode_solver=OdeSolver.RK4(n_integration_steps=10))
+
     x_init = base.set_q_qdot_init(
         n_shooting=window_n_shooting,
         pedal_config=cycling_info["pedal_config"],
@@ -148,7 +150,7 @@ def prepare_nmpc_bo(
 
     return base.MyCyclicNMPC(
         bio_model=[model],
-        dynamics=dynamics,
+        dynamics=dynamics_options,
         cycle_len=cycle_len,
         cycle_duration=cycle_duration,
         n_cycles_simultaneous=n_cycles_simultaneous,

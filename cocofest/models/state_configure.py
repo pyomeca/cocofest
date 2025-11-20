@@ -1,5 +1,5 @@
 from bioptim import (
-    ConfigureProblem,
+    ConfigureVariables,
     NonLinearProgram,
     OptimalControlProgram,
 )
@@ -49,7 +49,7 @@ class StateConfigure:
         muscle_name = "_" + muscle_name if muscle_name else ""
         name = "Cn" + muscle_name
         name_cn = [name]
-        ConfigureProblem.configure_new_variable(
+        ConfigureVariables.configure_new_variable(
             name,
             name_cn,
             ocp,
@@ -89,7 +89,7 @@ class StateConfigure:
         muscle_name = "_" + muscle_name if muscle_name else ""
         name = "F" + muscle_name
         name_f = [name]
-        ConfigureProblem.configure_new_variable(
+        ConfigureVariables.configure_new_variable(
             name,
             name_f,
             ocp,
@@ -129,7 +129,7 @@ class StateConfigure:
         muscle_name = "_" + muscle_name if muscle_name else ""
         name = "A" + muscle_name
         name_a = [name]
-        return ConfigureProblem.configure_new_variable(
+        return ConfigureVariables.configure_new_variable(
             name,
             name_a,
             ocp,
@@ -169,7 +169,7 @@ class StateConfigure:
         muscle_name = "_" + muscle_name if muscle_name else ""
         name = "Tau1" + muscle_name
         name_tau1 = [name]
-        return ConfigureProblem.configure_new_variable(
+        return ConfigureVariables.configure_new_variable(
             name,
             name_tau1,
             ocp,
@@ -209,7 +209,7 @@ class StateConfigure:
         muscle_name = "_" + muscle_name if muscle_name else ""
         name = "Km" + muscle_name
         name_km = [name]
-        return ConfigureProblem.configure_new_variable(
+        return ConfigureVariables.configure_new_variable(
             name,
             name_km,
             ocp,
@@ -236,7 +236,7 @@ class StateConfigure:
         muscle_name = "_" + muscle_name if muscle_name else ""
         name = "Cn_sum" + muscle_name
         name_cn_sum = [name]
-        return ConfigureProblem.configure_new_variable(name, name_cn_sum, ocp, nlp, as_states=False, as_controls=True)
+        return ConfigureVariables.configure_new_variable(name, name_cn_sum, ocp, nlp, as_states=False, as_controls=True)
 
     @staticmethod
     def configure_a_calculation(ocp, nlp, muscle_name: str = None):
@@ -255,7 +255,7 @@ class StateConfigure:
         muscle_name = "_" + muscle_name if muscle_name else ""
         name = "A_calculation" + muscle_name
         name_cn_sum = [name]
-        return ConfigureProblem.configure_new_variable(name, name_cn_sum, ocp, nlp, as_states=False, as_controls=True)
+        return ConfigureVariables.configure_new_variable(name, name_cn_sum, ocp, nlp, as_states=False, as_controls=True)
 
     @staticmethod
     def configure_muscle_activation(
@@ -287,7 +287,7 @@ class StateConfigure:
         muscle_name = "_" + muscle_name if muscle_name else ""
         name = "a" + muscle_name
         name_a = [name]
-        ConfigureProblem.configure_new_variable(
+        ConfigureVariables.configure_new_variable(
             name,
             name_a,
             ocp,
@@ -327,7 +327,7 @@ class StateConfigure:
         muscle_name = "_" + muscle_name if muscle_name else ""
         name = "mu" + muscle_name
         name_mu = [name]
-        ConfigureProblem.configure_new_variable(
+        ConfigureVariables.configure_new_variable(
             name,
             name_mu,
             ocp,
@@ -367,7 +367,7 @@ class StateConfigure:
         muscle_name = "_" + muscle_name if muscle_name else ""
         name = "theta" + muscle_name
         name_theta = [name]
-        ConfigureProblem.configure_new_variable(
+        ConfigureVariables.configure_new_variable(
             name,
             name_theta,
             ocp,
@@ -407,7 +407,7 @@ class StateConfigure:
         muscle_name = "_" + muscle_name if muscle_name else ""
         name = "dtheta_dt" + muscle_name
         name_dtheta_dt = [name]
-        ConfigureProblem.configure_new_variable(
+        ConfigureVariables.configure_new_variable(
             name,
             name_dtheta_dt,
             ocp,
@@ -418,7 +418,7 @@ class StateConfigure:
         )
 
     @staticmethod
-    def configure_last_pulse_width(ocp, nlp, muscle_name: str = None):
+    def configure_last_pulse_width(ocp, nlp, muscle_name: str = None, as_states=True, as_controls=False, as_algebraic_states=False):
         """
         Configure the last pulse width control
 
@@ -432,12 +432,12 @@ class StateConfigure:
         muscle_name = "_" + muscle_name if muscle_name else ""
         name = "last_pulse_width" + muscle_name
         last_pulse_width = [name]
-        return ConfigureProblem.configure_new_variable(
+        return ConfigureVariables.configure_new_variable(
             name, last_pulse_width, ocp, nlp, as_states=False, as_controls=True
         )
 
     @staticmethod
-    def configure_pulse_intensity(ocp, nlp, muscle_name: str = None, truncation: int = 20):
+    def configure_pulse_intensity(ocp, nlp, muscle_name: str = None, truncation: int = None, as_states=True, as_controls=False, as_algebraic_states=False):
         """
         Configure the pulse intensity control for the Ding model
 
@@ -448,15 +448,17 @@ class StateConfigure:
         nlp: NonLinearProgram
             A reference to the phase
         """
+        muscle_name = nlp.model.muscle_name if muscle_name is None else muscle_name
+        truncation = nlp.model.sum_stim_truncation if truncation is None else truncation
         muscle_name = "_" + muscle_name if muscle_name else ""
         name = "pulse_intensity" + muscle_name
         pulse_intensity = [str(i) for i in range(truncation)]
-        return ConfigureProblem.configure_new_variable(
+        return ConfigureVariables.configure_new_variable(
             name, pulse_intensity, ocp, nlp, as_states=False, as_controls=True
         )
 
     @staticmethod
-    def configure_intensity(ocp, nlp, muscle_name: str = None):
+    def configure_intensity(ocp, nlp, as_states=False, as_controls=True, as_algebraic_states=False):
         """
         Configure the intensity control for the Veltink1992 model
 
@@ -467,28 +469,38 @@ class StateConfigure:
         nlp: NonLinearProgram
             A reference to the phase
         """
+        muscle_name = nlp.model.muscle_name
         muscle_name = "_" + muscle_name if muscle_name else ""
         name = "I" + muscle_name
         pulse_intensity = [name]
-        return ConfigureProblem.configure_new_variable(
+        return ConfigureVariables.configure_new_variable(
             name, pulse_intensity, ocp, nlp, as_states=False, as_controls=True
         )
 
-    def configure_all_muscle_states(self, muscles_dynamics_model, ocp, nlp):
-        state_name_list = []
-        for muscle_dynamics_model in muscles_dynamics_model:
+    @staticmethod
+    def configure_all_muscle_states(ocp, nlp, as_states=True, as_controls=False, as_algebraic_states=False):
+        for state_key in nlp.model.name_dof:
+            if state_key in StateConfigure().state_dictionary.keys():
+                StateConfigure().state_dictionary[state_key](
+                    ocp=ocp,
+                    nlp=nlp,
+                    as_states=True,
+                    as_controls=False,
+                    muscle_name=nlp.model.muscle_name,
+                )
+
+    @staticmethod
+    def configure_all_muscle_msk_states(ocp, nlp, as_states=True, as_controls=False, as_algebraic_states=False):
+        for muscle_dynamics_model in nlp.model.muscles_dynamics_model:
             for state_key in muscle_dynamics_model.name_dof:
-                if state_key in self.state_dictionary.keys():
-                    self.state_dictionary[state_key](
+                if state_key in StateConfigure().state_dictionary.keys():
+                    StateConfigure().state_dictionary[state_key](
                         ocp=ocp,
                         nlp=nlp,
                         as_states=True,
                         as_controls=False,
                         muscle_name=muscle_dynamics_model.muscle_name,
                     )
-                    state_name_list.append(state_key + "_" + muscle_dynamics_model.muscle_name)
-
-        return state_name_list
 
     def configure_all_fes_model_states(self, ocp, nlp, fes_model):
         for state_key in fes_model.name_dof:

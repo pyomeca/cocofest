@@ -2,17 +2,12 @@ from typing import Callable
 from casadi import MX, vertcat
 import numpy as np
 
-from bioptim import (
-    ConfigureProblem,
-    DynamicsEvaluation,
-    NonLinearProgram,
-    OptimalControlProgram,
-)
+from bioptim import StateDynamics, FcnEnum
 
 from cocofest.models.state_configure import StateConfigure
 
 
-class VeltinkModelPulseIntensity:
+class VeltinkModelPulseIntensity(StateDynamics):
     """
     This is a custom model implementing the muscle activation dynamics from:
 
@@ -43,6 +38,10 @@ class VeltinkModelPulseIntensity:
         self.Ta = Ta if Ta is not None else TA_DEFAULT
         self.I_threshold = I_threshold if I_threshold is not None else I_THRESHOLD_DEFAULT
         self.I_saturation = I_saturation if I_saturation is not None else I_SATURATION_DEFAULT
+
+        self.contact_types = ()
+        self.state_configuration = [CustomStates.my_muscle_states]
+        self.control_configuration = [CustomStates.my_control]
 
     @property
     def name_dof(self, with_muscle_name: bool = False) -> list[str]:
@@ -128,95 +127,38 @@ class VeltinkModelPulseIntensity:
 
     def system_dynamics(
         self,
-        a: MX,
-        I: MX,
+        time: MX,
+        states: MX,
+        controls: MX,
+        numerical_timeseries: MX,
     ) -> MX:
         """
         The system dynamics implementing equation (4) for muscle activation.
 
         Parameters
         ----------
-        a: MX
-            Muscle activation state (unitless)
-        I: MX
-            Stimulation current amplitude (mA)
+        time: MX
+            The system's current node time
+        states: MX
+            The state of the system a
+        controls: MX
+            The controls of the system, I
+        numerical_timeseries: MX
+            The numerical timeseries of the system
 
         Returns
         -------
         The derivative of muscle activation state
         """
+        a = states[0]
+        I = controls[0]
         u = self.normalize_current(I)
         a_dot = self.get_muscle_activation(a=a, u=u)
 
         return vertcat(a_dot)
 
-    @staticmethod
-    def dynamics(
-        time: MX,
-        states: MX,
-        controls: MX,
-        parameters: MX,
-        algebraic_states: MX,
-        numerical_timeseries: MX,
-        nlp: NonLinearProgram,
-        fes_model=None,
-    ) -> DynamicsEvaluation:
-        """
-        Parameters
-        ----------
-        time: MX
-            The system's current node time
-        states: MX
-            The state of the system (muscle activation)
-        controls: MX
-            The controls of the system (stimulation current)
-        parameters: MX
-            The parameters acting on the system
-        algebraic_states: MX
-            The stochastic variables of the system
-        numerical_timeseries: MX
-            The numerical timeseries of the system
-        nlp: NonLinearProgram
-            A reference to the phase
-        fes_model: VeltinkModelPulseIntensity
-            The current phase fes model
 
-        Returns
-        -------
-        The derivative of the states
-        """
-        model = fes_model if fes_model else nlp.model
-        dxdt_fun = model.system_dynamics
-
-        return DynamicsEvaluation(
-            dxdt=dxdt_fun(
-                a=states[0],
-                I=controls[0],
-            ),
-            defects=None,
-        )
-
-    def declare_model_variables(
-        self,
-        ocp: OptimalControlProgram,
-        nlp: NonLinearProgram,
-        numerical_data_timeseries: dict[str, np.ndarray] = None,
-        contact_type: tuple = (),
-    ):
-        """
-        Tell the program which variables are states and controls.
-
-        Parameters
-        ----------
-        ocp: OptimalControlProgram
-            A reference to the ocp
-        nlp: NonLinearProgram
-            A reference to the phase
-        numerical_data_timeseries: dict[str, np.ndarray]
-            A list of values to pass to the dynamics at each node
-        contact_type: tuple
-            The type of contact to use for the model
-        """
-        StateConfigure().configure_all_fes_model_states(ocp, nlp, fes_model=self)
-        StateConfigure().configure_intensity(ocp, nlp)
-        ConfigureProblem.configure_dynamics_function(ocp, nlp, dyn_func=self.dynamics)
+# TODO: Change to future bioptim version
+class CustomStates(FcnEnum):
+    my_muscle_states = (StateConfigure().configure_all_muscle_states,)
+    my_control = (StateConfigure().configure_intensity,)

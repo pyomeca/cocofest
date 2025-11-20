@@ -4,7 +4,13 @@ This ocp was build to match a force value of 270N at the end of the last node.
 No optimization will be done on the stimulation, the frequency is fixed to 1Hz.
 """
 
-from bioptim import ObjectiveList, ObjectiveFcn, OptimalControlProgram, ControlType, OdeSolver, Node
+from bioptim import (ObjectiveList,
+                     ObjectiveFcn,
+                     OptimalControlProgram,
+                     ControlType,
+                     OdeSolver,
+                     Node,
+                     )
 from cocofest import OcpFes, ModelMaker
 
 
@@ -12,9 +18,9 @@ def prepare_ocp(model, final_time):
     # --- Set dynamics --- #
     n_shooting = model.get_n_shooting(final_time=final_time)
     numerical_data_time_series, stim_idx_at_node_list = model.get_numerical_data_time_series(n_shooting, final_time)
-    dynamics = OcpFes.declare_dynamics(
-        model, numerical_data_time_series, ode_solver=OdeSolver.RK4(n_integration_steps=10)
-    )
+
+    dynamics_options = OcpFes.declare_dynamics_options(numerical_time_series=numerical_data_time_series,
+                                                       ode_solver=OdeSolver.RK4(n_integration_steps=10))
 
     # --- Set initial guesses and bounds for states --- #
     x_bounds = OcpFes.set_x_bounds(model)
@@ -28,7 +34,7 @@ def prepare_ocp(model, final_time):
 
     return OptimalControlProgram(
         bio_model=[model],
-        dynamics=dynamics,
+        dynamics=dynamics_options,
         n_shooting=n_shooting,
         phase_time=final_time,
         objective_functions=objective_functions,

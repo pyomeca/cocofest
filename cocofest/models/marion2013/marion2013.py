@@ -2,10 +2,6 @@ from typing import Callable
 from casadi import MX, vertcat, exp, cos, pi
 import numpy as np
 
-from bioptim import (
-    DynamicsEvaluation,
-    NonLinearProgram,
-)
 from cocofest.models.marion2009.marion2009 import Marion2009ModelFrequency
 
 
@@ -126,38 +122,37 @@ class Marion2013ModelFrequency(Marion2009ModelFrequency):
 
     def system_dynamics(
         self,
-        cn: MX,
-        f: MX,
-        theta: MX,
-        dtheta_dt: MX,
-        t: MX = None,
-        t_stim_prev: MX = None,
-        Fload: MX = 0.0,
+        time: MX,
+        states: MX,
+        controls: MX,
+        numerical_timeseries: MX,
     ) -> MX:
         """
         The system dynamics that describes the model.
 
         Parameters
         ----------
-        cn: MX
-            The normalized Ca2+-troponin complex concentration
-        f: MX
-            The instantaneous force
-        theta: MX
-            The flexion angle
-        dtheta_dt: MX
-            The angular velocity
-        t: MX
-            The current time at which the dynamics is evaluated (ms)
-        t_stim_prev: MX
-            The time of the previous stimulation (ms)
-        Fload: MX
-            External load force (N)
+        time: MX
+            The system's current node time
+        states: MX
+            The state of the system CN, F, theta, dtheta
+        controls: MX
+            The controls of the system, Fload
+        numerical_timeseries: MX
+            The numerical timeseries of the system
 
         Returns
         -------
         The value of the derivative of each state dx/dt at the current time t
         """
+        t = time
+        cn = states[0]
+        f = states[1]
+        theta = states[2]
+        dtheta_dt = states[3]
+        Fload = controls[0] if controls.shape[0] > 0 else 0.0
+        t_stim_prev = numerical_timeseries
+
         cn_dot = self.calculate_cn_dot(cn, t, t_stim_prev)  # Similar to Ding's model calculation
 
         # Calculate Marion-specific force scaling terms
@@ -182,56 +177,3 @@ class Marion2013ModelFrequency(Marion2009ModelFrequency):
             Fload,
         )
         return vertcat(cn_dot, f_dot, dtheta_dt, d2theta_dt2)
-
-    @staticmethod
-    def dynamics(
-        time: MX,
-        states: MX,
-        controls: MX,
-        parameters: MX,
-        algebraic_states: MX,
-        numerical_timeseries: MX,
-        nlp: NonLinearProgram,
-        fes_model=None,
-    ) -> DynamicsEvaluation:
-        """
-        Functional electrical stimulation dynamic
-
-        Parameters
-        ----------
-        time: MX
-            The system's current node time
-        states: MX
-            The state of the system CN, F, theta, dtheta_dt
-        controls: MX
-            The controls of the system
-        parameters: MX
-            The parameters acting on the system
-        algebraic_states: MX
-            The stochastic variables of the system
-        numerical_timeseries: MX
-            The numerical timeseries of the system
-        nlp: NonLinearProgram
-            A reference to the phase
-        fes_model: Marion2013ModelFrequency
-            The current phase fes model
-
-        Returns
-        -------
-        The derivative of the states in the tuple[MX] format
-        """
-        model = fes_model if fes_model else nlp.model
-        dxdt_fun = model.system_dynamics
-
-        return DynamicsEvaluation(
-            dxdt=dxdt_fun(
-                cn=states[0],
-                f=states[1],
-                theta=states[2],
-                dtheta_dt=states[3],
-                t=time,
-                t_stim_prev=numerical_timeseries,
-                Fload=controls[0] if controls.shape[0] > 0 else 0.0,
-            ),
-            defects=None,
-        )

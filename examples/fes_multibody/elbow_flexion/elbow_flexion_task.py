@@ -42,13 +42,8 @@ def prepare_ocp(
     numerical_data_time_series, stim_idx_at_node_list = muscle_model.get_numerical_data_time_series(
         n_shooting, final_time
     )
-
-    dynamics = OcpFesMsk.declare_dynamics(
-        model,
-        numerical_time_series=numerical_data_time_series,
-        ode_solver=OdeSolver.RK4(n_integration_steps=10),
-        contact_type=[],
-    )
+    dynamics_options = OcpFesMsk.declare_dynamics_options(numerical_time_series=numerical_data_time_series,
+                                                          ode_solver=OdeSolver.RK4(n_integration_steps=10))
 
     x_bounds, x_init = OcpFesMsk.set_x_bounds(model, msk_info)
     u_bounds, u_init = OcpFesMsk.set_u_bounds(model, msk_info["with_residual_torque"], max_bound=max_bound)
@@ -99,7 +94,7 @@ def prepare_ocp(
 
     return OptimalControlProgram(
         bio_model=[model],
-        dynamics=dynamics,
+        dynamics=dynamics_options,
         n_shooting=n_shooting,
         phase_time=final_time,
         objective_functions=objective_functions,
@@ -139,6 +134,7 @@ def main(plot=True, model_path="../../msk_models/Arm26/arm26_biceps_triceps.bioM
         activate_passive_force_relationship=True,
         activate_residual_torque=False,
         stim_time=stim_time,
+        with_contact=False,
     )
 
     final_time = 1

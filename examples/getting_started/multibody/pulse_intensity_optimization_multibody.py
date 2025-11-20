@@ -34,11 +34,9 @@ def prepare_ocp(model: FesMskModel, final_time: float, external_force: dict, msk
     else:
         numerical_time_series = numerical_data_time_series
 
-    dynamics = OcpFesMsk.declare_dynamics(
-        model,
+    dynamics_options = OcpFesMsk.declare_dynamics_options(
         numerical_time_series=numerical_time_series,
         ode_solver=OdeSolver.RK4(n_integration_steps=10),
-        contact_type=[],
     )
 
     x_bounds, x_init = OcpFesMsk.set_x_bounds(model, msk_info)
@@ -77,7 +75,7 @@ def prepare_ocp(model: FesMskModel, final_time: float, external_force: dict, msk
 
     return OptimalControlProgram(
         bio_model=[model],
-        dynamics=dynamics,
+        dynamics=dynamics_options,
         n_shooting=n_shooting,
         phase_time=final_time,
         objective_functions=objective_functions,

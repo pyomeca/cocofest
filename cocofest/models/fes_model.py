@@ -112,13 +112,13 @@ class FesModel(ABC):
     @abstractmethod
     def system_dynamics(
         self,
-        cn: MX,
-        f: MX,
-        cn_sum: MX,
-        force_length_relationship: MX | float,
-        force_velocity_relationship: MX | float,
-        passive_force_relationship: MX | float,
+        time: MX,
+        states: MX,
+        controls: MX,
+        numerical_timeseries: MX,
     ):
+
+
         """
 
         Returns
@@ -169,9 +169,6 @@ class FesModel(ABC):
         a: MX | float,
         tau1: MX | float,
         km: MX | float,
-        force_length_relationship: MX | float,
-        force_velocity_relationship: MX | float,
-        passive_force_relationship: MX | float,
     ):
         """
 
@@ -180,35 +177,16 @@ class FesModel(ABC):
 
         """
 
-    @staticmethod
     @abstractmethod
     def dynamics(
+        self,
         time: MX,
         states: MX,
         controls: MX,
         parameters: MX,
         algebraic_states: MX,
-        numerical_data_timeseries: MX,
+        numerical_timeseries: MX,
         nlp: NonLinearProgram,
-        fes_model,
-        force_length_relationship: MX | float,
-        force_velocity_relationship: MX | float,
-        passive_force_relationship: MX | float,
-    ):
-        """
-
-        Returns
-        -------
-
-        """
-
-    @abstractmethod
-    def declare_ding_variables(
-        self,
-        ocp: OptimalControlProgram,
-        nlp: NonLinearProgram,
-        numerical_data_timeseries: dict[str, np.ndarray] = None,
-        contact_type: tuple = (),
     ):
         """
 
