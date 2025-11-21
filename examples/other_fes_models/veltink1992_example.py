@@ -1,8 +1,4 @@
-from cocofest import (
-    VeltinkModelPulseIntensity,
-    VeltinkRienerModelPulseIntensityWithFatigue,
-    OcpFes
-)
+from cocofest import VeltinkModelPulseIntensity, VeltinkRienerModelPulseIntensityWithFatigue, OcpFes
 
 from bioptim import (
     OptimalControlProgram,
@@ -17,8 +13,9 @@ from bioptim import (
 
 def prepare_ocp(model, final_time, n_shooting, fmax):
     # --- Set dynamics --- #
-    dynamics_options = OcpFes.declare_dynamics_options(numerical_time_series=None,
-                                                       ode_solver=OdeSolver.RK4(n_integration_steps=10))
+    dynamics_options = OcpFes.declare_dynamics_options(
+        numerical_time_series=None, ode_solver=OdeSolver.RK4(n_integration_steps=10)
+    )
 
     # --- Set initial guesses and bounds for states and controls --- #
     x_bounds = BoundsList()

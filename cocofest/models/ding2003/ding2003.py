@@ -40,7 +40,7 @@ class DingModelFrequency(FesModel, StateDynamics):
         stim_time: list[float] = None,
         previous_stim: dict = None,
         sum_stim_truncation: int = 20,
-        **kwargs
+        **kwargs,
     ):
         super().__init__(name=model_name, **kwargs)
         self._model_name = model_name
@@ -76,7 +76,6 @@ class DingModelFrequency(FesModel, StateDynamics):
         self.force_length_relationship = 1
         self.force_velocity_relationship = 1
         self.passive_force_relationship = 0
-
 
     # --- Configure variables --- #
     @property
@@ -135,7 +134,7 @@ class DingModelFrequency(FesModel, StateDynamics):
     # ---- Needed for the example ---- #
     @property
     def name_dofs(self) -> list[str]:
-        muscle_name = ("_" + self.muscle_name if self.muscle_name is not None else "")
+        muscle_name = "_" + self.muscle_name if self.muscle_name is not None else ""
         return ["Cn" + muscle_name, "F" + muscle_name]
 
     @property

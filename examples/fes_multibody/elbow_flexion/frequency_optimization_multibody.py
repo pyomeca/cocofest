@@ -21,8 +21,9 @@ def prepare_ocp(model, final_time: float, resistive_torque, msk_info):
         n_shooting, final_time
     )
     numerical_time_series.update(numerical_data_time_series)
-    dynamics_options = OcpFesMsk.declare_dynamics_options(numerical_time_series=numerical_data_time_series,
-                                                          ode_solver=OdeSolver.RK4(n_integration_steps=10))
+    dynamics_options = OcpFesMsk.declare_dynamics_options(
+        numerical_time_series=numerical_data_time_series, ode_solver=OdeSolver.RK4(n_integration_steps=10)
+    )
 
     # --- Set initial guesses and bounds for states and controls --- #
     x_bounds, x_init = OcpFesMsk.set_x_bounds(model, msk_info)

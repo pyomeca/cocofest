@@ -42,8 +42,9 @@ def prepare_ocp(
     numerical_data_time_series, stim_idx_at_node_list = muscle_model.get_numerical_data_time_series(
         n_shooting, final_time
     )
-    dynamics_options = OcpFesMsk.declare_dynamics_options(numerical_time_series=numerical_data_time_series,
-                                                          ode_solver=OdeSolver.RK4(n_integration_steps=10))
+    dynamics_options = OcpFesMsk.declare_dynamics_options(
+        numerical_time_series=numerical_data_time_series, ode_solver=OdeSolver.RK4(n_integration_steps=10)
+    )
 
     x_bounds, x_init = OcpFesMsk.set_x_bounds(model, msk_info)
     u_bounds, u_init = OcpFesMsk.set_u_bounds(model, msk_info["with_residual_torque"], max_bound=max_bound)

@@ -14,7 +14,7 @@ from bioptim import (
     OptimalControlProgram,
     ParameterList,
     StateDynamics,
-    States
+    States,
 )
 
 from ..models.fes_model import FesModel
@@ -27,6 +27,7 @@ from .hill_coefficients import (
     muscle_force_velocity_coefficient,
     muscle_passive_force_coefficient,
 )
+
 
 class FesMskModel(BiorbdModel, StateDynamics):
     def __init__(
@@ -67,10 +68,12 @@ class FesMskModel(BiorbdModel, StateDynamics):
             The parameters that will be used in the model
         """
         self.with_contact = with_contact
-        super().__init__(bio_model=biorbd_path,
-                         parameters=parameters,
-                         external_force_set=external_force_set,
-                         contact_types=[ContactType.RIGID_EXPLICIT] if self.with_contact else [])
+        super().__init__(
+            bio_model=biorbd_path,
+            parameters=parameters,
+            external_force_set=external_force_set,
+            contact_types=[ContactType.RIGID_EXPLICIT] if self.with_contact else [],
+        )
 
         self._name = name
         self.biorbd_path = biorbd_path
@@ -98,7 +101,6 @@ class FesMskModel(BiorbdModel, StateDynamics):
         self.parameters_list = parameters
         self.external_forces_set = external_force_set
         self.muscles_model = muscles_model
-
 
     @property
     def state_configuration_functions(self) -> List[States | Callable]:
@@ -226,7 +228,9 @@ class FesMskModel(BiorbdModel, StateDynamics):
         # You can directly call biorbd function (as for ddq) or call bioptim accessor (as for dq)
         dq = DynamicsFunctions.compute_qdot(nlp, q, qdot)
         total_torque = muscles_tau + tau if self.activate_residual_torque else muscles_tau
-        external_forces = nlp.get_external_forces("external_forces", states, controls, algebraic_states, numerical_data_timeseries)
+        external_forces = nlp.get_external_forces(
+            "external_forces", states, controls, algebraic_states, numerical_data_timeseries
+        )
 
         ddq = nlp.model.forward_dynamics(with_contact=self.with_contact)(
             q, qdot, total_torque, external_forces, parameters
@@ -258,7 +262,7 @@ class FesMskModel(BiorbdModel, StateDynamics):
         dxdt_muscle_list = vertcat()
         muscle_forces = vertcat()
         muscle_idx_list = []
-        state_name_list=nlp.states.keys()
+        state_name_list = nlp.states.keys()
 
         Q = nlp.model.q
         Qdot = nlp.model.qdot
@@ -345,12 +349,19 @@ class FesMskModel(BiorbdModel, StateDynamics):
             )
 
             muscle_model.fes_model = muscle_model
-            muscle_model.force_length_relationship=muscle_force_length_coeff
-            muscle_model.force_velocity_relationship=muscle_force_velocity_coeff
-            muscle_model.passive_force_relationship=muscle_passive_force_coeff
+            muscle_model.force_length_relationship = muscle_force_length_coeff
+            muscle_model.force_velocity_relationship = muscle_force_velocity_coeff
+            muscle_model.passive_force_relationship = muscle_passive_force_coeff
 
-            muscle_dxdt = muscle_model.dynamics(time, muscle_states, muscle_controls, muscle_parameters,
-                                                algebraic_states, fes_numerical_data_timeseries, nlp).dxdt
+            muscle_dxdt = muscle_model.dynamics(
+                time,
+                muscle_states,
+                muscle_controls,
+                muscle_parameters,
+                algebraic_states,
+                fes_numerical_data_timeseries,
+                nlp,
+            ).dxdt
 
             dxdt_muscle_list = vertcat(dxdt_muscle_list, muscle_dxdt)
             muscle_idx_list.append(muscle_idx)
@@ -437,16 +448,15 @@ class FesMskModel(BiorbdModel, StateDynamics):
 
         return nlp.model.rigid_contact_forces()(q, qdot, tau, external_forces, nlp.parameters.cx)
 
-
     @staticmethod
     def declare_model_control(
         ocp: OptimalControlProgram,
         nlp: NonLinearProgram,
         numerical_data_timeseries: dict[str, np.ndarray] = None,
         contact_type: list = (),
-        as_states: bool=False,
-        as_controls: bool=True,
-        as_algebraic_states: bool=False,
+        as_states: bool = False,
+        as_controls: bool = True,
+        as_algebraic_states: bool = False,
     ):
         """
         Tell the program which variables are states and controls.

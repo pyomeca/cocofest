@@ -131,7 +131,7 @@ class Marion2009ModelPulseWidthFrequency(DingModelPulseWidthFrequency):
         cn = states[0]
         f = states[1]
         pulse_width = controls[0]
-        theta=controls[1] if controls.shape[0] > 1 else 90
+        theta = controls[1] if controls.shape[0] > 1 else 90
         t_stim_prev = numerical_timeseries
 
         cn_dot = self.calculate_cn_dot(cn, t, t_stim_prev)

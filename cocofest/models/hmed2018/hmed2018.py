@@ -8,6 +8,7 @@ from bioptim import States
 from cocofest.models.ding2003.ding2003 import DingModelFrequency
 from cocofest.models.state_configure import StateConfigure
 
+
 class DingModelPulseIntensityFrequency(DingModelFrequency):
     """
     This is a custom models that inherits from bioptim. CustomModel.
@@ -57,7 +58,6 @@ class DingModelPulseIntensityFrequency(DingModelFrequency):
         self.cr = CR_DEFAULT
         self.impulse_intensity = None
 
-
     @property
     def control_configuration_functions(self) -> List[States | Callable]:
         return [StateConfigure().configure_pulse_intensity]
@@ -77,7 +77,7 @@ class DingModelPulseIntensityFrequency(DingModelFrequency):
 
     @property
     def pulse_intensity_name(self):
-        muscle_name = ("_" + self.muscle_name if self.muscle_name is not None else "")
+        muscle_name = "_" + self.muscle_name if self.muscle_name is not None else ""
         return "pulse_intensity" + muscle_name
 
     def set_ar(self, model, ar: MX | float):

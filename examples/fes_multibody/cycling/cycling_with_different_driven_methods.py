@@ -95,7 +95,7 @@ def update_model(
             activate_residual_torque=model.activate_residual_torque,
             parameters=parameters,
             external_force_set=external_force_set,
-            with_contact=model.with_contact
+            with_contact=model.with_contact,
         )
     else:
         model = BiorbdModel(model.path, external_force_set=external_force_set)
@@ -574,7 +574,7 @@ def main(
             activate_passive_force_relationship=True,
             activate_residual_torque=False,
             external_force_set=None,  # External forces will be added later
-            with_contact=True
+            with_contact=True,
         )
         # Adjust n_shooting based on the stimulation time
         n_shooting = model.muscles_dynamics_model[0].get_n_shooting(final_time)

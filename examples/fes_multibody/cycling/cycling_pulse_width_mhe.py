@@ -404,8 +404,9 @@ def set_external_forces(n_shooting, external_force_dict, force_name):
 
 
 def set_dynamics_options(numerical_time_series, ode_solver):
-    dynamics_options = OcpFesMsk.declare_dynamics_options(numerical_time_series=numerical_time_series,
-                                                          ode_solver=ode_solver)
+    dynamics_options = OcpFesMsk.declare_dynamics_options(
+        numerical_time_series=numerical_time_series, ode_solver=ode_solver
+    )
     return dynamics_options
 
 

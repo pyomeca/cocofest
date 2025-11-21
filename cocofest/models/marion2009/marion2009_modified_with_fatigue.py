@@ -55,7 +55,7 @@ class Marion2009ModelPulseWidthFrequencyWithFatigue(Marion2009ModelPulseWidthFre
 
     @property
     def name_dofs(self, with_muscle_name: bool = False) -> list[str]:
-        muscle_name = ("_" + self.muscle_name if self.muscle_name is not None else "")
+        muscle_name = "_" + self.muscle_name if self.muscle_name is not None else ""
         return [
             "Cn" + muscle_name,
             "F" + muscle_name,
@@ -131,7 +131,7 @@ class Marion2009ModelPulseWidthFrequencyWithFatigue(Marion2009ModelPulseWidthFre
         f = states[1]
         a = states[2]
         tau1 = states[3]
-        km=states[4]
+        km = states[4]
         pulse_width = controls[0]
         theta = controls[1] if controls.shape[0] > 1 else 90
         t_stim_prev = numerical_timeseries

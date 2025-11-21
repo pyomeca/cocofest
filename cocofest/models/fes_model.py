@@ -113,8 +113,6 @@ class FesModel(ABC):
         controls: MX,
         numerical_timeseries: MX,
     ):
-
-
         """
 
         Returns

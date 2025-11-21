@@ -90,8 +90,9 @@ class IvpFes:
             self.n_shooting, self.final_time
         )
         self.ode_solver = self.ivp_parameters["ode_solver"]
-        self.dynamics_options = OcpFes.declare_dynamics_options(numerical_time_series=numerical_data_time_series,
-                                                       ode_solver=self.ode_solver)
+        self.dynamics_options = OcpFes.declare_dynamics_options(
+            numerical_time_series=numerical_data_time_series, ode_solver=self.ode_solver
+        )
 
         (
             self.x_init,

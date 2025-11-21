@@ -54,7 +54,7 @@ class DingModelPulseIntensityFrequencyWithFatigue(DingModelPulseIntensityFrequen
     # ---- Absolutely needed methods ---- #
     @property
     def name_dofs(self) -> list[str]:
-        muscle_name = ("_" + self.muscle_name if self.muscle_name is not None else "")
+        muscle_name = "_" + self.muscle_name if self.muscle_name is not None else ""
         return [
             "Cn" + muscle_name,
             "F" + muscle_name,
@@ -122,22 +122,22 @@ class DingModelPulseIntensityFrequencyWithFatigue(DingModelPulseIntensityFrequen
         numerical_timeseries: MX,
     ) -> MX:
         """
-        The system dynamics is the function that describes the models.
+         The system dynamics is the function that describes the models.
 
-        Parameters
-        ----------
-       time: MX
-            The system's current node time
-        states: MX
-            The state of the system CN, F, A, Tau1, Km
-        controls: MX
-            The controls of the system, pulse_intensity
-        numerical_timeseries: MX
-            The numerical timeseries of the system
+         Parameters
+         ----------
+        time: MX
+             The system's current node time
+         states: MX
+             The state of the system CN, F, A, Tau1, Km
+         controls: MX
+             The controls of the system, pulse_intensity
+         numerical_timeseries: MX
+             The numerical timeseries of the system
 
-        Returns
-        -------
-        The value of the derivative of each state dx/dt at the current time t
+         Returns
+         -------
+         The value of the derivative of each state dx/dt at the current time t
         """
         t = time
         cn = states[0]

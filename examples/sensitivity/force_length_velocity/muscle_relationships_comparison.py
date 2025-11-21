@@ -6,17 +6,18 @@ import numpy as np
 
 import matplotlib.pyplot as plt
 
-from bioptim import (SolutionMerge,
-                     OdeSolver,
-                     ObjectiveList,
-                     ObjectiveFcn,
-                     ParameterList,
-                     OptimalControlProgram,
-                     ControlType,
-                     ConstraintFcn,
-                     ConstraintList,
-                     Node,
-                     )
+from bioptim import (
+    SolutionMerge,
+    OdeSolver,
+    ObjectiveList,
+    ObjectiveFcn,
+    ParameterList,
+    OptimalControlProgram,
+    ControlType,
+    ConstraintFcn,
+    ConstraintList,
+    Node,
+)
 
 from cocofest import DingModelPulseWidthFrequencyWithFatigue, OcpFesMsk, FesMskModel, CustomObjective, OcpFes
 
@@ -28,8 +29,9 @@ def prepare_ocp(model: FesMskModel, final_time: float, msk_info: dict, fixed_pw)
     numerical_data_time_series, stim_idx_at_node_list = muscle_model.get_numerical_data_time_series(
         n_shooting, final_time
     )
-    dynamics_options = OcpFes.declare_dynamics_options(numerical_time_series=numerical_data_time_series,
-                                                       ode_solver=OdeSolver.RK4(n_integration_steps=10))
+    dynamics_options = OcpFes.declare_dynamics_options(
+        numerical_time_series=numerical_data_time_series, ode_solver=OdeSolver.RK4(n_integration_steps=10)
+    )
 
     x_bounds, x_init = OcpFesMsk.set_x_bounds(model, msk_info)
     u_bounds, u_init = OcpFesMsk.set_u_bounds(model, msk_info["with_residual_torque"], max_bound=0.0006)
@@ -42,8 +44,7 @@ def prepare_ocp(model: FesMskModel, final_time: float, msk_info: dict, fixed_pw)
         quadratic=True,
     )
 
-    model = OcpFesMsk.update_model(model, parameters=ParameterList(use_sx=True),
-                                   external_force_set=None)
+    model = OcpFesMsk.update_model(model, parameters=ParameterList(use_sx=True), external_force_set=None)
 
     constraints = ConstraintList()
     constraints.add(
@@ -77,14 +78,16 @@ minimum_pulse_width = DingModelPulseWidthFrequencyWithFatigue().pd0
 sol_list = []
 sol_time = []
 
-relationship_activation_dict = {"no_relationship": [False, False, False],
-                                "length": [True, False, False],
-                                "velocity":[False, True, False],
-                                "passive_force":[False, False, True],
-                                "length_velocity": [True, True, False],
-                                "length_passive_force": [True, False, True],
-                                "velocity_passive_force":[False, True, True],
-                                "all_relationship": [True, True, True]}
+relationship_activation_dict = {
+    "no_relationship": [False, False, False],
+    "length": [True, False, False],
+    "velocity": [False, True, False],
+    "passive_force": [False, False, True],
+    "length_velocity": [True, True, False],
+    "length_passive_force": [True, False, True],
+    "velocity_passive_force": [False, True, True],
+    "all_relationship": [True, True, True],
+}
 
 keys = list(relationship_activation_dict.keys())
 for key in keys:
@@ -108,7 +111,7 @@ for key in keys:
             "bound_data": [0],
             "with_residual_torque": False,
         },
-        fixed_pw=0.00025
+        fixed_pw=0.00025,
     )
 
     sol = ocp.solve()

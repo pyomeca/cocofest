@@ -51,8 +51,9 @@ def prepare_nmpc(
     )
 
     # dynamics = OcpFes.declare_dynamics(model, numerical_data_time_series, ode_solver)
-    dynamics_options = OcpFes.declare_dynamics_options(numerical_time_series=numerical_data_time_series,
-                                                       ode_solver=ode_solver)
+    dynamics_options = OcpFes.declare_dynamics_options(
+        numerical_time_series=numerical_data_time_series, ode_solver=ode_solver
+    )
 
     x_bounds = OcpFes.set_x_bounds(model)
     x_init_fes = OcpFes.set_x_init(model)

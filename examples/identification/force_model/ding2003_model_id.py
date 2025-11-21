@@ -67,8 +67,9 @@ def prepare_ocp(
     )
 
     numerical_data_time_series, stim_idx_at_node_list = model.get_numerical_data_time_series(n_shooting, final_time)
-    dynamics_options = OcpFes.declare_dynamics_options(numerical_time_series=numerical_data_time_series,
-                                                       ode_solver=OdeSolver.RK4(n_integration_steps=10))
+    dynamics_options = OcpFes.declare_dynamics_options(
+        numerical_time_series=numerical_data_time_series, ode_solver=OdeSolver.RK4(n_integration_steps=10)
+    )
 
     x_bounds, x_init = OcpFesId.set_x_bounds(
         model=model,

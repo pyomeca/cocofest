@@ -117,8 +117,9 @@ def prepare_nmpc_bo(
     numerical_time_series.update(time_series2)
 
     # --- Dynamics & states --- #
-    dynamics_options = base.set_dynamics_options(numerical_time_series=numerical_time_series,
-                                                 ode_solver=OdeSolver.RK4(n_integration_steps=10))
+    dynamics_options = base.set_dynamics_options(
+        numerical_time_series=numerical_time_series, ode_solver=OdeSolver.RK4(n_integration_steps=10)
+    )
 
     x_init = base.set_q_qdot_init(
         n_shooting=window_n_shooting,

@@ -56,7 +56,7 @@ class Marion2013ModelFrequencyWithFatigue(Marion2013ModelFrequency):
 
     @property
     def name_dofs(self, with_muscle_name: bool = False) -> list[str]:
-        muscle_name = ("_" + self.muscle_name if self.muscle_name is not None else "")
+        muscle_name = "_" + self.muscle_name if self.muscle_name is not None else ""
         return [
             "Cn" + muscle_name,
             "F" + muscle_name,
@@ -183,14 +183,14 @@ class Marion2013ModelFrequencyWithFatigue(Marion2013ModelFrequency):
         The value of the derivative of each state dx/dt at the current time t
         """
         t = time
-        cn=states[0]
-        f=states[1]
-        theta=states[2]
-        dtheta_dt=states[3]
-        a=states[4]
-        tau1=states[5]
-        km=states[6]
-        Fload=controls[0] if controls.shape[0] > 0 else 0.0
+        cn = states[0]
+        f = states[1]
+        theta = states[2]
+        dtheta_dt = states[3]
+        a = states[4]
+        tau1 = states[5]
+        km = states[6]
+        Fload = controls[0] if controls.shape[0] > 0 else 0.0
         t_stim_prev = numerical_timeseries
 
         # Get CN dynamics from Ding model
