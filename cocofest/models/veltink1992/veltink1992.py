@@ -1,10 +1,11 @@
-from typing import Callable
+from typing import Callable, List
 from casadi import MX, vertcat
 import numpy as np
 
-from bioptim import StateDynamics, FcnEnum
+from bioptim import StateDynamics, States, OdeSolver, DynamicsEvaluation, NonLinearProgram, DynamicsFunctions
 
 from cocofest.models.state_configure import StateConfigure
+from cocofest.models.fes_model import FesModel
 
 
 class VeltinkModelPulseIntensity(StateDynamics):
@@ -40,12 +41,32 @@ class VeltinkModelPulseIntensity(StateDynamics):
         self.I_saturation = I_saturation if I_saturation is not None else I_SATURATION_DEFAULT
 
         self.contact_types = ()
-        self.state_configuration = [CustomStates.my_muscle_states]
-        self.control_configuration = [CustomStates.my_control]
+
 
     @property
-    def name_dof(self, with_muscle_name: bool = False) -> list[str]:
-        muscle_name = "_" + self.muscle_name if self.muscle_name and with_muscle_name else ""
+    def name(self):
+        return self._name
+
+    # --- Configure variables --- #
+    @property
+    def state_configuration_functions(self) -> List[States | Callable]:
+        return [StateConfigure().configure_all_muscle_states]
+
+    @property
+    def control_configuration_functions(self) -> List[States | Callable]:
+        return [StateConfigure().configure_intensity]
+
+    @property
+    def algebraic_configuration_functions(self) -> List[States | Callable]:
+        return []
+
+    @property
+    def extra_configuration_functions(self) -> List[States | Callable]:
+        return []
+
+    @property
+    def name_dofs(self, with_muscle_name: bool = False) -> list[str]:
+        muscle_name = ("_" + self.muscle_name if self.muscle_name is not None else "")
         return ["a" + muscle_name]  # Only muscle activation state
 
     @property
@@ -157,8 +178,55 @@ class VeltinkModelPulseIntensity(StateDynamics):
 
         return vertcat(a_dot)
 
+    def dynamics(
+        self,
+        time: MX,
+        states: MX,
+        controls: MX,
+        parameters: MX,
+        algebraic_states: MX,
+        numerical_timeseries: MX,
+        nlp: NonLinearProgram,
+    ) -> DynamicsEvaluation:
+        """
+        Functional electrical stimulation dynamic
 
-# TODO: Change to future bioptim version
-class CustomStates(FcnEnum):
-    my_muscle_states = (StateConfigure().configure_all_muscle_states,)
-    my_control = (StateConfigure().configure_intensity,)
+        Parameters
+        ----------
+        time: MX
+            The system's current node time
+        states: MX
+            The state of the system CN, F, A, Tau1, Km
+        controls: MX
+            The controls of the system, none
+        parameters: MX
+            The parameters acting on the system, final time of each phase
+        algebraic_states: MX
+            The stochastic variables of the system, none
+        numerical_timeseries: MX
+            The numerical timeseries of the system
+        nlp: NonLinearProgram
+            A reference to the phase
+        Returns
+        -------
+        The derivative of the states in the tuple[MX] format
+        """
+        dxdt_fun = nlp.model.system_dynamics
+        dxdt = dxdt_fun(
+            time=time,
+            states=states,
+            controls=controls,
+            numerical_timeseries=numerical_timeseries,
+        )
+
+        defects = None
+        if isinstance(nlp.dynamics_type.ode_solver, OdeSolver.COLLOCATION):
+            states_dot_list = []
+            for key in nlp.model.name_dofs:
+                states_dot_list.append(DynamicsFunctions.get(nlp.states_dot[key], nlp.states_dot.scaled.cx))
+            defects = vertcat(*states_dot_list) - dxdt
+
+        return DynamicsEvaluation(
+            dxdt=dxdt,
+            defects=defects,
+        )

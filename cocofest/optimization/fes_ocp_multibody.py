@@ -109,7 +109,7 @@ class OcpFesMsk(OcpFes):
         x_init = InitialGuessList()
         for model in bio_models.muscles_dynamics_model:
             muscle_name = model.muscle_name
-            variable_bound_list = [model.name_dof[i] + "_" + muscle_name for i in range(len(model.name_dof))]
+            variable_bound_list = model.name_dofs
 
             starting_bounds, min_bounds, max_bounds = (
                 model.standard_rest_values(),

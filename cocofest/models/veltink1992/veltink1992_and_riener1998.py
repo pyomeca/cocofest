@@ -49,8 +49,8 @@ class VeltinkRienerModelPulseIntensityWithFatigue(VeltinkModelPulseIntensity):
         self.T_rec = T_rec if T_rec is not None else T_REC_DEFAULT
 
     @property
-    def name_dof(self, with_muscle_name: bool = False) -> list[str]:
-        muscle_name = "_" + self.muscle_name if self.muscle_name and with_muscle_name else ""
+    def name_dofs(self, with_muscle_name: bool = False) -> list[str]:
+        muscle_name = ("_" + self.muscle_name if self.muscle_name is not None else "")
         return [
             "a" + muscle_name,  # Muscle activation
             "mu" + muscle_name,  # Fatigue state

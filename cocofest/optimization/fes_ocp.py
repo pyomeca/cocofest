@@ -100,7 +100,7 @@ class OcpFes:
 
         # Sets the bound for all the phases
         x_bounds = BoundsList()
-        variable_bound_list = model.name_dof
+        variable_bound_list = model.name_dofs
         starting_bounds, min_bounds, max_bounds = (
             model.standard_rest_values(),
             model.standard_rest_values(),
@@ -132,7 +132,7 @@ class OcpFes:
 
     @staticmethod
     def set_x_init(model):
-        variable_bound_list = model.name_dof
+        variable_bound_list = model.name_dofs
         x_init = InitialGuessList()
         for j in range(len(variable_bound_list)):
             x_init.add(variable_bound_list[j], model.standard_rest_values()[j])

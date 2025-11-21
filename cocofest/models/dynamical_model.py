@@ -1,14 +1,14 @@
-from typing import Callable
+from typing import Callable, List
 import numpy as np
 
 from casadi import vertcat, MX, SX, Function
 from bioptim import (
     BiorbdModel,
     ConfigureVariables,
+    ContactType,
     DynamicsEvaluation,
     DynamicsFunctions,
     ExternalForceSetTimeSeries,
-    FcnEnum,
     NonLinearProgram,
     OdeSolver,
     OptimalControlProgram,
@@ -28,7 +28,7 @@ from .hill_coefficients import (
     muscle_passive_force_coefficient,
 )
 
-class FesMskModel(StateDynamics, BiorbdModel):
+class FesMskModel(BiorbdModel, StateDynamics):
     def __init__(
         self,
         name: str = None,
@@ -66,7 +66,11 @@ class FesMskModel(StateDynamics, BiorbdModel):
         parameters: ParameterList
             The parameters that will be used in the model
         """
-        super().__init__(bio_model=biorbd_path, parameters=parameters, external_force_set=external_force_set)
+        self.with_contact = with_contact
+        super().__init__(bio_model=biorbd_path,
+                         parameters=parameters,
+                         external_force_set=external_force_set,
+                         contact_types=[ContactType.RIGID_EXPLICIT] if self.with_contact else [])
 
         self._name = name
         self.biorbd_path = biorbd_path
@@ -94,11 +98,46 @@ class FesMskModel(StateDynamics, BiorbdModel):
         self.parameters_list = parameters
         self.external_forces_set = external_force_set
         self.muscles_model = muscles_model
-        self.with_contact = with_contact
 
-        self.state_configuration = [CustomStates.my_muscles_states, States.Q, States.QDOT]
-        self.control_configuration = [CustomStates.my_controls]
 
+    @property
+    def state_configuration_functions(self) -> List[States | Callable]:
+        return [StateConfigure().configure_all_muscle_msk_states, States.Q, States.QDOT]
+
+    @property
+    def control_configuration_functions(self) -> list:
+        return [FesMskModel.declare_model_control]
+
+    @property
+    def algebraic_configuration_functions(self) -> list:
+        return []
+
+    @property
+    def extra_configuration_functions(self) -> list:
+        return []
+
+    @property
+    def contact_types(self) -> List[ContactType]:
+        return [ContactType.RIGID_EXPLICIT] if self.with_contact else []
+
+    def get_rigid_contact_forces(
+        self,
+        time,
+        states,
+        controls,
+        parameters,
+        algebraic_states,
+        numerical_timeseries,
+        nlp,
+    ):
+        q = DynamicsFunctions.get(nlp.states["q"], states)
+        qdot = DynamicsFunctions.get(nlp.states["qdot"], states)
+        tau = DynamicsFunctions.get(nlp.controls["tau"], controls) if "tau" in nlp.controls.keys() else MX()
+        external_forces = nlp.get_external_forces(
+            "external_forces", states, controls, algebraic_states, numerical_timeseries
+        )
+
+        return nlp.model.rigid_contact_forces()(q, qdot, tau, external_forces, nlp.parameters.cx)
 
     # ---- Absolutely needed methods ---- #
     def serialize(self) -> tuple[Callable, dict]:
@@ -189,22 +228,18 @@ class FesMskModel(StateDynamics, BiorbdModel):
         total_torque = muscles_tau + tau if self.activate_residual_torque else muscles_tau
         external_forces = nlp.get_external_forces("external_forces", states, controls, algebraic_states, numerical_data_timeseries)
 
-        # with_contact = (
-        #     True if nlp.model.bio_model.contact_names != () else False
-        # )  # TODO: Remove once added in supplementary dynamics
-
         ddq = nlp.model.forward_dynamics(with_contact=self.with_contact)(
             q, qdot, total_torque, external_forces, parameters
         )  # q, qdot, tau, external_forces, parameters
 
         dxdt = vertcat(dxdt_muscle_list, dq, ddq)
 
-        # TODO: Missing defect for FES states
         defects = None
         if isinstance(nlp.dynamics_type.ode_solver, OdeSolver.COLLOCATION):
-            slope_q = DynamicsFunctions.get(nlp.states_dot["q"], nlp.states_dot.scaled.cx)
-            slope_qdot = DynamicsFunctions.get(nlp.states_dot["qdot"], nlp.states_dot.scaled.cx)
-            defects = vertcat(slope_q, slope_qdot) * nlp.dt - vertcat(dq, ddq) * nlp.dt
+            states_dot_list = []
+            for key in nlp.states_dot.keys():
+                states_dot_list.append(DynamicsFunctions.get(nlp.states_dot[key], nlp.states_dot.scaled.cx))
+            defects = vertcat(*states_dot_list) * nlp.dt - dxdt * nlp.dt
 
         return DynamicsEvaluation(dxdt=dxdt, defects=defects)
 
@@ -482,9 +517,3 @@ def _check_numerical_timeseries_format(numerical_timeseries: np.ndarray, n_shoot
             f"The numerical_data_timeseries should be of format dict[str, np.ndarray] "
             f"where the list is the number of shooting points of the phase "
         )
-
-
-# TODO: Change to future bioptim version
-class CustomStates(FcnEnum):
-    my_muscles_states = (StateConfigure().configure_all_muscle_msk_states,)
-    my_controls = (FesMskModel.declare_model_control,)

@@ -1,13 +1,12 @@
-from typing import Callable
+from typing import Callable, List
 
 from casadi import MX, vertcat, tanh
 import numpy as np
 
-from bioptim import FcnEnum
+from bioptim import States
 
 from cocofest.models.ding2003.ding2003 import DingModelFrequency
 from cocofest.models.state_configure import StateConfigure
-
 
 class DingModelPulseIntensityFrequency(DingModelFrequency):
     """
@@ -58,7 +57,10 @@ class DingModelPulseIntensityFrequency(DingModelFrequency):
         self.cr = CR_DEFAULT
         self.impulse_intensity = None
 
-        self.control_configuration = [CustomStates.my_control]
+
+    @property
+    def control_configuration_functions(self) -> List[States | Callable]:
+        return [StateConfigure().configure_pulse_intensity]
 
     @property
     def identifiable_parameters(self):
@@ -75,7 +77,7 @@ class DingModelPulseIntensityFrequency(DingModelFrequency):
 
     @property
     def pulse_intensity_name(self):
-        muscle_name = "_" + self.muscle_name if self.muscle_name else ""
+        muscle_name = ("_" + self.muscle_name if self.muscle_name is not None else "")
         return "pulse_intensity" + muscle_name
 
     def set_ar(self, model, ar: MX | float):
@@ -218,8 +220,3 @@ class DingModelPulseIntensityFrequency(DingModelFrequency):
             self.previous_stim["time"].insert(0, -10000000)
             self.previous_stim["pulse_intensity"].insert(0, 50)
         return self.previous_stim
-
-
-# TODO: Change to future bioptim version
-class CustomStates(FcnEnum):
-    my_control = (StateConfigure().configure_pulse_intensity,)

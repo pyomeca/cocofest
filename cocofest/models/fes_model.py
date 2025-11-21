@@ -1,14 +1,19 @@
 from abc import ABC, abstractmethod
-import numpy as np
 
 from casadi import MX
-from bioptim import NonLinearProgram, OptimalControlProgram
+from bioptim import NonLinearProgram
 
 
 class FesModel(ABC):
-    def __init__(self):
+    def __init__(self, name, **kwargs):
+        super().__init__(**kwargs)
         self.stim_time = None
         self.previous_stim = None
+        self._name = name
+
+    @property
+    def name(self):
+        return self._name
 
     @abstractmethod
     def set_a_rest(self, model, a_rest: MX | float):
@@ -57,15 +62,6 @@ class FesModel(ABC):
 
     @abstractmethod
     def serialize(self):
-        """
-
-        Returns
-        -------
-
-        """
-
-    @abstractmethod
-    def name_dof(self):
         """
 
         Returns

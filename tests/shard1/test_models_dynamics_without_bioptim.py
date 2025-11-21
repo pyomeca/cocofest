@@ -9,7 +9,7 @@ from cocofest import ModelMaker
 def test_ding2003_dynamics():
     model = ModelMaker.create_model("ding2003_with_fatigue")
     assert model.nb_state == 5
-    assert model.name_dof == ["Cn", "F", "A", "Tau1", "Km"]
+    assert model.name_dofs == ["Cn", "F", "A", "Tau1", "Km"]
     np.testing.assert_almost_equal(
         model.standard_rest_values(),
         np.array([[0], [0], [model.a_rest], [model.tau1_rest], [model.km_rest]]),
@@ -73,7 +73,7 @@ def test_ding2003_dynamics():
 def test_ding2007_dynamics():
     model = ModelMaker.create_model("ding2007_with_fatigue")
     assert model.nb_state == 5
-    assert model.name_dof == [
+    assert model.name_dofs == [
         "Cn",
         "F",
         "A",
@@ -156,7 +156,7 @@ def test_ding2007_dynamics():
 def test_hmed2018_dynamics():
     model = ModelMaker.create_model("hmed2018_with_fatigue")
     assert model.nb_state == 5
-    assert model.name_dof == [
+    assert model.name_dofs == [
         "Cn",
         "F",
         "A",
@@ -245,7 +245,7 @@ def test_hmed2018_dynamics():
 def test_veltink1992_dynamics():
     model = ModelMaker.create_model("veltink_and_riener1998")
     assert model.nb_state == 2
-    assert model.name_dof == [
+    assert model.name_dofs == [
         "a",
         "mu",
     ]
@@ -296,7 +296,7 @@ def test_veltink1992_dynamics():
 def test_marion2009_dynamics():
     model = ModelMaker.create_model("marion2009_with_fatigue")
     assert model.nb_state == 5
-    assert model.name_dof == [
+    assert model.name_dofs == [
         "Cn",
         "F",
         "A",
@@ -362,7 +362,7 @@ def test_marion2009_dynamics():
 def test_marion2009_modified_dynamics():
     model = ModelMaker.create_model("marion2009_modified_with_fatigue")
     assert model.nb_state == 5
-    assert model.name_dof == [
+    assert model.name_dofs == [
         "Cn",
         "F",
         "A",
@@ -432,7 +432,7 @@ def test_marion2009_modified_dynamics():
 def test_marion2013_dynamics():
     model = ModelMaker.create_model("marion2013_with_fatigue")
     assert model.nb_state == 7
-    assert model.name_dof == [
+    assert model.name_dofs == [
         "Cn",
         "F",
         "theta",
@@ -524,7 +524,7 @@ def test_marion2013_dynamics():
 def test_marion2013_modified_dynamics():
     model = ModelMaker.create_model("marion2013_modified_with_fatigue")
     assert model.nb_state == 7
-    assert model.name_dof == [
+    assert model.name_dofs == [
         "Cn",
         "F",
         "theta",

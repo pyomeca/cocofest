@@ -653,6 +653,7 @@ def updating_model(model: FesMskModel, external_force_set, parameters=None) -> F
         activate_residual_torque=model.activate_residual_torque,
         parameters=parameters,
         external_force_set=external_force_set,
+        with_contact=True,
     )
     return model
 
@@ -716,6 +717,7 @@ def set_fes_model(model_path, stim_time):
         activate_passive_force_relationship=True,
         activate_residual_torque=False,
         external_force_set=None,  # External forces will be added later (resistive_torque)
+        with_contact=True,
     )
     return fes_model
 
@@ -1011,9 +1013,9 @@ if __name__ == "__main__":
 
     main(
         stimulation_frequency=30,
-        n_total_cycle=1,
+        n_total_cycle=5,
         n_cycles_simultaneous=[2],  # [2, 3, 4, 5]
-        resistive_torque=-0.3,  # (N.m)
+        resistive_torque=-0.2,  # (N.m)
         cost_fun_weight=[(1, 0, 0)],  # (min_force, min_fatigue, min_control)
         init_guess=False,
         save=False,

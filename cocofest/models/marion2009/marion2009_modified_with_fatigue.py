@@ -54,8 +54,8 @@ class Marion2009ModelPulseWidthFrequencyWithFatigue(Marion2009ModelPulseWidthFre
         self.alpha_km = ALPHA_KM_DEFAULT
 
     @property
-    def name_dof(self, with_muscle_name: bool = False) -> list[str]:
-        muscle_name = "_" + self.muscle_name if self.muscle_name and with_muscle_name else ""
+    def name_dofs(self, with_muscle_name: bool = False) -> list[str]:
+        muscle_name = ("_" + self.muscle_name if self.muscle_name is not None else "")
         return [
             "Cn" + muscle_name,
             "F" + muscle_name,

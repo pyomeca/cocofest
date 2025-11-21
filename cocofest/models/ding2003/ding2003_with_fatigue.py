@@ -3,15 +3,7 @@ from typing import Callable
 from casadi import MX, vertcat
 import numpy as np
 
-from bioptim import (
-    ConfigureProblem,
-    DynamicsEvaluation,
-    NonLinearProgram,
-    OptimalControlProgram,
-)
-
 from cocofest.models.ding2003.ding2003 import DingModelFrequency
-from cocofest.models.state_configure import StateConfigure
 
 
 class DingModelFrequencyWithFatigue(DingModelFrequency):
@@ -101,8 +93,8 @@ class DingModelFrequencyWithFatigue(DingModelFrequency):
 
     # ---- Needed for the example ---- #
     @property
-    def name_dof(self, with_muscle_name: bool = False) -> list[str]:
-        muscle_name = "_" + self.muscle_name if self.muscle_name and with_muscle_name else ""
+    def name_dofs(self) -> list[str]:
+        muscle_name = ("_" + self.muscle_name if self.muscle_name is not None else "")
         return [
             "Cn" + muscle_name,
             "F" + muscle_name,

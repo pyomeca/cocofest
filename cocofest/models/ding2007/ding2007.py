@@ -1,8 +1,8 @@
-from typing import Callable
+from typing import Callable, List
 
 from casadi import MX, vertcat, exp
 
-from bioptim import FcnEnum
+from bioptim import States
 
 from cocofest.models.ding2003.ding2003 import DingModelFrequency
 from cocofest.models.state_configure import StateConfigure
@@ -61,7 +61,9 @@ class DingModelPulseWidthFrequency(DingModelFrequency):
         self.tauc = TAUC_DEFAULT
         self.fmax = 248  # Maximum force (N) at 100 Hz and 600 us
 
-        self.control_configuration = [CustomStates.my_control]
+    @property
+    def control_configuration_functions(self) -> List[States | Callable]:
+        return [StateConfigure().configure_last_pulse_width]
 
     @property
     def identifiable_parameters(self):
@@ -198,9 +200,3 @@ class DingModelPulseWidthFrequency(DingModelFrequency):
             The pulsation duration list (s)
         """
         self.pulse_width = value
-
-
-# TODO: Change to future bioptim version
-class CustomStates(FcnEnum):
-    my_control = (StateConfigure().configure_last_pulse_width,)
-

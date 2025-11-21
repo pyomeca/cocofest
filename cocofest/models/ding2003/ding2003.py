@@ -1,4 +1,4 @@
-from typing import Callable
+from typing import Callable, List
 from math import gcd
 from fractions import Fraction
 
@@ -9,14 +9,16 @@ from bioptim import (
     DynamicsEvaluation,
     NonLinearProgram,
     StateDynamics,
-    FcnEnum,
+    DynamicsFunctions,
+    OdeSolver,
+    States,
 )
 
 from cocofest.models.state_configure import StateConfigure
 from cocofest.models.fes_model import FesModel
 
 
-class DingModelFrequency(StateDynamics, FesModel):
+class DingModelFrequency(FesModel, StateDynamics):
     """
     This is a custom model of the Bioptim package. As CustomModel, some methods are mandatory and must be implemented.
     to make it work with bioptim.
@@ -38,8 +40,9 @@ class DingModelFrequency(StateDynamics, FesModel):
         stim_time: list[float] = None,
         previous_stim: dict = None,
         sum_stim_truncation: int = 20,
+        **kwargs
     ):
-        super().__init__()
+        super().__init__(name=model_name, **kwargs)
         self._model_name = model_name
         self._muscle_name = muscle_name
         self.sum_stim_truncation = sum_stim_truncation
@@ -74,10 +77,25 @@ class DingModelFrequency(StateDynamics, FesModel):
         self.force_velocity_relationship = 1
         self.passive_force_relationship = 0
 
-        # ---- Declare dynamic variable ---- #
-        self.state_configuration = [CustomStates.my_muscle_states]
-        self.contact_types = ()
 
+    # --- Configure variables --- #
+    @property
+    def state_configuration_functions(self) -> List[States | Callable]:
+        return [StateConfigure().configure_all_muscle_states]
+
+    @property
+    def control_configuration_functions(self) -> List[States | Callable]:
+        return []
+
+    @property
+    def algebraic_configuration_functions(self) -> List[States | Callable]:
+        return []
+
+    @property
+    def extra_configuration_functions(self) -> List[States | Callable]:
+        return []
+
+    # --- Set model parameters --- #
     def set_a_rest(self, model, a_rest: MX | float):
         # models is required for bioptim compatibility
         self.a_rest = a_rest
@@ -116,8 +134,8 @@ class DingModelFrequency(StateDynamics, FesModel):
 
     # ---- Needed for the example ---- #
     @property
-    def name_dof(self, with_muscle_name: bool = False) -> list[str]:
-        muscle_name = "_" + self.muscle_name if self.muscle_name and with_muscle_name else ""
+    def name_dofs(self) -> list[str]:
+        muscle_name = ("_" + self.muscle_name if self.muscle_name is not None else "")
         return ["Cn" + muscle_name, "F" + muscle_name]
 
     @property
@@ -345,32 +363,22 @@ class DingModelFrequency(StateDynamics, FesModel):
         """
         model = self.fes_model if self.fes_model else nlp.model
         dxdt_fun = model.system_dynamics
+        dxdt = dxdt_fun(
+            time=time,
+            states=states,
+            controls=controls,
+            numerical_timeseries=numerical_timeseries,
+        )
 
         defects = None
-        # TODO: Get defects for fes model states
-        # if isinstance(nlp.dynamics_type.ode_solver, OdeSolver.COLLOCATION):
-        #     slope_q = DynamicsFunctions.get(nlp.states_dot["q"], nlp.states_dot.scaled.cx)
-        #     slope_qdot = DynamicsFunctions.get(nlp.states_dot["qdot"], nlp.states_dot.scaled.cx)
-        #     defects = vertcat(slope_q, slope_qdot) * nlp.dt - vertcat(dq, ddq) * nlp.dt
-
-        # if isinstance(nlp.dynamics_type.ode_solver, OdeSolver.COLLOCATION):
-        #     slope_states = vertcat(*[DynamicsFunctions.get(nlp.states_dot[key], nlp.states_dot.scaled.cx) for key in nlp.states.keys()])
-            # dq = DynamicsFunctions.compute_qdot(nlp, q, qdot)
-            # total_torque = muscles_tau + tau if self.activate_residual_torque else muscles_tau
-            # external_forces = nlp.get_external_forces("external_forces", states, controls, algebraic_states,
-            #                                           numerical_data_timeseries)
-            # ddq = nlp.model.forward_dynamics(with_contact=self.with_contact)(
-            #     q, qdot, total_torque, external_forces, parameters
-            # )  # q, qdot, tau, external_forces, parameters
-            # defects = slope_states * nlp.dt - vertcat(dq, ddq) * nlp.dt
+        if isinstance(nlp.dynamics_type.ode_solver, OdeSolver.COLLOCATION):
+            states_dot_list = []
+            for key in model.name_dofs:
+                states_dot_list.append(DynamicsFunctions.get(nlp.states_dot[key], nlp.states_dot.scaled.cx))
+            defects = vertcat(*states_dot_list) - dxdt
 
         return DynamicsEvaluation(
-            dxdt=dxdt_fun(
-                time=time,
-                states=states,
-                controls=controls,
-                numerical_timeseries=numerical_timeseries,
-            ),
+            dxdt=dxdt,
             defects=defects,
         )
 
@@ -438,8 +446,3 @@ class DingModelFrequency(StateDynamics, FesModel):
             )
 
         return n_shooting
-
-
-# TODO: Change to future bioptim version
-class CustomStates(FcnEnum):
-    my_muscle_states = (StateConfigure().configure_all_muscle_states,)
