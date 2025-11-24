@@ -40,15 +40,15 @@ jobs:
           conda info
           conda list
 
+      - name: Install extra dependencies
+        run: conda install pip pytest-cov black pytest pytest-cov codecov packaging -cconda-forge
+
       - name: Install bioptim on Windows
         run: |
           pwd
           cd external
           ./bioptim_install_windows.sh 4 ${{ env.PREFIX_WINDOWS }}
           cd ..
-
-      - name: Install extra dependencies
-        run: conda install pytest-cov black pytest pytest-cov codecov packaging -cconda-forge
 
       - name: Run tests with code coverage
         run: pytest -v --color=yes --cov-report term-missing --cov=cocofest --cov-report=xml:coverage.xml tests/shard${{ matrix.shard }}
