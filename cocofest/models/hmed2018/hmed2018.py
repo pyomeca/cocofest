@@ -124,9 +124,9 @@ class DingModelPulseIntensityFrequency(DingModelFrequency):
     ) -> MX:
         """
         The system dynamics is the function that describes the models.
-        #
-        # Parameters
-        # ----------
+
+        Parameters
+        ----------
         time: MX
             The system's current node time
         states: MX

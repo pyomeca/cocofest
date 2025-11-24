@@ -122,22 +122,22 @@ class DingModelPulseIntensityFrequencyWithFatigue(DingModelPulseIntensityFrequen
         numerical_timeseries: MX,
     ) -> MX:
         """
-         The system dynamics is the function that describes the models.
+        The system dynamics is the function that describes the models.
 
-         Parameters
+        Parameters
          ----------
         time: MX
              The system's current node time
-         states: MX
+        states: MX
              The state of the system CN, F, A, Tau1, Km
-         controls: MX
+        controls: MX
              The controls of the system, pulse_intensity
-         numerical_timeseries: MX
+        numerical_timeseries: MX
              The numerical timeseries of the system
 
-         Returns
-         -------
-         The value of the derivative of each state dx/dt at the current time t
+        Returns
+        -------
+        The value of the derivative of each state dx/dt at the current time t
         """
         t = time
         cn = states[0]
