@@ -18,9 +18,7 @@ from bioptim import (
     BoundsList,
     ConstraintList,
     ConstraintFcn,
-    ContactType,
     CostType,
-    DynamicsList,
     ExternalForceSetTimeSeries,
     InitialGuessList,
     InterpolationType,
@@ -29,7 +27,6 @@ from bioptim import (
     ObjectiveFcn,
     ObjectiveList,
     OdeSolver,
-    PhaseDynamics,
     SolutionMerge,
     Solution,
     Solver,
@@ -333,7 +330,7 @@ def prepare_nmpc(
     )
     numerical_time_series.update(numerical_data_time_series)
     # --- Dynamics --- #
-    dynamics = set_dynamics(model=model, numerical_time_series=numerical_time_series, ode_solver=ode_solver)
+    dynamics_options = set_dynamics_options(numerical_time_series=numerical_time_series, ode_solver=ode_solver)
 
     # --- Set states --- #
     # --- Set q (position and speed) initial guesses --- #
@@ -377,7 +374,7 @@ def prepare_nmpc(
 
     return MyCyclicNMPC(
         bio_model=[model],
-        dynamics=dynamics,
+        dynamics=dynamics_options,
         cycle_len=cycle_len,
         cycle_duration=cycle_duration,
         n_cycles_simultaneous=n_cycles_simultaneous,
@@ -406,19 +403,11 @@ def set_external_forces(n_shooting, external_force_dict, force_name):
     return numerical_time_series, external_force_set
 
 
-def set_dynamics(model, numerical_time_series, ode_solver):
-    dynamics = DynamicsList()
-    dynamics.add(
-        dynamics_type=model.declare_model_variables,
-        dynamic_function=model.muscle_dynamic,
-        expand_dynamics=True,
-        phase_dynamics=PhaseDynamics.SHARED_DURING_THE_PHASE,
-        numerical_data_timeseries=numerical_time_series,
-        contact_type=[ContactType.RIGID_EXPLICIT],
-        phase=0,
-        ode_solver=ode_solver,
+def set_dynamics_options(numerical_time_series, ode_solver):
+    dynamics_options = OcpFesMsk.declare_dynamics_options(
+        numerical_time_series=numerical_time_series, ode_solver=ode_solver
     )
-    return dynamics
+    return dynamics_options
 
 
 def set_q_qdot_init(
@@ -665,6 +654,7 @@ def updating_model(model: FesMskModel, external_force_set, parameters=None) -> F
         activate_residual_torque=model.activate_residual_torque,
         parameters=parameters,
         external_force_set=external_force_set,
+        with_contact=True,
     )
     return model
 
@@ -728,6 +718,7 @@ def set_fes_model(model_path, stim_time):
         activate_passive_force_relationship=True,
         activate_residual_torque=False,
         external_force_set=None,  # External forces will be added later (resistive_torque)
+        with_contact=True,
     )
     return fes_model
 
@@ -1023,9 +1014,9 @@ if __name__ == "__main__":
 
     main(
         stimulation_frequency=30,
-        n_total_cycle=1,
+        n_total_cycle=5,
         n_cycles_simultaneous=[2],  # [2, 3, 4, 5]
-        resistive_torque=-0.3,  # (N.m)
+        resistive_torque=-0.2,  # (N.m)
         cost_fun_weight=[(1, 0, 0)],  # (min_force, min_fatigue, min_control)
         init_guess=False,
         save=False,

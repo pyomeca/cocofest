@@ -1,18 +1,14 @@
-from typing import Callable
+from typing import Callable, List
 from casadi import MX, vertcat
 import numpy as np
 
-from bioptim import (
-    ConfigureProblem,
-    DynamicsEvaluation,
-    NonLinearProgram,
-    OptimalControlProgram,
-)
+from bioptim import StateDynamics, States, OdeSolver, DynamicsEvaluation, NonLinearProgram, DynamicsFunctions
 
 from cocofest.models.state_configure import StateConfigure
+from cocofest.models.fes_model import FesModel
 
 
-class VeltinkModelPulseIntensity:
+class VeltinkModelPulseIntensity(StateDynamics):
     """
     This is a custom model implementing the muscle activation dynamics from:
 
@@ -44,9 +40,32 @@ class VeltinkModelPulseIntensity:
         self.I_threshold = I_threshold if I_threshold is not None else I_THRESHOLD_DEFAULT
         self.I_saturation = I_saturation if I_saturation is not None else I_SATURATION_DEFAULT
 
+        self.contact_types = ()
+
     @property
-    def name_dof(self, with_muscle_name: bool = False) -> list[str]:
-        muscle_name = "_" + self.muscle_name if self.muscle_name and with_muscle_name else ""
+    def name(self):
+        return self._name
+
+    # --- Configure variables --- #
+    @property
+    def state_configuration_functions(self) -> List[States | Callable]:
+        return [StateConfigure().configure_all_muscle_states]
+
+    @property
+    def control_configuration_functions(self) -> List[States | Callable]:
+        return [StateConfigure().configure_intensity]
+
+    @property
+    def algebraic_configuration_functions(self) -> List[States | Callable]:
+        return []
+
+    @property
+    def extra_configuration_functions(self) -> List[States | Callable]:
+        return []
+
+    @property
+    def name_dofs(self, with_muscle_name: bool = False) -> list[str]:
+        muscle_name = "_" + self.muscle_name if self.muscle_name is not None else ""
         return ["a" + muscle_name]  # Only muscle activation state
 
     @property
@@ -128,30 +147,38 @@ class VeltinkModelPulseIntensity:
 
     def system_dynamics(
         self,
-        a: MX,
-        I: MX,
+        time: MX,
+        states: MX,
+        controls: MX,
+        numerical_timeseries: MX,
     ) -> MX:
         """
         The system dynamics implementing equation (4) for muscle activation.
 
         Parameters
         ----------
-        a: MX
-            Muscle activation state (unitless)
-        I: MX
-            Stimulation current amplitude (mA)
+        time: MX
+            The system's current node time
+        states: MX
+            The state of the system a
+        controls: MX
+            The controls of the system, I
+        numerical_timeseries: MX
+            The numerical timeseries of the system
 
         Returns
         -------
         The derivative of muscle activation state
         """
+        a = states[0]
+        I = controls[0]
         u = self.normalize_current(I)
         a_dot = self.get_muscle_activation(a=a, u=u)
 
         return vertcat(a_dot)
 
-    @staticmethod
     def dynamics(
+        self,
         time: MX,
         states: MX,
         controls: MX,
@@ -159,64 +186,46 @@ class VeltinkModelPulseIntensity:
         algebraic_states: MX,
         numerical_timeseries: MX,
         nlp: NonLinearProgram,
-        fes_model=None,
     ) -> DynamicsEvaluation:
         """
+        Functional electrical stimulation dynamic
+
         Parameters
         ----------
         time: MX
             The system's current node time
         states: MX
-            The state of the system (muscle activation)
+            The state of the system CN, F, A, Tau1, Km
         controls: MX
-            The controls of the system (stimulation current)
+            The controls of the system, none
         parameters: MX
-            The parameters acting on the system
+            The parameters acting on the system, final time of each phase
         algebraic_states: MX
-            The stochastic variables of the system
+            The stochastic variables of the system, none
         numerical_timeseries: MX
             The numerical timeseries of the system
         nlp: NonLinearProgram
             A reference to the phase
-        fes_model: VeltinkModelPulseIntensity
-            The current phase fes model
-
         Returns
         -------
-        The derivative of the states
+        The derivative of the states in the tuple[MX] format
         """
-        model = fes_model if fes_model else nlp.model
-        dxdt_fun = model.system_dynamics
-
-        return DynamicsEvaluation(
-            dxdt=dxdt_fun(
-                a=states[0],
-                I=controls[0],
-            ),
-            defects=None,
+        dxdt_fun = nlp.model.system_dynamics
+        dxdt = dxdt_fun(
+            time=time,
+            states=states,
+            controls=controls,
+            numerical_timeseries=numerical_timeseries,
         )
 
-    def declare_model_variables(
-        self,
-        ocp: OptimalControlProgram,
-        nlp: NonLinearProgram,
-        numerical_data_timeseries: dict[str, np.ndarray] = None,
-        contact_type: tuple = (),
-    ):
-        """
-        Tell the program which variables are states and controls.
+        defects = None
+        if isinstance(nlp.dynamics_type.ode_solver, OdeSolver.COLLOCATION):
+            states_dot_list = []
+            for key in nlp.model.name_dofs:
+                states_dot_list.append(DynamicsFunctions.get(nlp.states_dot[key], nlp.states_dot.scaled.cx))
+            defects = vertcat(*states_dot_list) - dxdt
 
-        Parameters
-        ----------
-        ocp: OptimalControlProgram
-            A reference to the ocp
-        nlp: NonLinearProgram
-            A reference to the phase
-        numerical_data_timeseries: dict[str, np.ndarray]
-            A list of values to pass to the dynamics at each node
-        contact_type: tuple
-            The type of contact to use for the model
-        """
-        StateConfigure().configure_all_fes_model_states(ocp, nlp, fes_model=self)
-        StateConfigure().configure_intensity(ocp, nlp)
-        ConfigureProblem.configure_dynamics_function(ocp, nlp, dyn_func=self.dynamics)
+        return DynamicsEvaluation(
+            dxdt=dxdt,
+            defects=defects,
+        )

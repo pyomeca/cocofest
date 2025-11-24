@@ -1,4 +1,4 @@
-from typing import Callable
+from typing import Callable, List
 from math import gcd
 from fractions import Fraction
 
@@ -6,17 +6,19 @@ import numpy as np
 from casadi import MX, exp, vertcat
 
 from bioptim import (
-    ConfigureProblem,
     DynamicsEvaluation,
     NonLinearProgram,
-    OptimalControlProgram,
+    StateDynamics,
+    DynamicsFunctions,
+    OdeSolver,
+    States,
 )
 
 from cocofest.models.state_configure import StateConfigure
 from cocofest.models.fes_model import FesModel
 
 
-class DingModelFrequency(FesModel):
+class DingModelFrequency(FesModel, StateDynamics):
     """
     This is a custom model of the Bioptim package. As CustomModel, some methods are mandatory and must be implemented.
     to make it work with bioptim.
@@ -38,8 +40,9 @@ class DingModelFrequency(FesModel):
         stim_time: list[float] = None,
         previous_stim: dict = None,
         sum_stim_truncation: int = 20,
+        **kwargs,
     ):
-        super().__init__()
+        super().__init__(name=model_name, **kwargs)
         self._model_name = model_name
         self._muscle_name = muscle_name
         self.sum_stim_truncation = sum_stim_truncation
@@ -68,6 +71,30 @@ class DingModelFrequency(FesModel):
         self.km_rest = KM_REST_DEFAULT
         self.fmax = 315.5  # Maximum force (N) at 100 Hz
 
+        # ---- Muscle relationship ---- #
+        self.fes_model = None
+        self.force_length_relationship = 1
+        self.force_velocity_relationship = 1
+        self.passive_force_relationship = 0
+
+    # --- Configure variables --- #
+    @property
+    def state_configuration_functions(self) -> List[States | Callable]:
+        return [StateConfigure().configure_all_muscle_states]
+
+    @property
+    def control_configuration_functions(self) -> List[States | Callable]:
+        return []
+
+    @property
+    def algebraic_configuration_functions(self) -> List[States | Callable]:
+        return []
+
+    @property
+    def extra_configuration_functions(self) -> List[States | Callable]:
+        return []
+
+    # --- Set model parameters --- #
     def set_a_rest(self, model, a_rest: MX | float):
         # models is required for bioptim compatibility
         self.a_rest = a_rest
@@ -106,8 +133,8 @@ class DingModelFrequency(FesModel):
 
     # ---- Needed for the example ---- #
     @property
-    def name_dof(self, with_muscle_name: bool = False) -> list[str]:
-        muscle_name = "_" + self.muscle_name if self.muscle_name and with_muscle_name else ""
+    def name_dofs(self) -> list[str]:
+        muscle_name = "_" + self.muscle_name if self.muscle_name is not None else ""
         return ["Cn" + muscle_name, "F" + muscle_name]
 
     @property
@@ -155,38 +182,34 @@ class DingModelFrequency(FesModel):
     # ---- Model's dynamics ---- #
     def system_dynamics(
         self,
-        cn: MX,
-        f: MX,
-        t: MX = None,
-        t_stim_prev: list[MX] = None,
-        force_length_relationship: MX | float = 1,
-        force_velocity_relationship: MX | float = 1,
-        passive_force_relationship: MX | float = 0,
+        time: MX,
+        states: MX,
+        controls: MX,
+        numerical_timeseries: MX,
     ) -> MX:
         """
         The system dynamics is the function that describes the models.
 
         Parameters
         ----------
-        cn: MX
-            The value of the ca_troponin_complex (unitless)
-        f: MX
-            The value of the force (N)
-        t: MX
-            The current time at which the dynamics is evaluated (s)
-        t_stim_prev: list[MX]
-            The time list of the previous stimulations (s)
-        force_length_relationship: MX | float
-            The force length relationship value (unitless)
-        force_velocity_relationship: MX | float
-            The force velocity relationship value (unitless)
-        passive_force_relationship: MX | float
-            The passive force relationship value (unitless)
+        time: MX
+            The system's current node time
+        states: MX
+            The state of the system CN, F
+        controls: MX
+            The controls of the system, none
+        numerical_timeseries: MX
+            The numerical timeseries of the system
 
         Returns
         -------
         The value of the derivative of each state dx/dt at the current time t
         """
+        t = time
+        cn = states[0]
+        f = states[1]
+        t_stim_prev = numerical_timeseries
+
         cn_dot = self.calculate_cn_dot(cn, t, t_stim_prev)
         f_dot = self.f_dot_fun(
             cn,
@@ -194,9 +217,6 @@ class DingModelFrequency(FesModel):
             self.a_rest,
             self.tau1_rest,
             self.km_rest,
-            force_length_relationship=force_length_relationship,
-            force_velocity_relationship=force_velocity_relationship,
-            passive_force_relationship=passive_force_relationship,
         )  # Equation n°2
         return vertcat(cn_dot, f_dot)
 
@@ -285,9 +305,6 @@ class DingModelFrequency(FesModel):
         a: MX | float,
         tau1: MX | float,
         km: MX | float,
-        force_length_relationship: MX | float = 1,
-        force_velocity_relationship: MX | float = 1,
-        passive_force_relationship: MX | float = 0,
     ) -> MX | float:
         """
         Parameters
@@ -302,23 +319,16 @@ class DingModelFrequency(FesModel):
             The previous step value of time_state_force_no_cross_bridge (s)
         km: MX | float
             The previous step value of cross_bridges (unitless)
-        force_length_relationship: MX | float
-            The force length relationship value (unitless)
-        force_velocity_relationship: MX | float
-            The force velocity relationship value (unitless)
-        passive_force_relationship: MX | float
-            The passive force relationship value (unitless)
-
         Returns
         -------
         The value of the derivative force (N)
         """
         return (a * (cn / (km + cn)) - (f / (tau1 + self.tau2 * (cn / (km + cn))))) * (
-            force_length_relationship * force_velocity_relationship + passive_force_relationship
+            self.force_length_relationship * self.force_velocity_relationship + self.passive_force_relationship
         )  # Equation n°2
 
-    @staticmethod
     def dynamics(
+        self,
         time: MX,
         states: MX,
         controls: MX,
@@ -326,10 +336,6 @@ class DingModelFrequency(FesModel):
         algebraic_states: MX,
         numerical_timeseries: MX,
         nlp: NonLinearProgram,
-        fes_model=None,
-        force_length_relationship: MX | float = 1,
-        force_velocity_relationship: MX | float = 1,
-        passive_force_relationship: MX | float = 0,
     ) -> DynamicsEvaluation:
         """
         Functional electrical stimulation dynamic
@@ -350,56 +356,30 @@ class DingModelFrequency(FesModel):
             The numerical timeseries of the system
         nlp: NonLinearProgram
             A reference to the phase
-        fes_model: DingModelFrequency
-            The current phase fes model
-        force_length_relationship: MX | float
-            The force length relationship value (unitless)
-        force_velocity_relationship: MX | float
-            The force velocity relationship value (unitless)
-        passive_force_relationship: MX | float
-            The passive force relationship value (unitless)
         Returns
         -------
         The derivative of the states in the tuple[MX] format
         """
-        model = fes_model if fes_model else nlp.model
+        model = self.fes_model if self.fes_model else nlp.model
         dxdt_fun = model.system_dynamics
-
-        return DynamicsEvaluation(
-            dxdt=dxdt_fun(
-                cn=states[0],
-                f=states[1],
-                t=time,
-                t_stim_prev=numerical_timeseries,
-                force_length_relationship=force_length_relationship,
-                force_velocity_relationship=force_velocity_relationship,
-                passive_force_relationship=passive_force_relationship,
-            ),
+        dxdt = dxdt_fun(
+            time=time,
+            states=states,
+            controls=controls,
+            numerical_timeseries=numerical_timeseries,
         )
 
-    def declare_ding_variables(
-        self,
-        ocp: OptimalControlProgram,
-        nlp: NonLinearProgram,
-        numerical_data_timeseries: dict[str, np.ndarray] = None,
-        contact_type: list = (),
-    ):
-        """
-        Tell the program which variables are states and controls.
-        The user is expected to use the ConfigureProblem.configure_xxx functions.
-        Parameters
-        ----------
-        ocp: OptimalControlProgram
-            A reference to the ocp
-        nlp: NonLinearProgram
-            A reference to the phase
-        numerical_data_timeseries: dict[str, np.ndarray]
-            A list of values to pass to the dynamics at each node. Experimental external forces should be included here.
-        contact_type: list
-            A list of contact types. This is used to define the contact forces in the dynamics. Not used in this model.
-        """
-        StateConfigure().configure_all_fes_model_states(ocp, nlp, fes_model=self)
-        ConfigureProblem.configure_dynamics_function(ocp, nlp, dyn_func=self.dynamics)
+        defects = None
+        if isinstance(nlp.dynamics_type.ode_solver, OdeSolver.COLLOCATION):
+            states_dot_list = []
+            for key in model.name_dofs:
+                states_dot_list.append(DynamicsFunctions.get(nlp.states_dot[key], nlp.states_dot.scaled.cx))
+            defects = vertcat(*states_dot_list) - dxdt
+
+        return DynamicsEvaluation(
+            dxdt=dxdt,
+            defects=defects,
+        )
 
     def _get_additional_previous_stim_time(self):
         while len(self.previous_stim["time"]) < self.sum_stim_truncation:

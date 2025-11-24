@@ -1,14 +1,19 @@
 from abc import ABC, abstractmethod
-import numpy as np
 
 from casadi import MX
-from bioptim import NonLinearProgram, OptimalControlProgram
+from bioptim import NonLinearProgram
 
 
 class FesModel(ABC):
-    def __init__(self):
+    def __init__(self, name, **kwargs):
+        super().__init__(**kwargs)
         self.stim_time = None
         self.previous_stim = None
+        self._name = name
+
+    @property
+    def name(self):
+        return self._name
 
     @abstractmethod
     def set_a_rest(self, model, a_rest: MX | float):
@@ -65,15 +70,6 @@ class FesModel(ABC):
         """
 
     @abstractmethod
-    def name_dof(self):
-        """
-
-        Returns
-        -------
-
-        """
-
-    @abstractmethod
     def nb_state(self):
         """
 
@@ -112,12 +108,10 @@ class FesModel(ABC):
     @abstractmethod
     def system_dynamics(
         self,
-        cn: MX,
-        f: MX,
-        cn_sum: MX,
-        force_length_relationship: MX | float,
-        force_velocity_relationship: MX | float,
-        passive_force_relationship: MX | float,
+        time: MX,
+        states: MX,
+        controls: MX,
+        numerical_timeseries: MX,
     ):
         """
 
@@ -169,9 +163,6 @@ class FesModel(ABC):
         a: MX | float,
         tau1: MX | float,
         km: MX | float,
-        force_length_relationship: MX | float,
-        force_velocity_relationship: MX | float,
-        passive_force_relationship: MX | float,
     ):
         """
 
@@ -180,35 +171,16 @@ class FesModel(ABC):
 
         """
 
-    @staticmethod
     @abstractmethod
     def dynamics(
+        self,
         time: MX,
         states: MX,
         controls: MX,
         parameters: MX,
         algebraic_states: MX,
-        numerical_data_timeseries: MX,
+        numerical_timeseries: MX,
         nlp: NonLinearProgram,
-        fes_model,
-        force_length_relationship: MX | float,
-        force_velocity_relationship: MX | float,
-        passive_force_relationship: MX | float,
-    ):
-        """
-
-        Returns
-        -------
-
-        """
-
-    @abstractmethod
-    def declare_ding_variables(
-        self,
-        ocp: OptimalControlProgram,
-        nlp: NonLinearProgram,
-        numerical_data_timeseries: dict[str, np.ndarray] = None,
-        contact_type: tuple = (),
     ):
         """
 

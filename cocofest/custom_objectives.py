@@ -23,7 +23,7 @@ class CustomObjective:
         -------
         The sum of each force scaling factor
         """
-        muscle_name_list = controller.model.bio_model.muscle_names
+        muscle_name_list = controller.model.muscle_names
         muscle_model = controller.model.muscles_dynamics_model
         muscle_fatigue = vertcat(
             *[
@@ -47,7 +47,7 @@ class CustomObjective:
         -------
         The sum of each force
         """
-        muscle_name_list = controller.model.bio_model.muscle_names
+        muscle_name_list = controller.model.muscle_names
         muscle_model = controller.model.muscles_dynamics_model
         muscle_force = vertcat(
             *[
@@ -72,7 +72,7 @@ class CustomObjective:
         The sum of each stimulation control
         """
         if isinstance(controller.model, FesMskModel):
-            muscle_name_list = controller.model.bio_model.muscle_names
+            muscle_name_list = controller.model.muscle_names
             if isinstance(controller.model.muscles_dynamics_model[0], DingModelPulseWidthFrequency):
                 stim_charge = vertcat(
                     *[

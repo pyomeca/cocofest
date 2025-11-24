@@ -9,7 +9,7 @@ from cocofest import ModelMaker
 def test_ding2003_dynamics():
     model = ModelMaker.create_model("ding2003_with_fatigue")
     assert model.nb_state == 5
-    assert model.name_dof == ["Cn", "F", "A", "Tau1", "Km"]
+    assert model.name_dofs == ["Cn", "F", "A", "Tau1", "Km"]
     np.testing.assert_almost_equal(
         model.standard_rest_values(),
         np.array([[0], [0], [model.a_rest], [model.tau1_rest], [model.km_rest]]),
@@ -47,13 +47,10 @@ def test_ding2003_dynamics():
     np.testing.assert_almost_equal(
         np.array(
             model.system_dynamics(
-                cn=5,
-                f=100,
-                a=3009,
-                tau1=0.050957,
-                km=0.103,
-                t=0.11,
-                t_stim_prev=np.array([0, 0.1]),
+                time=0.11,
+                states=[5, 100, 3009, 0.050957, 0.103],
+                controls=None,
+                numerical_timeseries=np.array([0, 0.1]),
             )
         ).squeeze(),
         np.array(DM([-219.4399, 2037.0703, -40, 0.0021, 0.0019])).squeeze(),
@@ -76,7 +73,7 @@ def test_ding2003_dynamics():
 def test_ding2007_dynamics():
     model = ModelMaker.create_model("ding2007_with_fatigue")
     assert model.nb_state == 5
-    assert model.name_dof == [
+    assert model.name_dofs == [
         "Cn",
         "F",
         "A",
@@ -126,14 +123,10 @@ def test_ding2007_dynamics():
     np.testing.assert_almost_equal(
         np.array(
             model.system_dynamics(
-                cn=5,
-                f=100,
-                a=4920,
-                tau1=0.050957,
-                km=0.103,
-                t=0.11,
-                t_stim_prev=np.array([0, 0.1]),
-                pulse_width=0.0002,
+                time=0.11,
+                states=[5, 100, 4920, 0.050957, 0.103],
+                controls=[0.0002],
+                numerical_timeseries=np.array([0, 0.1]),
             )
         ).squeeze(),
         np.array(DM([-4.179e02, -4.905e02, -40.0, 2.1759e-03, 2.1677e-03])).squeeze(),
@@ -163,7 +156,7 @@ def test_ding2007_dynamics():
 def test_hmed2018_dynamics():
     model = ModelMaker.create_model("hmed2018_with_fatigue")
     assert model.nb_state == 5
-    assert model.name_dof == [
+    assert model.name_dofs == [
         "Cn",
         "F",
         "A",
@@ -215,14 +208,10 @@ def test_hmed2018_dynamics():
     np.testing.assert_almost_equal(
         np.array(
             model.system_dynamics(
-                cn=5,
-                f=100,
-                a=3009,
-                tau1=0.050957,
-                km=0.103,
-                t=0.11,
-                t_stim_prev=np.array([0, 0.1]),
-                pulse_intensity=[30, 50],
+                time=0.11,
+                states=[5, 100, 3009, 0.050957, 0.103],
+                controls=[30, 50],
+                numerical_timeseries=np.array([0, 0.1]),
             )
         ).squeeze(),
         np.array(DM([-241, 2037.07, -40, 0.0021, 1.9e-03])).squeeze(),
@@ -256,7 +245,7 @@ def test_hmed2018_dynamics():
 def test_veltink1992_dynamics():
     model = ModelMaker.create_model("veltink_and_riener1998")
     assert model.nb_state == 2
-    assert model.name_dof == [
+    assert model.name_dofs == [
         "a",
         "mu",
     ]
@@ -289,9 +278,10 @@ def test_veltink1992_dynamics():
     np.testing.assert_almost_equal(
         np.array(
             model.system_dynamics(
-                a=0.5,
-                mu=0.1,
-                I=50,
+                time=None,
+                states=[0.5, 0.1],
+                controls=[50],
+                numerical_timeseries=None,
             )
         ).squeeze(),
         np.array(DM([0.96153846, 0.01066667])).squeeze(),
@@ -306,7 +296,7 @@ def test_veltink1992_dynamics():
 def test_marion2009_dynamics():
     model = ModelMaker.create_model("marion2009_with_fatigue")
     assert model.nb_state == 5
-    assert model.name_dof == [
+    assert model.name_dofs == [
         "Cn",
         "F",
         "A",
@@ -358,14 +348,10 @@ def test_marion2009_dynamics():
     np.testing.assert_almost_equal(
         np.array(
             model.system_dynamics(
-                cn=5,
-                f=100,
-                a=1473,
-                tau1=0.04298,
-                km=0.128,
-                t=0.11,
-                t_stim_prev=np.array([0, 0.1]),
-                theta=20,
+                time=0.11,
+                states=[5, 100, 1473, 0.04298, 0.128],
+                controls=np.array([20]),
+                numerical_timeseries=np.array([0, 0.1]),
             )
         ).squeeze(),
         np.array(DM([-2.19408644e02, 1.04853099e03, -2.32015336e01, 1.56300000e-02, 6.26900000e-03])).squeeze(),
@@ -376,7 +362,7 @@ def test_marion2009_dynamics():
 def test_marion2009_modified_dynamics():
     model = ModelMaker.create_model("marion2009_modified_with_fatigue")
     assert model.nb_state == 5
-    assert model.name_dof == [
+    assert model.name_dofs == [
         "Cn",
         "F",
         "A",
@@ -432,15 +418,10 @@ def test_marion2009_modified_dynamics():
     np.testing.assert_almost_equal(
         np.array(
             model.system_dynamics(
-                cn=5,
-                f=100,
-                a=1473,
-                tau1=0.04298,
-                km=0.128,
-                t=0.11,
-                t_stim_prev=np.array([0, 0.1]),
-                pulse_width=0.0004,
-                theta=20,
+                time=0.11,
+                states=[5, 100, 1473, 0.04298, 0.128],
+                controls=np.array([0.0004, 20]),
+                numerical_timeseries=np.array([0, 0.1]),
             )
         ).squeeze(),
         np.array(DM([-2.19408644e02, 6.13622448e02, -2.00600000e01, 1.56300000e-02, 6.26900000e-03])).squeeze(),
@@ -451,7 +432,7 @@ def test_marion2009_modified_dynamics():
 def test_marion2013_dynamics():
     model = ModelMaker.create_model("marion2013_with_fatigue")
     assert model.nb_state == 7
-    assert model.name_dof == [
+    assert model.name_dofs == [
         "Cn",
         "F",
         "theta",
@@ -517,16 +498,10 @@ def test_marion2013_dynamics():
     np.testing.assert_almost_equal(
         np.array(
             model.system_dynamics(
-                cn=5,
-                f=100,
-                theta=90,
-                dtheta_dt=0,
-                a=2100,
-                tau1=0.0361,
-                km=0.352,
-                t=0.11,
-                t_stim_prev=np.array([0, 0.1]),
-                Fload=0,
+                time=0.11,
+                states=[5, 100, 90, 0, 2100, 0.0361, 0.352],
+                controls=np.array([0]),
+                numerical_timeseries=np.array([0, 0.1]),
             )
         ).squeeze(),
         np.array(
@@ -549,7 +524,7 @@ def test_marion2013_dynamics():
 def test_marion2013_modified_dynamics():
     model = ModelMaker.create_model("marion2013_modified_with_fatigue")
     assert model.nb_state == 7
-    assert model.name_dof == [
+    assert model.name_dofs == [
         "Cn",
         "F",
         "theta",
@@ -619,17 +594,10 @@ def test_marion2013_modified_dynamics():
     np.testing.assert_almost_equal(
         np.array(
             model.system_dynamics(
-                cn=5,
-                f=100,
-                theta=90,
-                dtheta_dt=0,
-                a=2100,
-                tau1=0.0361,
-                km=0.352,
-                t=0.11,
-                t_stim_prev=np.array([0, 0.1]),
-                pulse_width=0.0004,
-                Fload=0,
+                time=0.11,
+                states=[5, 100, 90, 0, 2100, 0.0361, 0.352],
+                controls=np.array([0.0004, 0]),
+                numerical_timeseries=np.array([0, 0.1]),
             )
         ).squeeze(),
         np.array(

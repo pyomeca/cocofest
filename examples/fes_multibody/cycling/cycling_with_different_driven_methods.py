@@ -14,8 +14,6 @@ from bioptim import (
     ConstraintFcn,
     ControlType,
     CostType,
-    DynamicsFcn,
-    DynamicsList,
     ExternalForceSetTimeSeries,
     InitialGuessList,
     InterpolationType,
@@ -28,7 +26,8 @@ from bioptim import (
     PhaseDynamics,
     Solver,
     VariableScalingList,
-    ContactType,
+    DynamicsOptionsList,
+    DynamicsOptions,
 )
 
 from cocofest import (
@@ -92,9 +91,11 @@ def update_model(
             previous_stim=model.muscles_dynamics_model[0].previous_stim,
             activate_force_length_relationship=model.activate_force_length_relationship,
             activate_force_velocity_relationship=model.activate_force_velocity_relationship,
+            activate_passive_force_relationship=model.activate_force_velocity_relationship,
             activate_residual_torque=model.activate_residual_torque,
             parameters=parameters,
             external_force_set=external_force_set,
+            with_contact=model.with_contact,
         )
     else:
         model = BiorbdModel(model.path, external_force_set=external_force_set)
@@ -102,55 +103,55 @@ def update_model(
     return model
 
 
-def set_dynamics(
-    model: BiorbdModel | FesMskModel,
-    numerical_time_series: dict,
-    dynamics_type_str: str = "torque_driven",
-    ode_solver: OdeSolver = OdeSolver.RK4(n_integration_steps=10),
-) -> DynamicsList:
-    """
-    Set the dynamics of the optimal control program based on the chosen dynamics type.
-
-    Parameters
-    ----------
-    model: BiorbdModel | FesMskModel
-        The biomechanical model.
-    numerical_time_series: dict
-        External numerical data (e.g., external forces).
-    dynamics_type_str: str
-        Type of dynamics ("torque_driven", "muscle_driven", or "fes_driven").
-
-    Returns
-    -------
-        A DynamicsList configured for the problem.
-    """
-    dynamics_type = (
-        DynamicsFcn.TORQUE_DRIVEN
-        if dynamics_type_str == "torque_driven"
-        else (
-            DynamicsFcn.MUSCLE_DRIVEN
-            if dynamics_type_str == "muscle_driven"
-            else model.declare_model_variables if dynamics_type_str == "fes_driven" else None
-        )
-    )
-    if dynamics_type is None:
-        raise ValueError("Dynamics type not recognized")
-
-    dynamics = DynamicsList()
-    dynamics.add(
-        dynamics_type=dynamics_type,
-        dynamic_function=(
-            None if dynamics_type in (DynamicsFcn.TORQUE_DRIVEN, DynamicsFcn.MUSCLE_DRIVEN) else model.muscle_dynamic
-        ),
-        expand_dynamics=True,
-        expand_continuity=False,
-        phase_dynamics=PhaseDynamics.SHARED_DURING_THE_PHASE,
-        numerical_data_timeseries=numerical_time_series,
-        phase=0,
-        ode_solver=ode_solver,
-        contact_type=[ContactType.RIGID_EXPLICIT],
-    )
-    return dynamics
+# def set_dynamics(
+#     model: BiorbdModel | FesMskModel,
+#     numerical_time_series: dict,
+#     dynamics_type_str: str = "torque_driven",
+#     ode_solver: OdeSolver = OdeSolver.RK4(n_integration_steps=10),
+# ) -> DynamicsList:
+#     """
+#     Set the dynamics of the optimal control program based on the chosen dynamics type.
+#
+#     Parameters
+#     ----------
+#     model: BiorbdModel | FesMskModel
+#         The biomechanical model.
+#     numerical_time_series: dict
+#         External numerical data (e.g., external forces).
+#     dynamics_type_str: str
+#         Type of dynamics ("torque_driven", "muscle_driven", or "fes_driven").
+#
+#     Returns
+#     -------
+#         A DynamicsList configured for the problem.
+#     """
+#     dynamics_type = (
+#         DynamicsFcn.TORQUE_DRIVEN
+#         if dynamics_type_str == "torque_driven"
+#         else (
+#             DynamicsFcn.MUSCLE_DRIVEN
+#             if dynamics_type_str == "muscle_driven"
+#             else model.declare_model_variables if dynamics_type_str == "fes_driven" else None
+#         )
+#     )
+#     if dynamics_type is None:
+#         raise ValueError("Dynamics type not recognized")
+#
+#     dynamics = DynamicsList()
+#     dynamics.add(
+#         dynamics_type=dynamics_type,
+#         dynamic_function=(
+#             None if dynamics_type in (DynamicsFcn.TORQUE_DRIVEN, DynamicsFcn.MUSCLE_DRIVEN) else model.muscle_dynamic
+#         ),
+#         expand_dynamics=True,
+#         expand_continuity=False,
+#         phase_dynamics=PhaseDynamics.SHARED_DURING_THE_PHASE,
+#         numerical_data_timeseries=numerical_time_series,
+#         phase=0,
+#         ode_solver=ode_solver,
+#         contact_type=[ContactType.RIGID_EXPLICIT],
+#     )
+#     return dynamics
 
 
 def set_objective_functions(model: BiorbdModel | FesMskModel, dynamics_type: str, init_x) -> ObjectiveList:
@@ -452,11 +453,21 @@ def prepare_ocp(
         numerical_time_series.update(numerical_data_time_series)
 
     # Set dynamics based on the chosen dynamics type
-    dynamics = set_dynamics(
-        model,
-        numerical_time_series,
-        dynamics_type_str=dynamics_type,
-        ode_solver=ode_solver,
+    # dynamics = set_dynamics(
+    #     model,
+    #     numerical_time_series,
+    #     dynamics_type_str=dynamics_type,
+    #     ode_solver=ode_solver,
+    # )
+    dynamics_options = DynamicsOptionsList()
+    dynamics_options.add(
+        DynamicsOptions(
+            expand_dynamics=True,
+            expand_continuity=False,
+            phase_dynamics=PhaseDynamics.SHARED_DURING_THE_PHASE,
+            ode_solver=ode_solver,
+            numerical_data_timeseries=numerical_time_series,
+        )
     )
 
     # Set initial guess for state variables
@@ -486,9 +497,9 @@ def prepare_ocp(
 
     return OptimalControlProgram(
         [model],
-        dynamics,
         n_shooting,
         final_time,
+        dynamics_options,
         x_bounds=x_bounds,
         u_bounds=u_bounds,
         x_init=x_init,
@@ -563,6 +574,7 @@ def main(
             activate_passive_force_relationship=True,
             activate_residual_torque=False,
             external_force_set=None,  # External forces will be added later
+            with_contact=True,
         )
         # Adjust n_shooting based on the stimulation time
         n_shooting = model.muscles_dynamics_model[0].get_n_shooting(final_time)
@@ -578,7 +590,7 @@ def main(
         dynamics_type=dynamics_type,
         use_sx=False,
         ode_solver=OdeSolver.COLLOCATION(polynomial_degree=3, method="radau"),
-        # ode_solver=OdeSolver.RK4(n_integration_steps=5)
+        # ode_solver=OdeSolver.RK4(n_integration_steps=5),
         torque=-0.3,
         initial_guess_model_path=initial_guess_model_path,
     )
