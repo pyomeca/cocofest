@@ -165,6 +165,22 @@ class CustomCostFunctions:
                 "power": "max",
                 "state": "fat",
             },
+            "minimize_root_mean_square_fatigue_with_weights": {
+                "function": self.minimize_root_mean_square_fatigue_with_weights,
+                "index": 21,
+                "latex": r"\phi_{21} = \left(\frac{1}{\sum_{j=1}^{n_m} w_j}\sum_{j=1}^{n_m} w_j (\mathcal{F}^{j})^{2}\right)^{\tfrac{1}{2}}",
+                "description": "Minimize the root mean square of muscle fatigue with weights",
+                "power": "2",
+                "state": "fatw",
+            },
+            "minimize_root_mean_square_scalable_fatigue_decay": {
+                "function": self.minimize_root_mean_square_scalable_fatigue_decay,
+                "index": 22,
+                "latex": r"\phi_{22} = \left(\frac{1}{n_m}\sum_{t=1}^{n_m}\left(\frac{A_{t+1} - A_t}{A_t - A_{\text{end}}}\right)^{2}\right)^{\tfrac{1}{2}}",
+                "description": "Minimize the root mean square of scalable muscle fatigue decay",
+                "power": "2",
+                "state": "fats",
+            },
 
             "minimize_peak": {
                 "function": self.minimize_peak,
@@ -702,6 +718,72 @@ class CustomCostFunctions:
         )
         max_fatigue = mmax(muscle_fatigue)
         return max_fatigue
+
+    @staticmethod
+    def minimize_root_mean_square_fatigue_with_weights(controller: PenaltyController) -> MX:
+        """
+        Minimize the root-mean-square of muscle fatigue with fixed weights
+
+        Parameters
+        ----------
+        controller: PenaltyController
+            The penalty node elements
+
+        Returns
+        -------
+        The root-mean-square of muscle fatigue
+        """
+        weights = [72.32, 16.74, 9.62, 1.31]  # based on the contribution to the motion and scaled with A_rest and alpha_a
+        # weights = [38.53, 12.20, 36,99, 12.28]  # based on contribution to the motion
+        eps = 1e-8
+        muscle_name_list = controller.model.bio_model.muscle_names
+        muscle_fatigue = vertcat(
+            *[
+                (weights[x] * (controller.model.muscles_dynamics_model[x].a_scale - controller.states[
+                    "A_" + muscle_name_list[x]].cx)) ** 2
+                for x in range(len(muscle_name_list))
+            ]
+        )
+        rms_fatigue = (sum1(muscle_fatigue) / len(muscle_name_list) + eps) ** 0.5
+        return rms_fatigue
+
+    @staticmethod
+    def minimize_root_mean_square_scalable_fatigue_decay(controller: PenaltyController) -> MX:
+        """
+        Minimize the root-mean-square fatigue decay in a scalable way.
+
+        Parameters
+        ----------
+        controller: PenaltyController
+            The penalty node elements
+
+        Returns
+        -------
+        The root-mean-square fatigue decay
+        """
+        # Known form model
+        muscle_name_list = controller.model.bio_model.muscle_names
+        A_rest = vertcat(*[controller.model.muscles_dynamics_model[x].a_scale for x in range(len(muscle_name_list))])
+        tau_fat = vertcat(*[controller.model.muscles_dynamics_model[x].tau_fat for x in range(len(muscle_name_list))])
+        alpha_a = vertcat(*[controller.model.muscles_dynamics_model[x].alpha_a for x in range(len(muscle_name_list))])
+
+        # At time t or t+1
+        A_t = vertcat(*[controller.states["A_" + muscle_name_list[x]].cx for x in range(len(muscle_name_list))])
+        F_t = vertcat(*[controller.states["F_" + muscle_name_list[x]].cx for x in range(len(muscle_name_list))])
+        A_t_plus_one = vertcat(*[A_t[x]-((A_t[x] - A_rest[x]) / tau_fat[x] + alpha_a[x] * F_t[x]) for x in range(len(muscle_name_list))])
+
+        # Optimized elsewhere
+        A_end = [297.59, 226.84, 1191.58, 89.46]
+
+        eps = 1e-8
+        muscle_fatigue_decay = vertcat(
+            *[
+                ((A_t[x] - A_t_plus_one[x]) / (A_t[x] - A_end[x])) ** 2
+                for x in range(len(muscle_name_list))
+            ]
+        )
+        rms_fatigue = (sum1(muscle_fatigue_decay) / len(muscle_name_list) + eps) ** 0.5
+        return rms_fatigue
 
     # --- Peak cost function and constraint used in OCP --- #
     @staticmethod
