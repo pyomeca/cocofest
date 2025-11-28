@@ -735,6 +735,8 @@ class CustomCostFunctions:
         """
         weights = [72.32, 16.74, 9.62, 1.31]  # based on the contribution to the motion and scaled with A_rest and alpha_a
         # weights = [38.53, 12.20, 36,99, 12.28]  # based on contribution to the motion
+        # weights = [1.0, 0.0001, 0.36718311365133266, 0.0001]  # based on best bayesian results
+
         eps = 1e-8
         muscle_name_list = controller.model.bio_model.muscle_names
         muscle_fatigue = vertcat(

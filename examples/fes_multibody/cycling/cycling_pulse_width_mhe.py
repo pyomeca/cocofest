@@ -378,7 +378,7 @@ def prepare_nmpc(
         parameters_objectives = ParameterObjectiveList()
 
      # --- Set constraints --- #
-    constraints = set_constraints(model, objective_fun_dict["cost_fun_key"])
+    constraints = set_constraints(model, x_init["q"].init[2][0] - 2*np.pi, objective_fun_dict["cost_fun_key"])
 
     # --- Update model for resistive torque --- #
     model = updating_model(model=model, external_force_set=external_force_set, parameters=parameters)
@@ -590,7 +590,7 @@ def set_u_bounds_and_init(bio_model, n_shooting, init_file_path):
     )
 
 
-def set_constraints(bio_model, objective_function_key=None):
+def set_constraints(bio_model, one_cycle_bound, objective_function_key=None):
     constraints = ConstraintList()
     # --- Constraining wheel center position to a fix position --- #
     constraints.add(
@@ -605,6 +605,18 @@ def set_constraints(bio_model, objective_function_key=None):
         second_marker="global_wheel_center",
         node=Node.START,
         axes=[Axis.X, Axis.Y],
+    )
+
+    angle_slack = 0.174533  # 10 degrees in radiant
+    constraints.add(
+        ConstraintFcn.BOUND_STATE,
+        key="q",
+        node=30,
+        index=2,
+        # min_bound=np.array([-np.inf, -np.inf, one_cycle_bound-angle_slack]),
+        # max_bound=np.array([np.inf, np.inf, one_cycle_bound+angle_slack]),
+        min_bound=np.array([one_cycle_bound - angle_slack]),
+        max_bound=np.array([one_cycle_bound + angle_slack]),
     )
 
     if objective_function_key in [["minimize_peak_force"], ["minimize_peak_activation"],
