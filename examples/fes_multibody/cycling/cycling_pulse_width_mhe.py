@@ -607,7 +607,7 @@ def set_constraints(bio_model, one_cycle_bound, objective_function_key=None):
         axes=[Axis.X, Axis.Y],
     )
 
-    angle_slack = 0.174533  # 10 degrees in radiant
+    angle_slack = 0.174533/4  # 10 degrees in radiant
     constraints.add(
         ConstraintFcn.BOUND_STATE,
         key="q",
@@ -863,7 +863,7 @@ def save_sol_in_pkl(sol, simulation_conditions, nmpc, is_initial_guess=False, to
         "cost_function_weight": cost_function_weight,
     }
 
-    recalculate_objective = True
+    recalculate_objective = False
     if recalculate_objective:
         recalculate_objective_dict = recalculate_objective_fun(sol[1], nmpc, sim_cond=simulation_conditions)
         similar_cost_values = [True if objective_values_per_kept_cycle == recalculate_objective_dict[key] else False for
@@ -995,7 +995,7 @@ def run_optim(mhe_info, cycling_info, simulation_conditions, model_path, save_so
     nmpc.add_plot_penalty(CostType.ALL)
 
     # Set solver for the optimal control problem
-    solver = Solver.IPOPT(show_online_optim=False, _max_iter=10000, show_options=dict(show_bounds=True))
+    solver = Solver.IPOPT(show_online_optim=False, _max_iter=5000, show_options=dict(show_bounds=True))
     linear_solver = "ma57" if platform == "linux" else "mumps"
     solver.set_linear_solver(linear_solver)
 
@@ -1008,7 +1008,7 @@ def run_optim(mhe_info, cycling_info, simulation_conditions, model_path, save_so
         cycle_solutions=MultiCyclicCycleSolutions.ALL_CYCLES,
         get_all_iterations=True,
         cyclic_options={"states": {}},
-        max_consecutive_failing=1,
+        max_consecutive_failing=3,
     )
 
     result_show = False
@@ -1107,16 +1107,13 @@ if __name__ == "__main__":
             ["minimize_root_mean_square_muscle_stress"],
             ["minimize_cubic_average_muscle_stress"],
             ["minimize_peak_muscle_stress"],
-            ["minimize_average_muscle_power"],
             ["minimize_root_mean_square_muscle_power"],
-            ["minimize_cubic_average_muscle_power"],
-            ["minimize_peak_muscle_power"],
             ["minimize_average_fatigue"],
             ["minimize_root_mean_square_fatigue"],
             ["minimize_cubic_average_fatigue"],
             ["minimize_peak_fatigue"],
-            # ["minimize_root_mean_square_fatigue_with_weights"],
-            # ["minimize_root_mean_square_scalable_fatigue_decay"],
+            ["minimize_root_mean_square_fatigue_with_weights"],
+            ["minimize_root_mean_square_scalable_fatigue_decay"],
             ],
 
             "weight": [
