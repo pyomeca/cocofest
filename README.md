@@ -103,13 +103,7 @@ conda activate YOUR_ENV_NAME
 
 After, install the dependencies
 ```bash
-conda install numpy matplotlib pytest casadi biorbd pyorerun -c conda-forge
-```
-
-Finally, install the bioptim setup.py file located in your cocofest/external/bioptim folder
-```bash
-cd <path_up_to_cocofest_file>/external/bioptim
-python setup.py install
+conda install numpy matplotlib pytest casadi biorbd pyorerun bioptim==3.4.0 -c conda-forge
 ```
 
 You are now ready to use `Cocofest`!
