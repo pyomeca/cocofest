@@ -154,7 +154,7 @@ isometric muscle force, $f_l$ the force-length, $f_v$ the force-velocity and $f_
 ```math
 F_m(t) = a(t)\, F_{\max}\, f_l(\tilde{l}_m)\, f_v(\tilde{v}_m) + f_{pas}(\tilde{l}_m)
 ```
-<br>
+
 `Cocofest` replaces $a(t)$ × $F_{max}$ by the force obtained using [FES models](#available-fes-models).
 This approach allows motions driven-FES simulations, meanwhile benefiting from musculoskeletal model properties (e.g., muscle insertion, weight, inertial).
 
