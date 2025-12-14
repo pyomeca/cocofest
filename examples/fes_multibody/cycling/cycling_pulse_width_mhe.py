@@ -369,7 +369,7 @@ def prepare_nmpc(
     )
 
     # --- Set parameters (for minmax cost_function) --- #
-    if objective_fun_dict["cost_fun_key"] in [["minimize_peak_force"], ["minimize_peak_activation"], ["minimize_peak_muscle_stress"], ["minimize_peak_fatigue"]]:
+    if objective_fun_dict["cost_fun_key"] in [["minimize_peak_force"], ["minimize_peak_activation"], ["minimize_peak_muscle_stress"], ["minimize_peak_fatigue"], ["minimize_peak_fatigue_decay"]]:
         parameters, parameters_bounds, parameters_init, parameters_objectives = set_parameters(ns=cycle_len, cycle=n_cycles_simultaneous, use_sx=use_sx)
     else:
         parameters = ParameterList(use_sx=use_sx)
@@ -378,7 +378,7 @@ def prepare_nmpc(
         parameters_objectives = ParameterObjectiveList()
 
      # --- Set constraints --- #
-    constraints = set_constraints(model, x_init["q"].init[2][0] - 2*np.pi, objective_fun_dict["cost_fun_key"])
+    constraints = set_constraints(model, x_init["q"].init[2][0] - 2*np.pi, cycle_len, n_cycles_simultaneous, objective_fun_dict["cost_fun_key"])
 
     # --- Update model for resistive torque --- #
     model = updating_model(model=model, external_force_set=external_force_set, parameters=parameters)
@@ -590,7 +590,7 @@ def set_u_bounds_and_init(bio_model, n_shooting, init_file_path):
     )
 
 
-def set_constraints(bio_model, one_cycle_bound, objective_function_key=None):
+def set_constraints(bio_model, one_cycle_bound, cycle_len, n_simultaneous, objective_function_key=None):
     constraints = ConstraintList()
     # --- Constraining wheel center position to a fix position --- #
     constraints.add(
@@ -608,19 +608,18 @@ def set_constraints(bio_model, one_cycle_bound, objective_function_key=None):
     )
 
     angle_slack = 0.174533/4  # 10 degrees in radiant
-    constraints.add(
-        ConstraintFcn.BOUND_STATE,
-        key="q",
-        node=30,
-        index=2,
-        # min_bound=np.array([-np.inf, -np.inf, one_cycle_bound-angle_slack]),
-        # max_bound=np.array([np.inf, np.inf, one_cycle_bound+angle_slack]),
-        min_bound=np.array([one_cycle_bound - angle_slack]),
-        max_bound=np.array([one_cycle_bound + angle_slack]),
-    )
+    for i in range(n_simultaneous-1):
+        constraints.add(
+            ConstraintFcn.BOUND_STATE,
+            key="q",
+            node=cycle_len * (i + 1),
+            index=2,
+            min_bound=np.array([one_cycle_bound - (2*np.pi * i) - angle_slack]),
+            max_bound=np.array([one_cycle_bound - (2*np.pi * i) + angle_slack]),
+        )
 
     if objective_function_key in [["minimize_peak_force"], ["minimize_peak_activation"],
-                                              ["minimize_peak_muscle_stress"], ["minimize_peak_fatigue"]]:
+                                              ["minimize_peak_muscle_stress"], ["minimize_peak_fatigue"], ["minimize_peak_fatigue_decay"]]:
         for i in range(4):
             constraints.add(
                 CustomCostFunctions.constraints_minmax,
@@ -657,7 +656,7 @@ def set_objective_functions(objective_fun_dict, recalculate=False):
     else:
         for i in range(len(keys)):
             if keys[i] in ["minimize_peak_force", "minimize_peak_activation",
-                                          "minimize_peak_muscle_stress", "minimize_peak_fatigue"] and recalculate is False:
+                                          "minimize_peak_muscle_stress", "minimize_peak_fatigue", "minimize_peak_fatigue_decay"] and recalculate is False:
                 objective_functions.add(
                     custom_objective_functions["minimize_peak"]["function"],
                     custom_type=ObjectiveFcn.Lagrange,
