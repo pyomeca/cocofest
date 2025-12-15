@@ -8,7 +8,7 @@ class CustomCostFunctions:
             "minimize_average_activation": {
                 "function": self.minimize_average_activation,
                 "index": 1,
-                "latex": r"\phi_1 = \frac{1}{n_m}\sum_{j=1}^{n_m} a^{j}, \quad a^{j}=\frac{f^{j}-f^{j}_{\min}}{f^{j}_{\max}-f^{j}_{\min}}",
+                "latex": r"\phi_1 = \frac{1}{M}\sum_{m=1}^{M} a^{m}, \quad a^{m}=\frac{f^{m}-f^{m}_{\min}}{f^{m}_{\max}-f^{m}_{\min}}",
                 "description": "Minimize the average muscle activation",
                 "power": "1",
                 "state": "pw",
@@ -16,7 +16,7 @@ class CustomCostFunctions:
             "minimize_root_mean_square_activation": {
                 "function": self.minimize_root_mean_square_activation,
                 "index": 2,
-                "latex": r"\phi_2 = \left(\frac{1}{n_m}\sum_{j=1}^{n_m} (a^{j})^{2}\right)^{\tfrac{1}{2}}, \quad a^{j}=\frac{f^{j}-f^{j}_{\min}}{f^{j}_{\max}-f^{j}_{\min}}",
+                "latex": r"\phi_2 = \left(\frac{1}{M}\sum_{m=1}^{M} (a^{m})^{2}\right)^{\tfrac{1}{2}}, \quad a^{m}=\frac{f^{m}-f^{m}_{\min}}{f^{m}_{\max}-f^{m}_{\min}}",
                 "description": "Minimize the root mean square of muscle activation",
                 "power": "2",
                 "state": "pw",
@@ -24,7 +24,7 @@ class CustomCostFunctions:
             "minimize_cubic_average_activation": {
                 "function": self.minimize_cubic_average_activation,
                 "index": 3,
-                "latex": r"\phi_3 = \left(\frac{1}{n_m}\sum_{j=1}^{n_m} (a^{j})^{3}\right)^{\tfrac{1}{3}}, \quad a^{j}=\frac{f^{j}-f^{j}_{\min}}{f^{j}_{\max}-f^{j}_{\min}}",
+                "latex": r"\phi_3 = \left(\frac{1}{M}\sum_{m=1}^{M} (a^{m})^{3}\right)^{\tfrac{1}{3}}, \quad a^{m}=\frac{f^{m}-f^{m}_{\min}}{f^{m}_{\max}-f^{m}_{\min}}",
                 "description": "Minimize the cubic average of muscle activation",
                 "power": "3",
                 "state": "pw",
@@ -32,7 +32,7 @@ class CustomCostFunctions:
             "minimize_peak_activation": {
                 "function": self.minimize_peak_activation,
                 "index": 4,
-                "latex": r"\phi_4 = \max_{j=1,\ldots,n_m} \; a^{j}, \quad a^{j}=\frac{f^{j}-f^{j}_{\min}}{f^{j}_{\max}-f^{j}_{\min}}",
+                "latex": r"\phi_4 = \max_{m=1,\ldots,M} \; a^{m}, \quad a^{m}=\frac{f^{m}-f^{m}_{\min}}{f^{m}_{\max}-f^{m}_{\min}}",
                 "description": "Minimize the peak of muscle activation",
                 "power": "max",
                 "state": "pw",
@@ -40,7 +40,7 @@ class CustomCostFunctions:
             "minimize_average_force": {
                 "function": self.minimize_average_force,
                 "index": 5,
-                "latex": r"\phi_5 = \frac{1}{n_m}\sum_{j=1}^{n_m} f^{j}",
+                "latex": r"\phi_5 = \frac{1}{M}\sum_{m=1}^{M} f^{m}",
                 "description": "Minimize the average muscle force",
                 "power": "1",
                 "state": "f",
@@ -48,7 +48,7 @@ class CustomCostFunctions:
             "minimize_root_mean_square_force": {
                 "function": self.minimize_root_mean_square_force,
                 "index": 6,
-                "latex": r"\phi_6 = \left(\frac{1}{n_m}\sum_{j=1}^{n_m} (f^{j})^{2}\right)^{\tfrac{1}{2}}",
+                "latex": r"\phi_6 = \left(\frac{1}{M}\sum_{m=1}^{M} (f^{m})^{2}\right)^{\tfrac{1}{2}}",
                 "description": "Minimize the root mean square of muscle force",
                 "power": "2",
                 "state": "f",
@@ -56,7 +56,7 @@ class CustomCostFunctions:
             "minimize_cubic_average_force": {
                 "function": self.minimize_cubic_average_force,
                 "index": 7,
-                "latex": r"\phi_7 = \left(\frac{1}{n_m}\sum_{j=1}^{n_m} (f^{j})^{3}\right)^{\tfrac{1}{3}}",
+                "latex": r"\phi_7 = \left(\frac{1}{M}\sum_{m=1}^{M} (f^{m})^{3}\right)^{\tfrac{1}{3}}",
                 "description": "Minimize the cubic average of muscle force",
                 "power": "3",
                 "state": "f",
@@ -64,7 +64,7 @@ class CustomCostFunctions:
             "minimize_peak_force": {
                 "function": self.minimize_peak_force,
                 "index": 8,
-                "latex": r"\phi_8 = \max_{j=1,\ldots,n_m} \; f^{j}",
+                "latex": r"\phi_8 = \max_{m=1,\ldots,M} \; f^{m}",
                 "description": "Minimize the peak muscle force",
                 "power": "max",
                 "state": "f",
@@ -72,7 +72,7 @@ class CustomCostFunctions:
             "minimize_average_muscle_stress": {
                 "function": self.minimize_average_muscle_stress,
                 "index": 9,
-                "latex": r"\phi_9 = \frac{1}{n_m}\sum_{j=1}^{n_m} \frac{f^{j}}{S^{j}}",
+                "latex": r"\phi_9 = \frac{1}{M}\sum_{m=1}^{M} \frac{f^{m}}{S^{m}}",
                 "description":"Minimize the average muscle stress",
                 "power": "1",
                 "state": "str",
@@ -80,7 +80,7 @@ class CustomCostFunctions:
             "minimize_root_mean_square_muscle_stress": {
                 "function": self.minimize_root_mean_square_muscle_stress,
                 "index": 10,
-                "latex": r"\phi_{10} = \left(\frac{1}{n_m}\sum_{j=1}^{n_m} \left(\frac{f^{j}}{S^{j}}\right)^{2}\right)^{\tfrac{1}{2}}",
+                "latex": r"\phi_{10} = \left(\frac{1}{M}\sum_{m=1}^{M} \left(\frac{f^{m}}{S^{m}}\right)^{2}\right)^{\tfrac{1}{2}}",
                 "description":"Minimize the root mean square of muscle stress",
                 "power": "2",
                 "state": "str",
@@ -88,7 +88,7 @@ class CustomCostFunctions:
             "minimize_cubic_average_muscle_stress": {
                 "function": self.minimize_cubic_average_muscle_stress,
                 "index": 11,
-                "latex": r"\phi_{11} = \left(\frac{1}{n_m}\sum_{j=1}^{n_m} \left(\frac{f^{j}}{S^{j}}\right)^{3}\right)^{\tfrac{1}{3}}",
+                "latex": r"\phi_{11} = \left(\frac{1}{M}\sum_{m=1}^{M} \left(\frac{f^{m}}{S^{m}}\right)^{3}\right)^{\tfrac{1}{3}}",
                 "description":"Minimize the cubic average of muscle stress",
                 "power": "3",
                 "state": "str",
@@ -96,79 +96,57 @@ class CustomCostFunctions:
             "minimize_peak_muscle_stress": {
                 "function": self.minimize_peak_muscle_stress,
                 "index": 12,
-                "latex": r"\phi_{12} = \max_{j=1,\ldots,n_m} \; \frac{f^{j}}{S^{j}}",
+                "latex": r"\phi_{12} = \max_{m=1,\ldots,M} \; \frac{f^{m}}{S^{m}}",
                 "description":"Minimize the peak muscle stress",
                 "power": "max",
                 "state": "str",
             },
-            "minimize_average_muscle_power": {
-                "function": self.minimize_average_muscle_power,
-                "index": 13,
-                "latex": r"\phi_{13} = \frac{1}{n_m}\sum_{j=1}^{n_m} f^{j} v^{j}",
-                "description": "Minimize the average muscle power",
-                "power": "1",
-                "state": "pow",
-            },
-            "minimize_root_mean_square_muscle_power": {
-                "function": self.minimize_root_mean_square_muscle_power,
-                "index": 14,
-                "latex": r"\phi_{14} = \left(\frac{1}{n_m}\sum_{j=1}^{n_m} (f^{j} v^{j})^{2}\right)^{\tfrac{1}{2}}",
-                "description": "Minimize the root mean square of muscle power",
-                "power": "2",
-                "state": "pow",
-            },
-            "minimize_cubic_average_muscle_power": {
-                "function": self.minimize_cubic_average_muscle_power,
-                "index": 15,
-                "latex": r"\phi_{15} = \left(\frac{1}{n_m}\sum_{j=1}^{n_m} (f^{j} v^{j})^{3}\right)^{\tfrac{1}{3}}",
-                "description": "Minimize the cubic average of muscle power",
-                "power": "3",
-                "state": "pow",
-            },
-            "minimize_peak_muscle_power": {
-                "function": self.minimize_peak_muscle_power,
-                "index": 16,
-                "latex": r"\phi_{16} = \max_{j=1,\ldots,n_m} \; f^{j} v^{j}}",
-                "description": "Minimize the peak muscle power",
-                "power": "max",
-                "state": "pow",
-            },
             "minimize_average_fatigue": {
                 "function": self.minimize_average_fatigue,
-                "index": 17,
-                "latex": r"\phi_{17} = \frac{1}{n_m}\sum_{j=1}^{n_m} \mathcal{F}^{j}",
+                "index": 13,
+                "latex": r"\phi_{13} = \frac{1}{M}\sum_{m=1}^{M} \mathcal{F}^{m}",
                 "description": "Minimize the average muscle fatigue",
                 "power": "1",
                 "state": "fat",
             },
             "minimize_root_mean_square_fatigue": {
                 "function": self.minimize_root_mean_square_fatigue,
-                "index": 18,
-                "latex": r"\phi_{18} = \left(\frac{1}{n_m}\sum_{j=1}^{n_m} (\mathcal{F}^{j})^{2}\right)^{\tfrac{1}{2}}",
+                "index": 14,
+                "latex": r"\phi_{14} = \left(\frac{1}{M}\sum_{m=1}^{M} (\mathcal{F}^{m})^{2}\right)^{\tfrac{1}{2}}",
                 "description": "Minimize the root mean square of muscle fatigue",
                 "power": "2",
                 "state": "fat",
             },
             "minimize_cubic_average_fatigue": {
                 "function": self.minimize_cubic_average_fatigue,
-                "index": 19,
-                "latex": r"\phi_{19} = \left(\frac{1}{n_m}\sum_{j=1}^{n_m} (\mathcal{F}^{j})^{3}\right)^{\tfrac{1}{3}}",
+                "index": 15,
+                "latex": r"\phi_{15} = \left(\frac{1}{M}\sum_{m=1}^{M} (\mathcal{F}^{m})^{3}\right)^{\tfrac{1}{3}}",
                 "description": "Minimize the cubic average of muscle fatigue",
                 "power": "3",
                 "state": "fat",
             },
             "minimize_peak_fatigue": {
                 "function": self.minimize_peak_fatigue,
-                "index": 20,
-                "latex": r"\phi_{20} = \max_{j=1,\ldots,n_m} \; \mathcal{F}^{j}",
+                "index": 16,
+                "latex": r"\phi_{16} = \max_{m=1,\ldots,M} \; \mathcal{F}^{m}",
                 "description": "Minimize the peak muscle fatigue",
                 "power": "max",
                 "state": "fat",
             },
+            "minimize_root_mean_square_muscle_power": {
+                "function": self.minimize_root_mean_square_muscle_power,
+                "index": 17,
+                "latex": r"\phi_{17} = \left(\frac{1}{M}\sum_{m=1}^{M} (f^{m} v^{m})^{2}\right)^{\tfrac{1}{2}}",
+                "description": "Minimize the root mean square of muscle power",
+                "power": "2",
+                "state": "pow",
+            },
+
+
             "minimize_root_mean_square_fatigue_with_weights": {
                 "function": self.minimize_root_mean_square_fatigue_with_weights,
                 "index": 21,
-                "latex": r"\phi_{21} = \left(\frac{1}{\sum_{j=1}^{n_m} w_j}\sum_{j=1}^{n_m} w_j (\mathcal{F}^{j})^{2}\right)^{\tfrac{1}{2}}",
+                "latex": r"\phi_{21} = \left(\frac{1}{\sum_{m=1}^{M} w_m}\sum_{m=1}^{M} w_m (\mathcal{F}^{m})^{2}\right)^{\tfrac{1}{2}}",
                 "description": "Minimize the root mean square of muscle fatigue with weights",
                 "power": "2",
                 "state": "fatw",
@@ -176,16 +154,32 @@ class CustomCostFunctions:
             "minimize_root_mean_square_scalable_fatigue_decay": {
                 "function": self.minimize_root_mean_square_scalable_fatigue_decay,
                 "index": 22,
-                "latex": r"\phi_{22} = \left(\frac{1}{n_m}\sum_{t=1}^{n_m}\left(\frac{A_{t+1} - A_t}{A_t - A_{\text{end}}}\right)^{2}\right)^{\tfrac{1}{2}}",
+                "latex": r"\phi_{22} = \left(\frac{1}{M}\sum_{t=1}^{M}\left(\frac{A_{t+1} - A_t}{A_t - A_{\text{end}}}\right)^{2}\right)^{\tfrac{1}{2}}",
                 "description": "Minimize the root mean square of scalable muscle fatigue decay",
                 "power": "2",
                 "state": "fats",
+            },
+            "minimize_root_mean_square_fatigue_decay": {
+                "function": self.minimize_root_mean_square_fatigue_decay,
+                "index": 23,
+                "latex": r"\phi_{23} = \left(\frac{1}{M}\sum_{t=1}^{M}\left(\frac{A_{t+1} - A_t}{-A_{\text{rest}} / alpha_a}\right)^{2}\right)^{\tfrac{1}{2}}",
+                "description": "Minimize the root mean square of muscle fatigue decay",
+                "power": "2",
+                "state": "fatd",
+            },
+            "minimize_peak_fatigue_decay": {
+                "function": self.minimize_peak_fatigue_decay,
+                "index": 24,
+                "latex": r"\phi_{24} = \max_{m=1,\ldots,M} \left( \frac{A_{t+1}^{(m)} - A_t^{(m)}}{-A_{\text{rest}}^{(m)} / \alpha_a} \right)",
+                "description": "Minimize the peak muscle fatigue decay",
+                "power": "max",
+                "state": "fatd",
             },
 
             "minimize_peak": {
                 "function": self.minimize_peak,
                 "index": 99,
-                "latex": r"\phi_{99} = \max_{j=1,\ldots,n_m} \; \mathcal{Var}^{j}",
+                "latex": r"\phi_{99} = \max_{m=1,\ldots,M} \; \mathcal{Var}^{m}",
                 "description": "Minimize the peak of a variable",
             },
         }
@@ -511,116 +505,6 @@ class CustomCostFunctions:
         max_stress = mmax(muscle_stress)
         return max_stress
 
-    # --- Muscle power cost functions --- #
-    @staticmethod
-    def minimize_average_muscle_power(controller: PenaltyController) -> MX:
-        """
-        Minimize the average of muscle power.
-
-        Parameters
-        ----------
-        controller: PenaltyController
-            The penalty node elements
-
-        Returns
-        -------
-        The average of muscle power
-        """
-        muscle_name_list = controller.model.bio_model.muscle_names
-        muscle_velocity = controller.model.muscle_velocity()(
-            controller.states["q"].cx, controller.states["qdot"].cx, controller.parameters.cx
-        )
-        muscle_power = vertcat(
-            *[
-                (controller.states["F_" + muscle_name_list[x]].cx * muscle_velocity[x])
-                for x in range(len(muscle_name_list))
-            ]
-        )
-        return sum1(muscle_power) / len(muscle_name_list)
-
-    @staticmethod
-    def minimize_root_mean_square_muscle_power(controller: PenaltyController) -> MX:
-        """
-        Minimize the root-mean-square of muscle power.
-
-        Parameters
-        ----------
-        controller: PenaltyController
-            The penalty node elements
-
-        Returns
-        -------
-        The root-mean-square of muscle power
-        """
-        eps = 1e-8
-        muscle_name_list = controller.model.bio_model.muscle_names
-        muscle_velocity = controller.model.muscle_velocity()(
-            controller.states["q"].cx, controller.states["qdot"].cx, controller.parameters.cx
-        )
-        muscle_power = vertcat(
-            *[
-                (controller.states["F_" + muscle_name_list[x]].cx * muscle_velocity[x]) ** 2
-                for x in range(len(muscle_name_list))
-            ]
-        )
-        rms_power = (sum1(muscle_power) / len(muscle_name_list) + eps) ** 0.5
-        return rms_power
-
-    @staticmethod
-    def minimize_cubic_average_muscle_power(controller: PenaltyController) -> MX:
-        """
-        Minimize the cubic average of muscle power.
-
-        Parameters
-        ----------
-        controller: PenaltyController
-            The penalty node elements
-
-        Returns
-        -------
-        The cubic average of muscle power
-        """
-        eps = 1e-8
-        muscle_name_list = controller.model.bio_model.muscle_names
-        muscle_velocity = controller.model.muscle_velocity()(
-            controller.states["q"].cx, controller.states["qdot"].cx, controller.parameters.cx
-        )
-        muscle_power = vertcat(
-            *[
-                ((controller.states["F_" + muscle_name_list[x]].cx * muscle_velocity[x])**2 + 1e-6) ** 1.5
-                for x in range(len(muscle_name_list))
-            ]
-        )
-        cubic_avg_power = ((sum1(muscle_power)) / len(muscle_name_list) + eps) ** (1/3)
-        return cubic_avg_power
-
-    @staticmethod
-    def minimize_peak_muscle_power(controller: PenaltyController) -> MX:
-        """
-        Minimize the peak muscle power.
-
-        Parameters
-        ----------
-        controller: PenaltyController
-            The penalty node elements
-
-        Returns
-        -------
-        The peak of muscle power
-        """
-        muscle_name_list = controller.model.bio_model.muscle_names
-        muscle_velocity = controller.model.muscle_velocity()(
-            controller.states["q"].cx, controller.states["qdot"].cx, controller.parameters.cx
-        )
-        muscle_power = vertcat(
-            *[
-                (controller.states["F_" + muscle_name_list[x]].cx * muscle_velocity[x])
-                for x in range(len(muscle_name_list))
-            ]
-        )
-        max_power = mmax(muscle_power)
-        return max_power
-
     # --- Muscle fatigue cost functions --- #
     @staticmethod
     def minimize_average_fatigue(controller: PenaltyController) -> MX:
@@ -719,6 +603,36 @@ class CustomCostFunctions:
         max_fatigue = mmax(muscle_fatigue)
         return max_fatigue
 
+    # --- Muscle power cost functions --- #
+    @staticmethod
+    def minimize_root_mean_square_muscle_power(controller: PenaltyController) -> MX:
+        """
+        Minimize the root-mean-square of muscle power.
+
+        Parameters
+        ----------
+        controller: PenaltyController
+            The penalty node elements
+
+        Returns
+        -------
+        The root-mean-square of muscle power
+        """
+        eps = 1e-8
+        muscle_name_list = controller.model.bio_model.muscle_names
+        muscle_velocity = controller.model.muscle_velocity()(
+            controller.states["q"].cx, controller.states["qdot"].cx, controller.parameters.cx
+        )
+        muscle_power = vertcat(
+            *[
+                (controller.states["F_" + muscle_name_list[x]].cx * muscle_velocity[x]) ** 2
+                for x in range(len(muscle_name_list))
+            ]
+        )
+        rms_power = (sum1(muscle_power) / len(muscle_name_list) + eps) ** 0.5
+        return rms_power
+
+    # --- Custom cost functions --- #
     @staticmethod
     def minimize_root_mean_square_fatigue_with_weights(controller: PenaltyController) -> MX:
         """
@@ -787,6 +701,83 @@ class CustomCostFunctions:
         rms_fatigue = (sum1(muscle_fatigue_decay) / len(muscle_name_list) + eps) ** 0.5
         return rms_fatigue
 
+
+
+
+
+
+    @staticmethod
+    def minimize_root_mean_square_fatigue_decay(controller: PenaltyController) -> MX:
+        """
+        Minimize the root-mean-square fatigue decay.
+
+        Parameters
+        ----------
+        controller: PenaltyController
+            The penalty node elements
+
+        Returns
+        -------
+        The root-mean-square fatigue decay
+        """
+        # Known form model
+        muscle_name_list = controller.model.bio_model.muscle_names
+        A_rest = vertcat(*[controller.model.muscles_dynamics_model[x].a_scale for x in range(len(muscle_name_list))])
+        tau_fat = vertcat(*[controller.model.muscles_dynamics_model[x].tau_fat for x in range(len(muscle_name_list))])
+        alpha_a = vertcat(*[controller.model.muscles_dynamics_model[x].alpha_a for x in range(len(muscle_name_list))])
+
+        # At time t or t+1
+        A_t = vertcat(*[controller.states["A_" + muscle_name_list[x]].cx for x in range(len(muscle_name_list))])
+        F_t = vertcat(*[controller.states["F_" + muscle_name_list[x]].cx for x in range(len(muscle_name_list))])
+        A_t_plus_one = vertcat(
+            *[A_t[x] - ((A_t[x] - A_rest[x]) / tau_fat[x] + alpha_a[x] * F_t[x]) for x in range(len(muscle_name_list))])
+
+        eps = 1e-8
+        muscle_fatigue_decay = vertcat(
+            *[
+                ((A_t[x] - A_t_plus_one[x]) / -(A_rest[x] / alpha_a[x])) ** 2
+                for x in range(len(muscle_name_list))
+            ]
+        )
+        rms_fatigue = (sum1(muscle_fatigue_decay) / len(muscle_name_list) + eps) ** 0.5
+        return rms_fatigue
+
+    @staticmethod
+    def minimize_peak_fatigue_decay(controller: PenaltyController) -> MX:
+        """
+        Minimize the peak fatigue decay.
+
+        Parameters
+        ----------
+        controller: PenaltyController
+            The penalty node elements
+
+        Returns
+        -------
+        The peak fatigue decay
+        """
+        # Known form model
+        muscle_name_list = controller.model.bio_model.muscle_names
+        A_rest = vertcat(*[controller.model.muscles_dynamics_model[x].a_scale for x in range(len(muscle_name_list))])
+        tau_fat = vertcat(*[controller.model.muscles_dynamics_model[x].tau_fat for x in range(len(muscle_name_list))])
+        alpha_a = vertcat(*[controller.model.muscles_dynamics_model[x].alpha_a for x in range(len(muscle_name_list))])
+
+        # At time t or t+1
+        A_t = vertcat(*[controller.states["A_" + muscle_name_list[x]].cx for x in range(len(muscle_name_list))])
+        F_t = vertcat(*[controller.states["F_" + muscle_name_list[x]].cx for x in range(len(muscle_name_list))])
+        A_t_plus_one = vertcat(
+            *[A_t[x] - ((A_t[x] - A_rest[x]) / tau_fat[x] + alpha_a[x] * F_t[x]) for x in range(len(muscle_name_list))])
+
+        muscle_fatigue_decay = vertcat(
+            *[
+                ((A_t[x] - A_t_plus_one[x]) / -(A_rest[x] / alpha_a[x]))
+                for x in range(len(muscle_name_list))
+            ]
+        )
+        max_fatigue_decay = mmax(muscle_fatigue_decay)
+
+        return max_fatigue_decay
+
     # --- Peak cost function and constraint used in OCP --- #
     @staticmethod
     def minimize_peak(controller: PenaltyController) -> MX:
@@ -822,6 +813,18 @@ class CustomCostFunctions:
 
         elif obj_fun_key == ["minimize_peak_fatigue"]:
             value = controller.model.muscles_dynamics_model[param_index].a_scale - controller.states["A_" + muscle_name_list[param_index]].cx
+
+        elif obj_fun_key == ["minimize_peak_fatigue_decay"]:
+            A_rest = controller.model.muscles_dynamics_model[param_index].a_scale
+            tau_fat = controller.model.muscles_dynamics_model[param_index].tau_fat
+            alpha_a = controller.model.muscles_dynamics_model[param_index].alpha_a
+
+            # At time t or t+1
+            A_t = controller.states["A_" + muscle_name_list[param_index]].cx
+            F_t = controller.states["F_" + muscle_name_list[param_index]].cx
+            A_t_plus_one = A_t - (((A_t - A_rest) / tau_fat) + (alpha_a * F_t))
+
+            value = (A_t - A_t_plus_one) / -(A_rest / alpha_a)
 
         else:
             raise NotImplementedError(f"The cost function {obj_fun_key}, is not implementend in minmax")

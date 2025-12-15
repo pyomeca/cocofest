@@ -994,7 +994,7 @@ def run_optim(mhe_info, cycling_info, simulation_conditions, model_path, save_so
     nmpc.add_plot_penalty(CostType.ALL)
 
     # Set solver for the optimal control problem
-    solver = Solver.IPOPT(show_online_optim=False, _max_iter=5000, show_options=dict(show_bounds=True))
+    solver = Solver.IPOPT(show_online_optim=False, _max_iter=2000, show_options=dict(show_bounds=True))
     linear_solver = "ma57" if platform == "linux" else "mumps"
     solver.set_linear_solver(linear_solver)
 
@@ -1007,7 +1007,7 @@ def run_optim(mhe_info, cycling_info, simulation_conditions, model_path, save_so
         cycle_solutions=MultiCyclicCycleSolutions.ALL_CYCLES,
         get_all_iterations=True,
         cyclic_options={"states": {}},
-        max_consecutive_failing=3,
+        max_consecutive_failing=1,
     )
 
     result_show = False
@@ -1091,7 +1091,7 @@ if __name__ == "__main__":
     main(
         stimulation_frequency=30,
         n_total_cycle=10000,
-        n_cycles_simultaneous=[2],
+        n_cycles_simultaneous=[2, 3, 4, 5],
         resistive_torque=-0.20,  # (N.m)
         cost_fun_dict={"optimized_function": [
             ["minimize_average_activation"],
