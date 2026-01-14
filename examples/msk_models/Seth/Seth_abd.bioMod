@@ -1,0 +1,613 @@
+version 4
+
+// File extracted from C:\OpenSim 3.3\Models\ThoracoscapularShoulderPaperMaterials\Model\ThoracoscapularShoulderModel_custom_abd_biomod.osim
+
+//Publication : Frontiers in Neurorobotics: in In Press DSEM: van der Helm 1994 Klein-Breteler et al. 1996.
+
+//Credit : Ajay Seth, Meilin Dong, Ricardo Matias, Scott Delp. Parameters from van der Helm and Klein-Breteler
+
+//Force units : N
+
+//Length units : meters
+
+// Biomod not include all Osim features as the optimisation is performed on a third part software.
+// The original file contained some of these features, corresponding warnings are shown in the end of the file.
+
+
+gravity	0 -9.8066499999999994 0
+
+// SEGMENT DEFINITION
+
+// Information about ground segment
+
+    //True segment where are applied inertial values.
+	// Segment
+	segment ground
+		parent base 
+		RTinMatrix	0
+		RT	0	 0	 0	xyz	0	 0	 0
+	endsegment
+
+	// Markers
+
+// Information about thorax segment
+	// Segment
+	segment thorax_parent_offset
+		parent ground 
+		RTinMatrix	0
+		RT	0 0 0	xyz	0 0 0
+	endsegment
+
+	// Segments to define transformation axis.
+	// Segment
+	segment thorax_translation
+		parent thorax_parent_offset 
+		RTinMatrix	1
+		RT
+			1.0		0.0		0.0		0
+			0.0		1.0		0.0		0
+			0.0		0.0		1.0		0
+			0		0		0		1
+		// ranges
+				// -3.1415926500000002 3.1415926500000002
+				// -3.1415926500000002 3.1415926500000002
+				// -3.1415926500000002 3.1415926500000002
+	endsegment
+
+// Rotation transform was initially an orthogonal basis
+	// Segment
+	segment thorax_rotation_transform
+		parent thorax_translation 
+		RTinMatrix	1
+		RT
+			1.0		0.0		0.0		0
+			0.0		1.0		0.0		0
+			0.0		0.0		1.0		0
+			0		0		0		1
+		// ranges
+				// -3.1415926500000002 3.1415926500000002
+				// -3.1415926500000002 3.1415926500000002
+				// -3.1415926500000002 3.1415926500000002
+	endsegment
+
+
+    // Segment to cancel transformation bases effect.
+
+    //True segment where are applied inertial values.
+	// Segment
+	segment thorax
+		parent thorax_rotation_transform 
+		RTinMatrix	0
+		RT	-0.0	 0.0	 -0.0	xyz	-0.0	 -0.0	 -0.0
+		mass	20.45504587680885
+		inertia
+			1.1470502930519131	0	0
+			0	0.488082083684654	0
+			0	0	1.1470502930519131
+		com	-0.059099856018640096 -0.14860100703035389 0
+		meshfile	Geometry/thorax.vtp
+		meshcolor	1 1 1
+		meshscale	1 1 1
+	endsegment
+	// Segment
+	segment thorax_geom_2
+		parent thorax 
+		RTinMatrix	1
+		RT
+			1		0		0		0
+			0		1		0		0
+			0		0		1		0
+			0		0		0		1
+		meshfile	Geometry/groundspine.vtp
+		meshcolor	1 1 1
+		meshscale	1 1 1
+	endsegment
+
+
+	// Markers
+
+// Information about clavicle segment
+	// Segment
+	segment clavicle_parent_offset
+		parent thorax 
+		RTinMatrix	0
+		RT	0 0 0	xyz	0.006324976528009351 0.0069300434097705312 0.025464431687451307
+	endsegment
+
+	// Segments to define transformation axis.
+	// Segment
+	segment clavicle_translation
+		parent clavicle_parent_offset 
+		RTinMatrix	1
+		RT
+			1.0		0.0		0.0		0
+			0.0		1.0		0.0		0
+			0.0		0.0		1.0		0
+			0		0		0		1
+	endsegment
+
+	// Segment
+	segment clavicle_clav_prot
+		parent clavicle_translation 
+		RTinMatrix	1
+		RT
+			0.015299999952465261		0.921987555612399		0.38691711941619733		0
+			0.9892986969264016		0.042196083464205704		-0.1396695342585697		0
+			-0.14509995954919683		0.38491354592447785		-0.911475487274708		0
+			0		0		0		1
+		//rotations x
+		ranges
+				//.1415926500000002 3.1415926500000002
+	endsegment
+
+	// Segment
+	segment clavicle_clav_elev
+		parent clavicle_clav_prot 
+		RTinMatrix	1
+		RT
+			0.4433216695313522		1.962338313635867e-05		-0.8963625923357452		0
+			-0.0059340855241926125		-0.9999780218495672		-0.0029567628951040277		0
+			-0.8963429499655398		0.0066298893466731745		-0.44331180969417516		0
+			0		0		0		1
+		//rotations y
+		ranges
+				//.1415926500000002 3.1415926500000002
+	endsegment
+
+	// Segment
+	segment clavicle_rotation_2
+		parent clavicle_clav_elev 
+		RTinMatrix	1
+		RT
+			0.5148202657206312		0.5906635661370458		0.6213506623812405		0
+			0.753846817542714		-0.6570502078842396		4.079269127754675e-18		0
+			0.40825858188660397		0.4684032194141554		-0.7835326121856023		0
+			0		0		0		1
+		ranges
+				-3.1415926500000002 3.1415926500000002
+	endsegment
+
+
+    // Segment to cancel transformation bases effect.
+	// Segment
+	segment clavicle_reset_axis
+		parent clavicle_rotation_2 
+		RTinMatrix	1
+		RT
+			-0.9476963440715762		-0.07918545717327127		0.30919460345489314		0
+			0.3119760083330994		-0.02525220819419233		0.9497543346602125		0
+			-0.0673988846934013		0.9965400089076092		0.04863538823231893		0
+			0		0		0		1
+	endsegment
+
+
+    //True segment where are applied inertial values.
+	// Segment
+	segment clavicle
+		parent clavicle_reset_axis 
+		RTinMatrix	0
+		RT	-0.0	 0.0	 -0.0	xyz	-0.0	 -0.0	 -0.0
+		mass	0.18977290868104679
+		inertia
+			0.00026767372964065194	-2.0942636311609564e-05	-7.7172309095742937e-05
+			-2.0942636311609564e-05	0.00026767372964065194	5.9260645548665655e-05
+			-7.7172309095742937e-05	5.9260645548665655e-05	4.901323980777646e-05
+		com	-0.011100639351336325 0.0063717609081909501 0.054170293336786662
+		meshfile	Geometry/clavicle.vtp
+		meshcolor	1 1 1
+		meshscale	1 1 1
+	endsegment
+
+	// Markers
+
+// Information about scapula segment
+	// Segment
+	segment scapula_parent_offset
+		parent thorax 
+		RTinMatrix	0
+		RT	0 -0.87 0	xyz	-0.029422884944949112 -0.017300088530082611 0.070285568667052628
+	endsegment
+
+
+    // Segment to cancel transformation bases effect.
+
+    //True segment where are applied inertial values.
+	// Segment
+	segment scapula
+		parent scapula_parent_offset 
+		RTinMatrix	0
+		RT	0.6102084970498345	 1.1139280457420782	 -0.43901441960773646	xyz	0.07944571523370148  0.04235286307966318  0.034109767236020726
+		mass	0.50159886749985216
+		inertia
+			0.00088566933551532175	0.00032020007191396071	0.0002915426512417284
+			0.00032020007191396071	0.00081934037957356279	0.00017179294437008979
+			0.0002915426512417284	0.00017179294437008979	0.00088566933551532175
+		com	-0.054689731740849026 -0.035031350908916951 -0.043714611940415045
+		meshfile	Geometry/scapula.vtp
+		meshcolor	1 1 1
+		meshscale	1 1 1
+	endsegment
+
+	// Markers
+
+// Information about humerus segment
+	// Segment
+	segment humerus_parent_offset
+		parent scapula 
+		RTinMatrix	0
+		RT	0 0 0	xyz	-0.0095499447834722345 -0.034001364113029092 0.008996821850851211
+	endsegment
+
+	// Segments to define transformation axis.
+	// Segment
+	segment humerus_translation
+		parent humerus_parent_offset 
+		RTinMatrix	1
+		RT
+			1.0		0.0		0.0		0
+			0.0		1.0		0.0		0
+			0.0		0.0		1.0		0
+			0		0		0		1
+	endsegment
+
+	// Segment
+	segment humerus_plane_elv
+		parent humerus_translation 
+		RTinMatrix	1
+		RT
+			0.0		0.9559220802166513		0.29362046344604503		0
+			1.0		0.0		0.0		0
+			0.0		0.29362046344604503		-0.9559220802166513		0
+			0		0		0		1
+		//rotations x
+		ranges
+				//.5 3.1415926500000002
+	endsegment
+
+	// Segment
+	segment humerus_shoulder_elv
+		parent humerus_plane_elv 
+		RTinMatrix	1
+		RT
+			0.8745483400109197		0.0		-0.4849383476114715		0
+			0.14238782238162423		-0.9559220802082999		0.2567852889237532		0
+			-0.4635632740215335		-0.2936204634732334		-0.8360000684259541		0
+			0		0		0		1
+		rotations y
+		// ranges
+				// -0.78000000000000003 2.5299999999999998
+	endsegment
+
+	// Segment
+	segment humerus_axial_rot
+		parent humerus_shoulder_elv 
+		RTinMatrix	1
+		RT
+			0.7641189236746306		-0.1395139808805752		0.6298080021889042		0
+			-0.2460240450348391		-0.965564590939451		0.0846001772375569		0
+			0.5963173984943082		-0.21959250866726984		-0.7721299698821407		0
+			0		0		0		1
+		//rotations z
+		ranges
+				//.5707950000000199 1.5707950000000199
+	endsegment
+
+
+    // Segment to cancel transformation bases effect.
+	// Segment
+	segment humerus_reset_axis
+		parent humerus_axial_rot 
+		RTinMatrix	1
+		RT
+			0.24602404506021092		0.3790817623927777		0.8920589591912617		0
+			0.9655645909320648		-0.01552289208645878		-0.25969994331818186		0
+			-0.08460017724807617		0.9252329745758405		-0.36984693153673226		0
+			0		0		0		1
+	endsegment
+
+
+    //True segment where are applied inertial values.
+	// Segment
+	segment humerus
+		parent humerus_reset_axis 
+		RTinMatrix	0
+		RT	-0.0	 0.0	 -0.0	xyz	-0.0	 -0.0	 -0.0
+		mass	1.8801022951697861
+		inertia
+			0.011547622408340414	-0.00032695733374650814	-0.00021882518867171686
+			-0.00032695733374650814	0.0024009598165791765	0.00011566680670100846
+			-0.00021882518867171686	0.00011566680670100846	0.011547622408340414
+		com	0.018059994846920106 -0.14010038452973017 -0.012749884499947897
+		meshfile	Geometry/humerus.vtp
+		meshcolor	1 1 1
+		meshscale	1 1 1
+	endsegment
+
+	// Markers
+
+// Information about ulna segment
+	// Segment
+	segment ulna_parent_offset
+		parent humerus 
+		RTinMatrix	0
+		RT	0 0 0	xyz	0.0061000044831427585 -0.29040116109488806 -0.01229988504701285
+	endsegment
+
+	// Segments to define transformation axis.
+	// Segment
+	segment ulna_translation
+		parent ulna_parent_offset 
+		RTinMatrix	1
+		RT
+			1.0		0.0		0.0		0
+			0.0		1.0		0.0		0
+			0.0		0.0		1.0		0
+			0		0		0		1
+	endsegment
+
+	// Segment
+	segment ulna_rotation_0
+		parent ulna_translation 
+		RTinMatrix	1
+		RT
+			1.0		0.0		0.0		0
+			0.0		0.8691483036963981		-0.49455154047042826		0
+			0.0		0.49455154047042826		0.8691483036963981		0
+			0		0		0		1
+	endsegment
+
+	// Segment
+	segment ulna_rotation_1
+		parent ulna_rotation_0 
+		RTinMatrix	1
+		RT
+			0.9891612051033644		0.0		-0.1468336144023566		0
+			0.07261679019552632		0.8691483036963983		0.4891911977574541		0
+			0.12762018688341925		-0.4945515404704284		0.8597277834978742		0
+			0		0		0		1
+	endsegment
+
+	// Segment
+	segment ulna_elbow_flexion
+		parent ulna_rotation_1 
+		RTinMatrix	1
+		RT
+			0.016994308085666234		0.9805723098167276		0.19542041529322599		0
+			-0.9992797156339679		0.010024429713611012		0.036600009991983505		0
+			0.03392997811944287		-0.19590164886902897		0.9800363771591389		0
+			0		0		0		1
+		//rotations z
+		// ranges
+				// 0 2.2689280300000001
+	endsegment
+
+
+    // Segment to cancel transformation bases effect.
+	// Segment
+	segment ulna_reset_axis
+		parent ulna_elbow_flexion 
+		RTinMatrix	1
+		RT
+			0.011828048942044811		-0.9992797156339677		0.03605755372624452		0
+			0.9987090348401247		0.010024429713611002		-0.049797334643767274		0
+			0.04940000998917983		0.03660000999198338		0.9981082497813828		0
+			0		0		0		1
+	endsegment
+
+
+    //True segment where are applied inertial values.
+	// Segment
+	segment ulna
+		parent ulna_reset_axis 
+		RTinMatrix	0
+		RT	-0.0	 0.0	 -0.0	xyz	-0.0	 -0.0	 -0.0
+		mass	0.97977194064209672
+		inertia
+			0.004798249809730995	0.00028090991404096664	-6.7501703863110161e-05
+			0.00028090991404096664	0.0010220546888268683	0.00096798241127401597
+			-6.7501703863110161e-05	0.00096798241127401597	0.0043816273433401652
+		com	0.0097179999999999992 -0.095949999999999994 0.024289999999999999
+		meshfile	Geometry/ulna.vtp
+		meshcolor	1 1 1
+		meshscale	1 1 1
+	endsegment
+
+	// Markers
+
+// Information about radius segment
+	// Segment
+	segment radius_parent_offset
+		parent ulna 
+		RTinMatrix	0
+		RT	0 0 0	xyz	0.00040000000000000002 -0.011502999999999999 0.019998999999999999
+	endsegment
+
+	// Segments to define transformation axis.
+	// Segment
+	segment radius_translation
+		parent radius_parent_offset 
+		RTinMatrix	1
+		RT
+			1.0		0.0		0.0		0
+			0.0		1.0		0.0		0
+			0.0		0.0		1.0		0
+			0		0		0		1
+	endsegment
+
+	// Segment
+	segment radius_rotation_0
+		parent radius_translation 
+		RTinMatrix	1
+		RT
+			1.0		0.0		0.0		0
+			0.0		0.17888649949506		-0.983869717136575		0
+			0.0		0.983869717136575		0.17888649949506		0
+			0		0		0		1
+	endsegment
+
+	// Segment
+	segment radius_pro_sup
+		parent radius_rotation_0 
+		RTinMatrix	1
+		RT
+			0.9811188145972897		-0.01716099005950615		-0.19264312098641573		0
+			0.1933339254104395		0.05983679976059798		0.979306668352565		0
+			-0.005278724145085635		-0.9980606483649114		0.062024811622547145		0
+			0		0		0		1
+		//rotations y
+		// ranges
+				// -1.5707963300000001 1.5707963300000001
+	endsegment
+
+	// Segment
+	segment radius_rotation_2
+		parent radius_pro_sup 
+		RTinMatrix	1
+		RT
+			0.08927238401036693		0.7027476889715427		0.7058159300400221		0
+			-0.9627448425756726		0.24249112838219228		-0.11966796041495155		0
+			-0.25525048393107674		-0.668837602337882		0.698214474321368		0
+			0		0		0		1
+		// ranges
+				// -1.5707963300000001 1.5707963300000001
+	endsegment
+
+
+    // Segment to cancel transformation bases effect.
+	// Segment
+	segment radius_reset_axis
+		parent radius_rotation_2 
+		RTinMatrix	1
+		RT
+			0.15328072010758284		-0.9812721148712162		-0.11666215075795437		0
+			0.8141645548685006		0.19231202131245562		-0.5478614460376771		0
+			0.5600366938327143		-0.011005591074015157		0.8283946997211137		0
+			0		0		0		1
+	endsegment
+
+
+    //True segment where are applied inertial values.
+	// Segment
+	segment radius
+		parent radius_reset_axis 
+		RTinMatrix	0
+		RT	-0.0	 0.0	 -0.0	xyz	-0.0	 -0.0	 -0.0
+		mass	0.20707023010403855
+		inertia
+			0.00038878853991280527	2.6717023695786481e-05	-3.7584665053130287e-06
+			2.6717023695786481e-05	7.8528902760773868e-05	5.68911274318373e-05
+			-3.7584665053130287e-06	5.68911274318373e-05	3.5687703184882663e-05
+		com	0.03363 -0.18156 0.015599999999999999
+		meshfile	Geometry/radius.vtp
+		meshcolor	1 1 1
+		meshscale	1 1 1
+	endsegment
+
+	// Markers
+
+// Information about hand segment
+	// Segment
+	segment hand_parent_offset
+		parent radius 
+		RTinMatrix	0
+		RT	0 0 0	xyz	0.017999999999999999 -0.24199999999999999 0.025000000000000001
+	endsegment
+
+
+    // Segment to cancel transformation bases effect.
+
+    //True segment where are applied inertial values.
+	// Segment
+	segment hand
+		parent hand_parent_offset 
+		RTinMatrix	0
+		RT	-0.0	 0.0	 -0.0	xyz	-0.0	 -0.0	 -0.0
+		mass	0.46537615926635378
+		inertia
+			0.00056616333890175264	0	0
+			0	0.00016877642042726428	0
+			0	0	0.00056616333890175264
+		com	0.00059999999999999995 -0.090499999999999997 -0.036499999999999998
+	endsegment
+
+	// Markers
+
+// MUSCLE DEFINIION
+
+// clavicle > humerus
+musclegroup clavicle_to_humerus
+	OriginParent	clavicle
+	InsertionParent	humerus
+endmusclegroup
+
+	muscle	DeltoideusClavicle_A
+		type	hill
+		statetype	degroote
+		musclegroup	clavicle_to_humerus
+		OriginPosition	-0.022762490803495135 0.019491266287305724 0.084093007753211754
+		InsertionPosition	0.0066436613177381703 -0.10980522018450981 0.0011474186050816253
+		optimalLength	0.094
+		maximalForce	707.70000000000005
+		tendonSlackLength	0.087999999999999995
+		pennationAngle	0.087266460000000004
+		maxVelocity	10
+	endmuscle
+
+		viapoint	DeltoideusClavicle2-P2
+			parent	scapula
+			muscle	DeltoideusClavicle_A
+			musclegroup	clavicle_to_humerus
+			position	0.019562226742916928 -0.0065870855556006396 0.01039769231874158
+		endviapoint
+
+// scapula > humerus
+musclegroup scapula_to_humerus
+	OriginParent	scapula
+	InsertionParent	humerus
+endmusclegroup
+
+	muscle	DeltoideusScapula_P
+		type	hill
+		statetype	degroote
+		musclegroup	scapula_to_humerus
+		OriginPosition	-0.057737544968075358 -0.0069115913955361454 -0.027229490319444081
+		InsertionPosition	-0.0047659122508031749 -0.086162511515571069 0.0062390724151510932
+		optimalLength	0.094899999999999998
+		maximalForce	1324.4000000000001
+		tendonSlackLength	0.075999999999999998
+		pennationAngle	0.087266460000000004
+		maxVelocity	10
+	endmuscle
+
+		viapoint	DeltoideusScapulaPost2-P2
+			parent	scapula
+			muscle	DeltoideusScapula_P
+			musclegroup	scapula_to_humerus
+			position	-0.055002743369330122 -0.032365885079364429 0.0073526981238954681
+		endviapoint
+
+	muscle	DeltoideusScapula_M
+		type	hill
+		statetype	degroote
+		musclegroup	scapula_to_humerus
+		OriginPosition	-0.016020195155322037 0.0020340339243142404 0.0077978793780755194
+		InsertionPosition	-0.0043127648892225725 -0.10045486081870107 0.0038455353249774223
+		optimalLength	0.074800000000000005
+		maximalForce	2597.8000000000002
+		tendonSlackLength	0.064000000000000001
+		pennationAngle	0.087266460000000004
+		maxVelocity	10
+	endmuscle
+
+		viapoint	DeltoideusScapulaLat10-P2
+			parent	scapula
+			muscle	DeltoideusScapula_M
+			musclegroup	scapula_to_humerus
+			position	-0.005137830872043541 -0.0067412235795988491 0.031028935486928554
+		endviapoint
+
+/*-------------- WARNINGS---------------
+
+Some wrapping objects were present on the muscles :['DeltoideusClavicle_A', 'DeltoideusScapula_P', 'DeltoideusScapula_M'] in the original file force set.
+Only via point are supported in biomod so they will be ignored.
+Some constraints were present in the original file. This feature is not implemented in biorbd yet so it will be ignored.*/
