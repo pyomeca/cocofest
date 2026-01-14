@@ -5,7 +5,7 @@ Then, after each cycle, the muscle fatigue will be updated based on the activati
 control problem. If an optimal solution is found, the standard clinical settings simulation continues considering a
 cycle could be performed. When an optimal solution is not found, this ends meaning it reached muscle failure.
 """
-import platform
+from sys import platform
 import pickle
 import numpy as np
 
