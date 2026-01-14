@@ -5,7 +5,7 @@ Then, after each cycle, the muscle fatigue will be updated based on the activati
 control problem. If an optimal solution is found, the standard clinical settings simulation continues considering a
 cycle could be performed. When an optimal solution is not found, this ends meaning it reached muscle failure.
 """
-
+import platform
 import pickle
 import numpy as np
 
@@ -25,6 +25,7 @@ from bioptim import (
     VariableScalingList,
     InterpolationType,
     SolutionMerge,
+    Solver,
     CostType,
 )
 
@@ -448,6 +449,11 @@ def main():
     standard_store = defaultdict(list)
     optim_store = defaultdict(list)
 
+    # Set solver for the optimal control problem
+    solver = Solver.IPOPT(show_online_optim=False, _max_iter=10000, show_options=dict(show_bounds=True))
+    linear_solver = "ma57" if platform == "linux" else "mumps"
+    solver.set_linear_solver(linear_solver)
+
     while fes_ocp_solution_found:
         standard_cycling_problem = prepare_standard_fes_cycling(optim_info=optim_info,
                                                                 cycling_info=cycling_info,
@@ -455,7 +461,7 @@ def main():
                                                                 previous_problem=standard_cycling_problem,
                                                                 previous_sol=standard_cycling_sol,
         )
-        standard_cycling_sol = standard_cycling_problem.solve()
+        standard_cycling_sol = standard_cycling_problem.solve(solver=solver)
 
         fes_ocp_problem = prepare_ocp_fes_cycling(optim_info=optim_info,
                                                   cycling_info=cycling_info,
@@ -464,7 +470,7 @@ def main():
                                                   previous_sol=fes_ocp_sol,
         )
         fes_ocp_problem.add_plot_penalty(CostType.ALL)
-        fes_ocp_sol = fes_ocp_problem.solve()
+        fes_ocp_sol = fes_ocp_problem.solve(solver=solver)
 
         fes_ocp_solution_found = fes_ocp_sol.status == 0
         cycle_to_failure += 1 if fes_ocp_solution_found else 0
@@ -492,6 +498,7 @@ def main():
         pickle.dump(pickle_dict, file)
 
     np.savez_compressed(str(pickle_file_name)[:-4] + ".npz", **dictionary)
+    print(f"Results saved in {pickle_file_name} and {str(pickle_file_name)[:-4] + '.npz'}")
 
 if __name__ == "__main__":
     main()
