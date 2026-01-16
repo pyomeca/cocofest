@@ -299,17 +299,17 @@ def prepare_ocp_fes_cycling(optim_info, cycling_info, model, previous_problem=No
         prev_state_result = previous_sol.decision_states(to_merge=SolutionMerge.NODES)  # stewise_states
         for key in x_bounds.keys():
             if key == "A_" + "Delt_ant" or key == "A_" + "Delt_post" or key == "A_" + "Biceps" or key == "A_" + "Triceps":
-                x_bounds[key].min[0, 0] = prev_state_result[key][0][-1]
-                x_bounds[key].max[0, 0] = prev_state_result[key][0][-1]
+                x_bounds[key].min[0, 0] = prev_state_result[key][0][0]
+                x_bounds[key].max[0, 0] = prev_state_result[key][0][0]
             if key == "Km_" + "Delt_ant" or key == "Km_" + "Delt_post" or key == "Km_" + "Biceps" or key == "Km_" + "Triceps":
-                x_bounds[key].min[0, 0] = prev_state_result[key][0][-1]
-                x_bounds[key].max[0, 0] = prev_state_result[key][0][-1]
+                x_bounds[key].min[0, 0] = prev_state_result[key][0][0]
+                x_bounds[key].max[0, 0] = prev_state_result[key][0][0]
             if key == "Tau1_" + "Delt_ant" or key == "Tau1_" + "Delt_post" or key == "Tau1_" + "Biceps" or key == "Tau1_" + "Triceps":
-                x_bounds[key].min[0, 0] = prev_state_result[key][0][-1]
-                x_bounds[key].max[0, 0] = prev_state_result[key][0][-1]
+                x_bounds[key].min[0, 0] = prev_state_result[key][0][0]
+                x_bounds[key].max[0, 0] = prev_state_result[key][0][0]
 
     # --- Set controls --- #
-    if previous_sol is None:
+    if previous_sol is None or previous_problem is None:
         u_bounds, u_init, u_scaling = set_u_bounds_and_init(
             bio_model=model,
             n_shooting=n_shooting,
@@ -467,12 +467,14 @@ def main():
                                                   cycling_info=cycling_info,
                                                   model=model,
                                                   previous_problem=fes_ocp_problem,
-                                                  previous_sol=fes_ocp_sol,
+                                                  previous_sol=standard_cycling_sol,
         )
         fes_ocp_problem.add_plot_penalty(CostType.ALL)
         fes_ocp_sol = fes_ocp_problem.solve(solver=solver)
 
         fes_ocp_solution_found = fes_ocp_sol.status == 0
+        # if cycle_to_failure > 10:
+        #     fes_ocp_solution_found = False
         cycle_to_failure += 1 if fes_ocp_solution_found else 0
 
         # --- Append results --- #
