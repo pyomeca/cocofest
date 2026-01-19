@@ -292,6 +292,10 @@ def prepare_ocp_fes_cycling(optim_info, cycling_info, model, previous_problem=No
         ode_solver=ode_solver,
         init_file_path=None,
     )
+
+    x_bounds["qdot"].min[2, 0] = -8.390
+    x_bounds["qdot"].max[2, 0] = -8.390
+
     init_shape = x_init["qdot"].init[-1].shape[0]
     x_init["qdot"].init[-1] = np.array([-2*np.pi] * init_shape)
 
@@ -401,6 +405,9 @@ def solution_to_dict(solution, muscles=MUSCLES):
 
     if "tau" in controls:
         out["tau"] = controls["tau"][2, :]
+
+    out["q"] = states["q"]
+    out["qdot"] = states["qdot"]
 
     return out
 
