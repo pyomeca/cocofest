@@ -694,10 +694,14 @@ class CustomCostFunctions:
         A_t = vertcat(*[controller.states["A_" + muscle_name_list[x]].cx for x in range(len(muscle_name_list))])
         A_t_plus_one = CustomCostFunctions.compute_A_t_plus_one(controller)
 
+        fatigability = vertcat(*[1 / (A_rest[x] / (-alpha_a[x])) for x in range(len(muscle_name_list))])
+        l1 = sum1(fatigability)
+        weights = 1 + (fatigability / l1)
+
         eps = 1e-8
         muscle_fatigue_decay = vertcat(
             *[
-                ((A_t[x] - A_t_plus_one[x]) / (1/(-(A_rest[x] / alpha_a[x])))) ** 2
+                ((A_t[x] - A_t_plus_one[x]) *  weights[x]) ** 2
                 for x in range(len(muscle_name_list))
             ]
         )
@@ -724,9 +728,13 @@ class CustomCostFunctions:
         A_t = vertcat(*[controller.states["A_" + muscle_name_list[x]].cx for x in range(len(muscle_name_list))])
         A_t_plus_one = CustomCostFunctions.compute_A_t_plus_one(controller)
 
+        fatigability = vertcat(*[1 / (A_rest[x] / (-alpha_a[x])) for x in range(len(muscle_name_list))])
+        l1 = sum1(fatigability)
+        weights = 1 + (fatigability / l1)
+
         muscle_fatigue_decay = vertcat(
             *[
-                ((A_t[x] - A_t_plus_one[x]) / (1/(-(A_rest[x] / alpha_a[x]))))
+                ((A_t[x] - A_t_plus_one[x]) * weights[x])
                 for x in range(len(muscle_name_list))
             ]
         )
@@ -782,10 +790,14 @@ class CustomCostFunctions:
         A_t = vertcat(*[controller.states["A_" + muscle_name_list[x]].cx for x in range(len(muscle_name_list))])
         A_t_plus_one = CustomCostFunctions.compute_A_t_plus_one(controller)
 
+        fatigability = vertcat(*[1 / (A_rest[x] / (-alpha_a[x])) for x in range(len(muscle_name_list))])
+        l1 = sum1(fatigability)
+        weights = 1 + (fatigability / l1)
+
         eps = 1e-8
         muscle_fatigue_decay = vertcat(
             *[
-                ((1 + tanh(10 * (A_t[x] - A_t_plus_one[x]))) / (1/(-(A_rest[x] / alpha_a[x])))) ** 2
+                ((1 + tanh(10 * (A_t[x] - A_t_plus_one[x]))) * weights[x]) ** 2
                 for x in range(len(muscle_name_list))
             ]
         )

@@ -1091,7 +1091,7 @@ if __name__ == "__main__":
     main(
         stimulation_frequency=30,
         n_total_cycle=10000,
-        n_cycles_simultaneous=[2, 3, 4, 5],
+        n_cycles_simultaneous=[2],
         resistive_torque=-0.20,  # (N.m)
         cost_fun_dict={"optimized_function": [
             # ["minimize_average_activation"],
@@ -1112,9 +1112,8 @@ if __name__ == "__main__":
             # ["minimize_cubic_average_fatigue"],
             # ["minimize_peak_fatigue"],
             # ["minimize_root_mean_square_fatigue_with_weights"],
-            # ["minimize_root_mean_square_scalable_fatigue_decay"],
 
-            ["minimize_root_mean_square_scalable_fatigue_decay"],
+            # ["minimize_root_mean_square_scalable_fatigue_decay"],
             ["minimize_root_mean_square_fatigue_decay"],
             ["minimize_peak_fatigue_decay"],
             ["minimize_root_mean_square_tanh_fatigue_decay"],
