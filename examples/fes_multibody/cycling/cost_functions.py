@@ -697,7 +697,7 @@ class CustomCostFunctions:
         eps = 1e-8
         muscle_fatigue_decay = vertcat(
             *[
-                ((1 + 10 * (A_t[x] - A_t_plus_one[x])) / (1/(-(A_rest[x] / alpha_a[x])))) ** 2
+                ((A_t[x] - A_t_plus_one[x]) / (1/(-(A_rest[x] / alpha_a[x])))) ** 2
                 for x in range(len(muscle_name_list))
             ]
         )
@@ -726,7 +726,7 @@ class CustomCostFunctions:
 
         muscle_fatigue_decay = vertcat(
             *[
-                ((1 + 10 * (A_t[x] - A_t_plus_one[x])) / (1/(-(A_rest[x] / alpha_a[x]))))
+                ((A_t[x] - A_t_plus_one[x]) / (1/(-(A_rest[x] / alpha_a[x]))))
                 for x in range(len(muscle_name_list))
             ]
         )
