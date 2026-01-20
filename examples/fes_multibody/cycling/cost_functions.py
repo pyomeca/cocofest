@@ -1,4 +1,4 @@
-from casadi import MX, vertcat, sum1, mmax, fabs, sign, tanh
+from casadi import MX, vertcat, sum1, mmax, fabs, sign, tanh, if_else
 from bioptim import PenaltyController
 from cocofest.models.ding2007.ding2007 import DingModelPulseWidthFrequency
 
@@ -689,19 +689,13 @@ class CustomCostFunctions:
         The root-mean-square fatigue decay
         """
         muscle_name_list = controller.model.bio_model.muscle_names
-        A_rest = vertcat(*[controller.model.muscles_dynamics_model[x].a_scale for x in range(len(muscle_name_list))])
-        alpha_a = vertcat(*[controller.model.muscles_dynamics_model[x].alpha_a for x in range(len(muscle_name_list))])
         A_t = vertcat(*[controller.states["A_" + muscle_name_list[x]].cx for x in range(len(muscle_name_list))])
         A_t_plus_one = CustomCostFunctions.compute_A_t_plus_one(controller)
-
-        fatigability = vertcat(*[1 / (A_rest[x] / (-alpha_a[x])) for x in range(len(muscle_name_list))])
-        l1 = sum1(fatigability)
-        weights = 1 + (fatigability / l1)
 
         eps = 1e-8
         muscle_fatigue_decay = vertcat(
             *[
-                ((A_t[x] - A_t_plus_one[x]) *  weights[x]) ** 2
+                (A_t[x] - A_t_plus_one[x]) ** 2
                 for x in range(len(muscle_name_list))
             ]
         )
@@ -723,18 +717,12 @@ class CustomCostFunctions:
         The peak fatigue decay
         """
         muscle_name_list = controller.model.bio_model.muscle_names
-        A_rest = vertcat(*[controller.model.muscles_dynamics_model[x].a_scale for x in range(len(muscle_name_list))])
-        alpha_a = vertcat(*[controller.model.muscles_dynamics_model[x].alpha_a for x in range(len(muscle_name_list))])
         A_t = vertcat(*[controller.states["A_" + muscle_name_list[x]].cx for x in range(len(muscle_name_list))])
         A_t_plus_one = CustomCostFunctions.compute_A_t_plus_one(controller)
 
-        fatigability = vertcat(*[1 / (A_rest[x] / (-alpha_a[x])) for x in range(len(muscle_name_list))])
-        l1 = sum1(fatigability)
-        weights = 1 + (fatigability / l1)
-
         muscle_fatigue_decay = vertcat(
             *[
-                ((A_t[x] - A_t_plus_one[x]) * weights[x])
+                (A_t[x] - A_t_plus_one[x])
                 for x in range(len(muscle_name_list))
             ]
         )
@@ -763,7 +751,7 @@ class CustomCostFunctions:
         eps = 1e-8
         muscle_fatigue_decay = vertcat(
             *[
-                (1 + tanh((A_t[x] - A_t_plus_one[x]))) ** 2
+                (1 + tanh(10 * (A_t[x] - A_t_plus_one[x]))) ** 2
                 for x in range(len(muscle_name_list))
             ]
         )
@@ -797,7 +785,7 @@ class CustomCostFunctions:
         eps = 1e-8
         muscle_fatigue_decay = vertcat(
             *[
-                ((1 + tanh((A_t[x] - A_t_plus_one[x]))) * weights[x]) ** 2
+                ((1 + tanh(10 * (A_t[x] - A_t_plus_one[x]))) * weights[x]) ** 2
                 for x in range(len(muscle_name_list))
             ]
         )
@@ -851,13 +839,9 @@ class CustomCostFunctions:
             F_t = controller.states["F_" + muscle_name_list[param_index]].cx
             A_t_plus_one = A_t - (((A_t - A_rest) / tau_fat) + (alpha_a * F_t))
 
-            A_rest_list = [controller.model.muscles_dynamics_model[i].a_scale for i in range(len(controller.model.muscles_dynamics_model))]
-            alpha_a_list = [controller.model.muscles_dynamics_model[i].alpha_a for i in range(len(controller.model.muscles_dynamics_model))]
-            fatigability = vertcat(*[1 / (A_rest_list[x] / (-alpha_a_list[x])) for x in range(len(controller.model.muscles_dynamics_model))])
-            l1 = sum1(fatigability)
-            weights = 1 + (fatigability / l1)
+            value = A_t - A_t_plus_one
+            value = if_else(value<0, 0, value)
 
-            value = (A_t - A_t_plus_one) * weights[param_index]
         else:
             raise NotImplementedError(f"The cost function {obj_fun_key}, is not implementend in minmax")
 
