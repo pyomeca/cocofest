@@ -837,10 +837,9 @@ class CustomCostFunctions:
             # At time t or t+1
             A_t = controller.states["A_" + muscle_name_list[param_index]].cx
             F_t = controller.states["F_" + muscle_name_list[param_index]].cx
-            A_t_plus_one = A_t - (((A_t - A_rest) / tau_fat) + (alpha_a * F_t))
-
-            value = A_t - A_t_plus_one
-            value = if_else(value<0, 0, value)
+            
+            dA = ((A_t - A_rest) / tau_fat) + (alpha_a * F_t)
+            value = -dA
 
         else:
             raise NotImplementedError(f"The cost function {obj_fun_key}, is not implementend in minmax")
