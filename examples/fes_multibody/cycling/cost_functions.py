@@ -851,8 +851,13 @@ class CustomCostFunctions:
             F_t = controller.states["F_" + muscle_name_list[param_index]].cx
             A_t_plus_one = A_t - (((A_t - A_rest) / tau_fat) + (alpha_a * F_t))
 
-            value = (A_t - A_t_plus_one) / -(A_rest / alpha_a)
+            A_rest_list = [controller.model.muscles_dynamics_model[i].a_scale for i in range(len(controller.model.muscles_dynamics_model))]
+            alpha_a_list = [controller.model.muscles_dynamics_model[i].alpha_a for i in range(len(controller.model.muscles_dynamics_model))]
+            fatigability = vertcat(*[1 / (A_rest_list[x] / (-alpha_a_list[x])) for x in range(len(controller.model.muscles_dynamics_model))])
+            l1 = sum1(fatigability)
+            weights = 1 + (fatigability / l1)
 
+            value = (A_t[param_index] - A_t_plus_one[param_index]) * weights[param_index]
         else:
             raise NotImplementedError(f"The cost function {obj_fun_key}, is not implementend in minmax")
 
