@@ -763,7 +763,7 @@ class CustomCostFunctions:
         eps = 1e-8
         muscle_fatigue_decay = vertcat(
             *[
-                (1 + tanh(10 * (A_t[x] - A_t_plus_one[x]))) ** 2
+                (1 + tanh((A_t[x] - A_t_plus_one[x]))) ** 2
                 for x in range(len(muscle_name_list))
             ]
         )
@@ -797,7 +797,7 @@ class CustomCostFunctions:
         eps = 1e-8
         muscle_fatigue_decay = vertcat(
             *[
-                ((1 + tanh(10 * (A_t[x] - A_t_plus_one[x]))) * weights[x]) ** 2
+                ((1 + tanh((A_t[x] - A_t_plus_one[x]))) * weights[x]) ** 2
                 for x in range(len(muscle_name_list))
             ]
         )
@@ -857,7 +857,7 @@ class CustomCostFunctions:
             l1 = sum1(fatigability)
             weights = 1 + (fatigability / l1)
 
-            value = (A_t[param_index] - A_t_plus_one[param_index]) * weights[param_index]
+            value = (A_t - A_t_plus_one) * weights[param_index]
         else:
             raise NotImplementedError(f"The cost function {obj_fun_key}, is not implementend in minmax")
 
