@@ -130,7 +130,7 @@ def prepare_nmpc_bo(
     u_bounds, u_init, u_scaling = base.set_u_bounds_and_init(
         model, window_n_shooting, init_file_path=initial_guess_path
     )
-    constraints = base.set_constraints(model)
+    constraints = base.set_constraints(model, x_init["q"].init[2][0] - 2*np.pi, cycle_len, n_cycles_simultaneous)
 
     # --- Per-muscle fatigue objective --- #
     muscle_fatigue_keys = [f"A_{m.muscle_name}" for m in model.muscles_dynamics_model]
@@ -185,7 +185,7 @@ def run_optim_bo(
     nmpc = prepare_nmpc_bo(model, mhe_info, cycling_info, sim_cond)
 
     # --- IPOPT settings --- #
-    solver = Solver.IPOPT(show_online_optim=False, _max_iter=10000, show_options=dict(show_bounds=True))
+    solver = Solver.IPOPT(show_online_optim=False, _max_iter=2000, show_options=dict(show_bounds=True))
     solver.set_linear_solver("ma57" if platform == "linux" else "mumps")
 
     # Plot penalties
@@ -232,7 +232,6 @@ def bayes_optimize_weights(
     n_initial_points=6,
     random_state=42,
     weight_bounds_log=(1e-4, 1e2),
-    use_simplex=False,
     init_guess_file_path=None,
     fixed_weights=None,
     save_every=5,
@@ -266,11 +265,9 @@ def bayes_optimize_weights(
             f"fixed_weights contains unknown muscles: {invalid}. Known muscles: {muscle_names}"
         )
 
-    # --- Split free vs fixed weights --- #
+    # # --- Split free vs fixed weights --- #
     free_names = [n for n in muscle_names if n not in fixed_weights]
     fixed_sum = float(sum(fixed_weights.values()))
-    if use_simplex and fixed_sum >= 1.0 - 1e-12:
-        print("[BO] Warning: use_simplex=True but sum of fixed weights >= 1. Free weights ~ zero.")
 
     # --- Logging directory & files --- #
     log_dir = Path("result/bo")
@@ -328,15 +325,11 @@ def bayes_optimize_weights(
         except Exception as e:
             print(f"[BO] Resume failed (continuing fresh): {e}")
 
-    # --- Search space over FREE muscles --- #
-    if use_simplex:
-        space = [Real(-5.0, 5.0, name=f"z_{n}") for n in free_names]
-        free_param_names = [f"z_{n}" for n in free_names]
-    else:
-        space = [
-            Real(weight_bounds_log[0], weight_bounds_log[1], prior="log-uniform", name=f"w_{n}") for n in free_names
-        ]
-        free_param_names = [f"w_{n}" for n in free_names]
+    # # --- Search space over FREE muscles --- #
+    space = [
+        Real(weight_bounds_log[0], weight_bounds_log[1], prior="uniform", name=f"w_{n}") for n in free_names
+    ]
+    free_param_names = [f"w_{n}" for n in free_names]
 
     # --- Template sim conditions for each eval --- #
     stim_count = stimulation_frequency * n_cycles_simultaneous_for_bo
@@ -350,14 +343,7 @@ def bayes_optimize_weights(
 
     def _compose_full_weights(free_vec):
         """Map free weights to full muscle list, inserting fixed weights."""
-        if use_simplex:
-            z = np.array(free_vec) - (np.max(free_vec) if len(free_vec) else 0.0)
-            w_free = np.exp(z) if len(z) else np.array([])
-            w_free = w_free / (np.sum(w_free) + 1e-12) if len(w_free) else w_free
-            remaining = max(1e-12, 1.0 - fixed_sum)
-            w_free = w_free * remaining
-        else:
-            w_free = np.array(free_vec, dtype=float)
+        w_free = np.array(free_vec, dtype=float)
 
         full = []
         j = 0
@@ -446,7 +432,7 @@ def bayes_optimize_weights(
 
     # --- Seed gp_minimize with prior points when possible --- #
     x0, y0 = None, None
-    if resume and not use_simplex and bo_log:
+    if resume and bo_log:
         x0_list, y0_list = [], []
         for i in sorted(bo_log.keys()):
             row = bo_log[i]
@@ -549,10 +535,9 @@ def main_bayes():
         n_calls=100,
         n_initial_points=6,
         random_state=42,
-        weight_bounds_log=(1e-4, 1e2),
-        use_simplex=False,
+        weight_bounds_log=(1e-4, 1e4),
         init_guess_file_path=init_guess,
-        fixed_weights={"Delt_ant": 1.0},
+        fixed_weights={"Biceps": 1.0},
         resume=True, # Resume from previous optimization if any exist to prevent any weight repetition
     )
 
