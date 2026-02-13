@@ -1,4 +1,4 @@
-from casadi import MX, vertcat, sum1, mmax, fabs, sign, tanh, if_else
+from casadi import MX, vertcat, sum1, mmax, fabs, sign, tanh, if_else, log, exp, DM, dot
 from bioptim import PenaltyController
 from cocofest.models.ding2007.ding2007 import DingModelPulseWidthFrequency
 
@@ -34,7 +34,7 @@ class CustomCostFunctions:
                 "index": 4,
                 "latex": r"\phi_4 = \max_{m=1,\ldots,M} \; a^{m}, \quad a^{m}=\frac{f^{m}-f^{m}_{\min}}{f^{m}_{\max}-f^{m}_{\min}}",
                 "description": "Minimize the peak of muscle activation",
-                "power": "max",
+                "power": r"\infty",
                 "state": "pw",
             },
             "minimize_average_force": {
@@ -43,7 +43,7 @@ class CustomCostFunctions:
                 "latex": r"\phi_5 = \frac{1}{M}\sum_{m=1}^{M} f^{m}",
                 "description": "Minimize the average muscle force",
                 "power": "1",
-                "state": "f",
+                "state": r"F^{m}",
             },
             "minimize_root_mean_square_force": {
                 "function": self.minimize_root_mean_square_force,
@@ -51,7 +51,7 @@ class CustomCostFunctions:
                 "latex": r"\phi_6 = \left(\frac{1}{M}\sum_{m=1}^{M} (f^{m})^{2}\right)^{\tfrac{1}{2}}",
                 "description": "Minimize the root mean square of muscle force",
                 "power": "2",
-                "state": "f",
+                "state": r"F^{m}",
             },
             "minimize_cubic_average_force": {
                 "function": self.minimize_cubic_average_force,
@@ -59,15 +59,15 @@ class CustomCostFunctions:
                 "latex": r"\phi_7 = \left(\frac{1}{M}\sum_{m=1}^{M} (f^{m})^{3}\right)^{\tfrac{1}{3}}",
                 "description": "Minimize the cubic average of muscle force",
                 "power": "3",
-                "state": "f",
+                "state": r"F^{m}",
             },
             "minimize_peak_force": {
                 "function": self.minimize_peak_force,
                 "index": 8,
                 "latex": r"\phi_8 = \max_{m=1,\ldots,M} \; f^{m}",
                 "description": "Minimize the peak muscle force",
-                "power": "max",
-                "state": "f",
+                "power": r"\infty",
+                "state": r"F^{m}",
             },
             "minimize_average_muscle_stress": {
                 "function": self.minimize_average_muscle_stress,
@@ -75,7 +75,7 @@ class CustomCostFunctions:
                 "latex": r"\phi_9 = \frac{1}{M}\sum_{m=1}^{M} \frac{f^{m}}{S^{m}}",
                 "description":"Minimize the average muscle stress",
                 "power": "1",
-                "state": "str",
+                "state": r"\sigma",
             },
             "minimize_root_mean_square_muscle_stress": {
                 "function": self.minimize_root_mean_square_muscle_stress,
@@ -83,7 +83,7 @@ class CustomCostFunctions:
                 "latex": r"\phi_{10} = \left(\frac{1}{M}\sum_{m=1}^{M} \left(\frac{f^{m}}{S^{m}}\right)^{2}\right)^{\tfrac{1}{2}}",
                 "description":"Minimize the root mean square of muscle stress",
                 "power": "2",
-                "state": "str",
+                "state": r"\sigma",
             },
             "minimize_cubic_average_muscle_stress": {
                 "function": self.minimize_cubic_average_muscle_stress,
@@ -91,15 +91,15 @@ class CustomCostFunctions:
                 "latex": r"\phi_{11} = \left(\frac{1}{M}\sum_{m=1}^{M} \left(\frac{f^{m}}{S^{m}}\right)^{3}\right)^{\tfrac{1}{3}}",
                 "description":"Minimize the cubic average of muscle stress",
                 "power": "3",
-                "state": "str",
+                "state": r"\sigma",
             },
             "minimize_peak_muscle_stress": {
                 "function": self.minimize_peak_muscle_stress,
                 "index": 12,
                 "latex": r"\phi_{12} = \max_{m=1,\ldots,M} \; \frac{f^{m}}{S^{m}}",
                 "description":"Minimize the peak muscle stress",
-                "power": "max",
-                "state": "str",
+                "power": r"\infty",
+                "state": r"\sigma",
             },
             "minimize_average_fatigue": {
                 "function": self.minimize_average_fatigue,
@@ -107,7 +107,7 @@ class CustomCostFunctions:
                 "latex": r"\phi_{13} = \frac{1}{M}\sum_{m=1}^{M} \mathcal{F}^{m}",
                 "description": "Minimize the average muscle fatigue",
                 "power": "1",
-                "state": "fat",
+                "state": "A",
             },
             "minimize_root_mean_square_fatigue": {
                 "function": self.minimize_root_mean_square_fatigue,
@@ -115,7 +115,7 @@ class CustomCostFunctions:
                 "latex": r"\phi_{14} = \left(\frac{1}{M}\sum_{m=1}^{M} (\mathcal{F}^{m})^{2}\right)^{\tfrac{1}{2}}",
                 "description": "Minimize the root mean square of muscle fatigue",
                 "power": "2",
-                "state": "fat",
+                "state": "A",
             },
             "minimize_cubic_average_fatigue": {
                 "function": self.minimize_cubic_average_fatigue,
@@ -123,15 +123,15 @@ class CustomCostFunctions:
                 "latex": r"\phi_{15} = \left(\frac{1}{M}\sum_{m=1}^{M} (\mathcal{F}^{m})^{3}\right)^{\tfrac{1}{3}}",
                 "description": "Minimize the cubic average of muscle fatigue",
                 "power": "3",
-                "state": "fat",
+                "state": "A",
             },
             "minimize_peak_fatigue": {
                 "function": self.minimize_peak_fatigue,
                 "index": 16,
                 "latex": r"\phi_{16} = \max_{m=1,\ldots,M} \; \mathcal{F}^{m}",
                 "description": "Minimize the peak muscle fatigue",
-                "power": "max",
-                "state": "fat",
+                "power": r"\infty",
+                "state": "A",
             },
             "minimize_root_mean_square_muscle_power": {
                 "function": self.minimize_root_mean_square_muscle_power,
@@ -139,7 +139,7 @@ class CustomCostFunctions:
                 "latex": r"\phi_{17} = \left(\frac{1}{M}\sum_{m=1}^{M} (f^{m} v^{m})^{2}\right)^{\tfrac{1}{2}}",
                 "description": "Minimize the root mean square of muscle power",
                 "power": "2",
-                "state": "pow",
+                "state": "W",
             },
 
             # --- Custom cost functions --- #
@@ -185,6 +185,19 @@ class CustomCostFunctions:
                 "power": "2",
                 "state": "fatdwtanh",
             },
+
+            "minimize_failure_point": {
+                "function": self.minimize_failure_point,
+                "index": 25,
+                # "latex": r"\phi_{25} = \left(1,\ \left(\frac{1}{n_m}\sum_{t=1}^{n_m}\omega_{A_m}\left(1+\tanh\!\left(A_{m,t}-A_{m,t+1}\right)\right)^{2}\right)^{\tfrac{1}{2}}\right)",
+                "description": "Minimize the barrier task failure point",
+                "power": "1",
+                "state": "barrier",
+            },
+
+
+
+
 
             "minimize_peak": {
                 "function": self.minimize_peak,
@@ -659,7 +672,7 @@ class CustomCostFunctions:
         """
         muscle_name_list = controller.model.bio_model.muscle_names
         A_t = vertcat(*[controller.states["A_" + muscle_name_list[x]].cx for x in range(len(muscle_name_list))])
-        A_t_plus_one = CustomCostFunctions.compute_A_t_plus_one(controller)
+        dA = CustomCostFunctions.calculate_dA(controller)
 
         # Optimized elsewhere
         A_end = [297.59, 226.84, 1191.58, 89.46]
@@ -667,7 +680,7 @@ class CustomCostFunctions:
         eps = 1e-8
         muscle_fatigue_decay = vertcat(
             *[
-                ((A_t[x] - A_t_plus_one[x]) / (1 + ((A_t[x] - A_end[x])/A_end[x]))) ** 2
+                (dA[x] / (1 + ((A_t[x] - A_end[x])/A_end[x]))) ** 2
                 for x in range(len(muscle_name_list))
             ]
         )
@@ -689,13 +702,12 @@ class CustomCostFunctions:
         The root-mean-square fatigue decay
         """
         muscle_name_list = controller.model.bio_model.muscle_names
-        A_t = vertcat(*[controller.states["A_" + muscle_name_list[x]].cx for x in range(len(muscle_name_list))])
-        A_t_plus_one = CustomCostFunctions.compute_A_t_plus_one(controller)
+        dA = CustomCostFunctions.calculate_dA(controller)
 
         eps = 1e-8
         muscle_fatigue_decay = vertcat(
             *[
-                (A_t[x] - A_t_plus_one[x]) ** 2
+                (dA[x]) ** 2
                 for x in range(len(muscle_name_list))
             ]
         )
@@ -717,12 +729,11 @@ class CustomCostFunctions:
         The peak fatigue decay
         """
         muscle_name_list = controller.model.bio_model.muscle_names
-        A_t = vertcat(*[controller.states["A_" + muscle_name_list[x]].cx for x in range(len(muscle_name_list))])
-        A_t_plus_one = CustomCostFunctions.compute_A_t_plus_one(controller)
+        dA = CustomCostFunctions.calculate_dA(controller)
 
         muscle_fatigue_decay = vertcat(
             *[
-                (A_t[x] - A_t_plus_one[x])
+                (dA[x])
                 for x in range(len(muscle_name_list))
             ]
         )
@@ -745,13 +756,12 @@ class CustomCostFunctions:
         The root-mean-square fatigue decay in a hyperbolic tangential way
         """
         muscle_name_list = controller.model.bio_model.muscle_names
-        A_t = vertcat(*[controller.states["A_" + muscle_name_list[x]].cx for x in range(len(muscle_name_list))])
-        A_t_plus_one = CustomCostFunctions.compute_A_t_plus_one(controller)
+        dA = CustomCostFunctions.calculate_dA(controller)
 
         eps = 1e-8
         muscle_fatigue_decay = vertcat(
             *[
-                (1 + tanh(10 * (A_t[x] - A_t_plus_one[x]))) ** 2
+                (1 + tanh(10 * (dA[x]))) ** 2
                 for x in range(len(muscle_name_list))
             ]
         )
@@ -775,8 +785,7 @@ class CustomCostFunctions:
         muscle_name_list = controller.model.bio_model.muscle_names
         A_rest = vertcat(*[controller.model.muscles_dynamics_model[x].a_scale for x in range(len(muscle_name_list))])
         alpha_a = vertcat(*[controller.model.muscles_dynamics_model[x].alpha_a for x in range(len(muscle_name_list))])
-        A_t = vertcat(*[controller.states["A_" + muscle_name_list[x]].cx for x in range(len(muscle_name_list))])
-        A_t_plus_one = CustomCostFunctions.compute_A_t_plus_one(controller)
+        dA = CustomCostFunctions.calculate_dA(controller)
 
         fatigability = vertcat(*[1 / (A_rest[x] / (-alpha_a[x])) for x in range(len(muscle_name_list))])
         l1 = sum1(fatigability)
@@ -785,12 +794,29 @@ class CustomCostFunctions:
         eps = 1e-8
         muscle_fatigue_decay = vertcat(
             *[
-                ((1 + tanh(10 * (A_t[x] - A_t_plus_one[x]))) * weights[x]) ** 2
+                ((1 + tanh(10 * (dA[x]))) * weights[x]) ** 2
                 for x in range(len(muscle_name_list))
             ]
         )
         rms_fatigue = (sum1(muscle_fatigue_decay) / len(muscle_name_list) + eps) ** 0.5
         return rms_fatigue
+
+
+    @staticmethod
+    def minimize_failure_point(controller: PenaltyController) -> MX:
+        muscle_name_list = controller.model.bio_model.muscle_names
+        barrier_model = controller.model.barrier_model
+        A_rest = vertcat(*[controller.model.muscles_dynamics_model[x].a_scale for x in range(len(muscle_name_list))])
+        A_t = vertcat(*[controller.states["A_" + muscle_name_list[x]].cx for x in range(len(muscle_name_list))])
+
+        w = DM(barrier_model["w"])
+        b = float(barrier_model["b"])
+        s = A_t / A_rest
+        u = 1 - s
+        I = dot(w, u) + b
+        k = float(barrier_model["kappa"])
+
+        return log(1 + exp(k * (I - 1.0)) / k)
 
 
     # --- Peak cost function and constraint used in OCP --- #
@@ -848,7 +874,7 @@ class CustomCostFunctions:
 
     # --- A_t+1 cost function used in OCP --- #
     @staticmethod
-    def compute_A_t_plus_one(controller: PenaltyController) -> MX:
+    def calculate_dA(controller: PenaltyController) -> MX:
         """
         Compute A_t+1 based on the fatigue model.
 
@@ -874,9 +900,6 @@ class CustomCostFunctions:
         # At time t
         A_t = vertcat(*[controller.states["A_" + muscle_name_list[x]].cx for x in range(len(muscle_name_list))])
         F_t = vertcat(*[controller.states["F_" + muscle_name_list[x]].cx for x in range(len(muscle_name_list))])
+        dA = ((A_t - A_rest) / tau_fat) + (alpha_a * F_t)
 
-        A_t_plus_one = vertcat(
-            *[A_t[x] - ((A_t[x] - A_rest[x]) / tau_fat[x] + alpha_a[x] * F_t[x]) for x in
-              range(len(muscle_name_list))])
-
-        return A_t_plus_one
+        return dA

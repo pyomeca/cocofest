@@ -382,6 +382,9 @@ def prepare_nmpc(
 
     # --- Update model for resistive torque --- #
     model = updating_model(model=model, external_force_set=external_force_set, parameters=parameters)
+    if objective_fun_dict["cost_fun_key"][0] == "minimize_failure_point":
+        import joblib
+        model.barrier_model = joblib.load("failure_index_model_from_failure_points.joblib")
 
     return MyCyclicNMPC(
         bio_model=[model],
@@ -709,8 +712,6 @@ def updating_model(model: FesMskModel, external_force_set, parameters=None) -> F
 # --------------------------#
 #   Simulation functions   #
 # --------------------------#
-
-
 def set_fes_model(model_path, stim_time):
     # Set FES model (set to Ding et al. 2007 + fatigue, for now)
     dummy_biomodel = BiorbdModel(model_path)
@@ -1114,10 +1115,18 @@ if __name__ == "__main__":
             # ["minimize_root_mean_square_fatigue_with_weights"],
 
             # ["minimize_root_mean_square_scalable_fatigue_decay"],
-            ["minimize_root_mean_square_fatigue_decay"],
-            ["minimize_peak_fatigue_decay"],
-            ["minimize_root_mean_square_tanh_fatigue_decay"],
-            ["minimize_root_mean_square_weighted_tanh_fatigue_decay"],
+            # ["minimize_root_mean_square_fatigue_decay"],
+
+            # ["minimize_peak_fatigue_decay"],
+
+            # ["minimize_root_mean_square_tanh_fatigue_decay"],
+            #
+            # ["minimize_root_mean_square_weighted_tanh_fatigue_decay"],
+
+            ["minimize_failure_point"],
+
+
+
             ],
 
             "weight": [

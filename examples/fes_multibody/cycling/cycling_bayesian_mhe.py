@@ -74,7 +74,7 @@ def set_objective_functions(muscle_fatigue_key, cost_fun_weight):
         custom_type=ObjectiveFcn.Lagrange,
         muscle_weights=weights,
         node=Node.ALL,
-        weight=10000,
+        weight=1,
         quadratic=False,
     )
 
@@ -535,9 +535,9 @@ def main_bayes():
         n_calls=100,
         n_initial_points=6,
         random_state=42,
-        weight_bounds_log=(1e-4, 1e4),
+        weight_bounds_log=(1e-5, 1e4),
         init_guess_file_path=init_guess,
-        fixed_weights={"Biceps": 1.0},
+        fixed_weights=None, #{"Biceps": 1.0},
         resume=True, # Resume from previous optimization if any exist to prevent any weight repetition
     )
 
