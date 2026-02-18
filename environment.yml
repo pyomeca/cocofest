@@ -3,6 +3,7 @@ name: cocofest
 channels:
 - conda-forge
 dependencies:
+- bioptim=3.4.0
 - biorbd=1.11.2
 - bioviz
 - python-graphviz
