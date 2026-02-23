@@ -8,6 +8,7 @@ from sys import platform
 import pickle
 
 import numpy as np
+from numpy.ma.extras import average
 from skopt import gp_minimize
 from skopt.space import Real
 from skopt.utils import use_named_args
@@ -387,6 +388,11 @@ def bayes_optimize_weights(
             idx = np.array(sorted(bo_log.keys()), dtype=int)
             metrics = np.array([float(bo_log[i]["metric"]) for i in idx], dtype=float)
             weights_mat = np.array([[float(bo_log[i][name]) for name in muscle_names] for i in idx], dtype=float)
+            solving_time_per_ocp = np.array([bo_log[i].get("solving_time_per_ocp") for i in idx], dtype=object)
+            total_solving_time = np.array([bo_log[i].get("total_solving_time") for i in idx], dtype=float)
+            iter_per_ocp = np.array([bo_log[i].get("iter_per_ocp") for i in idx], dtype=object)
+            average_solving_time_per_iter_list = np.array([bo_log[i].get("average_solving_time_per_iter_list") for i in idx], dtype=object)
+            total_average_solving_time_per_iter = np.array([bo_log[i].get("average_solving_time_per_iter") for i in idx], dtype=float)
 
             save_fn = np.savez_compressed if compress_arrays else np.savez
             save_fn(
@@ -395,7 +401,13 @@ def bayes_optimize_weights(
                 muscle_names=np.array(muscle_names),
                 weights=weights_mat,
                 metric=metrics,
+                solving_time_per_ocp=solving_time_per_ocp,
+                total_solving_time=total_solving_time,
+                iter_per_ocp=iter_per_ocp,
+                average_solving_time_per_iter_list=average_solving_time_per_iter_list,
+                average_solving_time_per_iter=total_average_solving_time_per_iter,
             )
+
             npz_tmp.replace(npz_path)
 
     # --- BO objective --- #
@@ -412,6 +424,7 @@ def bayes_optimize_weights(
             i = _next_index()
             entry = {name: float(w) for name, w in zip(muscle_names, weights)}
             entry["metric"] = float(-loss) if np.isfinite(loss) else float("nan")
+
             bo_log[i] = entry
             _save_logs_snapshot()
             return loss
@@ -421,13 +434,14 @@ def bayes_optimize_weights(
 
         try:
             print(f"[BO] Running MHE with weights: {weights} for muscles: {muscle_names}")
-            metric = run_optim_bo(
+            metric, sol = run_optim_bo(
                 mhe_info=mhe_info,
                 cycling_info=cycling_info,
                 sim_cond=sim_cond,
                 model_path=model_path,
                 save_sol=False,
                 return_metric=True,
+                return_solution=True,
             )
             loss = -float(metric)  # maximize metric -> minimize negative
         except Exception as e:
@@ -440,6 +454,19 @@ def bayes_optimize_weights(
         i = _next_index()
         entry = {name: float(w) for name, w in zip(muscle_names, weights)}
         entry["metric"] = float(metric) if np.isfinite(metric) else float("nan")
+
+        solving_time_per_ocp = [sol[1][i].solver_time_to_optimize for i in range(len(sol[1]))]
+        total_solving_time = sum(solving_time_per_ocp)
+        iter_per_ocp = [sol[1][i].iterations + 1 for i in range(len(sol[1]))]
+        average_solving_time_per_iter_list = [solving_time_per_ocp[i] / (iter_per_ocp[i]) for i in range(len(sol[1]))]
+        total_average_solving_time_per_iter = average(average_solving_time_per_iter_list)
+
+        entry["solving_time_per_ocp"] = solving_time_per_ocp
+        entry["total_solving_time"] = total_solving_time
+        entry["iter_per_ocp"] = iter_per_ocp
+        entry["average_solving_time_per_iter_list"] = average_solving_time_per_iter_list
+        entry["average_solving_time_per_iter"] = total_average_solving_time_per_iter
+
         bo_log[i] = entry
         _save_logs_snapshot()
 
