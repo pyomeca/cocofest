@@ -1114,13 +1114,17 @@ if __name__ == "__main__":
             # ["minimize_peak_fatigue"],
             # ["minimize_root_mean_square_fatigue_with_weights"],
 
-            ["minimize_root_mean_square_scalable_fatigue_decay"],
+            # ["minimize_root_mean_square_scalable_fatigue_decay"],
 
             # ["minimize_root_mean_square_fatigue_decay"],
 
             # ["minimize_peak_fatigue_decay"],
 
-            # ["minimize_root_mean_square_tanh_fatigue_decay"],
+            ["minimize_root_mean_square_tanh_fatigue_decay"],
+            ["minimize_root_mean_square_tanh_fatigue_decay_mul"],
+            ["minimize_root_mean_square_weighted_tanh_fatigue_decay"],
+
+
             #
             # ["minimize_root_mean_square_weighted_tanh_fatigue_decay"],
 

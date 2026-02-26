@@ -196,6 +196,17 @@ class CustomCostFunctions:
             },
 
 
+            "minimize_root_mean_square_tanh_fatigue_decay_mul": {
+                "function": self.minimize_root_mean_square_tanh_fatigue_decay_mul,
+                "index": 26,
+                "latex": r"\phi_{23} = \left(1,\ \left(\frac{1}{n_m}\sum_{t=1}^{n_m}\left(\frac{1+\tanh\!\left(A_{m,t}-A_{m,t+1}\right)}{A_{m,\text{rest}}/(-\alpha_{A_m})}\right)^{2}\right)^{\tfrac{1}{2}}\right)",
+                "description": "Minimize the root mean square of scalable muscle fatigue decay",
+                "power": "2",
+                "state": "fatdtanhmul",
+            },
+
+
+
 
 
 
@@ -762,7 +773,38 @@ class CustomCostFunctions:
         eps = 1e-8
         muscle_fatigue_decay = vertcat(
             *[
-                (1 + tanh(10 * (dA[x]))) ** 2
+                (1 + tanh(0.1 * (-dA[x]))) ** 2
+                for x in range(len(muscle_name_list))
+            ]
+        )
+
+        rms_fatigue = (sum1(muscle_fatigue_decay) / len(muscle_name_list) + eps) ** 0.5
+        return rms_fatigue
+
+    @staticmethod
+    def minimize_root_mean_square_tanh_fatigue_decay_mul(controller: PenaltyController) -> MX:
+        """
+        Minimize the root-mean-square fatigue decay in a hyperbolic tangential way.
+
+        Parameters
+        ----------
+        controller: PenaltyController
+            The penalty node elements
+
+        Returns
+        -------
+        The root-mean-square fatigue decay in a hyperbolic tangential way
+        """
+        muscle_name_list = controller.model.bio_model.muscle_names
+        dA = CustomCostFunctions.calculate_dA(controller)
+
+        for i in range(dA.shape[0]):
+            dA[i] = if_else(dA[0] > 0, 4 * dA[0], dA[0])
+
+        eps = 1e-8
+        muscle_fatigue_decay = vertcat(
+            *[
+                (1 + tanh(0.1 * (-dA[x]))) ** 2
                 for x in range(len(muscle_name_list))
             ]
         )
@@ -788,14 +830,19 @@ class CustomCostFunctions:
         alpha_a = vertcat(*[controller.model.muscles_dynamics_model[x].alpha_a for x in range(len(muscle_name_list))])
         dA = CustomCostFunctions.calculate_dA(controller)
 
-        fatigability = vertcat(*[1 / (A_rest[x] / (-alpha_a[x])) for x in range(len(muscle_name_list))])
-        l1 = sum1(fatigability)
-        weights = 1 + (fatigability / l1)
+        for i in range(dA.shape[0]):
+            dA[i] = if_else(dA[0] > 0, 4 * dA[0], dA[0])
+
+        # fatigability = vertcat(*[1 / (A_rest[x] / (-alpha_a[x])) for x in range(len(muscle_name_list))])
+        # l1 = sum1(fatigability)
+        # weights = 1 + (fatigability / l1)
+
+        weights = [1.4 * 10e-1 * 342.7, 1.1 * 10e-1 * 445.5, 5.6 * 10e-2 * 179.6, 3.4 * 10e-2 * 109.1]
 
         eps = 1e-8
         muscle_fatigue_decay = vertcat(
             *[
-                ((1 + tanh(10 * (dA[x]))) * weights[x]) ** 2
+                weights[x] * (1 + tanh(0.1 * (-dA[x]))) ** 2
                 for x in range(len(muscle_name_list))
             ]
         )
@@ -902,5 +949,6 @@ class CustomCostFunctions:
         A_t = vertcat(*[controller.states["A_" + muscle_name_list[x]].cx for x in range(len(muscle_name_list))])
         F_t = vertcat(*[controller.states["F_" + muscle_name_list[x]].cx for x in range(len(muscle_name_list))])
         dA = ((A_t - A_rest) / tau_fat) + (alpha_a * F_t)
+        # dA = vertcat(*[((A_t[x] - A_rest[x]) / tau_fat[x]) + (alpha_a[x] * F_t[x]) for x in range(len(muscle_name_list))])
 
         return dA
