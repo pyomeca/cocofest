@@ -832,7 +832,7 @@ def save_sol_in_pkl(sol, simulation_conditions, nmpc, is_initial_guess=False, to
     objective_values_per_ocp = [float(sol[1][i].cost) for i in range(len(sol[1]))]
     objective_values_per_kept_cycle = [float(sol[2][i].cost) for i in range(len(sol[2])-(simulation_conditions["n_cycles_simultaneous"]-1))]
     iter_per_ocp = [sol[1][i].iterations for i in range(len(sol[1]))]
-    average_solving_time_per_iter_list = [solving_time_per_ocp[i] / iter_per_ocp[i] for i in range(len(sol[1]))]
+    average_solving_time_per_iter_list = [solving_time_per_ocp[i] / (iter_per_ocp[i] + 1) for i in range(len(sol[1]))]
     total_average_solving_time_per_iter = average(average_solving_time_per_iter_list)
     number_of_turns_before_failing = len(sol[2])
     convergence_status = [sol[1][i].status for i in range(len(sol[1]))]
@@ -1114,7 +1114,8 @@ if __name__ == "__main__":
             # ["minimize_peak_fatigue"],
             # ["minimize_root_mean_square_fatigue_with_weights"],
 
-            # ["minimize_root_mean_square_scalable_fatigue_decay"],
+            ["minimize_root_mean_square_scalable_fatigue_decay"],
+
             # ["minimize_root_mean_square_fatigue_decay"],
 
             # ["minimize_peak_fatigue_decay"],
@@ -1123,14 +1124,11 @@ if __name__ == "__main__":
             #
             # ["minimize_root_mean_square_weighted_tanh_fatigue_decay"],
 
-            ["minimize_failure_point"],
-
 
 
             ],
 
             "weight": [
-                       [10000],
                        [10000],
                        [10000],
                        [10000],

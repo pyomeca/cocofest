@@ -675,7 +675,8 @@ class CustomCostFunctions:
         dA = CustomCostFunctions.calculate_dA(controller)
 
         # Optimized elsewhere
-        A_end = [297.59, 226.84, 1191.58, 89.46]
+        # A_end = [297.59, 226.84, 1191.58, 89.46]
+        A_end = [128.45242911, 175.68692114, 889.89511914, 4438.59666597]  # 0
 
         eps = 1e-8
         muscle_fatigue_decay = vertcat(
