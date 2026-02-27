@@ -46,6 +46,27 @@ def minimize_root_mean_square_fatigue(controller: PenaltyController, muscle_weig
     return rms_fatigue
 
 
+def minimize_root_mean_pw(controller: PenaltyController, muscle_weights: list) -> MX:
+    """
+    Minimize the root-mean-square of pw.
+    """
+    eps = 1e-8
+    muscle_name_list = controller.model.bio_model.muscle_names
+    stim_charge = vertcat(
+        *[
+            muscle_weights[x]
+            * ((controller.controls["last_pulse_width_" + muscle_name_list[x]].cx -
+      controller.ocp.nlp[0].u_bounds["last_pulse_width_" + muscle_name_list[x]].min[0][0])
+     / (controller.ocp.nlp[0].u_bounds["last_pulse_width_" + muscle_name_list[x]].max[0][0] -
+        controller.ocp.nlp[0].u_bounds["last_pulse_width_" + muscle_name_list[x]].min[0][0])) ** 2
+            for x in range(len(muscle_name_list))
+        ]
+    )
+
+    rms_activation = (sum1(stim_charge) / len(muscle_name_list) + eps) ** 0.5
+    return rms_activation
+
+
 def set_objective_functions(muscle_fatigue_key, cost_fun_weight):
     objective_functions = ObjectiveList()
 
@@ -61,7 +82,7 @@ def set_objective_functions(muscle_fatigue_key, cost_fun_weight):
             raise ValueError(f"cost_fun_weight must be length 1 or {len(muscle_fatigue_key)}, got {len(cost_fun_weight)}")
 
     objective_functions.add(
-        minimize_root_mean_square_fatigue,
+        minimize_root_mean_pw, #minimize_root_mean_square_fatigue,
         custom_type=ObjectiveFcn.Lagrange,
         muscle_weights=weights,
         node=Node.ALL,
