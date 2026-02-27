@@ -207,9 +207,6 @@ class CustomCostFunctions:
 
 
 
-
-
-
             "minimize_peak": {
                 "function": self.minimize_peak,
                 "index": 99,
@@ -687,7 +684,7 @@ class CustomCostFunctions:
 
         # Optimized elsewhere
         # A_end = [297.59, 226.84, 1191.58, 89.46]
-        A_end = [128.45242911, 175.68692114, 889.89511914, 4438.59666597]  # 0
+        A_end = [128.45242911, 175.68692114, 889.89511914, 0]  # 4438.59666597
 
         eps = 1e-8
         muscle_fatigue_decay = vertcat(
@@ -773,7 +770,7 @@ class CustomCostFunctions:
         eps = 1e-8
         muscle_fatigue_decay = vertcat(
             *[
-                (1 + tanh(0.1 * (-dA[x]))) ** 2
+                (1 + tanh(0.01 * (-dA[x]))) ** 2
                 for x in range(len(muscle_name_list))
             ]
         )
@@ -799,12 +796,12 @@ class CustomCostFunctions:
         dA = CustomCostFunctions.calculate_dA(controller)
 
         for i in range(dA.shape[0]):
-            dA[i] = if_else(dA[0] > 0, 4 * dA[0], dA[0])
+            dA[i] = if_else(dA[0] > 0, 20 * dA[0], dA[0])
 
         eps = 1e-8
         muscle_fatigue_decay = vertcat(
             *[
-                (1 + tanh(0.1 * (-dA[x]))) ** 2
+                (1 + tanh(0.01 * (-dA[x]))) ** 2
                 for x in range(len(muscle_name_list))
             ]
         )
@@ -842,7 +839,7 @@ class CustomCostFunctions:
         eps = 1e-8
         muscle_fatigue_decay = vertcat(
             *[
-                weights[x] * (1 + tanh(0.1 * (-dA[x]))) ** 2
+                weights[x] * (1 + tanh(0.01 * (-dA[x]))) ** 2
                 for x in range(len(muscle_name_list))
             ]
         )
