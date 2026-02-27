@@ -684,16 +684,17 @@ class CustomCostFunctions:
 
         # Optimized elsewhere
         # A_end = [297.59, 226.84, 1191.58, 89.46]
-        A_end = [128.45242911, 175.68692114, 889.89511914, 0]  # 4438.59666597
+        # A_end = [128.45242911, 175.68692114, 889.89511914, 0]  # 4438.59666597
+        A_end = [128.45242911, 175.68692114, 889.89511914]
 
         eps = 1e-8
         muscle_fatigue_decay = vertcat(
             *[
                 (dA[x] / (1 + ((A_t[x] - A_end[x])/A_end[x]))) ** 2
-                for x in range(len(muscle_name_list))
+                for x in range(len(muscle_name_list)-1)
             ]
         )
-        rms_fatigue = (sum1(muscle_fatigue_decay) / len(muscle_name_list) + eps) ** 0.5
+        rms_fatigue = (sum1(muscle_fatigue_decay) / (len(muscle_name_list)-1) + eps) ** 0.5
         return rms_fatigue
 
     @staticmethod
@@ -771,11 +772,11 @@ class CustomCostFunctions:
         muscle_fatigue_decay = vertcat(
             *[
                 (1 + tanh(0.01 * (-dA[x]))) ** 2
-                for x in range(len(muscle_name_list))
+                for x in range(len(muscle_name_list)-1)
             ]
         )
 
-        rms_fatigue = (sum1(muscle_fatigue_decay) / len(muscle_name_list) + eps) ** 0.5
+        rms_fatigue = (sum1(muscle_fatigue_decay) / (len(muscle_name_list)-1) + eps) ** 0.5
         return rms_fatigue
 
     @staticmethod
@@ -802,10 +803,10 @@ class CustomCostFunctions:
         muscle_fatigue_decay = vertcat(
             *[
                 (1 + tanh(0.01 * (-dA[x]))) ** 2
-                for x in range(len(muscle_name_list))
+                for x in range(len(muscle_name_list)-1)
             ]
         )
-        rms_fatigue = (sum1(muscle_fatigue_decay) / len(muscle_name_list) + eps) ** 0.5
+        rms_fatigue = (sum1(muscle_fatigue_decay) / (len(muscle_name_list) -1)+ eps) ** 0.5
         return rms_fatigue
 
     @staticmethod
@@ -840,10 +841,10 @@ class CustomCostFunctions:
         muscle_fatigue_decay = vertcat(
             *[
                 weights[x] * (1 + tanh(0.01 * (-dA[x]))) ** 2
-                for x in range(len(muscle_name_list))
+                for x in range(len(muscle_name_list)-1)
             ]
         )
-        rms_fatigue = (sum1(muscle_fatigue_decay) / len(muscle_name_list) + eps) ** 0.5
+        rms_fatigue = (sum1(muscle_fatigue_decay) / (len(muscle_name_list)-1) + eps) ** 0.5
         return rms_fatigue
 
 
