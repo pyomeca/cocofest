@@ -806,7 +806,7 @@ class CustomCostFunctions:
 
         muscle_fatigue_decay = vertcat(
             *[
-                (1 + tanh(4 * (-dA_nomalized[x]))) ** 2
+                (1 + tanh(1 * (-dA_nomalized[x]))) ** 2
                 for x in range(len(muscle_name_list)-1)
             ]
         )
@@ -831,7 +831,7 @@ class CustomCostFunctions:
         """
         muscle_name_list = controller.model.bio_model.muscle_names
         A_rest = vertcat(*[controller.model.muscles_dynamics_model[x].a_scale for x in range(len(muscle_name_list))])
-        alpha_a = vertcat(*[controller.model.muscles_dynamics_model[x].alpha_a for x in range(len(muscle_name_list))])
+        # alpha_a = vertcat(*[controller.model.muscles_dynamics_model[x].alpha_a for x in range(len(muscle_name_list))])
         dA = CustomCostFunctions.calculate_dA(controller)
 
         for i in range(dA.shape[0]):
@@ -841,9 +841,10 @@ class CustomCostFunctions:
         # l1 = sum1(fatigability)
         # weights = 1 + (fatigability / l1)
 
-        weights = [1.4 * 10e-1 * 342.7, 1.1 * 10e-1 * 445.5, 5.6 * 10e-2 * 179.6, 3.4 * 10e-2 * 109.1]
+        # weights = [1.4 * 10e-1 * 342.7, 1.1 * 10e-1 * 445.5, 5.6 * 10e-2 * 179.6, 3.4 * 10e-2 * 109.1]
         max_dA_fatigue = [72.2, 61.2, 85.7, 92.3]
         max_dA_recovery = [2.3, 3.0, 14.8, 35.6]
+
         dA_nomalized = vertcat(
             *[
                 if_else(dA[x] < 0, dA[x] / max_dA_fatigue[x], dA[x] / max_dA_recovery[x])
@@ -851,10 +852,13 @@ class CustomCostFunctions:
             ]
         )
 
+        A_t = vertcat(*[controller.states["A_" + muscle_name_list[x]].cx for x in range(len(muscle_name_list))])
+        fatigue = [((A_rest[i]-A_t[i])/A_rest[i] * 100)**2 for i in range(A_rest.shape[0])]
+
         muscle_fatigue_decay = vertcat(
             *[
-                weights[x] * (1 + tanh(4 * (-dA_nomalized[x]))) ** 2
-                for x in range(len(muscle_name_list))
+                fatigue[x] * (1 + tanh(4 * (-dA_nomalized[x]))) ** 2
+                for x in range(len(muscle_name_list)-1)
             ]
         )
         eps = 1e-8

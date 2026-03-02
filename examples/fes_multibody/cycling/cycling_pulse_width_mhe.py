@@ -1116,9 +1116,9 @@ if __name__ == "__main__":
 
             # ["minimize_root_mean_square_scalable_fatigue_decay"],
 
-            ["minimize_fatigue_decay"],
-            ["minimize_peak_fatigue_decay"],
-            ["minimize_root_mean_square_tanh_fatigue_decay"],
+            # ["minimize_fatigue_decay"],
+            # ["minimize_peak_fatigue_decay"],
+            # ["minimize_root_mean_square_tanh_fatigue_decay"],
             ["minimize_root_mean_square_tanh_fatigue_decay_norm"],
             ["minimize_root_mean_square_weighted_tanh_fatigue_decay"],
 
