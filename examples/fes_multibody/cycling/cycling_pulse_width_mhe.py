@@ -1121,7 +1121,7 @@ if __name__ == "__main__":
             # ["minimize_root_mean_square_tanh_fatigue_decay"],
             # ["minimize_root_mean_square_tanh_fatigue_decay_norm"],
             # ["minimize_root_mean_square_weighted_tanh_fatigue_decay"],
-            ["minimize_average_tanh_fatigue_decay"],
+            # ["minimize_average_tanh_fatigue_decay"],
             ["minimize_rms_tanh_fatigue_decay"],
             ["minimize_rms_tanh_fatigue_decay_new"],
 

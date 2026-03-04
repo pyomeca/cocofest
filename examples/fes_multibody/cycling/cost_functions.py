@@ -974,7 +974,8 @@ class CustomCostFunctions:
             ]
         )
 
-        rms_fatigue = (sum1(muscle_fatigue_decay) / muscle_range)**0.5
+        eps = 1e-8
+        rms_fatigue = (sum1(muscle_fatigue_decay) / muscle_range + eps)**0.5
         return rms_fatigue
 
     @staticmethod
@@ -1021,7 +1022,8 @@ class CustomCostFunctions:
             ]
         )
 
-        rms_fatigue = (sum1(muscle_fatigue_decay) / muscle_range) ** 0.5
+        eps = 1e-8
+        rms_fatigue = (sum1(muscle_fatigue_decay) / muscle_range + eps)**0.5
         return rms_fatigue
 
 
