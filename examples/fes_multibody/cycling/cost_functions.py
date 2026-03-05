@@ -920,11 +920,11 @@ class CustomCostFunctions:
         )
 
         A_t = vertcat(*[controller.states["A_" + muscle_name_list[x]].cx for x in range(len(muscle_name_list))])
-        fatigue = [((A_rest[i] - A_t[i]) / (A_rest[i]-A_min) * 100) for i in range(muscle_range)]
+        fatigue = [((A_rest[i] - A_t[i]) / (A_rest[i]-A_min)) for i in range(muscle_range)]
 
         muscle_fatigue_decay = vertcat(
             *[
-                fatigue[x] * (1 + tanh(-dA_nomalized[x]))
+                (2 ** (4 * fatigue[x])) * (1 + tanh(-dA_nomalized[x]))
                 for x in range(muscle_range)
             ]
         )
