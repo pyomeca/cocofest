@@ -902,8 +902,8 @@ class CustomCostFunctions:
         The root-mean-square fatigue decay in a hyperbolic tangential way weighted by A_rest and alpha_A
         """
         muscle_name_list = controller.model.bio_model.muscle_names
-        A_rest = vertcat(*[controller.model.muscles_dynamics_model[x].a_scale for x in range(len(muscle_name_list))])
         dA = CustomCostFunctions.calculate_dA(controller)
+        A_rest = [controller.model.muscles_dynamics_model[x].a_scale for x in range(len(muscle_name_list))]
         normed_a = [A / max(A_rest) for A in A_rest]
 
         max_dA_fatigue = [72.2, 61.2, 85.7, 92.3]
@@ -921,7 +921,7 @@ class CustomCostFunctions:
         )
 
         A_t = vertcat(*[controller.states["A_" + muscle_name_list[x]].cx for x in range(len(muscle_name_list))])
-        fatigue = [((A_rest[i] - A_t[i]) / (A_rest[i]-A_min)) for i in range(muscle_range)]
+        fatigue = [((A_rest[i] - A_t[i]) / (A_rest[i]-A_min[i])) for i in range(muscle_range)]
 
         muscle_fatigue_decay = vertcat(
             *[
