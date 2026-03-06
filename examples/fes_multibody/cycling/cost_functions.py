@@ -1,4 +1,4 @@
-from casadi import MX, vertcat, sum1, mmax, fabs, sign, tanh, if_else, log, exp, DM, dot
+from casadi import MX, vertcat, sum1, mmax, fabs, sign, tanh, if_else, log, exp, DM, dot, mmax
 from bioptim import PenaltyController
 from cocofest.models.ding2007.ding2007 import DingModelPulseWidthFrequency
 
@@ -923,9 +923,12 @@ class CustomCostFunctions:
         A_t = vertcat(*[controller.states["A_" + muscle_name_list[x]].cx for x in range(len(muscle_name_list))])
         fatigue = [((A_rest[i] - A_t[i]) / (A_rest[i]-A_min[i])) for i in range(muscle_range)]
 
+        max_fatigue_power = mmax(vertcat(*[10 ** (4 * fatigue[i]) for i in range(muscle_range)]))
+        normed_fatigue_power = [10 ** (4 * fatigue[i]) / max_fatigue_power for i in range(muscle_range)]
+
         muscle_fatigue_decay = vertcat(
             *[
-                normed_a[x] * (100 * fatigue[x]) * (1 + tanh(-dA_nomalized[x]))
+                normed_a[x] * normed_fatigue_power[x] * (1 + tanh(-dA_nomalized[x]))
                 for x in range(muscle_range)
             ]
         )
