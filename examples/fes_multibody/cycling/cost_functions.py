@@ -904,6 +904,7 @@ class CustomCostFunctions:
         muscle_name_list = controller.model.bio_model.muscle_names
         A_rest = vertcat(*[controller.model.muscles_dynamics_model[x].a_scale for x in range(len(muscle_name_list))])
         dA = CustomCostFunctions.calculate_dA(controller)
+        normed_a = [A / max(A_rest) for A in A_rest]
 
         max_dA_fatigue = [72.2, 61.2, 85.7, 92.3]
         max_dA_recovery = [2.3, 3.0, 14.8, 35.6]
@@ -924,7 +925,7 @@ class CustomCostFunctions:
 
         muscle_fatigue_decay = vertcat(
             *[
-                (2 ** (4 * fatigue[x])) * (1 + tanh(-dA_nomalized[x]))
+                normed_a[x] * (100 * fatigue[x]) * (1 + tanh(-dA_nomalized[x]))
                 for x in range(muscle_range)
             ]
         )
