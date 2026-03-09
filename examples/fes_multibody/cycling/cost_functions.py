@@ -906,9 +906,11 @@ class CustomCostFunctions:
         A_rest = [controller.model.muscles_dynamics_model[x].a_scale for x in range(len(muscle_name_list))]
         normed_a = [A / max(A_rest) for A in A_rest]
 
-        max_dA_fatigue = [72.2, 61.2, 85.7, 92.3]
-        max_dA_recovery = [2.3, 3.0, 14.8, 35.6]
-        A_min = [41, 70, 379, 932]
+        # max_dA_fatigue = [72.2, 61.2, 85.7, 92.3]
+        # max_dA_recovery = [2.3, 3.0, 14.8, 35.6]
+        # A_min = [41, 70, 379, 932]
+        max_dA_fatigue = [72.1, 61.1, 85.5, 93.9]
+        max_dA_recovery = [8.0, 8.4, 21.9, 31.7]
 
         with_triceps = True
         muscle_range = 4 if with_triceps else 3
@@ -921,14 +923,12 @@ class CustomCostFunctions:
         )
 
         A_t = vertcat(*[controller.states["A_" + muscle_name_list[x]].cx for x in range(len(muscle_name_list))])
-        fatigue = [((A_rest[i] - A_t[i]) / (A_rest[i]-A_min[i])) for i in range(muscle_range)]
-
-        max_fatigue_power = mmax(vertcat(*[10 ** (4 * fatigue[i]) for i in range(muscle_range)]))
-        normed_fatigue_power = [10 ** (4 * fatigue[i]) / max_fatigue_power for i in range(muscle_range)]
+        # fatigue = [((A_rest[i] - A_t[i]) / (A_rest[i]-A_min[i])) for i in range(muscle_range)]
+        fatigue = [((A_rest[i] - A_t[i]) / (A_rest[i])) for i in range(muscle_range)]
 
         muscle_fatigue_decay = vertcat(
             *[
-                normed_a[x] * normed_fatigue_power[x] * (1 + tanh(-dA_nomalized[x]))
+                normed_a[x] * (10 ** (4 * fatigue[x])) * (1 + tanh(-dA_nomalized[x]))
                 for x in range(muscle_range)
             ]
         )

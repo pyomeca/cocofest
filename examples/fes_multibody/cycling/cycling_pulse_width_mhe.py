@@ -740,11 +740,18 @@ def set_fes_model(model_path, stim_time):
     # alpha_a = (alpha_a_RF * Fiber_prop_II_muscle / Fiber_prop_II_RF) * (a_scale_RF / a_scale_muscle)
     # tau_fat = (tau_fat_RF * Fiber_prop_II_muscle / Fiber_prop_II_RF) * (a_scale_RF / a_scale_muscle)
 
+    # parameter_dict = {
+    #     "Biceps": {"Fmax": 149, "a_scale": 3314.7, "alpha_a": -5.6 * 10e-2, "tau_fat": 179.6, "pcsa": 7.33},
+    #     "Triceps": {"Fmax": 262, "a_scale": 4915.5, "alpha_a": -3.4 * 10e-2, "tau_fat": 109.1, "pcsa": 10.87},
+    #     "Delt_ant": {"Fmax": 48, "a_scale": 1148.6, "alpha_a": -1.4 * 10e-1, "tau_fat": 445.5, "pcsa": 2.54},
+    #     "Delt_post": {"Fmax": 51, "a_scale": 1234.5, "alpha_a": -1.1 * 10e-1, "tau_fat": 342.7, "pcsa": 2.73},
+    # }
+
     parameter_dict = {
-        "Biceps": {"Fmax": 149, "a_scale": 3314.7, "alpha_a": -5.6 * 10e-2, "tau_fat": 179.6, "pcsa": 7.33},
-        "Triceps": {"Fmax": 262, "a_scale": 4915.5, "alpha_a": -3.4 * 10e-2, "tau_fat": 109.1, "pcsa": 10.87},
-        "Delt_ant": {"Fmax": 48, "a_scale": 1148.6, "alpha_a": -1.4 * 10e-1, "tau_fat": 445.5, "pcsa": 2.54},
-        "Delt_post": {"Fmax": 51, "a_scale": 1234.5, "alpha_a": -1.1 * 10e-1, "tau_fat": 342.7, "pcsa": 2.73},
+        "Biceps": {"Fmax": 149, "a_scale": 3314.7, "alpha_a": -5.6 * 10e-2, "pcsa": 7.33},
+        "Triceps": {"Fmax": 262, "a_scale": 4915.5, "alpha_a": -3.4 * 10e-2, "pcsa": 10.87},
+        "Delt_ant": {"Fmax": 48, "a_scale": 1148.6, "alpha_a": -1.4 * 10e-1, "pcsa": 2.54},
+        "Delt_post": {"Fmax": 51, "a_scale": 1234.5, "alpha_a": -1.1 * 10e-1, "pcsa": 2.73},
     }
 
     for model in muscles_model:
@@ -753,7 +760,7 @@ def set_fes_model(model_path, stim_time):
         model.a_rest = parameter_dict[muscle_name]["a_scale"]
         model.fmax = parameter_dict[muscle_name]["Fmax"]
         model.alpha_a = parameter_dict[muscle_name]["alpha_a"]
-        model.tau_fat = parameter_dict[muscle_name]["tau_fat"]
+        # model.tau_fat = parameter_dict[muscle_name]["tau_fat"]
         model.pcsa = parameter_dict[muscle_name]["pcsa"]
 
     # Create MSK FES-driven model
@@ -797,7 +804,7 @@ def create_simulation_list(
             raise RuntimeError("ode_solver must be COLLOCATION or RK4")
 
         full_suffix = f"{weight_suffix}_{solver_suffix}_with_init"
-        pkl = str(Path("result") / f"{num_cycles}_cycle" / f"{num_cycles}_min_{full_suffix}.pkl")
+        pkl = str(Path("result/test") / f"{num_cycles}_cycle" / f"{num_cycles}_min_{full_suffix}.pkl")
         init = str(Path("result/initial_guess") / f"{num_cycles}_initial_guess_{solver_suffix}.pkl")
         init = init if os.path.exists(init) else None
         if init is None:
@@ -1091,31 +1098,32 @@ def main(
 if __name__ == "__main__":
     main(
         stimulation_frequency=30,
-        n_total_cycle=10000,
+        n_total_cycle=3000,
         n_cycles_simultaneous=[2],
         resistive_torque=-0.20,  # (N.m)
         cost_fun_dict={"optimized_function": [
             # ["minimize_average_activation"],
-            # ["minimize_root_mean_square_activation"],
+            ["minimize_root_mean_square_activation"],
             # ["minimize_cubic_average_activation"],
             # ["minimize_peak_activation"],
             # ["minimize_average_force"],
-            # ["minimize_root_mean_square_force"],
+            ["minimize_root_mean_square_force"],
             # ["minimize_cubic_average_force"],
             # ["minimize_peak_force"],
             # ["minimize_average_muscle_stress"],
-            # ["minimize_root_mean_square_muscle_stress"],
+            ["minimize_root_mean_square_muscle_stress"],
             # ["minimize_cubic_average_muscle_stress"],
             # ["minimize_peak_muscle_stress"],
-            # ["minimize_root_mean_square_muscle_power"],
             # ["minimize_average_fatigue"],
-            # ["minimize_root_mean_square_fatigue"],
+            ["minimize_root_mean_square_fatigue"],
             # ["minimize_cubic_average_fatigue"],
             # ["minimize_peak_fatigue"],
+
+            # ["minimize_root_mean_square_muscle_power"],
+
+
             # ["minimize_root_mean_square_fatigue_with_weights"],
-
             # ["minimize_root_mean_square_scalable_fatigue_decay"],
-
             # ["minimize_fatigue_decay"],
             # ["minimize_peak_fatigue_decay"],
             # ["minimize_root_mean_square_tanh_fatigue_decay"],
