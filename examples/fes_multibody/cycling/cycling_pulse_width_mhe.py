@@ -995,7 +995,16 @@ def run_optim(mhe_info, cycling_info, simulation_conditions, model_path, save_so
     nmpc.n_cycles_simultaneous = simulation_conditions["n_cycles_simultaneous"]
 
     def update_functions(_nmpc: MultiCyclicNonlinearModelPredictiveControl, cycle_idx: int, _sol: Solution):
-        print("Optimized window n°" + str(cycle_idx))
+        if _sol:
+            print("Optimized window n°" + str(cycle_idx))
+            sol = _sol.decision_states(to_merge=SolutionMerge.NODES)
+            muscles = _sol.ocp.nlp[0].model.muscle_names
+            a_rest_list = [_sol.ocp.nlp[0].model.muscles_dynamics_model[i].a_rest for i in range(len(muscles))]
+            a_t_list = [sol["A_" + muscles[i]][0][-1] for i in range(len(muscles))]
+            fatigue_percentage = [round(((a_rest_list[i] - a_t_list[i]) / (a_rest_list[i])) * 100, 2) for i in
+                                  range(len(muscles))]
+            for i in range(len(muscles)):
+                print(muscles[i] + " fatigue = " + str(fatigue_percentage[i]) + "%")
         return cycle_idx < mhe_info["n_cycles"]  # True if there are still some cycle to perform
 
     # Add the penalty cost function plot
@@ -1100,7 +1109,7 @@ if __name__ == "__main__":
         stimulation_frequency=30,
         n_total_cycle=3000,
         n_cycles_simultaneous=[2],
-        resistive_torque=-0.20,  # (N.m)
+        resistive_torque=-0.30,  # (N.m)
         cost_fun_dict={"optimized_function": [
             # ["minimize_average_activation"],
             ["minimize_root_mean_square_activation"],

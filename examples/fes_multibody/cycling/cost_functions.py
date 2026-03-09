@@ -904,13 +904,20 @@ class CustomCostFunctions:
         muscle_name_list = controller.model.bio_model.muscle_names
         dA = CustomCostFunctions.calculate_dA(controller)
         A_rest = [controller.model.muscles_dynamics_model[x].a_scale for x in range(len(muscle_name_list))]
+        tau_fat = [controller.model.muscles_dynamics_model[x].tau_fat for x in range(len(muscle_name_list))]
+        alpha_a = [controller.model.muscles_dynamics_model[x].alpha_a for x in range(len(muscle_name_list))]
+        fmax = [controller.model.muscles_dynamics_model[x].fmax for x in range(len(muscle_name_list))]
         normed_a = [A / max(A_rest) for A in A_rest]
 
         # max_dA_fatigue = [72.2, 61.2, 85.7, 92.3]
         # max_dA_recovery = [2.3, 3.0, 14.8, 35.6]
         # A_min = [41, 70, 379, 932]
-        max_dA_fatigue = [72.1, 61.1, 85.5, 93.9]
-        max_dA_recovery = [8.0, 8.4, 21.9, 31.7]
+
+        max_dA_recovery = [A_rest[x]/tau_fat[x] for x in range(len(muscle_name_list))]
+        max_dA_fatigue = [-(alpha_a[x] * fmax[x]) for x in range(len(muscle_name_list))]
+
+        # max_dA_fatigue = [72.1, 61.1, 85.5, 93.9]
+        # max_dA_recovery = [8.0, 8.4, 21.9, 31.7]
 
         with_triceps = True
         muscle_range = 4 if with_triceps else 3
