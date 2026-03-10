@@ -404,12 +404,20 @@ class CustomCostFunctions:
         """
         eps = 1e-8
         muscle_name_list = controller.model.bio_model.muscle_names
+        fmax = [controller.model.muscles_dynamics_model[x].fmax for x in range(len(muscle_name_list))]
+        # muscle_force = vertcat(
+        #     *[
+        #         controller.states["F_" + muscle_name_list[x]].cx ** 2
+        #         for x in range(len(muscle_name_list))
+        #     ]
+        # )
         muscle_force = vertcat(
             *[
-                controller.states["F_" + muscle_name_list[x]].cx ** 2
+                (controller.states["F_" + muscle_name_list[x]].cx / fmax[x]) ** 2
                 for x in range(len(muscle_name_list))
             ]
         )
+
         rms_force = (sum1(muscle_force) / len(muscle_name_list) + eps) ** 0.5
         return rms_force
 
@@ -502,9 +510,17 @@ class CustomCostFunctions:
         """
         eps = 1e-8
         muscle_name_list = controller.model.bio_model.muscle_names
+        fmax = [controller.model.muscles_dynamics_model[x].fmax for x in range(len(muscle_name_list))]
+        # muscle_stress = vertcat(
+        #     *[
+        #         (controller.states["F_" + muscle_name_list[x]].cx / controller.model.muscles_dynamics_model[x].pcsa) ** 2
+        #         for x in range(len(muscle_name_list))
+        #     ]
+        # )
         muscle_stress = vertcat(
             *[
-                (controller.states["F_" + muscle_name_list[x]].cx / controller.model.muscles_dynamics_model[x].pcsa) ** 2
+                ((controller.states["F_" + muscle_name_list[x]].cx / controller.model.muscles_dynamics_model[x].pcsa) /
+                 (fmax[x] / controller.model.muscles_dynamics_model[x].pcsa))** 2
                 for x in range(len(muscle_name_list))
             ]
         )
@@ -601,9 +617,16 @@ class CustomCostFunctions:
         """
         eps = 1e-8
         muscle_name_list = controller.model.bio_model.muscle_names
+        # muscle_fatigue = vertcat(
+        #     *[
+        #         (controller.model.muscles_dynamics_model[x].a_scale - controller.states["A_" + muscle_name_list[x]].cx) ** 2
+        #         for x in range(len(muscle_name_list))
+        #     ]
+        # )
         muscle_fatigue = vertcat(
             *[
-                (controller.model.muscles_dynamics_model[x].a_scale - controller.states["A_" + muscle_name_list[x]].cx) ** 2
+                ((controller.model.muscles_dynamics_model[x].a_scale - controller.states[
+                    "A_" + muscle_name_list[x]].cx) / controller.model.muscles_dynamics_model[x].a_scale)  ** 2
                 for x in range(len(muscle_name_list))
             ]
         )
@@ -933,14 +956,21 @@ class CustomCostFunctions:
         # fatigue = [((A_rest[i] - A_t[i]) / (A_rest[i]-A_min[i])) for i in range(muscle_range)]
         fatigue = [((A_rest[i] - A_t[i]) / (A_rest[i])) for i in range(muscle_range)]
 
+        # muscle_fatigue_decay = vertcat(
+        #     *[
+        #         normed_a[x] * (10 ** (4 * fatigue[x])) * (1 + tanh(-dA_nomalized[x]))
+        #         for x in range(muscle_range)
+        #     ]
+        # )
+
         muscle_fatigue_decay = vertcat(
             *[
-                normed_a[x] * (10 ** (4 * fatigue[x])) * (1 + tanh(-dA_nomalized[x]))
+                (1 + tanh(-dA_nomalized[x]))**2
                 for x in range(muscle_range)
             ]
         )
 
-        avg_fatigue = sum1(muscle_fatigue_decay) / muscle_range
+        avg_fatigue = (sum1(muscle_fatigue_decay) / muscle_range) ** 0.5
         return avg_fatigue
 
     @staticmethod

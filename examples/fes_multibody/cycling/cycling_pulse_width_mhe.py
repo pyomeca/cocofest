@@ -892,8 +892,8 @@ def save_sol_in_pkl(sol, simulation_conditions, nmpc, is_initial_guess=False, to
 
 
     pickle_file_name = simulation_conditions["pickle_file_path"]
-    with open(pickle_file_name, "wb") as file:
-        pickle.dump(dictionary, file)
+    # with open(pickle_file_name, "wb") as file:
+    #     pickle.dump(dictionary, file)
 
     np.savez_compressed(str(pickle_file_name)[:-4] + ".npz", **dictionary)
     print(simulation_conditions["pickle_file_path"])
@@ -1109,10 +1109,10 @@ if __name__ == "__main__":
         stimulation_frequency=30,
         n_total_cycle=3000,
         n_cycles_simultaneous=[2],
-        resistive_torque=-0.30,  # (N.m)
+        resistive_torque=-0.28,  # (N.m)
         cost_fun_dict={"optimized_function": [
             # ["minimize_average_activation"],
-            ["minimize_root_mean_square_activation"],
+           # ["minimize_root_mean_square_activation"],
             # ["minimize_cubic_average_activation"],
             # ["minimize_peak_activation"],
             # ["minimize_average_force"],
