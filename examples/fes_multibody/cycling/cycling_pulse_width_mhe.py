@@ -789,7 +789,10 @@ def create_simulation_list(
 
     sims = []
     custom_cost_function_dict = CustomCostFunctions().dict_functions
-    for (n_cycles, stim), (cost_fun_key, weight) in product(zip(n_cycles_simultaneous, stimulation), zip(cost_fun_dict["optimized_function"], cost_fun_dict["weight"])):
+    for (n_cycles, stim), cost_fun_key in product(
+            zip(n_cycles_simultaneous, stimulation),
+            cost_fun_dict["optimized_function"],
+    ):
         index = [custom_cost_function_dict[key]["index"] for key in cost_fun_key]
         pkl_path, init_path = make_file_paths(n_cycles, index, ode_solver)
         sims.append(
@@ -797,7 +800,6 @@ def create_simulation_list(
                 "n_cycles_simultaneous": n_cycles,
                 "stimulation": stim,
                 "cost_fun_key": cost_fun_key,
-                "cost_fun_weight": weight,
                 "pickle_file_path": pkl_path,
                 "init_guess_file_path": init_path,
             }
