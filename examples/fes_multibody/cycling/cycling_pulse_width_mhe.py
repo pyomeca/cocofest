@@ -40,7 +40,6 @@ from bioptim import (
     VariableScaling,
 )
 from cocofest import (
-    CustomObjective,
     DingModelPulseWidthFrequencyWithFatigue,
     FesMskModel,
     inverse_kinematics_cycling,
@@ -295,8 +294,6 @@ class MyCyclicNMPC(FesNmpcMsk):
 # --------------------#
 #    OCP functions    #
 # --------------------#
-
-
 def prepare_nmpc(
     model: BiorbdModel | FesMskModel,
     mhe_info: dict,
@@ -319,7 +316,7 @@ def prepare_nmpc(
     external_force = cycling_info["resistive_torque"]
     # --- Cost function info --- #
     objective_fun_dict = {"cost_fun_key": simulation_conditions["cost_fun_key"],
-                          "cost_fun_weight": simulation_conditions["cost_fun_weight"],
+                          "cost_fun_weight": 10000,
                           "individual_quadratic": True}
     # --- Pickle file info --- #
     initial_guess_path = simulation_conditions["init_guess_file_path"]
@@ -355,9 +352,6 @@ def prepare_nmpc(
         ode_solver=ode_solver,
         init_file_path=initial_guess_path,
     )
-
-    # --- Set states scaling --- #
-    # x_scaling = set_x_scaling(bio_model=model)  # Less efficient
 
     # --- Set controls --- #
     u_bounds, u_init, u_scaling = set_u_bounds_and_init(model, window_n_shooting, init_file_path=initial_guess_path)
@@ -397,7 +391,6 @@ def prepare_nmpc(
         constraints=constraints,
         x_bounds=x_bounds,
         x_init=x_init,
-        # x_scaling=x_scaling,
         u_bounds=u_bounds,
         u_init=u_init,
         u_scaling=u_scaling,
@@ -416,7 +409,7 @@ def set_external_forces(n_shooting, external_force_dict, force_name):
     reshape_values_array = np.tile(external_force_array[:, np.newaxis], (1, n_shooting))
     external_force_set.add_torque(
         segment=external_force_dict["Segment_application"], values=reshape_values_array, force_name=force_name
-    )  # warning forloop different force name
+    )
     numerical_time_series = {"external_forces": external_force_set.to_numerical_time_series()}
     return numerical_time_series, external_force_set
 
@@ -450,7 +443,6 @@ def set_q_qdot_init(
     else:
         # --- Chose the biorbd model to init the inverse kinematics --- #
         biorbd_model_path = "../../msk_models/Wu/Modified_Wu_Shoulder_Model_Cycling_for_IK.bioMod"
-        # biorbd_model_path = "../../msk_models/Seth/Modified_UL_Seth_2D_Cycling_for_IK.bioMod"
         n_shooting = (
             n_shooting * (ode_solver.polynomial_degree + 1)
             if isinstance(ode_solver, OdeSolver.COLLOCATION)
@@ -546,19 +538,6 @@ def set_x_bounds(
     )
 
     return x_bounds, x_init
-
-
-# Currently not used
-def set_x_scaling(bio_model) -> VariableScalingList:
-    x_scaling = VariableScalingList()
-    model_list = bio_model.muscles_dynamics_model
-    prefix_key_list = ["Cn_", "A_", "Tau1_", "Km_"]
-    scaling_value_list = [1 / 100, 1000, 1 / 100, 1 / 10]
-    for i in range(len(model_list)):
-        for j in range(len(prefix_key_list)):
-            key = prefix_key_list[j] + model_list[i].muscle_name
-            x_scaling.add(key=key, scaling=[scaling_value_list[j]])
-    return x_scaling
 
 
 def set_u_bounds_and_init(bio_model, n_shooting, init_file_path):
@@ -664,7 +643,7 @@ def set_objective_functions(objective_fun_dict, recalculate=False):
                     custom_objective_functions["minimize_peak"]["function"],
                     custom_type=ObjectiveFcn.Lagrange,
                     node=Node.ALL,
-                    weight=weights[i],
+                    weight=weights,
                     quadratic=False,
                 )
             else:
@@ -672,7 +651,7 @@ def set_objective_functions(objective_fun_dict, recalculate=False):
                     custom_objective_functions[keys[i]]["function"],
                     custom_type=ObjectiveFcn.Lagrange,
                     node=Node.ALL,
-                    weight=weights[i],
+                    weight=weights,
                     quadratic=False,
                 )
 
@@ -722,7 +701,7 @@ def set_fes_model(model_path, stim_time):
     ]
 
     # --- Muscle parameter scaling --- #
-    # Values from Ding et al. 2007 + Ding et al. 2003 for fatigue, based on the rectus femoris muscle
+    # Values from Ding et al. 2007 + Ding et al. 2003 for fatigue, based on the rectus femoris (RF) muscle
     # Note: these values were scaled on PCSA and fiber proportion to match biceps, triceps, and deltoids muscles
 
     # ------------------------------------------------------ #
@@ -734,24 +713,21 @@ def set_fes_model(model_path, stim_time):
     # Delt_ant       |    2.54     |          47/53          |
     # Delt_post      |    2.73     |          56/44          |
     # ------------------------------------------------------ #
+    # Table 1: PCSA and fiber type proportion from Peterson et al. (2011) and Kumazaki et al. (2022)
 
     # The scaling was done as follows (a_scale_RF=4920; alpha_a_RF=-4.0*10e-2;: tau_fat_RF=127):
     # a_scale = a_scale_RF * PCSA_muscle / PCSA_RF
     # alpha_a = (alpha_a_RF * Fiber_prop_II_muscle / Fiber_prop_II_RF) * (a_scale_RF / a_scale_muscle)
     # tau_fat = (tau_fat_RF * Fiber_prop_II_muscle / Fiber_prop_II_RF) * (a_scale_RF / a_scale_muscle)
 
-    # parameter_dict = {
-    #     "Biceps": {"Fmax": 149, "a_scale": 3314.7, "alpha_a": -5.6 * 10e-2, "tau_fat": 179.6, "pcsa": 7.33},
-    #     "Triceps": {"Fmax": 262, "a_scale": 4915.5, "alpha_a": -3.4 * 10e-2, "tau_fat": 109.1, "pcsa": 10.87},
-    #     "Delt_ant": {"Fmax": 48, "a_scale": 1148.6, "alpha_a": -1.4 * 10e-1, "tau_fat": 445.5, "pcsa": 2.54},
-    #     "Delt_post": {"Fmax": 51, "a_scale": 1234.5, "alpha_a": -1.1 * 10e-1, "tau_fat": 342.7, "pcsa": 2.73},
-    # }
+    # Maximal force Fmax was obtained during a simulation of a 30 Hz stimulation train of one second at 600us with
+    # scaled muscle properties
 
     parameter_dict = {
-        "Biceps": {"Fmax": 149, "a_scale": 3314.7, "alpha_a": -5.6 * 10e-2, "pcsa": 7.33},
-        "Triceps": {"Fmax": 262, "a_scale": 4915.5, "alpha_a": -3.4 * 10e-2, "pcsa": 10.87},
-        "Delt_ant": {"Fmax": 48, "a_scale": 1148.6, "alpha_a": -1.4 * 10e-1, "pcsa": 2.54},
-        "Delt_post": {"Fmax": 51, "a_scale": 1234.5, "alpha_a": -1.1 * 10e-1, "pcsa": 2.73},
+        "Biceps": {"Fmax": 149, "a_scale": 3314.7, "alpha_a": -5.6 * 10e-2, "tau_fat": 179.6, "pcsa": 7.33},
+        "Triceps": {"Fmax": 262, "a_scale": 4915.5, "alpha_a": -3.4 * 10e-2, "tau_fat": 109.1, "pcsa": 10.87},
+        "Delt_ant": {"Fmax": 48, "a_scale": 1148.6, "alpha_a": -1.4 * 10e-1, "tau_fat": 445.5, "pcsa": 2.54},
+        "Delt_post": {"Fmax": 51, "a_scale": 1234.5, "alpha_a": -1.1 * 10e-1, "tau_fat": 342.7, "pcsa": 2.73},
     }
 
     for model in muscles_model:
@@ -760,7 +736,7 @@ def set_fes_model(model_path, stim_time):
         model.a_rest = parameter_dict[muscle_name]["a_scale"]
         model.fmax = parameter_dict[muscle_name]["Fmax"]
         model.alpha_a = parameter_dict[muscle_name]["alpha_a"]
-        # model.tau_fat = parameter_dict[muscle_name]["tau_fat"]
+        model.tau_fat = parameter_dict[muscle_name]["tau_fat"]
         model.pcsa = parameter_dict[muscle_name]["pcsa"]
 
     # Create MSK FES-driven model
@@ -1052,11 +1028,9 @@ def main(
 
     # --- Model choice --- #
     model_path = "../../msk_models/Wu/Modified_Wu_Shoulder_Model_Cycling.bioMod"
-    # model_path = "../../msk_models/Seth/Modified_UL_Seth_2D_Cycling.bioMod"
 
     # --- MHE parameters --- #
     ode_solver = OdeSolver.COLLOCATION(polynomial_degree=3, method="radau")
-    # ode_solver = OdeSolver.RK4(n_integration_steps=5)
     mhe_info = {
         "cycle_duration": 1,
         "n_cycles_to_advance": 1,
@@ -1109,64 +1083,38 @@ if __name__ == "__main__":
         stimulation_frequency=30,
         n_total_cycle=3000,
         n_cycles_simultaneous=[2],
-        resistive_torque=-0.28,  # (N.m)
+        resistive_torque=-0.20,  # (N.m)
         cost_fun_dict={"optimized_function": [
+            # --- Pulse width --- #
             # ["minimize_average_activation"],
-           # ["minimize_root_mean_square_activation"],
+            # ["minimize_root_mean_square_activation"],
             # ["minimize_cubic_average_activation"],
             # ["minimize_peak_activation"],
+
+            # --- Force --- #
             # ["minimize_average_force"],
-            ["minimize_root_mean_square_force"],
+            # ["minimize_root_mean_square_force"],
             # ["minimize_cubic_average_force"],
             # ["minimize_peak_force"],
+
+            # --- Stress --- #
             # ["minimize_average_muscle_stress"],
-            ["minimize_root_mean_square_muscle_stress"],
+            # ["minimize_root_mean_square_muscle_stress"],
             # ["minimize_cubic_average_muscle_stress"],
             # ["minimize_peak_muscle_stress"],
+
+            # --- Fatigue --- #
             # ["minimize_average_fatigue"],
-            ["minimize_root_mean_square_fatigue"],
+            # ["minimize_root_mean_square_fatigue"],
             # ["minimize_cubic_average_fatigue"],
             # ["minimize_peak_fatigue"],
 
+            # --- Power --- #
             # ["minimize_root_mean_square_muscle_power"],
 
-
-            # ["minimize_root_mean_square_fatigue_with_weights"],
-            # ["minimize_root_mean_square_scalable_fatigue_decay"],
-            # ["minimize_fatigue_decay"],
-            # ["minimize_peak_fatigue_decay"],
-            # ["minimize_root_mean_square_tanh_fatigue_decay"],
-            # ["minimize_root_mean_square_tanh_fatigue_decay_norm"],
-            # ["minimize_root_mean_square_weighted_tanh_fatigue_decay"],
-            ["minimize_average_tanh_fatigue_decay"],
-            #["minimize_rms_tanh_fatigue_decay"],
-            #["minimize_rms_tanh_fatigue_decay_new"],
-
-            # ["minimize_root_mean_square_weighted_tanh_fatigue_decay"],
-
-            ],
-
-            "weight": [
-                       [10000],
-                       [10000],
-                       [10000],
-                       [10000],
-                       [10000],
-                       [10000],
-                       [10000],
-                       [10000],
-                       [10000],
-                       [10000],
-                       [10000],
-                       [10000],
-                       [10000],
-                       [10000],
-                       [10000],
-                       [10000],
-                       [10000],
-                       [10000],
-                       [10000]
-                       ],
+            # --- Recovery --- #
+            ["minimize_average_fatigue_and_recovery"],
+            ]
         },
         init_guess=False,
         save=True,
