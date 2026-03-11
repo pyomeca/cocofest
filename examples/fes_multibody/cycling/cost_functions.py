@@ -677,10 +677,29 @@ class CustomCostFunctions:
 
         # --- Calculate useful torque based on force and muscle efficiency --- #
         gamma = CustomCostFunctions.useful_gain_from_angle(q[2])
-        tau_use = vertcat(*[
-            if_else(gamma[i] * F[i] > 0, gamma[i] * F[i], 0)
-            for i in range(F.shape[0])
-        ])
+
+        gamma_tanh = vertcat(
+            *[(1 + tanh(10*gamma[x]))
+              for x in range(F.shape[0])
+              ]
+        )
+
+
+        # tau_use = vertcat(*[
+        #     if_else(gamma[i] * F[i] > 0, gamma[i] * F[i], 0)
+        #     for i in range(F.shape[0])
+        # ])
+
+        muscle_motion_contrib = [0.16259391348727756, 0.32644352775103314, 0.06473043181533218, 0.07310528260037236]
+        muscle_motion_contrib_norm = [muscle_contrib/max(muscle_motion_contrib) for muscle_contrib in muscle_motion_contrib]
+
+        muscle_fatigability = [-alpha_a[i]/A_rest[i] for i in range(F.shape[0])]
+        muscle_fatigability_norm = [muscle_fat/max(muscle_fatigability) for muscle_fat in muscle_fatigability]
+
+        muscle_importance_weight = [muscle_motion_contrib_norm[i] * muscle_fatigability_norm[i] for i in range(F.shape[0])]
+
+        torque_distribution = [(muscle_importance_weight[i] / (gamma_tanh[i] + 1e-8)) * F[i] for i in range(F.shape[0])]
+
 
         # --- Fatigue and recovery --- #
         cap = A / A_rest
@@ -696,22 +715,38 @@ class CustomCostFunctions:
         ])
 
         # --- Calculate the cost function --- #
-        use_term = vertcat(*[
-            adaptive_weight[i] * (tau_use[i] / fmax[i]) ** 2
-            for i in range(F.shape[0])
-        ])
+        # use_term = vertcat(*[
+        #     adaptive_weight[i] * (tau_use[i] / fmax[i]) ** 2
+        #     for i in range(F.shape[0])
+        # ])
 
+        # fatigue_term = vertcat(*[
+        #     lambda_fatigue * fatigue[i] ** 2
+        #     for i in range(F.shape[0])
+        # ])
         fatigue_term = vertcat(*[
-            lambda_fatigue * fatigue[i] ** 2
+            lambda_fatigue * (10 ** (4 * fatigue[i]))
             for i in range(F.shape[0])
         ])
 
-        dA_term = vertcat(*[
-            lambda_dA * if_else(dA_norm[i] < 0, (-dA_norm[i]) ** 2, 0)
-            for i in range(F.shape[0])
-        ])
+        # dA_term = vertcat(*[
+        #     lambda_dA * if_else(dA_norm[i] < 0, (-dA_norm[i]) ** 2, 0)
+        #     for i in range(F.shape[0])
+        # ])
+        dA_term = vertcat(
+            *[(1 + tanh(-dA_norm[x]))
+                for x in range(F.shape[0])
+            ]
+        )
 
-        return sum1(use_term + fatigue_term + dA_term) / len(muscle_names)
+        # return sum1(use_term + fatigue_term + dA_term) / len(muscle_names)
+
+        cost_fun = vertcat(
+            *[torque_distribution[i] * fatigue_term[i] * dA_term[i]
+                for i in range(F.shape[0])
+            ]
+        )
+        return sum1(cost_fun) / len(muscle_names)
 
     @staticmethod
     def minimize_terminal_fatigue_reserve(controller: PenaltyController) -> MX:
@@ -842,10 +877,10 @@ class CustomCostFunctions:
     def useful_gain_from_angle(theta):
         gains = []
         coeffs = [
-            [-0.003796394160508141, -0.07527209994759597, 0.0012680063435009572,-0.0061414695027003875, 0.010001029394988675],
-            [0.0035496461377487435, 0.168625205597484, 0.00715498920622323, 0.0021333488227879933, -0.01389008809979322],
-            [-0.002167840747823907, -0.025718492411623006, 0.01056494736328612, 0.008221893404768942, 0.0004271720304807771],
-            [-0.004142036625458454, 0.020814164180226594, 0.02166684165948551, -0.005969951747631583, -0.004676535739979978],
+            [0.003796394160508141, 0.07527209994759597, -0.0012680063435009572, 0.0061414695027003875, -0.010001029394988675],
+            [-0.0035496461377487435, -0.168625205597484, -0.00715498920622323, -0.0021333488227879933, 0.01389008809979322],
+            [0.002167840747823907, 0.025718492411623006, -0.01056494736328612, -0.008221893404768942, -0.0004271720304807771],
+            [0.004142036625458454, -0.020814164180226594, -0.02166684165948551, 0.005969951747631583, 0.004676535739979978],
         ]
 
         for i in range(len(coeffs)):
