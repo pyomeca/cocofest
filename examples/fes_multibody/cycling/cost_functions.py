@@ -1,4 +1,4 @@
-from casadi import MX, vertcat, sum1, fabs, sign, tanh, if_else, log, exp, DM, dot, mmax
+from casadi import MX, vertcat, sum1, fabs, sign, tanh, if_else, log, exp, DM, dot, mmax, cos, sin
 from bioptim import PenaltyController
 from cocofest.models.ding2007.ding2007 import DingModelPulseWidthFrequency
 
@@ -139,7 +139,13 @@ class CustomCostFunctions:
                 "power": "1",
                 "state": "A_recovery",
             },
-
+            "minimize_useful_torque_fatigue_tradeoff": {
+                "function": self.minimize_useful_torque_fatigue_tradeoff,
+                "index": 21,
+                "description": "Minimize the average fatigue and recovery based on torque efficiency",
+                "power": "1",
+                "state": "tau_eff",
+            },
             "minimize_peak": {
                 "function": self.minimize_peak,
                 "index": 99,
@@ -645,6 +651,79 @@ class CustomCostFunctions:
         avg_fatigue = sum1(muscle_fatigue_decay) / muscle_range
         return avg_fatigue
 
+    @staticmethod
+    def minimize_useful_torque_fatigue_tradeoff(
+            controller: PenaltyController,
+    ) -> MX:
+        """
+        Minimize the fatigue and recuperation based on torque efficiency.
+
+        Parameters
+        ----------
+        controller: PenaltyController
+            The penalty node elements
+
+        Returns
+        -------
+        The average fatigue and recuperation based on torque efficiency
+        """
+        # --- Weights --- #
+        lambda_fatigue = 1.0
+        lambda_dA = 1.0
+        kappa_recovery = 1.0
+
+        # --- Get all information --- #
+        muscle_names, q, qdot, F, A, A_rest, tau_fat, alpha_a, fmax, dA = CustomCostFunctions.get_muscle_quantities(controller)
+
+        # --- Calculate useful torque based on force and muscle efficiency --- #
+        gamma = CustomCostFunctions.useful_gain_from_angle(q[2])
+        tau_use = vertcat(*[
+            if_else(gamma[i] * F[i] > 0, gamma[i] * F[i], 0)
+            for i in range(F.shape[0])
+        ])
+
+        # --- Fatigue and recovery --- #
+        cap = A / A_rest
+        fatigue = 1 - cap
+        dA_norm = CustomCostFunctions.normalized_dA(dA, A_rest, tau_fat, alpha_a, fmax)
+
+        # --- Build the adaptive weight --- #
+        adaptive_weight = vertcat(*[
+            1
+            + fatigue[i]
+            + kappa_recovery * if_else(dA_norm[i] < 0, -dA_norm[i], 0)
+            for i in range(F.shape[0])
+        ])
+
+        # --- Calculate the cost function --- #
+        use_term = vertcat(*[
+            adaptive_weight[i] * (tau_use[i] / fmax[i]) ** 2
+            for i in range(F.shape[0])
+        ])
+
+        fatigue_term = vertcat(*[
+            lambda_fatigue * fatigue[i] ** 2
+            for i in range(F.shape[0])
+        ])
+
+        dA_term = vertcat(*[
+            lambda_dA * if_else(dA_norm[i] < 0, (-dA_norm[i]) ** 2, 0)
+            for i in range(F.shape[0])
+        ])
+
+        return sum1(use_term + fatigue_term + dA_term) / len(muscle_names)
+
+    @staticmethod
+    def minimize_terminal_fatigue_reserve(controller: PenaltyController) -> MX:
+        muscle_names = controller.model.bio_model.muscle_names
+        A = vertcat(*[controller.states[f"A_{name}"].cx for name in muscle_names])
+        A_rest = vertcat(*[
+            controller.model.muscles_dynamics_model[i].a_scale
+            for i in range(len(muscle_names))
+        ])
+        reserve_loss = 1 - A / A_rest
+        return sum1(reserve_loss ** 2) / len(muscle_names)
+
     # --- Peak cost function and constraint used in OCP --- #
     @staticmethod
     def minimize_peak(controller: PenaltyController) -> MX:
@@ -728,3 +807,69 @@ class CustomCostFunctions:
         dA = -((A_t - A_rest) / tau_fat) + (alpha_a * F_t)
 
         return dA
+
+    @staticmethod
+    def get_muscle_quantities(controller: PenaltyController):
+        muscle_names = controller.model.bio_model.muscle_names
+
+        F = vertcat(*[controller.states[f"F_{name}"].cx for name in muscle_names])
+        A = vertcat(*[controller.states[f"A_{name}"].cx for name in muscle_names])
+
+        A_rest = vertcat(*[
+            controller.model.muscles_dynamics_model[i].a_scale
+            for i in range(len(muscle_names))
+        ])
+        tau_fat = vertcat(*[
+            controller.model.muscles_dynamics_model[i].tau_fat
+            for i in range(len(muscle_names))
+        ])
+        alpha_a = vertcat(*[
+            controller.model.muscles_dynamics_model[i].alpha_a
+            for i in range(len(muscle_names))
+        ])
+        fmax = vertcat(*[
+            controller.model.muscles_dynamics_model[i].fmax
+            for i in range(len(muscle_names))
+        ])
+
+        q = controller.states["q"].cx
+        qdot = controller.states["qdot"].cx
+        dA = CustomCostFunctions.calculate_dA(controller)
+
+        return muscle_names, q, qdot, F, A, A_rest, tau_fat, alpha_a, fmax, dA
+
+    @staticmethod
+    def useful_gain_from_angle(theta):
+        gains = []
+        coeffs = [
+            [-0.003796394160508141, -0.07527209994759597, 0.0012680063435009572,-0.0061414695027003875, 0.010001029394988675],
+            [0.0035496461377487435, 0.168625205597484, 0.00715498920622323, 0.0021333488227879933, -0.01389008809979322],
+            [-0.002167840747823907, -0.025718492411623006, 0.01056494736328612, 0.008221893404768942, 0.0004271720304807771],
+            [-0.004142036625458454, 0.020814164180226594, 0.02166684165948551, -0.005969951747631583, -0.004676535739979978],
+        ]
+
+        for i in range(len(coeffs)):
+            a0, a1, b1, a2, b2 = coeffs[i]
+            g = (
+                    a0
+                    + a1 * cos(theta)
+                    + b1 * sin(theta)
+                    + a2 * cos(2 * theta)
+                    + b2 * sin(2 * theta)
+            )
+            gains.append(g)
+        return vertcat(*gains)
+
+    @staticmethod
+    def normalized_dA(dA, A_rest, tau_fat, alpha_a, fmax):
+        max_dA_recovery = A_rest / tau_fat
+        max_dA_fatigue = -(alpha_a * fmax)
+
+        return vertcat(*[
+            if_else(
+                dA[i] < 0,
+                dA[i] / max_dA_fatigue[i],
+                dA[i] / max_dA_recovery[i]
+            )
+            for i in range(dA.shape[0])
+        ])

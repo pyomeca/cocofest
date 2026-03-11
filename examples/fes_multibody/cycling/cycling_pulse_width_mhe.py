@@ -637,7 +637,24 @@ def set_objective_functions(objective_fun_dict, recalculate=False):
     # --- Set main cost function --- #
     else:
         for i in range(len(keys)):
-            if keys[i] in ["minimize_peak_force", "minimize_peak_activation",
+            if keys[i] in ["minimize_useful_torque_fatigue_tradeoff"]:
+                objective_functions.add(
+                    custom_objective_functions[keys[i]]["function"],
+                    custom_type=ObjectiveFcn.Lagrange,
+                    node=Node.ALL,
+                    weight=weights,
+                    quadratic=False,
+                )
+
+                objective_functions.add(
+                    CustomCostFunctions.minimize_terminal_fatigue_reserve,
+                    custom_type=ObjectiveFcn.Mayer,
+                    node=Node.END,
+                    weight=weights*20,
+                    quadratic=False,
+                )
+
+            elif keys[i] in ["minimize_peak_force", "minimize_peak_activation",
                                           "minimize_peak_muscle_stress", "minimize_peak_fatigue", "minimize_peak_fatigue_decay"] and recalculate is False:
                 objective_functions.add(
                     custom_objective_functions["minimize_peak"]["function"],
@@ -1115,7 +1132,8 @@ if __name__ == "__main__":
             # ["minimize_root_mean_square_muscle_power"],
 
             # --- Recovery --- #
-            ["minimize_average_fatigue_and_recovery"],
+            # ["minimize_average_fatigue_and_recovery"],
+            ["minimize_useful_torque_fatigue_tradeoff"],
             ]
         },
         init_guess=False,
