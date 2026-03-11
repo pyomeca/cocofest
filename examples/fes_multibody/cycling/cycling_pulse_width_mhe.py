@@ -839,7 +839,6 @@ def save_sol_in_pkl(sol, simulation_conditions, nmpc, is_initial_guess=False, to
     number_of_turns_before_failing = len(sol[2])
     convergence_status = [sol[1][i].status for i in range(len(sol[1]))]
     cost_function = np.array(simulation_conditions["cost_fun_key"], dtype=np.str_)
-    cost_function_weight = simulation_conditions["cost_fun_weight"]
 
     # --- Convert all data into lists for compatibility across Python versions --- #
     time = time.tolist()
@@ -862,7 +861,6 @@ def save_sol_in_pkl(sol, simulation_conditions, nmpc, is_initial_guess=False, to
         "polynomial_order": solution.ocp.nlp[0].dynamics_type.ode_solver.polynomial_degree,
         "applied_torque": torque,
         "cost_function": cost_function,
-        "cost_function_weight": cost_function_weight,
     }
 
     recalculate_objective = False
