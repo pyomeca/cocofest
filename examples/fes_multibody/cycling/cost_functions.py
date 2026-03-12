@@ -651,102 +651,143 @@ class CustomCostFunctions:
         avg_fatigue = sum1(muscle_fatigue_decay) / muscle_range
         return avg_fatigue
 
+    # @staticmethod
+    # def minimize_useful_torque_fatigue_tradeoff(
+    #         controller: PenaltyController,
+    # ) -> MX:
+    #     """
+    #     Minimize the fatigue and recuperation based on torque efficiency.
+    #
+    #     Parameters
+    #     ----------
+    #     controller: PenaltyController
+    #         The penalty node elements
+    #
+    #     Returns
+    #     -------
+    #     The average fatigue and recuperation based on torque efficiency
+    #     """
+    #     # --- Weights --- #
+    #     lambda_fatigue = 1.0
+    #     lambda_dA = 1.0
+    #     kappa_recovery = 1.0
+    #
+    #     # --- Get all information --- #
+    #     muscle_names, q, qdot, F, A, A_rest, tau_fat, alpha_a, fmax, dA = CustomCostFunctions.get_muscle_quantities(controller)
+    #
+    #     # --- Calculate useful torque based on force and muscle efficiency --- #
+    #     gamma = CustomCostFunctions.useful_gain_from_angle(q[2])
+    #
+    #     gamma_tanh = vertcat(
+    #         *[(1 + tanh(10*gamma[x]))
+    #           for x in range(F.shape[0])
+    #           ]
+    #     )
+    #
+    #
+    #     # tau_use = vertcat(*[
+    #     #     if_else(gamma[i] * F[i] > 0, gamma[i] * F[i], 0)
+    #     #     for i in range(F.shape[0])
+    #     # ])
+    #
+    #     muscle_motion_contrib = [0.16259391348727756, 0.32644352775103314, 0.06473043181533218, 0.07310528260037236]
+    #     muscle_motion_contrib_norm = [muscle_contrib/max(muscle_motion_contrib) for muscle_contrib in muscle_motion_contrib]
+    #
+    #     muscle_fatigability = [-alpha_a[i]/A_rest[i] for i in range(F.shape[0])]
+    #     muscle_fatigability_norm = [muscle_fat/max(muscle_fatigability) for muscle_fat in muscle_fatigability]
+    #
+    #     muscle_importance_weight = [muscle_motion_contrib_norm[i] * muscle_fatigability_norm[i] for i in range(F.shape[0])]
+    #
+    #     torque_distribution = [(muscle_importance_weight[i] / (gamma_tanh[i] + 1e-8)) * F[i] for i in range(F.shape[0])]
+    #
+    #
+    #     # --- Fatigue and recovery --- #
+    #     cap = A / A_rest
+    #     fatigue = 1 - cap
+    #     dA_norm = CustomCostFunctions.normalized_dA(dA, A_rest, tau_fat, alpha_a, fmax)
+    #
+    #     # --- Build the adaptive weight --- #
+    #     adaptive_weight = vertcat(*[
+    #         1
+    #         + fatigue[i]
+    #         + kappa_recovery * if_else(dA_norm[i] < 0, -dA_norm[i], 0)
+    #         for i in range(F.shape[0])
+    #     ])
+    #
+    #     # --- Calculate the cost function --- #
+    #     # use_term = vertcat(*[
+    #     #     adaptive_weight[i] * (tau_use[i] / fmax[i]) ** 2
+    #     #     for i in range(F.shape[0])
+    #     # ])
+    #
+    #     # fatigue_term = vertcat(*[
+    #     #     lambda_fatigue * fatigue[i] ** 2
+    #     #     for i in range(F.shape[0])
+    #     # ])
+    #     fatigue_term = vertcat(*[
+    #         lambda_fatigue * (10 ** (4 * fatigue[i]))
+    #         for i in range(F.shape[0])
+    #     ])
+    #
+    #     # dA_term = vertcat(*[
+    #     #     lambda_dA * if_else(dA_norm[i] < 0, (-dA_norm[i]) ** 2, 0)
+    #     #     for i in range(F.shape[0])
+    #     # ])
+    #     dA_term = vertcat(
+    #         *[(1 + tanh(-dA_norm[x]))
+    #             for x in range(F.shape[0])
+    #         ]
+    #     )
+    #
+    #     # return sum1(use_term + fatigue_term + dA_term) / len(muscle_names)
+    #
+    #     cost_fun = vertcat(
+    #         *[torque_distribution[i] * fatigue_term[i] * dA_term[i]
+    #             for i in range(F.shape[0])
+    #         ]
+    #     )
+    #     return sum1(cost_fun) / len(muscle_names)
+
     @staticmethod
-    def minimize_useful_torque_fatigue_tradeoff(
-            controller: PenaltyController,
-    ) -> MX:
-        """
-        Minimize the fatigue and recuperation based on torque efficiency.
-
-        Parameters
-        ----------
-        controller: PenaltyController
-            The penalty node elements
-
-        Returns
-        -------
-        The average fatigue and recuperation based on torque efficiency
-        """
-        # --- Weights --- #
-        lambda_fatigue = 1.0
-        lambda_dA = 1.0
-        kappa_recovery = 1.0
-
-        # --- Get all information --- #
+    def minimize_useful_torque_fatigue_tradeoff(controller: PenaltyController) -> MX:
+        kappa_recovery = 1
+        lambda_fatigue = 1
+        lambda_dA = 1
         muscle_names, q, qdot, F, A, A_rest, tau_fat, alpha_a, fmax, dA = CustomCostFunctions.get_muscle_quantities(controller)
 
-        # --- Calculate useful torque based on force and muscle efficiency --- #
         gamma = CustomCostFunctions.useful_gain_from_angle(q[2])
+        tau_use = vertcat(*[
+            if_else(gamma[i] * F[i] > 0, gamma[i] * F[i], 0)
+            for i in range(F.shape[0])
+        ])
 
-        gamma_tanh = vertcat(
-            *[(1 + tanh(10*gamma[x]))
-              for x in range(F.shape[0])
-              ]
-        )
-
-
-        # tau_use = vertcat(*[
-        #     if_else(gamma[i] * F[i] > 0, gamma[i] * F[i], 0)
-        #     for i in range(F.shape[0])
-        # ])
-
-        muscle_motion_contrib = [0.16259391348727756, 0.32644352775103314, 0.06473043181533218, 0.07310528260037236]
-        muscle_motion_contrib_norm = [muscle_contrib/max(muscle_motion_contrib) for muscle_contrib in muscle_motion_contrib]
-
-        muscle_fatigability = [-alpha_a[i]/A_rest[i] for i in range(F.shape[0])]
-        muscle_fatigability_norm = [muscle_fat/max(muscle_fatigability) for muscle_fat in muscle_fatigability]
-
-        muscle_importance_weight = [muscle_motion_contrib_norm[i] * muscle_fatigability_norm[i] for i in range(F.shape[0])]
-
-        torque_distribution = [(muscle_importance_weight[i] / (gamma_tanh[i] + 1e-8)) * F[i] for i in range(F.shape[0])]
-
-
-        # --- Fatigue and recovery --- #
         cap = A / A_rest
         fatigue = 1 - cap
+
         dA_norm = CustomCostFunctions.normalized_dA(dA, A_rest, tau_fat, alpha_a, fmax)
 
-        # --- Build the adaptive weight --- #
         adaptive_weight = vertcat(*[
-            1
-            + fatigue[i]
-            + kappa_recovery * if_else(dA_norm[i] < 0, -dA_norm[i], 0)
+            1 + fatigue[i] + kappa_recovery * if_else(dA_norm[i] < 0, -dA_norm[i], 0)
             for i in range(F.shape[0])
         ])
 
-        # --- Calculate the cost function --- #
-        # use_term = vertcat(*[
-        #     adaptive_weight[i] * (tau_use[i] / fmax[i]) ** 2
-        #     for i in range(F.shape[0])
-        # ])
+        use_term = vertcat(*[
+            adaptive_weight[i] * (tau_use[i] / (fmax[i])) ** 2
+            for i in range(F.shape[0])
+        ])
 
-        # fatigue_term = vertcat(*[
-        #     lambda_fatigue * fatigue[i] ** 2
-        #     for i in range(F.shape[0])
-        # ])
         fatigue_term = vertcat(*[
-            lambda_fatigue * (10 ** (4 * fatigue[i]))
+            lambda_fatigue * fatigue[i] ** 2
             for i in range(F.shape[0])
         ])
 
-        # dA_term = vertcat(*[
-        #     lambda_dA * if_else(dA_norm[i] < 0, (-dA_norm[i]) ** 2, 0)
-        #     for i in range(F.shape[0])
-        # ])
-        dA_term = vertcat(
-            *[(1 + tanh(-dA_norm[x]))
-                for x in range(F.shape[0])
-            ]
-        )
+        dA_term = vertcat(*[
+            lambda_dA * if_else(dA_norm[i] < 0, (-dA_norm[i]) ** 2, 0)
+            for i in range(F.shape[0])
+        ])
 
-        # return sum1(use_term + fatigue_term + dA_term) / len(muscle_names)
+        return sum1(use_term + fatigue_term + dA_term) / len(muscle_names)
 
-        cost_fun = vertcat(
-            *[torque_distribution[i] * fatigue_term[i] * dA_term[i]
-                for i in range(F.shape[0])
-            ]
-        )
-        return sum1(cost_fun) / len(muscle_names)
 
     @staticmethod
     def minimize_terminal_fatigue_reserve(controller: PenaltyController) -> MX:
