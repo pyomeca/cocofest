@@ -1,6 +1,10 @@
 from casadi import MX, vertcat, sum1, fabs, sign, tanh, if_else, log, exp, DM, dot, mmax, mmin, cos, sin
 from bioptim import PenaltyController
 from cocofest.models.ding2007.ding2007 import DingModelPulseWidthFrequency
+from cocofest.models.hill_coefficients import (muscle_force_length_coefficient,
+                                               muscle_force_velocity_coefficient,
+                                               muscle_passive_force_coefficient)
+
 
 class CustomCostFunctions:
     def __init__(self):
@@ -155,9 +159,13 @@ class CustomCostFunctions:
                 "state": "A_recovery",
             },
 
-
-
-
+            "minimize_average_fatigue_and_recovery_3": {
+                "function": self.minimize_average_fatigue_and_recovery_3,
+                "index": 23,
+                "description": "Minimize the average fatigue and recovery",
+                "power": "1",
+                "state": "A_recovery",
+            },
 
             "minimize_peak": {
                 "function": self.minimize_peak,
@@ -713,6 +721,34 @@ class CustomCostFunctions:
         )
         avg_cost= sum1(cost) / F.shape[0]
         return avg_cost
+
+    @staticmethod
+    def minimize_average_fatigue_and_recovery_3(controller: PenaltyController) -> MX:
+        """
+        Minimize the average fatigue and recuperation.
+
+        Parameters
+        ----------
+        controller: PenaltyController
+            The penalty node elements
+
+        Returns
+        -------
+        The average fatigue and recuperation
+        """
+
+        # --- Get all information --- #
+        muscle_names, q, qdot, F, A, A_rest, tau_fat, alpha_a, fmax, dA = CustomCostFunctions.get_muscle_quantities(
+            controller)
+
+        # --- Fatigue --- #
+        weight_fatigue = [1.0, 0.0, 0.7316463404270923, 0.0]
+        cost_fatigue = [(A_rest[i] - A[i])**2 for i in range(F.shape[0])]
+
+        # --- Cost function --- #
+        cost = vertcat(*[weight_fatigue[i] * cost_fatigue[i] for i in range(F.shape[0])])
+        rms_cost = (sum1(cost) / F.shape[0]) ** (1/2)
+        return rms_cost
 
 
 

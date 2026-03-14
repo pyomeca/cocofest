@@ -1130,7 +1130,7 @@ if __name__ == "__main__":
             # ["minimize_root_mean_square_muscle_power"],
 
             # --- Recovery --- #
-            ["minimize_average_fatigue_and_recovery_2"],
+            ["minimize_average_fatigue_and_recovery_3"],
             # ["minimize_useful_torque_fatigue_tradeoff"],
             ]
         },
