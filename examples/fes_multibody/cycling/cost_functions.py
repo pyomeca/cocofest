@@ -761,9 +761,8 @@ class CustomCostFunctions:
         A_min = [41, 70, 379, 932]
 
         # --- Fatigue --- #
-        # weight_fatigue = [1.0, 0.0, 0.7316463404270923, 0.0]
         weight_fatigue = [1.0, 0.6104101922170402, 0.754209800965523, 0.0]
-        cost_fatigue = [(1 - ((A_rest[i] - A[i])/A_min[i]))**2 for i in range(F.shape[0])]
+        cost_fatigue = [((A_rest[i] - A[i]) / (A_rest[i] - A_min[i] + 1e-8)) ** 2 for i in range(F.shape[0])]
 
         # --- Cost function --- #
         cost = vertcat(*[weight_fatigue[i] * cost_fatigue[i] for i in range(F.shape[0])])
@@ -794,8 +793,7 @@ class CustomCostFunctions:
 
         # --- Fatigue --- #
         weight_fatigue = [1.0, 0.6104101922170402, 0.754209800965523, 0.0]
-        cost_fatigue = [(1 - ((A_rest[i] - A[i]) / A_min[i])) ** 2 for i in range(F.shape[0])]
-
+        cost_fatigue = [((A_rest[i] - A[i]) / (A_rest[i] - A_min[i] + 1e-8)) ** 2 for i in range(F.shape[0])]
 
         # --- Recovery --- #
         dA_nomalized = vertcat(
