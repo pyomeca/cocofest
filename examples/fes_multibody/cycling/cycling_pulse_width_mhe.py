@@ -1132,7 +1132,7 @@ if __name__ == "__main__":
             # --- Recovery --- #
             ["minimize_average_fatigue_and_recovery_3"],
             ["minimize_average_fatigue_and_recovery_4"],
-            ["minimize_torque_deficit_area"],
+            #["minimize_torque_deficit_area"],
             # ["minimize_useful_torque_fatigue_tradeoff"],
             ]
         },

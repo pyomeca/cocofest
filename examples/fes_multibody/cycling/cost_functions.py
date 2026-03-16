@@ -762,7 +762,7 @@ class CustomCostFunctions:
 
         # --- Fatigue --- #
         # weight_fatigue = [1.0, 0.0, 0.7316463404270923, 0.0]
-        weight_fatigue = [0.9536847967328755, 0.9330995253122598, 1.0, 0.0]
+        weight_fatigue = [1.0, 0.6104101922170402, 0.754209800965523, 0.0]
         cost_fatigue = [(1 - ((A_rest[i] - A[i])/A_min[i]))**2 for i in range(F.shape[0])]
 
         # --- Cost function --- #
@@ -793,7 +793,7 @@ class CustomCostFunctions:
         max_dA_fatigue = [-(alpha_a[x] * fmax[x]) for x in range(F.shape[0])]
 
         # --- Fatigue --- #
-        weight_fatigue = [0.9536847967328755, 0.9330995253122598, 1.0, 0.0]
+        weight_fatigue = [1.0, 0.6104101922170402, 0.754209800965523, 0.0]
         cost_fatigue = [(1 - ((A_rest[i] - A[i]) / A_min[i])) ** 2 for i in range(F.shape[0])]
 
 
