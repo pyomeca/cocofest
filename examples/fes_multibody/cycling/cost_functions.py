@@ -167,6 +167,24 @@ class CustomCostFunctions:
                 "state": "A_recovery",
             },
 
+            "minimize_average_fatigue_and_recovery_4": {
+                "function": self.minimize_average_fatigue_and_recovery_4,
+                "index": 24,
+                "description": "Minimize the average fatigue and recovery",
+                "power": "1",
+                "state": "A_recovery",
+            },
+
+            "minimize_torque_deficit_area": {
+                "function": self.minimize_torque_deficit_area,
+                "index": 25,
+                "latex": r"\phi_{24}=\left(\tau_{\mathrm{thr}}-\sum_{m=1}^{M}[\gamma^m(\theta)F^m]_+\right)_+|\dot{\theta}|",
+                "description": "Minimize the crank-angle area where useful torque is below threshold",
+                "power": "1",
+                "state": r"\tau_{\mathrm{def}}",
+            },
+
+
             "minimize_peak": {
                 "function": self.minimize_peak,
                 "index": 99,
@@ -740,14 +758,57 @@ class CustomCostFunctions:
         # --- Get all information --- #
         muscle_names, q, qdot, F, A, A_rest, tau_fat, alpha_a, fmax, dA = CustomCostFunctions.get_muscle_quantities(
             controller)
+        A_min = [41, 70, 379, 932]
 
         # --- Fatigue --- #
-        weight_fatigue = [1.0, 0.0, 0.7316463404270923, 0.0]
-        cost_fatigue = [(A_rest[i] - A[i])**2 for i in range(F.shape[0])]
+        # weight_fatigue = [1.0, 0.0, 0.7316463404270923, 0.0]
+        weight_fatigue = [0.9536847967328755, 0.9330995253122598, 1.0, 0.0]
+        cost_fatigue = [(1 - ((A_rest[i] - A[i])/A_min[i]))**2 for i in range(F.shape[0])]
 
         # --- Cost function --- #
         cost = vertcat(*[weight_fatigue[i] * cost_fatigue[i] for i in range(F.shape[0])])
-        rms_cost = (sum1(cost) / F.shape[0]) ** (1/2)
+        rms_cost = (sum1(cost) / F.shape[0] + 1e-8) ** (1/2)
+        return rms_cost
+
+    @staticmethod
+    def minimize_average_fatigue_and_recovery_4(controller: PenaltyController) -> MX:
+        """
+        Minimize the average fatigue and recuperation.
+
+        Parameters
+        ----------
+        controller: PenaltyController
+            The penalty node elements
+
+        Returns
+        -------
+        The average fatigue and recuperation
+        """
+
+        # --- Get all information --- #
+        muscle_names, q, qdot, F, A, A_rest, tau_fat, alpha_a, fmax, dA = CustomCostFunctions.get_muscle_quantities(
+            controller)
+        A_min = [41, 70, 379, 932]
+        max_dA_recovery = [A_rest[x] / tau_fat[x] for x in range(F.shape[0])]
+        max_dA_fatigue = [-(alpha_a[x] * fmax[x]) for x in range(F.shape[0])]
+
+        # --- Fatigue --- #
+        weight_fatigue = [0.9536847967328755, 0.9330995253122598, 1.0, 0.0]
+        cost_fatigue = [(1 - ((A_rest[i] - A[i]) / A_min[i])) ** 2 for i in range(F.shape[0])]
+
+
+        # --- Recovery --- #
+        dA_nomalized = vertcat(
+            *[
+                if_else(dA[x] < 0, dA[x] / max_dA_fatigue[x], dA[x] / max_dA_recovery[x])
+                for x in range(F.shape[0])
+            ]
+        )
+        cost_recovery = [(1 + tanh(-dA_nomalized[i])) for i in range(F.shape[0])]
+
+        # --- Cost function --- #
+        cost = vertcat(*[weight_fatigue[i] * cost_fatigue[i] * cost_recovery[i] for i in range(F.shape[0])])
+        rms_cost = (sum1(cost) / F.shape[0] + 1e-8) ** (1 / 2)
         return rms_cost
 
 
@@ -901,6 +962,46 @@ class CustomCostFunctions:
         reserve_loss = 1 - A / A_rest
         return sum1(reserve_loss ** 2) / len(muscle_names)
 
+
+    @staticmethod
+    def minimize_torque_deficit_area(
+            controller: PenaltyController,
+    ) -> MX:
+        """
+        Minimize the crank-angle area where useful torque is below a threshold.
+
+        This implements:
+            integral( max(threshold - tau_use(theta), 0) dtheta )
+
+        Since the OCP is integrated over time, the node-wise Lagrange term is:
+            max(threshold - tau_use, 0) * abs(theta_dot)
+
+        Parameters
+        ----------
+        controller: PenaltyController
+            The penalty node elements
+
+        Returns
+        -------
+        MX
+            Instantaneous deficit-area density
+        """
+        muscle_names, q, qdot, F, A, A_rest, tau_fat, alpha_a, fmax, dA = \
+            CustomCostFunctions.get_muscle_quantities(controller)
+
+        moment_arm = CustomCostFunctions.get_moment_arm_from_angle(q[2])
+        tau_use_per_muscle = vertcat(*[moment_arm[i] * F[i] for i in range(F.shape[0])])
+
+        tau_use_total = sum1(tau_use_per_muscle)
+        torque_deficit = 0.20 - tau_use_total
+        positive_deficit = fabs(torque_deficit)
+
+        angular_weight = fabs(qdot[2])  # Convert time integral into crank-angle integral: dtheta = |theta_dot| dt
+        cost = positive_deficit * angular_weight
+
+        return cost
+
+
     # --- Peak cost function and constraint used in OCP --- #
     @staticmethod
     def minimize_peak(controller: PenaltyController) -> MX:
@@ -1023,6 +1124,32 @@ class CustomCostFunctions:
             [-0.0035496461377487435, -0.168625205597484, -0.00715498920622323, -0.0021333488227879933, 0.01389008809979322],
             [0.002167840747823907, 0.025718492411623006, -0.01056494736328612, -0.008221893404768942, -0.0004271720304807771],
             [0.004142036625458454, -0.020814164180226594, -0.02166684165948551, 0.005969951747631583, 0.004676535739979978],
+        ]
+
+        for i in range(len(coeffs)):
+            a0, a1, b1, a2, b2 = coeffs[i]
+            g = (
+                    a0
+                    + a1 * cos(theta)
+                    + b1 * sin(theta)
+                    + a2 * cos(2 * theta)
+                    + b2 * sin(2 * theta)
+            )
+            gains.append(g)
+        return vertcat(*gains)
+
+    @staticmethod
+    def get_moment_arm_from_angle(theta):
+        gains = []
+        coeffs = [
+            [0.004161487758942413, 0.1073083139877185, -0.0015211682786977012, 0.00824887333313916,
+             -0.004961689555209104],
+            [-0.005257685768086165, -0.17937397449870182, -0.006646755380076929, -0.003783181999089678,
+             0.02065945437924536],
+            [0.0025016818882907517, 0.03586617223381479, -0.014120195346288443, -0.01071484060626549,
+             0.001829055148093859],
+            [0.004146157359059304, -0.021729857362885213, -0.022603532576381705, 0.007384693394067062,
+             0.004975602705321599],
         ]
 
         for i in range(len(coeffs)):
