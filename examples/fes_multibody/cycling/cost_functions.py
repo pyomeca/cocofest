@@ -758,11 +758,12 @@ class CustomCostFunctions:
         # --- Get all information --- #
         muscle_names, q, qdot, F, A, A_rest, tau_fat, alpha_a, fmax, dA = CustomCostFunctions.get_muscle_quantities(
             controller)
-        A_min = [41, 70, 379, 932]
+        # A_min = [41, 70, 379, 932]
 
         # --- Fatigue --- #
-        weight_fatigue = vertcat([1.0, 0.6104101922170402, 0.754209800965523, 0.0]) * 10000
-        cost_fatigue = [((A_rest[i] - A[i]) / (A_rest[i] - A_min[i] + 1e-8)) ** 2 for i in range(F.shape[0])]
+        weight_fatigue = vertcat([100.0, 1, 5, 0.0])
+        # cost_fatigue = [((A_rest[i] - A[i]) / (A_rest[i] - A_min[i] + 1e-8)) ** 2 for i in range(F.shape[0])]
+        cost_fatigue = [(A_rest[i] - A[i]) ** 2 for i in range(F.shape[0])]
 
         # --- Cost function --- #
         cost = vertcat(*[weight_fatigue[i] * cost_fatigue[i] for i in range(F.shape[0])])
