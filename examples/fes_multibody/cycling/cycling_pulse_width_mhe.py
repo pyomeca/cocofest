@@ -668,7 +668,7 @@ def set_objective_functions(objective_fun_dict, recalculate=False):
                     custom_objective_functions[keys[i]]["function"],
                     custom_type=ObjectiveFcn.Lagrange,
                     node=Node.ALL,
-                    weight=weights,
+                    weight=1, # weights,
                     quadratic=False,
                 )
 

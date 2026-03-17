@@ -766,33 +766,33 @@ class CustomCostFunctions:
         The average fatigue and recuperation
         """
 
-        # # --- Get all information --- #
-        # muscle_names, q, qdot, F, A, A_rest, tau_fat, alpha_a, fmax, dA = CustomCostFunctions.get_muscle_quantities(
-        #     controller)
-        # # A_min = [41, 70, 379, 932]
-        #
-        # # --- Fatigue --- #
-        # weight_fatigue = vertcat([100.0, 1, 5, 0.0])
-        # # cost_fatigue = [((A_rest[i] - A[i]) / (A_rest[i] - A_min[i] + 1e-8)) ** 2 for i in range(F.shape[0])]
-        # cost_fatigue = [(A_rest[i] - A[i]) ** 2 for i in range(F.shape[0])]
-        #
-        # # --- Cost function --- #
-        # cost = vertcat(*[weight_fatigue[i] * cost_fatigue[i] for i in range(F.shape[0])])
-        # rms_cost = (sum1(cost) / F.shape[0] + 1e-8) ** (1/2)
+        # --- Get all information --- #
+        muscle_names, q, qdot, F, A, A_rest, tau_fat, alpha_a, fmax, dA = CustomCostFunctions.get_muscle_quantities(
+            controller)
+        # A_min = [41, 70, 379, 932]
 
-        muscle_weights = vertcat([100.0, 1, 5, 0.0])
-        eps = 1e-8
-        muscle_name_list = controller.model.bio_model.muscle_names
-        muscle_fatigue = vertcat(
-            *[
-                muscle_weights[x]
-                * (controller.model.muscles_dynamics_model[x].a_scale - controller.states[
-                    "A_" + muscle_name_list[x]].cx) ** 2
-                for x in range(len(muscle_name_list))
-            ]
-        )
-        rms_fatigue = (sum1(muscle_fatigue) / len(muscle_name_list) + eps) ** 0.5
-        return rms_fatigue
+        # --- Fatigue --- #
+        weight_fatigue = vertcat([100.0, 1, 5, 0.0])
+        # cost_fatigue = [((A_rest[i] - A[i]) / (A_rest[i] - A_min[i] + 1e-8)) ** 2 for i in range(F.shape[0])]
+        cost_fatigue = [(A_rest[i] - A[i]) ** 2 for i in range(F.shape[0])]
+
+        # --- Cost function --- #
+        cost = vertcat(*[weight_fatigue[i] * cost_fatigue[i] for i in range(F.shape[0])])
+        rms_cost = (sum1(cost) / F.shape[0] + 1e-8) ** (1/2)
+
+        # muscle_weights = vertcat([100.0, 1, 5, 0.0])
+        # eps = 1e-8
+        # muscle_name_list = controller.model.bio_model.muscle_names
+        # muscle_fatigue = vertcat(
+        #     *[
+        #         muscle_weights[x]
+        #         * (controller.model.muscles_dynamics_model[x].a_scale - controller.states[
+        #             "A_" + muscle_name_list[x]].cx) ** 2
+        #         for x in range(len(muscle_name_list))
+        #     ]
+        # )
+        # rms_fatigue = (sum1(muscle_fatigue) / len(muscle_name_list) + eps) ** 0.5
+        return rms_cost
 
     @staticmethod
     def minimize_average_fatigue_and_recovery_4(controller: PenaltyController) -> MX:
