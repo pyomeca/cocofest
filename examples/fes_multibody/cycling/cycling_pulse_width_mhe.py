@@ -308,18 +308,22 @@ def prepare_nmpc(
     n_cycles_simultaneous = mhe_info["n_cycles_simultaneous"]
     ode_solver = mhe_info["ode_solver"]
     use_sx = mhe_info["use_sx"]
+
+    # --- Pickle file info --- #
+    initial_guess_path = simulation_conditions["init_guess_file_path"]
+
     window_n_shooting = cycle_len * n_cycles_simultaneous
     window_cycle_duration = cycle_duration * n_cycles_simultaneous
+
     # --- Cycling info --- #
     turn_number = cycling_info["turn_number"]
     pedal_config = cycling_info["pedal_config"]
     external_force = cycling_info["resistive_torque"]
+
     # --- Cost function info --- #
     objective_fun_dict = {"cost_fun_key": simulation_conditions["cost_fun_key"],
                           "cost_fun_weight": 10000,
                           "individual_quadratic": True}
-    # --- Pickle file info --- #
-    initial_guess_path = simulation_conditions["init_guess_file_path"]
 
     # --- Set dynamics --- #
     # --- External force numerical time series --- #
@@ -376,9 +380,6 @@ def prepare_nmpc(
 
     # --- Update model for resistive torque --- #
     model = updating_model(model=model, external_force_set=external_force_set, parameters=parameters)
-    if objective_fun_dict["cost_fun_key"][0] == "minimize_failure_point":
-        import joblib
-        model.barrier_model = joblib.load("failure_index_model_from_failure_points.joblib")
 
     return MyCyclicNMPC(
         bio_model=[model],
@@ -637,24 +638,7 @@ def set_objective_functions(objective_fun_dict, recalculate=False):
     # --- Set main cost function --- #
     else:
         for i in range(len(keys)):
-            if keys[i] in ["minimize_useful_torque_fatigue_tradeoff"]:
-                objective_functions.add(
-                    custom_objective_functions[keys[i]]["function"],
-                    custom_type=ObjectiveFcn.Lagrange,
-                    node=Node.ALL,
-                    weight=weights,
-                    quadratic=False,
-                )
-
-                objective_functions.add(
-                    CustomCostFunctions.minimize_terminal_fatigue_reserve,
-                    custom_type=ObjectiveFcn.Mayer,
-                    node=Node.END,
-                    weight=weights*20,
-                    quadratic=False,
-                )
-
-            elif keys[i] in ["minimize_peak_force", "minimize_peak_activation",
+            if keys[i] in ["minimize_peak_force", "minimize_peak_activation",
                                           "minimize_peak_muscle_stress", "minimize_peak_fatigue", "minimize_peak_fatigue_decay"] and recalculate is False:
                 objective_functions.add(
                     custom_objective_functions["minimize_peak"]["function"],
@@ -668,7 +652,7 @@ def set_objective_functions(objective_fun_dict, recalculate=False):
                     custom_objective_functions[keys[i]]["function"],
                     custom_type=ObjectiveFcn.Lagrange,
                     node=Node.ALL,
-                    weight=1, # weights,
+                    weight=weights,
                     quadratic=False,
                 )
 
@@ -990,10 +974,10 @@ def run_optim(mhe_info, cycling_info, simulation_conditions, model_path, save_so
     def update_functions(_nmpc: MultiCyclicNonlinearModelPredictiveControl, cycle_idx: int, _sol: Solution):
         if _sol:
             print("Optimized window n°" + str(cycle_idx))
-            sol = _sol.decision_states(to_merge=SolutionMerge.NODES)
+            result_sol = _sol.decision_states(to_merge=SolutionMerge.NODES)
             muscles = _sol.ocp.nlp[0].model.muscle_names
             a_rest_list = [_sol.ocp.nlp[0].model.muscles_dynamics_model[i].a_rest for i in range(len(muscles))]
-            a_t_list = [sol["A_" + muscles[i]][0][-1] for i in range(len(muscles))]
+            a_t_list = [result_sol["A_" + muscles[i]][0][-1] for i in range(len(muscles))]
             fatigue_percentage = [round(((a_rest_list[i] - a_t_list[i]) / (a_rest_list[i])) * 100, 2) for i in
                                   range(len(muscles))]
             for i in range(len(muscles)):
