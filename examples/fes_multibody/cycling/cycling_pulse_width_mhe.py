@@ -1082,8 +1082,8 @@ def main(
 if __name__ == "__main__":
     main(
         stimulation_frequency=30,
-        n_total_cycle=3000,
-        n_cycles_simultaneous=[2],
+        n_total_cycle=10000,
+        n_cycles_simultaneous=[2, 3, 4, 5],
         resistive_torque=-0.20,  # (N.m)
         cost_fun_dict={"optimized_function": [
             # --- Pulse width --- #
@@ -1114,11 +1114,8 @@ if __name__ == "__main__":
             # ["minimize_root_mean_square_muscle_power"],
 
             # --- Recovery --- #
-            ["minimize_average_fatigue_and_recovery_3"],
-            ["minimize_average_fatigue_and_recovery_4"],
-            ["minimize_average_fatigue_and_recovery_5"],
-            #["minimize_torque_deficit_area"],
-            # ["minimize_useful_torque_fatigue_tradeoff"],
+            ["minimize_average_fatigue_and_recovery"],
+            ["minimize_average_fatigue_and_recovery_2"],
             ]
         },
         init_guess=False,

@@ -143,58 +143,13 @@ class CustomCostFunctions:
                 "power": "1",
                 "state": "A_recovery",
             },
-            "minimize_useful_torque_fatigue_tradeoff": {
-                "function": self.minimize_useful_torque_fatigue_tradeoff,
-                "index": 21,
-                "description": "Minimize the average fatigue and recovery based on torque efficiency",
-                "power": "1",
-                "state": "tau_eff",
-            },
-
             "minimize_average_fatigue_and_recovery_2": {
                 "function": self.minimize_average_fatigue_and_recovery_2,
-                "index": 22,
+                "index": 21,
                 "description": "Minimize the average fatigue and recovery",
                 "power": "1",
                 "state": "A_recovery",
             },
-
-            "minimize_average_fatigue_and_recovery_3": {
-                "function": self.minimize_average_fatigue_and_recovery_3,
-                "index": 23,
-                "description": "Minimize the average fatigue and recovery",
-                "power": "1",
-                "state": "A_recovery",
-            },
-
-            "minimize_average_fatigue_and_recovery_4": {
-                "function": self.minimize_average_fatigue_and_recovery_4,
-                "index": 24,
-                "description": "Minimize the average fatigue and recovery",
-                "power": "1",
-                "state": "A_recovery",
-            },
-
-            "minimize_average_fatigue_and_recovery_5": {
-                "function": self.minimize_average_fatigue_and_recovery_5,
-                "index": 25,
-                "description": "Minimize the average fatigue and recovery",
-                "power": "1",
-                "state": "A_recovery",
-            },
-
-            # "minimize_torque_deficit_area": {
-            #     "function": self.minimize_torque_deficit_area,
-            #     "index": 25,
-            #     "latex": r"\phi_{24}=\left(\tau_{\mathrm{thr}}-\sum_{m=1}^{M}[\gamma^m(\theta)F^m]_+\right)_+|\dot{\theta}|",
-            #     "description": "Minimize the crank-angle area where useful torque is below threshold",
-            #     "power": "1",
-            #     "state": r"\tau_{\mathrm{def}}",
-            # },
-            #
-            #
-            #
-            #
 
             "minimize_peak": {
                 "function": self.minimize_peak,
@@ -667,104 +622,6 @@ class CustomCostFunctions:
         -------
         The average fatigue and recuperation
         """
-        muscle_name_list = controller.model.bio_model.muscle_names
-        dA = CustomCostFunctions.calculate_dA(controller)
-        A_rest = [controller.model.muscles_dynamics_model[x].a_scale for x in range(len(muscle_name_list))]
-        tau_fat = [controller.model.muscles_dynamics_model[x].tau_fat for x in range(len(muscle_name_list))]
-        alpha_a = [controller.model.muscles_dynamics_model[x].alpha_a for x in range(len(muscle_name_list))]
-        fmax = [controller.model.muscles_dynamics_model[x].fmax for x in range(len(muscle_name_list))]
-        normed_a = [A / max(A_rest) for A in A_rest]
-
-        max_dA_recovery = [A_rest[x]/tau_fat[x] for x in range(len(muscle_name_list))]
-        max_dA_fatigue = [-(alpha_a[x] * fmax[x]) for x in range(len(muscle_name_list))]
-
-        with_triceps = True
-        muscle_range = 4 if with_triceps else 3
-
-        dA_nomalized = vertcat(
-            *[
-                if_else(dA[x] < 0, dA[x] / max_dA_fatigue[x], dA[x] / max_dA_recovery[x])
-                for x in range(muscle_range)
-            ]
-        )
-
-        A_t = vertcat(*[controller.states["A_" + muscle_name_list[x]].cx for x in range(len(muscle_name_list))])
-        fatigue = [((A_rest[i] - A_t[i]) / (A_rest[i])) for i in range(muscle_range)]
-
-        muscle_fatigue_decay = vertcat(
-            *[
-                normed_a[x] * (10 ** (4 * fatigue[x])) * (1 + tanh(-dA_nomalized[x]))
-                for x in range(muscle_range)
-            ]
-        )
-
-        avg_fatigue = sum1(muscle_fatigue_decay) / muscle_range
-        return avg_fatigue
-
-    @staticmethod
-    def minimize_average_fatigue_and_recovery_2(controller: PenaltyController) -> MX:
-        """
-        Minimize the average fatigue and recuperation.
-
-        Parameters
-        ----------
-        controller: PenaltyController
-            The penalty node elements
-
-        Returns
-        -------
-        The average fatigue and recuperation
-        """
-        # --- Get all information --- #
-        muscle_names, q, qdot, F, A, A_rest, tau_fat, alpha_a, fmax, dA = CustomCostFunctions.get_muscle_quantities(
-            controller)
-        gamma = CustomCostFunctions.useful_gain_from_angle(q[2])
-        max_dA_recovery = [A_rest[x] / tau_fat[x] for x in range(F.shape[0])]
-        max_dA_fatigue = [-(alpha_a[x] * fmax[x]) for x in range(F.shape[0])]
-        dA_nomalized = vertcat(
-            *[
-                if_else(dA[x] < 0, dA[x] / max_dA_fatigue[x], dA[x] / max_dA_recovery[x])
-                for x in range(F.shape[0])
-            ]
-        )
-
-        # --- Contribution --- #
-        weight_contribution = (F / fmax) / (mmax(F / fmax) + 1e-8)
-        cost_contribution = [(1 + tanh(-gamma[i] * 10)) for i in range(F.shape[0])]
-
-        # --- Fatigue --- #
-        weight_fatigue = vertcat([74.425, 151.963, 93.339, 42.114]) / mmax(vertcat([74.425, 151.963, 93.339, 42.114]))
-        fatigue = [1 - ((A_rest[i] - A[i]) / (A_rest[i])) for i in range(F.shape[0])]
-        cost_fatigue = [(10**4) / (10 ** (4 * fatigue[i])) for i in range(F.shape[0])]
-
-        # --- Recovery --- #
-        weight_recovery = (alpha_a / A_rest) / mmin(alpha_a / A_rest)
-        cost_recovery = [(1 + tanh(-dA_nomalized[i])) for i in range(F.shape[0])]
-
-        # --- Cost function --- #
-        cost = vertcat(
-            *[
-                weight_contribution[i] * cost_contribution[i] * weight_fatigue[i] * cost_fatigue[i] * weight_recovery[i] * cost_recovery[i]
-                for i in range(F.shape[0])
-            ]
-        )
-        avg_cost= sum1(cost) / F.shape[0]
-        return avg_cost
-
-    @staticmethod
-    def minimize_average_fatigue_and_recovery_3(controller: PenaltyController) -> MX:
-        """
-        Minimize the average fatigue and recuperation.
-
-        Parameters
-        ----------
-        controller: PenaltyController
-            The penalty node elements
-
-        Returns
-        -------
-        The average fatigue and recuperation
-        """
 
         # --- Get all information --- #
         muscle_names, q, qdot, F, A, A_rest, tau_fat, alpha_a, fmax, dA = CustomCostFunctions.get_muscle_quantities(
@@ -781,7 +638,7 @@ class CustomCostFunctions:
         return rms_cost
 
     @staticmethod
-    def minimize_average_fatigue_and_recovery_4(controller: PenaltyController) -> MX:
+    def minimize_average_fatigue_and_recovery_2(controller: PenaltyController) -> MX:
         """
         Minimize the average fatigue and recuperation.
 
@@ -800,10 +657,11 @@ class CustomCostFunctions:
             controller)
         max_dA_recovery = [A_rest[x] / tau_fat[x] for x in range(F.shape[0])]
         max_dA_fatigue = [-(alpha_a[x] * fmax[x]) for x in range(F.shape[0])]
+        Amin = [41, 70, 379, 932]
 
         # --- Fatigue --- #
         weight_fatigue = [1.0, 0.6104101922170402, 0.754209800965523, 0.0]
-        cost_fatigue = [(A_rest[i] - A[i]) ** 2 for i in range(F.shape[0])]
+        cost_fatigue = [((A_rest[i] - A[i])/ Amin[i]) ** 2 for i in range(F.shape[0])]
 
         # --- Recovery --- #
         dA_nomalized = vertcat(
@@ -819,232 +677,6 @@ class CustomCostFunctions:
         rms_cost = (sum1(cost) / F.shape[0] + 1e-8) ** (1 / 2)
 
         return rms_cost
-
-
-    @staticmethod
-    def minimize_average_fatigue_and_recovery_5(controller: PenaltyController) -> MX:
-        """
-        Minimize the average fatigue and recuperation.
-
-        Parameters
-        ----------
-        controller: PenaltyController
-            The penalty node elements
-
-        Returns
-        -------
-        The average fatigue and recuperation
-        """
-        # --- Get all information --- #
-        muscle_names, q, qdot, F, A, A_rest, tau_fat, alpha_a, fmax, dA = CustomCostFunctions.get_muscle_quantities(
-            controller)
-        max_dA_recovery = [A_rest[x] / tau_fat[x] for x in range(F.shape[0])]
-        max_dA_fatigue = [-(alpha_a[x] * fmax[x]) for x in range(F.shape[0])]
-        weight = [1.0, 0.6104101922170402, 0.754209800965523, 0.0]
-
-        # --- Recovery --- #
-        dA_nomalized = vertcat(
-            *[
-                if_else(dA[x] < 0, dA[x] / max_dA_fatigue[x], dA[x] / max_dA_recovery[x])
-                for x in range(F.shape[0])
-            ]
-        )
-        cost_recovery = [(1 + tanh(-dA_nomalized[i])) for i in range(F.shape[0])]
-
-        # --- Cost function --- #
-        cost = vertcat(
-            *[weight[i] * cost_recovery[i] for i in range(F.shape[0])])
-        rms_cost = (sum1(cost) / F.shape[0])
-        return rms_cost
-
-
-    # @staticmethod
-    # def minimize_useful_torque_fatigue_tradeoff(
-    #         controller: PenaltyController,
-    # ) -> MX:
-    #     """
-    #     Minimize the fatigue and recuperation based on torque efficiency.
-    #
-    #     Parameters
-    #     ----------
-    #     controller: PenaltyController
-    #         The penalty node elements
-    #
-    #     Returns
-    #     -------
-    #     The average fatigue and recuperation based on torque efficiency
-    #     """
-    #     # --- Weights --- #
-    #     lambda_fatigue = 1.0
-    #     lambda_dA = 1.0
-    #     kappa_recovery = 1.0
-    #
-    #     # --- Get all information --- #
-    #     muscle_names, q, qdot, F, A, A_rest, tau_fat, alpha_a, fmax, dA = CustomCostFunctions.get_muscle_quantities(controller)
-    #
-    #     # --- Calculate useful torque based on force and muscle efficiency --- #
-    #     gamma = CustomCostFunctions.useful_gain_from_angle(q[2])
-    #
-    #     gamma_tanh = vertcat(
-    #         *[(1 + tanh(10*gamma[x]))
-    #           for x in range(F.shape[0])
-    #           ]
-    #     )
-    #
-    #
-    #     # tau_use = vertcat(*[
-    #     #     if_else(gamma[i] * F[i] > 0, gamma[i] * F[i], 0)
-    #     #     for i in range(F.shape[0])
-    #     # ])
-    #
-    #     muscle_motion_contrib = [0.16259391348727756, 0.32644352775103314, 0.06473043181533218, 0.07310528260037236]
-    #     muscle_motion_contrib_norm = [muscle_contrib/max(muscle_motion_contrib) for muscle_contrib in muscle_motion_contrib]
-    #
-    #     muscle_fatigability = [-alpha_a[i]/A_rest[i] for i in range(F.shape[0])]
-    #     muscle_fatigability_norm = [muscle_fat/max(muscle_fatigability) for muscle_fat in muscle_fatigability]
-    #
-    #     muscle_importance_weight = [muscle_motion_contrib_norm[i] * muscle_fatigability_norm[i] for i in range(F.shape[0])]
-    #
-    #     torque_distribution = [(muscle_importance_weight[i] / (gamma_tanh[i] + 1e-8)) * F[i] for i in range(F.shape[0])]
-    #
-    #
-    #     # --- Fatigue and recovery --- #
-    #     cap = A / A_rest
-    #     fatigue = 1 - cap
-    #     dA_norm = CustomCostFunctions.normalized_dA(dA, A_rest, tau_fat, alpha_a, fmax)
-    #
-    #     # --- Build the adaptive weight --- #
-    #     adaptive_weight = vertcat(*[
-    #         1
-    #         + fatigue[i]
-    #         + kappa_recovery * if_else(dA_norm[i] < 0, -dA_norm[i], 0)
-    #         for i in range(F.shape[0])
-    #     ])
-    #
-    #     # --- Calculate the cost function --- #
-    #     # use_term = vertcat(*[
-    #     #     adaptive_weight[i] * (tau_use[i] / fmax[i]) ** 2
-    #     #     for i in range(F.shape[0])
-    #     # ])
-    #
-    #     # fatigue_term = vertcat(*[
-    #     #     lambda_fatigue * fatigue[i] ** 2
-    #     #     for i in range(F.shape[0])
-    #     # ])
-    #     fatigue_term = vertcat(*[
-    #         lambda_fatigue * (10 ** (4 * fatigue[i]))
-    #         for i in range(F.shape[0])
-    #     ])
-    #
-    #     # dA_term = vertcat(*[
-    #     #     lambda_dA * if_else(dA_norm[i] < 0, (-dA_norm[i]) ** 2, 0)
-    #     #     for i in range(F.shape[0])
-    #     # ])
-    #     dA_term = vertcat(
-    #         *[(1 + tanh(-dA_norm[x]))
-    #             for x in range(F.shape[0])
-    #         ]
-    #     )
-    #
-    #     # return sum1(use_term + fatigue_term + dA_term) / len(muscle_names)
-    #
-    #     cost_fun = vertcat(
-    #         *[torque_distribution[i] * fatigue_term[i] * dA_term[i]
-    #             for i in range(F.shape[0])
-    #         ]
-    #     )
-    #     return sum1(cost_fun) / len(muscle_names)
-
-    @staticmethod
-    def minimize_useful_torque_fatigue_tradeoff(controller: PenaltyController) -> MX:
-        kappa_recovery = 1
-        lambda_fatigue = 1
-        lambda_dA = 1
-        muscle_names, q, qdot, F, A, A_rest, tau_fat, alpha_a, fmax, dA = CustomCostFunctions.get_muscle_quantities(controller)
-
-        gamma = CustomCostFunctions.useful_gain_from_angle(q[2])
-        tau_use = vertcat(*[
-            if_else(gamma[i] * F[i] > 0, gamma[i] * F[i], 0)
-            for i in range(F.shape[0])
-        ])
-
-        cap = A / A_rest
-        fatigue = 1 - cap
-
-        dA_norm = CustomCostFunctions.normalized_dA(dA, A_rest, tau_fat, alpha_a, fmax)
-
-        adaptive_weight = vertcat(*[
-            1 + fatigue[i] + kappa_recovery * if_else(dA_norm[i] < 0, -dA_norm[i], 0)
-            for i in range(F.shape[0])
-        ])
-
-        use_term = vertcat(*[
-            adaptive_weight[i] * (tau_use[i] / (fmax[i])) ** 2
-            for i in range(F.shape[0])
-        ])
-
-        fatigue_term = vertcat(*[
-            lambda_fatigue * fatigue[i] ** 2
-            for i in range(F.shape[0])
-        ])
-
-        dA_term = vertcat(*[
-            lambda_dA * if_else(dA_norm[i] < 0, (-dA_norm[i]) ** 2, 0)
-            for i in range(F.shape[0])
-        ])
-
-        return sum1(use_term + fatigue_term + dA_term) / len(muscle_names)
-
-
-    @staticmethod
-    def minimize_terminal_fatigue_reserve(controller: PenaltyController) -> MX:
-        muscle_names = controller.model.bio_model.muscle_names
-        A = vertcat(*[controller.states[f"A_{name}"].cx for name in muscle_names])
-        A_rest = vertcat(*[
-            controller.model.muscles_dynamics_model[i].a_scale
-            for i in range(len(muscle_names))
-        ])
-        reserve_loss = 1 - A / A_rest
-        return sum1(reserve_loss ** 2) / len(muscle_names)
-
-
-    @staticmethod
-    def minimize_torque_deficit_area(
-            controller: PenaltyController,
-    ) -> MX:
-        """
-        Minimize the crank-angle area where useful torque is below a threshold.
-
-        This implements:
-            integral( max(threshold - tau_use(theta), 0) dtheta )
-
-        Since the OCP is integrated over time, the node-wise Lagrange term is:
-            max(threshold - tau_use, 0) * abs(theta_dot)
-
-        Parameters
-        ----------
-        controller: PenaltyController
-            The penalty node elements
-
-        Returns
-        -------
-        MX
-            Instantaneous deficit-area density
-        """
-        muscle_names, q, qdot, F, A, A_rest, tau_fat, alpha_a, fmax, dA = \
-            CustomCostFunctions.get_muscle_quantities(controller)
-
-        moment_arm = CustomCostFunctions.get_moment_arm_from_angle(q[2])
-        tau_use_per_muscle = vertcat(*[moment_arm[i] * F[i] for i in range(F.shape[0])])
-
-        tau_use_total = sum1(tau_use_per_muscle)
-        torque_deficit = 0.20 - tau_use_total
-        positive_deficit = fabs(torque_deficit)
-
-        angular_weight = fabs(qdot[2])  # Convert time integral into crank-angle integral: dtheta = |theta_dot| dt
-        cost = positive_deficit * angular_weight
-
-        return cost
 
 
     # --- Peak cost function and constraint used in OCP --- #
