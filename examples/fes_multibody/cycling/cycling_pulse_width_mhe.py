@@ -1083,7 +1083,7 @@ if __name__ == "__main__":
     main(
         stimulation_frequency=30,
         n_total_cycle=10000,
-        n_cycles_simultaneous=[2, 3, 4, 5],
+        n_cycles_simultaneous=[2],
         resistive_torque=-0.20,  # (N.m)
         cost_fun_dict={"optimized_function": [
             # --- Pulse width --- #
@@ -1115,7 +1115,7 @@ if __name__ == "__main__":
 
             # --- Recovery --- #
             ["minimize_average_fatigue_and_recovery"],
-            ["minimize_average_fatigue_and_recovery_2"],
+            # ["minimize_average_fatigue_and_recovery_2"],
             ]
         },
         init_guess=False,

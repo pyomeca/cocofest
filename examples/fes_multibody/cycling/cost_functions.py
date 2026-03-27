@@ -145,7 +145,7 @@ class CustomCostFunctions:
             },
             "minimize_average_fatigue_and_recovery_2": {
                 "function": self.minimize_average_fatigue_and_recovery_2,
-                "index": 21,
+                "index": 210,
                 "description": "Minimize the average fatigue and recovery",
                 "power": "1",
                 "state": "A_recovery",
@@ -628,7 +628,8 @@ class CustomCostFunctions:
             controller)
 
         # --- Fatigue --- #
-        weight_fatigue = vertcat([1.0, 0.6104101922170402, 0.754209800965523, 0.0])
+        # weight_fatigue = vertcat([1.0, 0.6104101922170402, 0.754209800965523, 0.0])
+        weight_fatigue = vertcat([19.202832556431385, 10.21788125816213, 2.3030126467653567, 0.5899910605450449])
         cost_fatigue = [(A_rest[i] - A[i]) ** 2 for i in range(F.shape[0])]
 
         # --- Cost function --- #
