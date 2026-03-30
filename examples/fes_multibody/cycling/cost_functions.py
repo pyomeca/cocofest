@@ -697,8 +697,8 @@ class CustomCostFunctions:
         pull_capacity = remaining_capacity[0] + remaining_capacity[2]
         push_capacity = remaining_capacity[1] + remaining_capacity[3]
 
-        pull_weight = if_else(pull_capacity > push_capacity, 0, 1)
-        push_weight = if_else(pull_capacity < push_capacity, 0, 1)
+        pull_weight = if_else(pull_capacity > push_capacity, 1, 0)
+        push_weight = if_else(push_capacity >= pull_capacity, 1, 0)
 
         weight_fatigue = [pull_weight, push_weight, pull_weight, push_weight]
         cost_fatigue = vertcat(*[(A_rest[i] - A[i])**2 for i in range(F.shape[0])])
