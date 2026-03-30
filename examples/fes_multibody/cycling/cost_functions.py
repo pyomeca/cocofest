@@ -151,6 +151,14 @@ class CustomCostFunctions:
                 "state": "A_recovery",
             },
 
+            "minimize_balanced_fatigue_by_contribution": {
+                "function": self.minimize_balanced_fatigue_by_contribution,
+                "index": 201,
+                "description": "Minimize fatigue using dynamic reserve/usefulness weights",
+                "power": "2",
+                "state": "A_recovery",
+            },
+
             "minimize_peak": {
                 "function": self.minimize_peak,
                 "index": 99,
@@ -678,6 +686,35 @@ class CustomCostFunctions:
         rms_cost = (sum1(cost) / F.shape[0] + 1e-8) ** (1 / 2)
 
         return rms_cost
+
+    @staticmethod
+    def minimize_balanced_fatigue_by_contribution(controller: PenaltyController) -> MX:
+        muscle_names, q, qdot, F, A, A_rest, tau_fat, alpha_a, fmax, dA = (
+            CustomCostFunctions.get_muscle_quantities(controller)
+        )
+
+        remaining_capacity = [(A[i] / A_rest[i] ) for i in range(F.shape[0])]
+        pull_capacity = remaining_capacity[0] + remaining_capacity[2]
+        push_capacity = remaining_capacity[1] + remaining_capacity[3]
+
+        pull_weight = if_else(pull_capacity > push_capacity, 0, 1)
+        push_weight = if_else(pull_capacity < push_capacity, 0, 1)
+
+        weight_fatigue = [pull_weight, push_weight, pull_weight, push_weight]
+        cost_fatigue = vertcat(*[(A_rest[i] - A[i])**2 for i in range(F.shape[0])])
+
+        # --- Cost function --- #
+        cost = vertcat(*[weight_fatigue[i] * cost_fatigue[i] for i in range(F.shape[0])])
+        rms_cost = (sum1(cost) / F.shape[0] + 1e-8) ** (1 / 2)
+        return rms_cost
+
+
+
+
+
+
+
+
 
 
     # --- Peak cost function and constraint used in OCP --- #
