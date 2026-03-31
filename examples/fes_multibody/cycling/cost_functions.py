@@ -637,7 +637,7 @@ class CustomCostFunctions:
 
         # --- Fatigue --- #
         # weight_fatigue = vertcat([1.0, 0.6104101922170402, 0.754209800965523, 0.0])
-        weight_fatigue = vertcat([19.202832556431385, 10.21788125816213, 2.3030126467653567, 0.5899910605450449])
+        weight_fatigue = vertcat([10000.0, 2622.984911640199, 3295.935637664999, 1e-05])
         cost_fatigue = [(A_rest[i] - A[i]) ** 2 for i in range(F.shape[0])]
 
         # --- Cost function --- #

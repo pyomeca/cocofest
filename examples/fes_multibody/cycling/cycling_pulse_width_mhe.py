@@ -652,7 +652,7 @@ def set_objective_functions(objective_fun_dict, recalculate=False):
                     custom_objective_functions[keys[i]]["function"],
                     custom_type=ObjectiveFcn.Lagrange,
                     node=Node.ALL,
-                    weight=weights,
+                    weight=1,  # weight=weights,
                     quadratic=False,
                 )
 
@@ -1114,9 +1114,9 @@ if __name__ == "__main__":
             # ["minimize_root_mean_square_muscle_power"],
 
             # --- Recovery --- #
-            # ["minimize_average_fatigue_and_recovery"],
+            ["minimize_average_fatigue_and_recovery"],
             # ["minimize_average_fatigue_and_recovery_2"],
-            ["minimize_balanced_fatigue_by_contribution"],
+            # ["minimize_balanced_fatigue_by_contribution"],
             ]
         },
         init_guess=False,
