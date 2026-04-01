@@ -1088,19 +1088,19 @@ if __name__ == "__main__":
         cost_fun_dict={"optimized_function": [
             # --- Pulse width --- #
             # ["minimize_average_activation"],
-            # ["minimize_root_mean_square_activation"],
+            ["minimize_root_mean_square_activation"],
             # ["minimize_cubic_average_activation"],
             # ["minimize_peak_activation"],
 
             # --- Force --- #
             # ["minimize_average_force"],
-            # ["minimize_root_mean_square_force"],
+            ["minimize_root_mean_square_force"],
             # ["minimize_cubic_average_force"],
             # ["minimize_peak_force"],
 
             # --- Stress --- #
             # ["minimize_average_muscle_stress"],
-            # ["minimize_root_mean_square_muscle_stress"],
+            ["minimize_root_mean_square_muscle_stress"],
             # ["minimize_cubic_average_muscle_stress"],
             # ["minimize_peak_muscle_stress"],
 
@@ -1111,10 +1111,10 @@ if __name__ == "__main__":
             # ["minimize_peak_fatigue"],
 
             # --- Power --- #
-            # ["minimize_root_mean_square_muscle_power"],
+            ["minimize_root_mean_square_muscle_power"],
 
             # --- Recovery --- #
-            ["minimize_average_fatigue_and_recovery"],
+            # ["minimize_average_fatigue_and_recovery"],
             # ["minimize_average_fatigue_and_recovery_2"],
             # ["minimize_balanced_fatigue_by_contribution"],
             ]
