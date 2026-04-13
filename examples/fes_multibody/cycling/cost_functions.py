@@ -143,6 +143,16 @@ class CustomCostFunctions:
                 "power": "1",
                 "state": "A_recovery",
             },
+
+            "minimize_average_fatigue_weight_m": {
+                "function": self.minimize_average_fatigue_weight_m,
+                "index": 205,
+                "description": "Minimize the average fatigue",
+                "power": "1",
+                "state": "A_recovery",
+            },
+
+
             "minimize_average_fatigue_and_recovery_2": {
                 "function": self.minimize_average_fatigue_and_recovery_2,
                 "index": 210,
@@ -651,6 +661,40 @@ class CustomCostFunctions:
         rms_cost = (sum1(cost) / F.shape[0] + 1e-8) ** (1/2)
 
         return rms_cost
+
+    @staticmethod
+    def minimize_average_fatigue_weight_m(controller: PenaltyController) -> MX:
+        """
+        Minimize the average fatigue.
+
+        Parameters
+        ----------
+        controller: PenaltyController
+            The penalty node elements
+
+        Returns
+        -------
+        The average fatigue
+        """
+
+        # --- Get all information --- #
+        muscle_names, q, qdot, F, A, A_rest, tau_fat, alpha_a, fmax, dA = CustomCostFunctions.get_muscle_quantities(
+            controller)
+
+        # --- Fatigue --- #
+        weight_fatigue = vertcat([191790.4782397877e-6, 31608.944067062093e-6, 117259.12134978296e-6, 1.0e-6])
+        cost_fatigue = [(A_rest[i] - A[i]) for i in range(F.shape[0])]
+
+        # --- Cost function --- #
+        cost = vertcat(*[weight_fatigue[i] * cost_fatigue[i] for i in range(F.shape[0])])
+        rms_cost = (sum1(cost) / F.shape[0])
+
+        return rms_cost
+
+
+
+
+
 
     @staticmethod
     def minimize_average_fatigue_and_recovery_2(controller: PenaltyController) -> MX:

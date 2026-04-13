@@ -781,7 +781,7 @@ def create_simulation_list(
             raise RuntimeError("ode_solver must be COLLOCATION or RK4")
 
         full_suffix = f"{weight_suffix}_{solver_suffix}_with_init"
-        pkl = str(Path("result/bayesian") / f"{num_cycles}_cycle" / f"{num_cycles}_min_{full_suffix}.pkl")
+        pkl = str(Path("result/test") / f"{num_cycles}_cycle" / f"{num_cycles}_min_{full_suffix}.pkl")
         init = str(Path("result/initial_guess") / f"{num_cycles}_initial_guess_{solver_suffix}.pkl")
         init = init if os.path.exists(init) else None
         if init is None:
@@ -1083,24 +1083,24 @@ if __name__ == "__main__":
     main(
         stimulation_frequency=30,
         n_total_cycle=10000,
-        n_cycles_simultaneous=[2, 3, 4, 5],
+        n_cycles_simultaneous=[2],
         resistive_torque=-0.20,  # (N.m)
         cost_fun_dict={"optimized_function": [
             # --- Pulse width --- #
             # ["minimize_average_activation"],
-            ["minimize_root_mean_square_activation"],
+            # ["minimize_root_mean_square_activation"],
             # ["minimize_cubic_average_activation"],
             # ["minimize_peak_activation"],
 
             # --- Force --- #
             # ["minimize_average_force"],
-            ["minimize_root_mean_square_force"],
+            # ["minimize_root_mean_square_force"],
             # ["minimize_cubic_average_force"],
             # ["minimize_peak_force"],
 
             # --- Stress --- #
             # ["minimize_average_muscle_stress"],
-            ["minimize_root_mean_square_muscle_stress"],
+            # ["minimize_root_mean_square_muscle_stress"],
             # ["minimize_cubic_average_muscle_stress"],
             # ["minimize_peak_muscle_stress"],
 
@@ -1111,12 +1111,11 @@ if __name__ == "__main__":
             # ["minimize_peak_fatigue"],
 
             # --- Power --- #
-            ["minimize_root_mean_square_muscle_power"],
+            # ["minimize_root_mean_square_muscle_power"],
 
             # --- Recovery --- #
-            ["minimize_average_fatigue_and_recovery"],
-            # ["minimize_average_fatigue_and_recovery_2"],
-            # ["minimize_balanced_fatigue_by_contribution"],
+            # ["minimize_average_fatigue_and_recovery"],
+            ["minimize_average_fatigue_weight_m"],
             ]
         },
         init_guess=False,
