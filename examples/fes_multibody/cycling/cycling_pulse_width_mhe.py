@@ -1115,7 +1115,7 @@ if __name__ == "__main__":
 
             # --- Recovery --- #
             # ["minimize_average_fatigue_and_recovery"],
-            ["minimize_average_fatigue_weight_m"],
+            ["minimize_average_fatigue_weight_m_rms"],
             ]
         },
         init_guess=False,
