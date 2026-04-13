@@ -144,15 +144,15 @@ class CustomCostFunctions:
                 "state": "A_recovery",
             },
 
-            "minimize_average_fatigue_weight_m": {
-                "function": self.minimize_average_fatigue_weight_m,
+            "minimize_average_fatigue_weight_m_rms_90": {
+                "function": self.minimize_average_fatigue_weight_m_rms_90,
                 "index": 205,
                 "description": "Minimize the average fatigue",
                 "power": "1",
                 "state": "A_recovery",
             },
-            "minimize_average_fatigue_weight_m_rms": {
-                "function": self.minimize_average_fatigue_weight_m_rms,
+            "minimize_average_fatigue_weight_m_rms_120": {
+                "function": self.minimize_average_fatigue_weight_m_rms_120,
                 "index": 206,
                 "description": "Minimize the average fatigue",
                 "power": "1",
@@ -670,7 +670,7 @@ class CustomCostFunctions:
         return rms_cost
 
     @staticmethod
-    def minimize_average_fatigue_weight_m(controller: PenaltyController) -> MX:
+    def minimize_average_fatigue_weight_m_rms_90(controller: PenaltyController) -> MX:
         """
         Minimize the average fatigue.
 
@@ -683,23 +683,22 @@ class CustomCostFunctions:
         -------
         The average fatigue
         """
-
         # --- Get all information --- #
         muscle_names, q, qdot, F, A, A_rest, tau_fat, alpha_a, fmax, dA = CustomCostFunctions.get_muscle_quantities(
             controller)
 
         # --- Fatigue --- #
-        weight_fatigue = vertcat([191790.4782397877e-6, 31608.944067062093e-6, 117259.12134978296e-6, 1.0e-6])
-        cost_fatigue = [(A_rest[i] - A[i]) for i in range(F.shape[0])]
+        weight_fatigue = vertcat([191790, 31609, 117259, 1])
+        cost_fatigue = [(A_rest[i] - A[i])**2 for i in range(F.shape[0])]
 
         # --- Cost function --- #
         cost = vertcat(*[weight_fatigue[i] * cost_fatigue[i] for i in range(F.shape[0])])
-        rms_cost = (sum1(cost) / F.shape[0])
+        rms_cost = (sum1(cost) / F.shape[0] + 1e-8) ** (1 / 2)
 
         return rms_cost
 
     @staticmethod
-    def minimize_average_fatigue_weight_m_rms(controller: PenaltyController) -> MX:
+    def minimize_average_fatigue_weight_m_rms_120(controller: PenaltyController) -> MX:
         """
         Minimize the average fatigue.
 
@@ -712,14 +711,13 @@ class CustomCostFunctions:
         -------
         The average fatigue
         """
-
         # --- Get all information --- #
         muscle_names, q, qdot, F, A, A_rest, tau_fat, alpha_a, fmax, dA = CustomCostFunctions.get_muscle_quantities(
             controller)
 
         # --- Fatigue --- #
-        weight_fatigue = vertcat([191790.4782397877e-6, 31608.944067062093e-6, 117259.12134978296e-6, 1.0e-6])
-        cost_fatigue = [(A_rest[i] - A[i])**2 for i in range(F.shape[0])]
+        weight_fatigue = vertcat([312040, 31609, 200149, 1])
+        cost_fatigue = [(A_rest[i] - A[i]) ** 2 for i in range(F.shape[0])]
 
         # --- Cost function --- #
         cost = vertcat(*[weight_fatigue[i] * cost_fatigue[i] for i in range(F.shape[0])])
