@@ -146,19 +146,11 @@ class CustomCostFunctions:
 
             "minimize_average_fatigue_weight_m_rms_90": {
                 "function": self.minimize_average_fatigue_weight_m_rms_90,
-                "index": 205,
+                "index": 21,
                 "description": "Minimize the average fatigue",
                 "power": "1",
                 "state": "A_recovery",
             },
-            "minimize_average_fatigue_weight_m_rms_120": {
-                "function": self.minimize_average_fatigue_weight_m_rms_120,
-                "index": 206,
-                "description": "Minimize the average fatigue",
-                "power": "1",
-                "state": "A_recovery",
-            },
-
 
             "minimize_average_fatigue_and_recovery_2": {
                 "function": self.minimize_average_fatigue_and_recovery_2,
@@ -229,7 +221,7 @@ class CustomCostFunctions:
         """
         eps = 1e-8
         muscle_name_list = controller.model.bio_model.muscle_names
-        weight_fatigue = vertcat([1.00000000e+04, 1.55976591e+03, 4.66525639e+03, 1.00000000e-05])
+        weight_fatigue = vertcat([191790, 31609, 117259, 1])
 
         if isinstance(controller.model.muscles_dynamics_model[0], DingModelPulseWidthFrequency):
             stim_charge = vertcat(
@@ -350,7 +342,7 @@ class CustomCostFunctions:
         """
         eps = 1e-8
         muscle_name_list = controller.model.bio_model.muscle_names
-        weight_fatigue = vertcat([1.00000000e+04, 1.55976591e+03, 4.66525639e+03, 1.00000000e-05])
+        weight_fatigue = vertcat([191790, 31609, 117259, 1])
         
         muscle_force = vertcat(
             *[  weight_fatigue[x] *
@@ -450,7 +442,7 @@ class CustomCostFunctions:
         """
         eps = 1e-8
         muscle_name_list = controller.model.bio_model.muscle_names
-        weight_fatigue = vertcat([1.00000000e+04, 1.55976591e+03, 4.66525639e+03, 1.00000000e-05])
+        weight_fatigue = vertcat([191790, 31609, 117259, 1])
         muscle_stress = vertcat(
             *[  weight_fatigue[x] *
                 (controller.states["F_" + muscle_name_list[x]].cx / controller.model.muscles_dynamics_model[x].pcsa) ** 2
@@ -625,7 +617,7 @@ class CustomCostFunctions:
         """
         eps = 1e-8
         muscle_name_list = controller.model.bio_model.muscle_names
-        weight_fatigue = vertcat([1.00000000e+04, 1.55976591e+03, 4.66525639e+03, 1.00000000e-05])
+        weight_fatigue = vertcat([191790, 31609, 117259, 1])
         muscle_velocity = controller.model.muscle_velocity()(
             controller.states["q"].cx, controller.states["qdot"].cx, controller.parameters.cx
         )
@@ -660,7 +652,7 @@ class CustomCostFunctions:
 
         # --- Fatigue --- #
         # weight_fatigue = vertcat([1.0, 0.6104101922170402, 0.754209800965523, 0.0])
-        weight_fatigue = vertcat([1.00000000e+04, 1.55976591e+03, 4.66525639e+03, 1.00000000e-05])
+        weight_fatigue = vertcat([191790, 31609, 117259, 1])
         cost_fatigue = [(A_rest[i] - A[i]) ** 2 for i in range(F.shape[0])]
 
         # --- Cost function --- #

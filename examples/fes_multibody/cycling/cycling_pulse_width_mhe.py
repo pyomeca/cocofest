@@ -652,7 +652,7 @@ def set_objective_functions(objective_fun_dict, recalculate=False):
                     custom_objective_functions[keys[i]]["function"],
                     custom_type=ObjectiveFcn.Lagrange,
                     node=Node.ALL,
-                    weight=1,  # weight=weights,
+                    weight=0.1,  # weight=weights,
                     quadratic=False,
                 )
 
@@ -1083,24 +1083,24 @@ if __name__ == "__main__":
     main(
         stimulation_frequency=30,
         n_total_cycle=10000,
-        n_cycles_simultaneous=[2],
+        n_cycles_simultaneous=[2, 3, 4, 5],
         resistive_torque=-0.20,  # (N.m)
         cost_fun_dict={"optimized_function": [
             # --- Pulse width --- #
             # ["minimize_average_activation"],
-            # ["minimize_root_mean_square_activation"],
+            ["minimize_root_mean_square_activation"],
             # ["minimize_cubic_average_activation"],
             # ["minimize_peak_activation"],
 
             # --- Force --- #
             # ["minimize_average_force"],
-            # ["minimize_root_mean_square_force"],
+            ["minimize_root_mean_square_force"],
             # ["minimize_cubic_average_force"],
             # ["minimize_peak_force"],
 
             # --- Stress --- #
             # ["minimize_average_muscle_stress"],
-            # ["minimize_root_mean_square_muscle_stress"],
+            ["minimize_root_mean_square_muscle_stress"],
             # ["minimize_cubic_average_muscle_stress"],
             # ["minimize_peak_muscle_stress"],
 
@@ -1111,12 +1111,12 @@ if __name__ == "__main__":
             # ["minimize_peak_fatigue"],
 
             # --- Power --- #
-            # ["minimize_root_mean_square_muscle_power"],
+            ["minimize_root_mean_square_muscle_power"],
 
             # --- Recovery --- #
-            # ["minimize_average_fatigue_and_recovery"],
-            ["minimize_average_fatigue_weight_m_rms_90"],
-            ["minimize_average_fatigue_weight_m_rms_120"],
+            ["minimize_average_fatigue_and_recovery"],
+            # ["minimize_average_fatigue_weight_m_rms_90"],
+            # ["minimize_average_fatigue_weight_m_rms_120"],
             ]
         },
         init_guess=False,
