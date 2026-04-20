@@ -123,7 +123,7 @@ def set_objective_functions(muscle_fatigue_key, cost_fun_weight):
             raise ValueError(f"cost_fun_weight must be length 1 or {len(muscle_fatigue_key)}, got {len(cost_fun_weight)}")
 
     objective_functions.add(
-        minimize_avg_fatigue_recovery, #minimize_root_mean_pw, #minimize_root_mean_square_fatigue,
+        minimize_root_mean_pw, #minimize_root_mean_pw, #minimize_root_mean_square_fatigue,
         custom_type=ObjectiveFcn.Lagrange,
         muscle_weights=weights,
         node=Node.ALL,
@@ -256,7 +256,7 @@ def run_optim_bo(mhe_info, cycling_info, sim_cond, model_path, save_sol=False, r
     metric = len(sol[1]) - 1 + sim_cond["n_cycles_simultaneous"]
 
     if save_sol:
-        Path("result/bo").mkdir(parents=True, exist_ok=True)
+        Path("result/bayesian_optimization").mkdir(parents=True, exist_ok=True)
         base.save_sol_in_pkl(
             sol,
             sim_cond,
@@ -317,7 +317,7 @@ def bayes_optimize_weights(
     free_names = [n for n in muscle_names if n not in fixed_weights]
 
     # --- Logging directory & files --- #
-    log_dir = Path("result/bo")
+    log_dir = Path("result/bayesian_optimization")
     log_dir.mkdir(parents=True, exist_ok=True)
 
     pkl_path = log_dir / "bo_iter_log.pkl"
@@ -410,7 +410,7 @@ def bayes_optimize_weights(
         "n_cycles_simultaneous": n_cycles_simultaneous_for_bo,
         "stimulation": stim_count,
         "cost_fun_weight": None,  # applied by BO
-        "pickle_file_path": Path("result/bo/bo_tmp.pkl"),
+        "pickle_file_path": Path("result/bayesian_optimization/bo_tmp.pkl"),
         "init_guess_file_path": init_guess_file_path,
     }
 
@@ -618,7 +618,7 @@ def bayes_optimize_weights(
     # --- Confirm best with a saved final run --- #
     final_sim_cond = dict(sim_cond_template)
     final_sim_cond["cost_fun_weight"] = best_full_w
-    final_sim_cond["pickle_file_path"] = Path("result/bo/bo_best.pkl")
+    final_sim_cond["pickle_file_path"] = Path("result/bayesian_optimization/bo_best.pkl")
     final_sim_cond["cost_fun_key"] = "minimize_root_mean_square_fatigue"
 
     save_all_windows = True
@@ -627,7 +627,8 @@ def bayes_optimize_weights(
             final_sim_cond["n_cycles_simultaneous"] = 2 + j
             final_sim_cond["stimulation"] = 60 + 30 * j
             final_sim_cond["init_guess_file_path"] = f'result/initial_guess/{final_sim_cond["n_cycles_simultaneous"]}_initial_guess_collocation_3_radau.pkl'
-            final_sim_cond["pickle_file_path"] = Path(f"result/bo/bo_best_{final_sim_cond['n_cycles_simultaneous']}_cycles.pkl")
+            final_sim_cond["pickle_file_path"] = Path(
+                f"result/bayesian_optimization/bo_best_{final_sim_cond['n_cycles_simultaneous']}_cycles.pkl")
             final_metric, final_sol = run_optim_bo(
                 mhe_info=mhe_info,
                 cycling_info=cycling_info,
@@ -703,10 +704,10 @@ def main_bayes():
 def read_pickle_file(file_type="pkl", is_numeric=False):
     bo = None
     if file_type == "pkl":
-        bo = pickle.load(open(Path("result/bo/bo_iter_log.pkl"), "rb"))
+        bo = pickle.load(open(Path("result/bayesian_optimization/bo_iter_log.pkl"), "rb"))
 
     if file_type == "npz" and is_numeric:
-        arr = np.load("result/bo/bo_iter_arrays.npz", allow_pickle=False)
+        arr = np.load("result/bayesian_optimization/bo_iter_arrays.npz", allow_pickle=False)
         iteration = arr["iteration"]
         muscle_names = [s.decode("utf-8") if isinstance(s, bytes) else str(s) for s in arr["muscle_names"]]
         weights = arr["weights"]  # shape (n_iter, n_muscles)
