@@ -5,6 +5,7 @@ Then, after each cycle, the muscle fatigue will be updated based on the activati
 control problem. If an optimal solution is found, the standard clinical settings simulation continues considering a
 cycle could be performed. When an optimal solution is not found, this ends meaning it reached muscle failure.
 """
+
 from sys import platform
 import pickle
 import numpy as np
@@ -98,19 +99,18 @@ def prepare_standard_fes_cycling(optim_info, cycling_info, model, previous_probl
         prev_state_result = previous_sol.decision_states(to_merge=SolutionMerge.NODES)
         for key in x_bounds.keys():
             if key not in ("q", "qdot"):
-                x_bounds[key].min[:,0] = prev_state_result[key][:, -1]
-                x_bounds[key].max[:,0] = prev_state_result[key][:, -1]
+                x_bounds[key].min[:, 0] = prev_state_result[key][:, -1]
+                x_bounds[key].max[:, 0] = prev_state_result[key][:, -1]
 
     # --- Set controls --- #
     if previous_problem is None:
-        u_bounds, u_init, u_scaling = set_standard_u_bounds_and_init(
-            bio_model=model,
-            n_shooting=n_shooting
-        )
+        u_bounds, u_init, u_scaling = set_standard_u_bounds_and_init(bio_model=model, n_shooting=n_shooting)
     else:
         u_bounds = previous_problem.nlp[0].u_bounds
         u_init = previous_problem.nlp[0].u_init
-        u_init["tau"].init[:, :] = previous_sol.decision_controls(to_merge=SolutionMerge.NODES)["tau"]  # Previous solution as initial guess
+        u_init["tau"].init[:, :] = previous_sol.decision_controls(to_merge=SolutionMerge.NODES)[
+            "tau"
+        ]  # Previous solution as initial guess
         u_scaling = previous_problem.nlp[0].u_scaling
 
     # --- Set objective --- #
@@ -149,7 +149,7 @@ def prepare_standard_fes_cycling(optim_info, cycling_info, model, previous_probl
     )
 
     # --- Update model for resistive torque --- #
-    model.activate_residual_torque=True
+    model.activate_residual_torque = True
     model = updating_model(model=model, external_force_set=external_force_set, parameters=parameters)
 
     return OptimalControlProgram(
@@ -171,6 +171,7 @@ def prepare_standard_fes_cycling(optim_info, cycling_info, model, previous_probl
         n_threads=48,
         use_sx=use_sx,
     )
+
 
 def set_pw_dictionary(model, n_shooting):
     pulse_width_dictionary = {}
@@ -225,17 +226,20 @@ def set_standard_u_bounds_and_init(bio_model, n_shooting):
     for model in models:
         key = "last_pulse_width_" + str(model.muscle_name)
         reshaped_bounds = np.array([list(pulse_width_dictionary[model.muscle_name])])
-        u_init.add(key=key, initial_guess=reshaped_bounds, phase=0,
-                   interpolation=InterpolationType.EACH_FRAME)
-        u_bounds.add(key=key, min_bound=reshaped_bounds,
-                     max_bound=reshaped_bounds, phase=0,
-                     interpolation=InterpolationType.EACH_FRAME)
+        u_init.add(key=key, initial_guess=reshaped_bounds, phase=0, interpolation=InterpolationType.EACH_FRAME)
+        u_bounds.add(
+            key=key,
+            min_bound=reshaped_bounds,
+            max_bound=reshaped_bounds,
+            phase=0,
+            interpolation=InterpolationType.EACH_FRAME,
+        )
 
     # --- Pedal assistance control --- #
-    u_init.add(key="tau", initial_guess=np.array([[0]*n_shooting]*3), phase=0,
-               interpolation=InterpolationType.EACH_FRAME)
-    u_bounds.add(key="tau", min_bound=np.array([0, 0, -10]),
-                 max_bound=np.array([0, 0, 10]), phase=0)
+    u_init.add(
+        key="tau", initial_guess=np.array([[0] * n_shooting] * 3), phase=0, interpolation=InterpolationType.EACH_FRAME
+    )
+    u_bounds.add(key="tau", min_bound=np.array([0, 0, -10]), max_bound=np.array([0, 0, 10]), phase=0)
 
     u_scaling = VariableScalingList()
     for model in bio_model.muscles_dynamics_model:
@@ -248,6 +252,7 @@ def set_standard_u_bounds_and_init(bio_model, n_shooting):
         u_init,
         u_scaling,
     )
+
 
 def prepare_ocp_fes_cycling(optim_info, cycling_info, model, previous_problem=None, previous_sol=None):
     # --- Optimization info --- #
@@ -297,18 +302,33 @@ def prepare_ocp_fes_cycling(optim_info, cycling_info, model, previous_problem=No
     x_bounds["qdot"].max[2, 0] = -8.390
 
     init_shape = x_init["qdot"].init[-1].shape[0]
-    x_init["qdot"].init[-1] = np.array([-2*np.pi] * init_shape)
+    x_init["qdot"].init[-1] = np.array([-2 * np.pi] * init_shape)
 
     if previous_sol:
         prev_state_result = previous_sol.decision_states(to_merge=SolutionMerge.NODES)  # stewise_states
         for key in x_bounds.keys():
-            if key == "A_" + "Delt_ant" or key == "A_" + "Delt_post" or key == "A_" + "Biceps" or key == "A_" + "Triceps":
+            if (
+                key == "A_" + "Delt_ant"
+                or key == "A_" + "Delt_post"
+                or key == "A_" + "Biceps"
+                or key == "A_" + "Triceps"
+            ):
                 x_bounds[key].min[0, 0] = prev_state_result[key][0][0]
                 x_bounds[key].max[0, 0] = prev_state_result[key][0][0]
-            if key == "Km_" + "Delt_ant" or key == "Km_" + "Delt_post" or key == "Km_" + "Biceps" or key == "Km_" + "Triceps":
+            if (
+                key == "Km_" + "Delt_ant"
+                or key == "Km_" + "Delt_post"
+                or key == "Km_" + "Biceps"
+                or key == "Km_" + "Triceps"
+            ):
                 x_bounds[key].min[0, 0] = prev_state_result[key][0][0]
                 x_bounds[key].max[0, 0] = prev_state_result[key][0][0]
-            if key == "Tau1_" + "Delt_ant" or key == "Tau1_" + "Delt_post" or key == "Tau1_" + "Biceps" or key == "Tau1_" + "Triceps":
+            if (
+                key == "Tau1_" + "Delt_ant"
+                or key == "Tau1_" + "Delt_post"
+                or key == "Tau1_" + "Biceps"
+                or key == "Tau1_" + "Triceps"
+            ):
                 x_bounds[key].min[0, 0] = prev_state_result[key][0][0]
                 x_bounds[key].max[0, 0] = prev_state_result[key][0][0]
 
@@ -325,8 +345,9 @@ def prepare_ocp_fes_cycling(optim_info, cycling_info, model, previous_problem=No
         prev_control_result = previous_sol.decision_controls(to_merge=SolutionMerge.NODES)
         for muscle_model in model.muscles_dynamics_model:
             key = "last_pulse_width_" + str(muscle_model.muscle_name)
-            u_init.add(key=key, initial_guess=prev_control_result[key], phase=0,
-                       interpolation=InterpolationType.EACH_FRAME)
+            u_init.add(
+                key=key, initial_guess=prev_control_result[key], phase=0, interpolation=InterpolationType.EACH_FRAME
+            )
         u_scaling = previous_problem.nlp[0].u_scaling
 
     # --- Set objective --- #
@@ -363,7 +384,7 @@ def prepare_ocp_fes_cycling(optim_info, cycling_info, model, previous_problem=No
     )
 
     # --- Update model for resistive torque --- #
-    model.activate_residual_torque=False
+    model.activate_residual_torque = False
     model = updating_model(model=model, external_force_set=external_force_set, parameters=parameters)
 
     return OptimalControlProgram(
@@ -385,6 +406,7 @@ def prepare_ocp_fes_cycling(optim_info, cycling_info, model, previous_problem=No
         n_threads=48,
         use_sx=use_sx,
     )
+
 
 def solution_to_dict(solution, muscles=MUSCLES):
     time = solution.stepwise_time(to_merge=[SolutionMerge.NODES]).T[0]
@@ -410,6 +432,7 @@ def solution_to_dict(solution, muscles=MUSCLES):
     out["qdot"] = states["qdot"]
 
     return out
+
 
 def append_cycle(store_dict_of_lists, cycle_dict):
     for k, v in cycle_dict.items():
@@ -445,8 +468,9 @@ def main():
             endpoint=False,
         )
     )
-    model = set_fes_model(model_path = "../../msk_models/Wu/Modified_Wu_Shoulder_Model_Cycling.bioMod",
-                          stim_time=stim_time)
+    model = set_fes_model(
+        model_path="../../msk_models/Wu/Modified_Wu_Shoulder_Model_Cycling.bioMod", stim_time=stim_time
+    )
 
     standard_cycling_problem = None
     standard_cycling_sol = None
@@ -462,19 +486,21 @@ def main():
     solver.set_linear_solver(linear_solver)
 
     while fes_ocp_solution_found:
-        standard_cycling_problem = prepare_standard_fes_cycling(optim_info=optim_info,
-                                                                cycling_info=cycling_info,
-                                                                model=model,
-                                                                previous_problem=standard_cycling_problem,
-                                                                previous_sol=standard_cycling_sol,
+        standard_cycling_problem = prepare_standard_fes_cycling(
+            optim_info=optim_info,
+            cycling_info=cycling_info,
+            model=model,
+            previous_problem=standard_cycling_problem,
+            previous_sol=standard_cycling_sol,
         )
         standard_cycling_sol = standard_cycling_problem.solve(solver=solver)
 
-        fes_ocp_problem = prepare_ocp_fes_cycling(optim_info=optim_info,
-                                                  cycling_info=cycling_info,
-                                                  model=model,
-                                                  previous_problem=fes_ocp_problem,
-                                                  previous_sol=standard_cycling_sol,
+        fes_ocp_problem = prepare_ocp_fes_cycling(
+            optim_info=optim_info,
+            cycling_info=cycling_info,
+            model=model,
+            previous_problem=fes_ocp_problem,
+            previous_sol=standard_cycling_sol,
         )
         fes_ocp_problem.add_plot_penalty(CostType.ALL)
         fes_ocp_sol = fes_ocp_problem.solve(solver=solver)
@@ -496,9 +522,9 @@ def main():
 
     # --- Save results --- #
     dictionary = (
-            {f"standard_{k}": v for k, v in standard_store.items()}
-            | {f"optim_{k}": v for k, v in optim_store.items()}
-            | {"cycle_to_failure": cycle_to_failure}
+        {f"standard_{k}": v for k, v in standard_store.items()}
+        | {f"optim_{k}": v for k, v in optim_store.items()}
+        | {"cycle_to_failure": cycle_to_failure}
     )
 
     pickle_file_name = "standard_cycling_to_failure.pkl"
@@ -508,6 +534,7 @@ def main():
 
     np.savez_compressed(str(pickle_file_name)[:-4] + ".npz", **dictionary)
     print(f"Results saved in {pickle_file_name} and {str(pickle_file_name)[:-4] + '.npz'}")
+
 
 if __name__ == "__main__":
     main()
