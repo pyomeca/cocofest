@@ -82,6 +82,23 @@ class OcpFes:
         return dynamics
 
     @staticmethod
+    def declare_dynamics_options(
+        model=None,
+        numerical_time_series=None,
+        numerical_data_timeseries=None,
+        ode_solver=OdeSolver.RK4(n_integration_steps=10),
+        **_,
+    ):
+        numerical_data_timeseries = (
+            numerical_data_timeseries if numerical_data_timeseries is not None else numerical_time_series
+        )
+        return OcpFes.declare_dynamics(
+            model=model,
+            numerical_data_timeseries=numerical_data_timeseries,
+            ode_solver=ode_solver,
+        )
+
+    @staticmethod
     def set_x_bounds(model):
         # ---- STATE BOUNDS REPRESENTATION ---- #
         #

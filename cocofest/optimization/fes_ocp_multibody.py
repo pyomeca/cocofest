@@ -40,7 +40,8 @@ class OcpFesMsk(OcpFes):
 
     @staticmethod
     def declare_dynamics(bio_models, numerical_time_series, ode_solver, contact_type):
-        bio_models._contact_types = tuple(contact_type)
+        if bio_models is not None:
+            bio_models._contact_types = tuple(contact_type)
         dynamics = DynamicsOptions(
             expand_dynamics=True,
             expand_continuity=False,
@@ -49,6 +50,27 @@ class OcpFesMsk(OcpFes):
             ode_solver=ode_solver,
         )
         return dynamics
+
+    @staticmethod
+    def declare_dynamics_options(
+        bio_models=None,
+        model=None,
+        numerical_time_series=None,
+        numerical_data_timeseries=None,
+        ode_solver=None,
+        contact_type=(),
+        **_,
+    ):
+        bio_models = bio_models if bio_models is not None else model
+        numerical_time_series = numerical_data_timeseries if numerical_data_timeseries is not None else numerical_time_series
+        if ode_solver is None:
+            ode_solver = OcpFes.declare_dynamics.__defaults__[1]
+        return OcpFesMsk.declare_dynamics(
+            bio_models=bio_models,
+            numerical_time_series=numerical_time_series,
+            ode_solver=ode_solver,
+            contact_type=contact_type,
+        )
 
     @staticmethod
     def build_parameters(

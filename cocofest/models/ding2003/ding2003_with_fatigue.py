@@ -139,13 +139,17 @@ class DingModelFrequencyWithFatigue(DingModelFrequency):
     # ---- Model's dynamics ---- #
     def system_dynamics(
         self,
-        cn: MX,
-        f: MX,
+        cn: MX = None,
+        f: MX = None,
         a: MX = None,
         tau1: MX = None,
         km: MX = None,
         t: MX = None,
         t_stim_prev: MX | float = None,
+        states: MX = None,
+        time: MX = None,
+        controls: MX = None,
+        numerical_timeseries: MX = None,
         force_length_relationship: MX | float = 1,
         force_velocity_relationship: MX | float = 1,
         passive_force_relationship: MX | float = 0,
@@ -180,6 +184,17 @@ class DingModelFrequencyWithFatigue(DingModelFrequency):
         -------
         The value of the derivative of each state dx/dt at the current time t
         """
+        if states is not None:
+            cn = states[0]
+            f = states[1]
+            a = states[2]
+            tau1 = states[3]
+            km = states[4]
+        if time is not None:
+            t = time
+        if numerical_timeseries is not None:
+            t_stim_prev = numerical_timeseries
+
         cn_dot = self.calculate_cn_dot(cn, t, t_stim_prev)  # Equation n°1
         f_dot = self.f_dot_fun(
             cn,

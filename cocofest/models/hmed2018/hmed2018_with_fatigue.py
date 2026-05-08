@@ -2,6 +2,9 @@ from typing import Callable
 
 from casadi import MX, vertcat
 import numpy as np
+from bioptim import ConfigureProblem, DynamicsEvaluation, NonLinearProgram, OptimalControlProgram
+
+from cocofest.models.state_configure import StateConfigure
 
 from cocofest.models.hmed2018.hmed2018 import DingModelPulseIntensityFrequency
 
@@ -53,7 +56,7 @@ class DingModelPulseIntensityFrequencyWithFatigue(DingModelPulseIntensityFrequen
 
     # ---- Absolutely needed methods ---- #
     @property
-    def name_dofs(self) -> list[str]:
+    def name_dof(self) -> list[str]:
         muscle_name = "_" + self.muscle_name if self.muscle_name is not None else ""
         return [
             "Cn" + muscle_name,
@@ -62,6 +65,10 @@ class DingModelPulseIntensityFrequencyWithFatigue(DingModelPulseIntensityFrequen
             "Tau1" + muscle_name,
             "Km" + muscle_name,
         ]
+
+    @property
+    def name_dofs(self) -> list[str]:
+        return self.name_dof
 
     @property
     def nb_state(self) -> int:
@@ -116,10 +123,21 @@ class DingModelPulseIntensityFrequencyWithFatigue(DingModelPulseIntensityFrequen
 
     def system_dynamics(
         self,
-        time: MX,
-        states: MX,
-        controls: MX,
-        numerical_timeseries: MX,
+        cn: MX = None,
+        f: MX = None,
+        a: MX = None,
+        tau1: MX = None,
+        km: MX = None,
+        t: MX = None,
+        t_stim_prev: MX = None,
+        pulse_intensity: MX = None,
+        states: MX = None,
+        time: MX = None,
+        controls: MX = None,
+        numerical_timeseries: MX = None,
+        force_length_relationship: MX | float = 1,
+        force_velocity_relationship: MX | float = 1,
+        passive_force_relationship: MX | float = 0,
     ) -> MX:
         """
         The system dynamics is the function that describes the models.
@@ -139,14 +157,26 @@ class DingModelPulseIntensityFrequencyWithFatigue(DingModelPulseIntensityFrequen
         -------
         The value of the derivative of each state dx/dt at the current time t
         """
-        t = time
-        cn = states[0]
-        f = states[1]
-        a = states[2]
-        tau1 = states[3]
-        km = states[4]
-        pulse_intensity = controls  # Check
-        t_stim_prev = numerical_timeseries
+        if states is not None:
+            cn = states[0]
+            f = states[1]
+            a = states[2]
+            tau1 = states[3]
+            km = states[4]
+        if time is not None:
+            t = time
+        if numerical_timeseries is not None:
+            t_stim_prev = numerical_timeseries
+        if controls is not None:
+            pulse_intensity = controls
+        if isinstance(pulse_intensity, (list, tuple)):
+            pulse_intensity = pulse_intensity[0]
+        if a is None:
+            a = self.a_rest
+        if tau1 is None:
+            tau1 = self.tau1_rest
+        if km is None:
+            km = self.km_rest
 
         cn_dot = self.calculate_cn_dot(cn, t, t_stim_prev, pulse_intensity)
         f_dot = self.f_dot_fun(
@@ -155,11 +185,59 @@ class DingModelPulseIntensityFrequencyWithFatigue(DingModelPulseIntensityFrequen
             a,
             tau1,
             km,
+            force_length_relationship=force_length_relationship,
+            force_velocity_relationship=force_velocity_relationship,
+            passive_force_relationship=passive_force_relationship,
         )  # Equation n°2
         a_dot = self.a_dot_fun(a, f)  # Equation n°5
         tau1_dot = self.tau1_dot_fun(tau1, f)  # Equation n°9
         km_dot = self.km_dot_fun(km, f)  # Equation n°11
         return vertcat(cn_dot, f_dot, a_dot, tau1_dot, km_dot)
+
+    @staticmethod
+    def dynamics(
+        time: MX,
+        states: MX,
+        controls: MX,
+        parameters: MX,
+        algebraic_states: MX,
+        numerical_timeseries: MX,
+        nlp: NonLinearProgram,
+        fes_model: NonLinearProgram = None,
+        force_length_relationship: MX | float = 1,
+        force_velocity_relationship: MX | float = 1,
+        passive_force_relationship: MX | float = 0,
+    ) -> DynamicsEvaluation:
+        model = fes_model if fes_model else nlp.model
+        dxdt_fun = model.system_dynamics
+
+        return DynamicsEvaluation(
+            dxdt=dxdt_fun(
+                cn=states[0],
+                f=states[1],
+                a=states[2],
+                tau1=states[3],
+                km=states[4],
+                t=time,
+                t_stim_prev=numerical_timeseries,
+                pulse_intensity=controls,
+                force_length_relationship=force_length_relationship,
+                force_velocity_relationship=force_velocity_relationship,
+                passive_force_relationship=passive_force_relationship,
+            ),
+            defects=None,
+        )
+
+    def declare_ding_variables(
+        self,
+        ocp: OptimalControlProgram,
+        nlp: NonLinearProgram,
+        numerical_data_timeseries: dict[str, np.ndarray] = None,
+        contact_type: list = (),
+    ):
+        StateConfigure().configure_all_fes_model_states(ocp, nlp, fes_model=self)
+        StateConfigure().configure_pulse_intensity(ocp, nlp, self.muscle_name, self.sum_stim_truncation)
+        ConfigureProblem.configure_dynamics_function(ocp, nlp, dyn_func=self.dynamics)
 
     def a_dot_fun(self, a: MX, f: MX) -> MX | float:
         """
