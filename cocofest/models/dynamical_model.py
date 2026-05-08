@@ -43,6 +43,7 @@ class FesMskModel(BiorbdModel, StateDynamicsWithContacts):
         parameters: ParameterList = None,
         external_force_set: ExternalForceSetTimeSeries = None,
         contact_types: list[ContactType] | tuple[ContactType] = (),
+        with_contact: bool | None = None,
     ):
         """
         The custom model that will be used in the optimal control program for the FES-MSK models
@@ -66,6 +67,9 @@ class FesMskModel(BiorbdModel, StateDynamicsWithContacts):
         parameters: ParameterList
             The parameters that will be used in the model
         """
+        if with_contact is not None and not contact_types:
+            contact_types = (ContactType.RIGID_EXPLICIT,) if with_contact else ()
+
         super().__init__(
             biorbd_path,
             parameters=parameters,

@@ -5,6 +5,7 @@ from casadi import MX, vertcat, exp
 
 from bioptim import (
     ConfigureProblem,
+    DynamicsFunctions,
     DynamicsEvaluation,
     NonLinearProgram,
     OdeSolver,
@@ -280,20 +281,35 @@ class DingModelPulseWidthFrequency(DingModelFrequency):
         model = fes_model if fes_model else nlp.model
         dxdt_fun = model.system_dynamics
 
-        dxdt = dxdt_fun(
-            cn=states[0],
-            f=states[1],
-            t=time,
-            t_stim_prev=numerical_timeseries,
-            pulse_width=controls[0],
-            force_length_relationship=force_length_relationship,
-            force_velocity_relationship=force_velocity_relationship,
-            passive_force_relationship=passive_force_relationship,
-        )
+        try:
+            dxdt = dxdt_fun(
+                cn=states[0],
+                f=states[1],
+                t=time,
+                t_stim_prev=numerical_timeseries,
+                pulse_width=controls[0],
+                force_length_relationship=force_length_relationship,
+                force_velocity_relationship=force_velocity_relationship,
+                passive_force_relationship=passive_force_relationship,
+            )
+        except TypeError:
+            dxdt = dxdt_fun(
+                time=time,
+                states=states,
+                controls=controls,
+                numerical_timeseries=numerical_timeseries,
+            )
 
         defects = None
-        if isinstance(nlp.dynamics_type.ode_solver, OdeSolver.COLLOCATION):
-            defects = nlp.states_dot.scaled.cx * nlp.dt - dxdt * nlp.dt
+        if isinstance(nlp.dynamics_type.ode_solver, OdeSolver.COLLOCATION) and nlp.model is model:
+            state_names = [
+                f"{name}_{model.muscle_name}" if model.muscle_name and f"{name}_{model.muscle_name}" in nlp.states_dot else name
+                for name in model.name_dof
+            ]
+            states_dot = vertcat(
+                *[DynamicsFunctions.get(nlp.states_dot[state_name], nlp.states_dot.scaled.cx) for state_name in state_names]
+            )
+            defects = states_dot * nlp.dt - dxdt * nlp.dt
 
         return DynamicsEvaluation(dxdt=dxdt, defects=defects)
 

@@ -377,8 +377,8 @@ class DingModelFrequency(FesModel):
         model = fes_model if fes_model else nlp.model
         dxdt_fun = model.system_dynamics
 
-        return DynamicsEvaluation(
-            dxdt=dxdt_fun(
+        try:
+            dxdt = dxdt_fun(
                 cn=states[0],
                 f=states[1],
                 t=time,
@@ -386,8 +386,16 @@ class DingModelFrequency(FesModel):
                 force_length_relationship=force_length_relationship,
                 force_velocity_relationship=force_velocity_relationship,
                 passive_force_relationship=passive_force_relationship,
-            ),
-        )
+            )
+        except TypeError:
+            dxdt = dxdt_fun(
+                time=time,
+                states=states,
+                controls=controls,
+                numerical_timeseries=numerical_timeseries,
+            )
+
+        return DynamicsEvaluation(dxdt=dxdt, defects=None)
 
     def declare_ding_variables(
         self,

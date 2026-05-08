@@ -57,13 +57,12 @@ class DingModelPulseIntensityFrequencyWithFatigue(DingModelPulseIntensityFrequen
     # ---- Absolutely needed methods ---- #
     @property
     def name_dof(self) -> list[str]:
-        muscle_name = "_" + self.muscle_name if self.muscle_name is not None else ""
         return [
-            "Cn" + muscle_name,
-            "F" + muscle_name,
-            "A" + muscle_name,
-            "Tau1" + muscle_name,
-            "Km" + muscle_name,
+            "Cn",
+            "F",
+            "A",
+            "Tau1",
+            "Km",
         ]
 
     @property
