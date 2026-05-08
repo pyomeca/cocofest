@@ -7,6 +7,7 @@ from bioptim import (
     ConfigureProblem,
     DynamicsEvaluation,
     NonLinearProgram,
+    OdeSolver,
     OptimalControlProgram,
 )
 from cocofest.models.ding2003.ding2003 import DingModelFrequency
@@ -263,19 +264,22 @@ class DingModelPulseWidthFrequency(DingModelFrequency):
         model = fes_model if fes_model else nlp.model
         dxdt_fun = model.system_dynamics
 
-        return DynamicsEvaluation(
-            dxdt=dxdt_fun(
-                cn=states[0],
-                f=states[1],
-                t=time,
-                t_stim_prev=numerical_timeseries,
-                pulse_width=controls[0],
-                force_length_relationship=force_length_relationship,
-                force_velocity_relationship=force_velocity_relationship,
-                passive_force_relationship=passive_force_relationship,
-            ),
-            defects=None,
+        dxdt = dxdt_fun(
+            cn=states[0],
+            f=states[1],
+            t=time,
+            t_stim_prev=numerical_timeseries,
+            pulse_width=controls[0],
+            force_length_relationship=force_length_relationship,
+            force_velocity_relationship=force_velocity_relationship,
+            passive_force_relationship=passive_force_relationship,
         )
+
+        defects = None
+        if isinstance(nlp.dynamics_type.ode_solver, OdeSolver.COLLOCATION):
+            defects = nlp.states_dot.scaled.cx * nlp.dt - dxdt * nlp.dt
+
+        return DynamicsEvaluation(dxdt=dxdt, defects=defects)
 
     def declare_ding_variables(
         self,
