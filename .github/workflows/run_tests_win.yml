@@ -1,9 +1,6 @@
 name: Run the tests
 
-on:
-  push:
-    branches: [main]
-  pull_request:
+on: [pull_request]
 
 env:
   PREFIX_WINDOWS: C:\Miniconda3\envs\cocofest
@@ -13,7 +10,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [windows-latest, ubuntu-latest]
+        os: [windows-latest]
         shard: [1, 2]
     name: Tests on ${{ matrix.os }}-shard ${{ matrix.shard }}
     runs-on: ${{ matrix.os }}
@@ -43,8 +40,12 @@ jobs:
           conda info
           conda list
 
-      - name: Install cocofest with dev dependencies
-        run: pip install -e ".[dev]"
+      - name: Verify conda bioptim installation
+        run: |
+          python -c "import bioptim; print(bioptim.__version__, bioptim.__file__)"
+
+      - name: Install extra dependencies
+        run: conda install pytest-cov black pytest pytest-cov codecov packaging -cconda-forge
 
       - name: Run tests with code coverage
         run: pytest -v --color=yes --cov-report term-missing --cov=cocofest --cov-report=xml:coverage.xml tests/shard${{ matrix.shard }}
@@ -53,7 +54,7 @@ jobs:
         id: archive
         uses: actions/upload-artifact@v4
         with:
-          name: coverage-${{ matrix.os }}-${{ matrix.shard }}
+          name: coverage${{ matrix.shard }}
           path: |
             coverage.xml
             .coverage
@@ -62,11 +63,7 @@ jobs:
 
   merge-coverage:
     needs: build
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [windows-latest, ubuntu-latest]
-    runs-on: ${{ matrix.os }}
+    runs-on: windows-latest
     defaults:
       run:
         shell: bash -l {0}
@@ -75,7 +72,6 @@ jobs:
       - name: Set prefix windows
         run: |
           echo "PREFIX=${{ env.PREFIX_WINDOWS }}" >> $GITHUB_ENV
-        if: matrix.os == 'windows-latest'
 
       - name: Checkout code
         uses: actions/checkout@v3
@@ -93,19 +89,22 @@ jobs:
           conda info
           conda list
 
+      - name: Verify conda bioptim installation
+        run: |
+          python -c "import bioptim; print(bioptim.__version__, bioptim.__file__)"
+
       - name: Install extra dependencies
         run: pip install coverage
 
-      - name: Download coverage artifacts for this OS
+      - name: Download all workflow run artifacts
+        id: download
         uses: actions/download-artifact@v4
-        with:
-          pattern: coverage-${{ matrix.os }}-*
 
       - name: Rename coverage files
         run: |
           for shard in {1,2}; do
-            mv coverage-${{ matrix.os }}-${shard}/coverage.xml coverage${shard}.xml
-            mv coverage-${{ matrix.os }}-${shard}/.coverage* .coverage${shard}
+            mv coverage${shard}/coverage.xml coverage${shard}.xml
+            mv coverage${shard}/.coverage* .coverage${shard}
           done
 
       - name: Show current dir content
