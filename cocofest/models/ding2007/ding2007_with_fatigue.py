@@ -5,6 +5,7 @@ import numpy as np
 
 from bioptim import (
     ConfigureProblem,
+    DynamicsFunctions,
     DynamicsEvaluation,
     NonLinearProgram,
     OdeSolver,
@@ -315,8 +316,15 @@ class DingModelPulseWidthFrequencyWithFatigue(DingModelPulseWidthFrequency):
         )
 
         defects = None
-        if isinstance(nlp.dynamics_type.ode_solver, OdeSolver.COLLOCATION):
-            defects = nlp.states_dot.scaled.cx * nlp.dt - dxdt * nlp.dt
+        if isinstance(nlp.dynamics_type.ode_solver, OdeSolver.COLLOCATION) and nlp.model is model:
+            state_names = [
+                f"{name}_{model.muscle_name}" if model.muscle_name and f"{name}_{model.muscle_name}" in nlp.states_dot else name
+                for name in model.name_dof
+            ]
+            states_dot = vertcat(
+                *[DynamicsFunctions.get(nlp.states_dot[state_name], nlp.states_dot.scaled.cx) for state_name in state_names]
+            )
+            defects = states_dot * nlp.dt - dxdt * nlp.dt
 
         return DynamicsEvaluation(dxdt=dxdt, defects=defects)
 
