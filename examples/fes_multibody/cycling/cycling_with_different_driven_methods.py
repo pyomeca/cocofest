@@ -41,7 +41,7 @@ from cocofest import (
     OcpFesMsk,
     DingModelPulseWidthFrequency,
 )
-from cost_functions import CustomCostFunctions
+from examples.fes_multibody.cycling.cost_functions import CustomCostFunctions
 
 
 def set_external_forces(n_shooting: int, torque: int | float) -> tuple[dict, ExternalForceSetTimeSeries]:
@@ -499,10 +499,10 @@ def prepare_ocp(
     model = update_model(model, external_force_set, parameters=ParameterList(use_sx=use_sx))
 
     return OptimalControlProgram(
-        [model],
-        dynamics,
-        n_shooting,
-        final_time,
+        bio_model=[model],
+        dynamics=dynamics,
+        n_shooting=n_shooting,
+        phase_time=final_time,
         x_bounds=x_bounds,
         u_bounds=u_bounds,
         x_init=x_init,

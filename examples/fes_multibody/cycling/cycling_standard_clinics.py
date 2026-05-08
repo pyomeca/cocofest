@@ -39,7 +39,7 @@ from cycling_pulse_width_mhe import (
     updating_model,
     set_u_bounds_and_init,
 )
-from cost_functions import CustomCostFunctions
+from examples.fes_multibody.cycling.cost_functions import CustomCostFunctions
 
 from collections import defaultdict
 
