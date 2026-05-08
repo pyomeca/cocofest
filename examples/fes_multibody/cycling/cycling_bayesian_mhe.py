@@ -28,7 +28,7 @@ from bioptim import (
 
 import cycling_pulse_width_mhe as base
 
-from cost_functions import CustomCostFunctions
+from examples.fes_multibody.cycling.cost_functions import CustomCostFunctions
 
 
 def minimize_root_mean_square_fatigue(controller: PenaltyController, muscle_weights: list) -> MX:
