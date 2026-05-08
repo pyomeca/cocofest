@@ -3,10 +3,12 @@ import numpy as np
 from bioptim import (
     BoundsList,
     ConstraintList,
+    DynamicsOptions,
     ExternalForceSetTimeSeries,
     InitialGuessList,
     InterpolationType,
     ParameterList,
+    PhaseDynamics,
     VariableScaling,
 )
 
@@ -35,6 +37,18 @@ class OcpFesMsk(OcpFes):
         numerical_time_series = {"external_forces": external_force_set.to_numerical_time_series()}
 
         return numerical_time_series, external_force_set
+
+    @staticmethod
+    def declare_dynamics(bio_models, numerical_time_series, ode_solver, contact_type):
+        bio_models._contact_types = tuple(contact_type)
+        dynamics = DynamicsOptions(
+            expand_dynamics=True,
+            expand_continuity=False,
+            phase_dynamics=PhaseDynamics.SHARED_DURING_THE_PHASE,
+            numerical_data_timeseries=numerical_time_series,
+            ode_solver=ode_solver,
+        )
+        return dynamics
 
     @staticmethod
     def build_parameters(
@@ -109,7 +123,7 @@ class OcpFesMsk(OcpFes):
         x_init = InitialGuessList()
         for model in bio_models.muscles_dynamics_model:
             muscle_name = model.muscle_name
-            variable_bound_list = model.name_dofs
+            variable_bound_list = [model.name_dof[i] + "_" + muscle_name for i in range(len(model.name_dof))]
 
             starting_bounds, min_bounds, max_bounds = (
                 model.standard_rest_values(),
@@ -272,4 +286,5 @@ class OcpFesMsk(OcpFes):
             activate_residual_torque=model.activate_residual_torque,
             parameters=parameters,
             external_force_set=external_force_set,
+            contact_types=model.contact_types,
         )

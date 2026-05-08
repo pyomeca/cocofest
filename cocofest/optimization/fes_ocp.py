@@ -3,7 +3,6 @@ import numpy as np
 from bioptim import (
     BoundsList,
     ConstraintList,
-    DynamicsOptionsList,
     DynamicsOptions,
     InitialGuessList,
     InterpolationType,
@@ -13,6 +12,7 @@ from bioptim import (
     ParameterList,
     PhaseDynamics,
     VariableScaling,
+    OdeSolver,
 )
 
 from ..fourier_approx import FourierSeries
@@ -72,18 +72,14 @@ class OcpFes:
         return constraints
 
     @staticmethod
-    def declare_dynamics_options(numerical_time_series, ode_solver):
-        dynamics_options = DynamicsOptionsList()
-        dynamics_options.add(
-            DynamicsOptions(
-                expand_dynamics=True,
-                expand_continuity=False,
-                phase_dynamics=PhaseDynamics.SHARED_DURING_THE_PHASE,
-                ode_solver=ode_solver,
-                numerical_data_timeseries=numerical_time_series,
-            )
+    def declare_dynamics(model, numerical_data_timeseries=None, ode_solver=OdeSolver.RK4(n_integration_steps=10)):
+        dynamics = DynamicsOptions(
+            expand_dynamics=True,
+            phase_dynamics=PhaseDynamics.SHARED_DURING_THE_PHASE,
+            numerical_data_timeseries=numerical_data_timeseries,
+            ode_solver=ode_solver,
         )
-        return dynamics_options
+        return dynamics
 
     @staticmethod
     def set_x_bounds(model):
@@ -100,7 +96,7 @@ class OcpFes:
 
         # Sets the bound for all the phases
         x_bounds = BoundsList()
-        variable_bound_list = model.name_dofs
+        variable_bound_list = model.name_dof
         starting_bounds, min_bounds, max_bounds = (
             model.standard_rest_values(),
             model.standard_rest_values(),
@@ -132,7 +128,7 @@ class OcpFes:
 
     @staticmethod
     def set_x_init(model):
-        variable_bound_list = model.name_dofs
+        variable_bound_list = model.name_dof
         x_init = InitialGuessList()
         for j in range(len(variable_bound_list)):
             x_init.add(variable_bound_list[j], model.standard_rest_values()[j])
