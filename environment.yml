@@ -1,8 +1,26 @@
-# create a dev conda environment with: `make create_env` or `conda env create -f environment.yml`
-name: cocofest
+# Create the branch environment with:
+#   conda env create -f environment.yml
+# or update an existing one with:
+#   conda env update -f environment.yml --prune
+#
+# Notes:
+# - This branch targets bioptim 3.4.0 from conda-forge.
+# - Keep `external/bioptim` out of PYTHONPATH so the conda package is used.
+# - `ma57` is optional. If `libhsl.dylib` is available on your machine, point IPOPT to it.
+name: cocofest-run
 channels:
 - conda-forge
 dependencies:
+- python=3.11
+- numpy
+- scipy
+- matplotlib
+- pytest
+- casadi>=3.7
+- ipopt=3.14.16
+- mumps-include=5.7.3
+- mumps-seq=5.7.3
+- biorbd>=1.12.0,<1.13.0
 - bioptim=3.4.0
 - bioviz
 - python-graphviz
