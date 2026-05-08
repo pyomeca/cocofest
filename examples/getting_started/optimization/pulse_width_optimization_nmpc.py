@@ -138,7 +138,7 @@ def main(plot=True):
         minimize_force=True,
         minimize_fatigue=False,
         use_sx=False,
-        ode_solver=OdeSolver.RK4(n_integration_steps=10),
+        ode_solver=OdeSolver.COLLOCATION(polynomial_degree=5, method="radau"),
     )
 
     def update_functions(_nmpc: MultiCyclicNonlinearModelPredictiveControl, cycle_idx: int, _sol: Solution):
