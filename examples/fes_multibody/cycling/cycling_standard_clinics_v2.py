@@ -80,20 +80,6 @@ def compute_net_work(time: np.ndarray, torque: np.ndarray) -> float:
 
     Parameters
     ----------
-    time : np.ndarray
-        Time vector in seconds.
-    torque : np.ndarray
-        Torque vector in N.m.
-
-    Returns
-    -------
-    float
-        Net work in joules.
-
-    Notes
-    -----
-    If torque has the same length as time, trapezoidal integration is used.
-    If torque has one fewer point than time, torque is interpreted as a piecewise-constant control per interval.
     """
     time = np.asarray(time, dtype=float).squeeze()
     torque = np.asarray(torque, dtype=float).squeeze()
@@ -114,8 +100,21 @@ def compute_net_work(time: np.ndarray, torque: np.ndarray) -> float:
         dt = np.diff(time)
         return float(np.sum(torque * omega * dt))
 
+    if (time.size - 1) % torque.size == 0:
+        step = (time.size - 1) // torque.size
+        time_boundaries = time[::step]
+
+        if time_boundaries.size != torque.size + 1:
+            raise ValueError(
+                f"Could not build interval boundaries. "
+                f"len(time_boundaries)={time_boundaries.size}, expected {torque.size + 1}."
+            )
+
+        dt = np.diff(time_boundaries)
+        return float(np.sum(torque * omega * dt))
+
     raise ValueError(
-        f"torque length must be equal to len(time) or len(time) - 1. "
+        f"Cannot match time and torque automatically. "
         f"Got len(time)={time.size}, len(torque)={torque.size}."
     )
 
