@@ -602,9 +602,11 @@ def prepare_nmpc(
     external_force = cycling_info["resistive_torque"]
 
     # --- Cost function info --- #
-    objective_fun_dict = {"cost_fun_key": simulation_conditions["cost_fun_key"],
-                          "cost_fun_weight": 10000,
-                          "individual_quadratic": True}
+    objective_fun_dict = {
+        "cost_fun_key": simulation_conditions["cost_fun_key"],
+        "cost_fun_weight": 10000,
+        "individual_quadratic": True,
+    }
 
     # --- Set dynamics --- #
     # --- External force numerical time series --- #
@@ -648,16 +650,26 @@ def prepare_nmpc(
     )
 
     # --- Set parameters (for minmax cost_function) --- #
-    if objective_fun_dict["cost_fun_key"] in [["minimize_peak_force"], ["minimize_peak_activation"], ["minimize_peak_muscle_stress"], ["minimize_peak_fatigue"], ["minimize_peak_fatigue_decay"]]:
-        parameters, parameters_bounds, parameters_init, parameters_objectives = set_parameters(ns=cycle_len, cycle=n_cycles_simultaneous, use_sx=use_sx)
+    if objective_fun_dict["cost_fun_key"] in [
+        ["minimize_peak_force"],
+        ["minimize_peak_activation"],
+        ["minimize_peak_muscle_stress"],
+        ["minimize_peak_fatigue"],
+        ["minimize_peak_fatigue_decay"],
+    ]:
+        parameters, parameters_bounds, parameters_init, parameters_objectives = set_parameters(
+            ns=cycle_len, cycle=n_cycles_simultaneous, use_sx=use_sx
+        )
     else:
         parameters = ParameterList(use_sx=use_sx)
         parameters_bounds = BoundsList()
         parameters_init = InitialGuessList()
         parameters_objectives = ParameterObjectiveList()
 
-     # --- Set constraints --- #
-    constraints = set_constraints(model, x_init["q"].init[2][0] - 2*np.pi, cycle_len, n_cycles_simultaneous, objective_fun_dict["cost_fun_key"])
+    # --- Set constraints --- #
+    constraints = set_constraints(
+        model, x_init["q"].init[2][0] - 2 * np.pi, cycle_len, n_cycles_simultaneous, objective_fun_dict["cost_fun_key"]
+    )
 
     # --- Update model for resistive torque --- #
     model = updating_model(model=model, external_force_set=external_force_set, parameters=parameters)
@@ -867,19 +879,24 @@ def set_constraints(bio_model, one_cycle_bound, cycle_len, n_simultaneous, objec
         axes=[Axis.X, Axis.Y],
     )
 
-    angle_slack = 0.174533/4  # 10 degrees in radiant
-    for i in range(n_simultaneous-1):
+    angle_slack = 0.174533 / 4  # 10 degrees in radiant
+    for i in range(n_simultaneous - 1):
         constraints.add(
             ConstraintFcn.BOUND_STATE,
             key="q",
             node=cycle_len * (i + 1),
             index=2,
-            min_bound=np.array([one_cycle_bound - (2*np.pi * i) - angle_slack]),
-            max_bound=np.array([one_cycle_bound - (2*np.pi * i) + angle_slack]),
+            min_bound=np.array([one_cycle_bound - (2 * np.pi * i) - angle_slack]),
+            max_bound=np.array([one_cycle_bound - (2 * np.pi * i) + angle_slack]),
         )
 
-    if objective_function_key in [["minimize_peak_force"], ["minimize_peak_activation"],
-                                              ["minimize_peak_muscle_stress"], ["minimize_peak_fatigue"], ["minimize_peak_fatigue_decay"]]:
+    if objective_function_key in [
+        ["minimize_peak_force"],
+        ["minimize_peak_activation"],
+        ["minimize_peak_muscle_stress"],
+        ["minimize_peak_fatigue"],
+        ["minimize_peak_fatigue_decay"],
+    ]:
         for i in range(4):
             constraints.add(
                 CustomCostFunctions.constraints_minmax,
@@ -915,8 +932,17 @@ def set_objective_functions(objective_fun_dict, recalculate=False):
     # --- Set main cost function --- #
     else:
         for i in range(len(keys)):
-            if keys[i] in ["minimize_peak_force", "minimize_peak_activation",
-                                          "minimize_peak_muscle_stress", "minimize_peak_fatigue", "minimize_peak_fatigue_decay"] and recalculate is False:
+            if (
+                keys[i]
+                in [
+                    "minimize_peak_force",
+                    "minimize_peak_activation",
+                    "minimize_peak_muscle_stress",
+                    "minimize_peak_fatigue",
+                    "minimize_peak_fatigue_decay",
+                ]
+                and recalculate is False
+            ):
                 objective_functions.add(
                     custom_objective_functions["minimize_peak"]["function"],
                     custom_type=ObjectiveFcn.Lagrange,
@@ -943,9 +969,11 @@ def set_parameters(ns: int, cycle: int, use_sx: bool):
     parameter_objectives = ParameterObjectiveList()
     ns = ns * cycle + 1
 
-    parameters.add("minmax_param", None, size=ns, scaling=VariableScaling("minmax_param", [1]*ns))
+    parameters.add("minmax_param", None, size=ns, scaling=VariableScaling("minmax_param", [1] * ns))
     parameter_init["minmax_param"] = [0] * ns
-    parameter_bounds.add("minmax_param", min_bound=[0]*ns, max_bound=[1000000]*ns, interpolation=InterpolationType.CONSTANT)
+    parameter_bounds.add(
+        "minmax_param", min_bound=[0] * ns, max_bound=[1000000] * ns, interpolation=InterpolationType.CONSTANT
+    )
 
     return parameters, parameter_bounds, parameter_init, parameter_objectives
 
@@ -1068,8 +1096,8 @@ def create_simulation_list(
     sims = []
     custom_cost_function_dict = CustomCostFunctions().dict_functions
     for (n_cycles, stim), cost_fun_key in product(
-            zip(n_cycles_simultaneous, stimulation),
-            cost_fun_dict["optimized_function"],
+        zip(n_cycles_simultaneous, stimulation),
+        cost_fun_dict["optimized_function"],
     ):
         index = [custom_cost_function_dict[key]["index"] for key in cost_fun_key]
         pkl_path, init_path = make_file_paths(n_cycles, index, ode_solver)
@@ -1094,7 +1122,9 @@ def save_sol_in_pkl(sol, simulation_conditions, nmpc, is_initial_guess=False, to
     solving_time_per_ocp = [sol[1][i].solver_time_to_optimize for i in range(len(sol[1]))]
     real_time_per_ocp = [sol[1][i].real_time_to_optimize for i in range(len(sol[1]))]
     objective_values_per_ocp = [float(sol[1][i].cost) for i in range(len(sol[1]))]
-    objective_values_per_kept_cycle = [float(sol[2][i].cost) for i in range(len(sol[2])-(simulation_conditions["n_cycles_simultaneous"]-1))]
+    objective_values_per_kept_cycle = [
+        float(sol[2][i].cost) for i in range(len(sol[2]) - (simulation_conditions["n_cycles_simultaneous"] - 1))
+    ]
     iter_per_ocp = [sol[1][i].iterations for i in range(len(sol[1]))]
     average_solving_time_per_iter_list = [solving_time_per_ocp[i] / (iter_per_ocp[i] + 1) for i in range(len(sol[1]))]
     total_average_solving_time_per_iter = average(average_solving_time_per_iter_list)
@@ -1133,8 +1163,10 @@ def save_sol_in_pkl(sol, simulation_conditions, nmpc, is_initial_guess=False, to
     recalculate_objective = False
     if recalculate_objective:
         recalculate_objective_dict = recalculate_objective_fun(sol[1], nmpc, sim_cond=simulation_conditions)
-        similar_cost_values = [True if objective_values_per_kept_cycle == recalculate_objective_dict[key] else False for
-                               key in recalculate_objective_dict]
+        similar_cost_values = [
+            True if objective_values_per_kept_cycle == recalculate_objective_dict[key] else False
+            for key in recalculate_objective_dict
+        ]
         if any(similar_cost_values):
             dictionary["similar_cost_values"] = True
             print("Recalculated cost function matches the original one.")
@@ -1150,7 +1182,6 @@ def save_sol_in_pkl(sol, simulation_conditions, nmpc, is_initial_guess=False, to
     for key in controls.keys():
         dictionary[key] = controls[key]
 
-
     pickle_file_name = simulation_conditions["pickle_file_path"]
     Path(pickle_file_name).parent.mkdir(parents=True, exist_ok=True)
     with open(pickle_file_name, "wb") as file:
@@ -1162,6 +1193,7 @@ def save_sol_in_pkl(sol, simulation_conditions, nmpc, is_initial_guess=False, to
 
 def recalculate_objective_fun(cycle_solutions: list[Solution], nmpc, sim_cond) -> dict:
     import time
+
     recalculated_cost_functions = {}
     custom_cost_functions = CustomCostFunctions().dict_functions
 
@@ -1169,8 +1201,10 @@ def recalculate_objective_fun(cycle_solutions: list[Solution], nmpc, sim_cond) -
 
     for key in recalculated_cost_functions_keys:
         initial_time = time.time()
-        obj_fun_dict = {'cost_fun_key': [key],
-                        'cost_fun_weight': sim_cond["cost_fun_weight"],}
+        obj_fun_dict = {
+            "cost_fun_key": [key],
+            "cost_fun_weight": sim_cond["cost_fun_weight"],
+        }
         objective = set_objective_functions(obj_fun_dict, recalculate=True)
         nmpc.common_objective_functions = objective
         cost_function_values = []
@@ -1213,7 +1247,7 @@ def run_initial_guess(mhe_info, cycling_info, model_path, stimulation, n_cycles_
         simulation_conditions = {
             "n_cycles_simultaneous": n_cycles_simultaneous[i],
             "stimulation": stimulation[i],
-            "cost_fun_key":["initial_guess"],
+            "cost_fun_key": ["initial_guess"],
             "cost_fun_weight": [10000],
             "pickle_file_path": Path("result")
             / "initial_guess"
@@ -1262,8 +1296,9 @@ def run_optim(mhe_info, cycling_info, simulation_conditions, model_path, save_so
             muscles = _sol.ocp.nlp[0].model.muscle_names
             a_rest_list = [_sol.ocp.nlp[0].model.muscles_dynamics_model[i].a_rest for i in range(len(muscles))]
             a_t_list = [result_sol["A_" + muscles[i]][0][-1] for i in range(len(muscles))]
-            fatigue_percentage = [round(((a_rest_list[i] - a_t_list[i]) / (a_rest_list[i])) * 100, 2) for i in
-                                  range(len(muscles))]
+            fatigue_percentage = [
+                round(((a_rest_list[i] - a_t_list[i]) / (a_rest_list[i])) * 100, 2) for i in range(len(muscles))
+            ]
             for i in range(len(muscles)):
                 print(muscles[i] + " fatigue = " + str(fatigue_percentage[i]) + "%")
         return cycle_idx < mhe_info["n_cycles"]  # True if there are still some cycle to perform
@@ -1416,38 +1451,34 @@ if __name__ == "__main__":
         n_total_cycle=10000,
         n_cycles_simultaneous=[2, 3, 4, 5],
         resistive_torque=-0.20,  # (N.m)
-        cost_fun_dict={"optimized_function": [
-            # --- Pulse width --- #
-            # ["minimize_average_activation"],
-            ["minimize_root_mean_square_activation"],
-            # ["minimize_cubic_average_activation"],
-            # ["minimize_peak_activation"],
-
-            # --- Force --- #
-            # ["minimize_average_force"],
-            ["minimize_root_mean_square_force"],
-            # ["minimize_cubic_average_force"],
-            # ["minimize_peak_force"],
-
-            # --- Stress --- #
-            # ["minimize_average_muscle_stress"],
-            ["minimize_root_mean_square_muscle_stress"],
-            # ["minimize_cubic_average_muscle_stress"],
-            # ["minimize_peak_muscle_stress"],
-
-            # --- Fatigue --- #
-            # ["minimize_average_fatigue"],
-            # ["minimize_root_mean_square_fatigue"],
-            # ["minimize_cubic_average_fatigue"],
-            # ["minimize_peak_fatigue"],
-
-            # --- Power --- #
-            ["minimize_root_mean_square_muscle_power"],
-
-            # --- Recovery --- #
-            ["minimize_average_fatigue_and_recovery"],
-            # ["minimize_average_fatigue_and_recovery_2"],
-            # ["minimize_balanced_fatigue_by_contribution"],
+        cost_fun_dict={
+            "optimized_function": [
+                # --- Pulse width --- #
+                # ["minimize_average_activation"],
+                ["minimize_root_mean_square_activation"],
+                # ["minimize_cubic_average_activation"],
+                # ["minimize_peak_activation"],
+                # --- Force --- #
+                # ["minimize_average_force"],
+                ["minimize_root_mean_square_force"],
+                # ["minimize_cubic_average_force"],
+                # ["minimize_peak_force"],
+                # --- Stress --- #
+                # ["minimize_average_muscle_stress"],
+                ["minimize_root_mean_square_muscle_stress"],
+                # ["minimize_cubic_average_muscle_stress"],
+                # ["minimize_peak_muscle_stress"],
+                # --- Fatigue --- #
+                # ["minimize_average_fatigue"],
+                # ["minimize_root_mean_square_fatigue"],
+                # ["minimize_cubic_average_fatigue"],
+                # ["minimize_peak_fatigue"],
+                # --- Power --- #
+                ["minimize_root_mean_square_muscle_power"],
+                # --- Recovery --- #
+                ["minimize_average_fatigue_and_recovery"],
+                # ["minimize_average_fatigue_and_recovery_2"],
+                # ["minimize_balanced_fatigue_by_contribution"],
             ]
         },
         init_guess=False,
