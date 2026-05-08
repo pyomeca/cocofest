@@ -13,9 +13,8 @@ from skopt import gp_minimize
 from skopt.space import Real
 from skopt.utils import use_named_args
 from skopt.callbacks import CheckpointSaver
-from casadi import MX, vertcat, sum1
+from casadi import MX, vertcat, sum1, if_else, mmax, tanh
 
-import cocofest._matplotlib_compat  # Temporary fix, see cocofest/_matplotlib_compat.py
 from bioptim import (
     ObjectiveList,
     ObjectiveFcn,
@@ -29,16 +28,33 @@ from bioptim import (
 
 import cycling_pulse_width_mhe as base
 
+from cost_functions import CustomCostFunctions
 
-# ---------------------#
-#    Cost functions    #
-# ---------------------#
+
+def minimize_root_mean_square_fatigue(controller: PenaltyController, muscle_weights: list) -> MX:
+    """
+    Minimize the root-mean-square of muscle fatigue.
+    """
+    eps = 1e-8
+    muscle_name_list = controller.model.bio_model.muscle_names
+    muscle_fatigue = vertcat(
+        *[
+            muscle_weights[x]
+            * (controller.model.muscles_dynamics_model[x].a_scale - controller.states["A_" + muscle_name_list[x]].cx)
+            ** 2
+            for x in range(len(muscle_name_list))
+        ]
+    )
+    rms_fatigue = (sum1(muscle_fatigue) / len(muscle_name_list) + eps) ** 0.5
+    return rms_fatigue
+
+
 def minimize_root_mean_pw(controller: PenaltyController, muscle_weights: list) -> MX:
     """
     Minimize the root-mean-square of pw.
     """
     eps = 1e-8
-    muscle_name_list = controller.model.muscle_names
+    muscle_name_list = controller.model.bio_model.muscle_names
     stim_charge = vertcat(
         *[
             muscle_weights[x]
@@ -56,82 +72,45 @@ def minimize_root_mean_pw(controller: PenaltyController, muscle_weights: list) -
             for x in range(len(muscle_name_list))
         ]
     )
+
     rms_activation = (sum1(stim_charge) / len(muscle_name_list) + eps) ** 0.5
     return rms_activation
 
 
-def minimize_root_mean_square_force(controller: PenaltyController, muscle_weights: list) -> MX:
+def minimize_avg_fatigue_recovery(controller: PenaltyController, muscle_weights: list) -> MX:
     """
-    Minimize the root-mean-square of muscle force production.
+    Minimize the average fatigue based on recovery.
     """
-    eps = 1e-8
-    muscle_name_list = controller.model.muscle_names
-    muscle_force = vertcat(
-        *[
-            muscle_weights[x] * controller.states["F_" + muscle_name_list[x]].cx ** 2
-            for x in range(len(muscle_name_list))
-        ]
+    muscle_name_list = controller.model.bio_model.muscle_names
+    dA = CustomCostFunctions.calculate_dA(controller)
+    A_rest = [controller.model.muscles_dynamics_model[x].a_scale for x in range(len(muscle_name_list))]
+
+    max_dA_fatigue = [72.2, 61.2, 85.7, 92.3]
+    max_dA_recovery = [2.3, 3.0, 14.8, 35.6]
+    A_min = [41, 70, 379, 932]
+
+    with_triceps = True
+    muscle_range = 4 if with_triceps else 3
+
+    dA_nomalized = vertcat(
+        *[if_else(dA[x] < 0, dA[x] / max_dA_fatigue[x], dA[x] / max_dA_recovery[x]) for x in range(muscle_range)]
     )
-    rms_force = (sum1(muscle_force) / len(muscle_name_list) + eps) ** 0.5
-    return rms_force
 
+    A_t = vertcat(*[controller.states["A_" + muscle_name_list[x]].cx for x in range(len(muscle_name_list))])
+    fatigue = [((A_rest[i] - A_t[i]) / (A_rest[i] - A_min[i])) for i in range(muscle_range)]
 
-def minimize_root_mean_square_muscle_stress(controller: PenaltyController, muscle_weights: list) -> MX:
-    """
-    Minimize the root-mean-square of muscle stress.
-    """
-    eps = 1e-8
-    muscle_name_list = controller.model.muscle_names
-    muscle_stress = vertcat(
-        *[
-            muscle_weights[x]
-            * (controller.states["F_" + muscle_name_list[x]].cx / controller.model.muscles_dynamics_model[x].pcsa) ** 2
-            for x in range(len(muscle_name_list))
-        ]
+    muscle_fatigue_decay = vertcat(
+        *[muscle_weights[x] * fatigue[x] * (1 + tanh(-dA_nomalized[x])) for x in range(muscle_range)]
     )
-    rms_stress = (sum1(muscle_stress) / len(muscle_name_list) + eps) ** 0.5
-    return rms_stress
 
-
-def minimize_root_mean_square_fatigue(controller: PenaltyController, muscle_weights: list) -> MX:
-    """
-    Minimize the root-mean-square of muscle fatigue.
-    """
-    eps = 1e-8
-    muscle_name_list = controller.model.muscle_names
-    muscle_fatigue = vertcat(
-        *[
-            muscle_weights[x]
-            * (controller.model.muscles_dynamics_model[x].a_scale - controller.states["A_" + muscle_name_list[x]].cx)
-            ** 2
-            for x in range(len(muscle_name_list))
-        ]
-    )
-    rms_fatigue = (sum1(muscle_fatigue) / len(muscle_name_list) + eps) ** 0.5
-    return rms_fatigue
-
-
-def minimize_root_mean_square_power(controller: PenaltyController, muscle_weights: list) -> MX:
-    """
-    Minimize the root-mean-square of muscle power.
-    """
-    eps = 1e-8
-    muscle_name_list = controller.model.muscle_names
-    muscle_velocity = controller.model.muscle_velocity()(
-        controller.states["q"].cx, controller.states["qdot"].cx, controller.parameters.cx
-    )
-    muscle_power = vertcat(
-        *[
-            muscle_weights[x] * (controller.states["F_" + muscle_name_list[x]].cx * muscle_velocity[x]) ** 2
-            for x in range(len(muscle_name_list))
-        ]
-    )
-    rms_power = (sum1(muscle_power) / len(muscle_name_list) + eps) ** 0.5
-    return rms_power
+    avg_fatigue = sum1(muscle_fatigue_decay) / muscle_range
+    return avg_fatigue
 
 
 def set_objective_functions(muscle_fatigue_key, cost_fun_weight):
     objective_functions = ObjectiveList()
+
+    # Normalize weights to per-muscle list
     if isinstance(cost_fun_weight, (int, float)):
         weights = [float(cost_fun_weight)] * len(muscle_fatigue_key)
     else:
@@ -145,24 +124,18 @@ def set_objective_functions(muscle_fatigue_key, cost_fun_weight):
             )
 
     objective_functions.add(
-        minimize_root_mean_pw,
-        # minimize_root_mean_square_force,
-        # minimize_root_mean_square_stress,
-        # minimize_root_mean_square_fatigue,
-        # minimize_root_mean_square_power,
+        minimize_avg_fatigue_recovery,  # minimize_root_mean_pw, #minimize_root_mean_square_fatigue,
         custom_type=ObjectiveFcn.Lagrange,
         muscle_weights=weights,
         node=Node.ALL,
         weight=1,
         quadratic=False,
     )
+
     return objective_functions
 
 
-# --------------------#
-#    OCP functions    #
-# --------------------#
-def prepare_mhe_bo(
+def prepare_nmpc_bo(
     model,
     mhe_info: dict,
     cycling_info: dict,
@@ -193,8 +166,7 @@ def prepare_mhe_bo(
     numerical_time_series.update(time_series2)
 
     # --- Dynamics & states --- #
-    dynamics_options = base.set_dynamics_options(numerical_time_series=numerical_time_series, ode_solver=ode_solver)
-
+    dynamics = base.set_dynamics(model=model, numerical_time_series=numerical_time_series, ode_solver=ode_solver)
     x_init = base.set_q_qdot_init(
         n_shooting=window_n_shooting,
         pedal_config=cycling_info["pedal_config"],
@@ -221,9 +193,9 @@ def prepare_mhe_bo(
     # --- Update model with forces / params --- #
     model = base.updating_model(model=model, external_force_set=external_force_set)
 
-    return base.MyCyclicMHE(
+    return base.MyCyclicNMPC(
         bio_model=[model],
-        dynamics=dynamics_options,
+        dynamics=dynamics,
         cycle_len=cycle_len,
         cycle_duration=cycle_duration,
         n_cycles_simultaneous=n_cycles_simultaneous,
@@ -261,22 +233,22 @@ def run_optim_bo(
     cycling_info = dict(cycling_info)
     cycling_info["turn_number"] = sim_cond["n_cycles_simultaneous"]  # 1 turn / cycle
 
-    # --- Build MHE with per-muscle objective --- #
-    mhe = prepare_mhe_bo(model, mhe_info, cycling_info, sim_cond)
+    # --- Build NMPC with per-muscle objective --- #
+    nmpc = prepare_nmpc_bo(model, mhe_info, cycling_info, sim_cond)
 
     # --- IPOPT settings --- #
     solver = Solver.IPOPT(show_online_optim=False, _max_iter=2000, show_options=dict(show_bounds=True))
     solver.set_linear_solver("ma57" if platform == "linux" else "mumps")
 
     # Plot penalties
-    mhe.add_plot_penalty(CostType.ALL)
+    nmpc.add_plot_penalty(CostType.ALL)
 
     # --- Solve window by window --- #
-    def _update(_mhe, cycle_idx, _sol):
+    def _update(_nmpc, cycle_idx, _sol):
         print("Optimized window n°", cycle_idx)
         return cycle_idx < mhe_info["n_cycles"]
 
-    sol = mhe.solve_fes_mhe(
+    sol = nmpc.solve_fes_nmpc(
         _update,
         solver=solver,
         total_cycles=mhe_info["n_cycles"],
@@ -291,11 +263,11 @@ def run_optim_bo(
     metric = len(sol[1]) - 1 + sim_cond["n_cycles_simultaneous"]
 
     if save_sol:
-        Path("result/bayesian_optimization").mkdir(parents=True, exist_ok=True)
+        Path("result/bo").mkdir(parents=True, exist_ok=True)
         base.save_sol_in_pkl(
             sol,
             sim_cond,
-            mhe=mhe,
+            nmpc=nmpc,
             is_initial_guess=False,
             torque=cycling_info["resistive_torque"]["torque"][-1],
         )
@@ -352,7 +324,7 @@ def bayes_optimize_weights(
     free_names = [n for n in muscle_names if n not in fixed_weights]
 
     # --- Logging directory & files --- #
-    log_dir = Path("result/bayesian_optimization")
+    log_dir = Path("result/bo")
     log_dir.mkdir(parents=True, exist_ok=True)
 
     pkl_path = log_dir / "bo_iter_log.pkl"
@@ -447,7 +419,7 @@ def bayes_optimize_weights(
         "n_cycles_simultaneous": n_cycles_simultaneous_for_bo,
         "stimulation": stim_count,
         "cost_fun_weight": None,  # applied by BO
-        "pickle_file_path": Path("result/bayesian_optimization/bo_tmp.pkl"),
+        "pickle_file_path": Path("result/bo/bo_tmp.pkl"),
         "init_guess_file_path": init_guess_file_path,
     }
 
@@ -477,10 +449,12 @@ def bayes_optimize_weights(
             return
         _last_saved_len = len(bo_log)
 
+        # 1) pickle – write to .tmp then replace
         with open(pkl_tmp, "wb") as f:
             pickle.dump(bo_log, f, protocol=pickle.HIGHEST_PROTOCOL)
         pkl_tmp.replace(pkl_path)
 
+        # 2) numeric arrays – write to .tmp.npz then replace
         if bo_log:
             idx = np.array(sorted(bo_log.keys()), dtype=int)
             metrics = np.array([float(bo_log[i]["metric"]) for i in idx], dtype=float)
@@ -514,12 +488,14 @@ def bayes_optimize_weights(
     # --- BO objective --- #
     @use_named_args(space)
     def objective(**kwargs):
+        # Build free vector in stable order
         x_free = [kwargs[k] for k in free_param_names] if free_param_names else []
         weights = _compose_full_weights(x_free)
 
         key = tuple(round(float(v), 8) for v in weights)
         if key in _cache:
             loss = _cache[key]
+            # still log duplicate proposal for a complete history
             i = _next_index()
             entry = {name: float(w) for name, w in zip(muscle_names, weights)}
             entry["metric"] = float(-loss) if np.isfinite(loss) else float("nan")
@@ -531,7 +507,6 @@ def bayes_optimize_weights(
         sim_cond = dict(sim_cond_template)
         sim_cond["cost_fun_weight"] = weights
 
-        sol = None
         try:
             print(f"[BO] Running MHE with weights: {weights} for muscles: {muscle_names}")
             metric, sol = run_optim_bo(
@@ -555,20 +530,17 @@ def bayes_optimize_weights(
         entry = {name: float(w) for name, w in zip(muscle_names, weights)}
         entry["metric"] = float(metric) if np.isfinite(metric) else float("nan")
 
-        if sol is not None:
-            solving_time_per_ocp = [sol[1][i].solver_time_to_optimize for i in range(len(sol[1]))]
-            total_solving_time = sum(solving_time_per_ocp)
-            iter_per_ocp = [sol[1][i].iterations + 1 for i in range(len(sol[1]))]
-            average_solving_time_per_iter_list = [
-                solving_time_per_ocp[i] / (iter_per_ocp[i]) for i in range(len(sol[1]))
-            ]
-            total_average_solving_time_per_iter = average(average_solving_time_per_iter_list)
+        solving_time_per_ocp = [sol[1][i].solver_time_to_optimize for i in range(len(sol[1]))]
+        total_solving_time = sum(solving_time_per_ocp)
+        iter_per_ocp = [sol[1][i].iterations + 1 for i in range(len(sol[1]))]
+        average_solving_time_per_iter_list = [solving_time_per_ocp[i] / (iter_per_ocp[i]) for i in range(len(sol[1]))]
+        total_average_solving_time_per_iter = average(average_solving_time_per_iter_list)
 
-            entry["solving_time_per_ocp"] = solving_time_per_ocp
-            entry["total_solving_time"] = total_solving_time
-            entry["iter_per_ocp"] = iter_per_ocp
-            entry["average_solving_time_per_iter_list"] = average_solving_time_per_iter_list
-            entry["average_solving_time_per_iter"] = total_average_solving_time_per_iter
+        entry["solving_time_per_ocp"] = solving_time_per_ocp
+        entry["total_solving_time"] = total_solving_time
+        entry["iter_per_ocp"] = iter_per_ocp
+        entry["average_solving_time_per_iter_list"] = average_solving_time_per_iter_list
+        entry["average_solving_time_per_iter"] = total_average_solving_time_per_iter
 
         bo_log[i] = entry
         _save_logs_snapshot()
@@ -583,6 +555,7 @@ def bayes_optimize_weights(
             row = bo_log[i]
             if not np.isfinite(row.get("metric", np.nan)):
                 continue
+            # order matters and includes only free muscles
             x_free_prev = [float(row[name]) for name in free_names]
             x0_list.append(x_free_prev)
             y0_list.append(-float(row["metric"]))
@@ -590,7 +563,7 @@ def bayes_optimize_weights(
             x0, y0 = x0_list, y0_list
             print(f"[BO] Seeding skopt with {len(x0)} prior evals.")
 
-    # --- Run BO --- #
+    # --- Run BO (or skip if nothing to do) --- #
     res = None
     if remaining_calls > 0:
         print(
@@ -660,7 +633,7 @@ def bayes_optimize_weights(
     # --- Confirm best with a saved final run --- #
     final_sim_cond = dict(sim_cond_template)
     final_sim_cond["cost_fun_weight"] = best_full_w
-    final_sim_cond["pickle_file_path"] = Path("result/bayesian_optimization/bo_best.pkl")
+    final_sim_cond["pickle_file_path"] = Path("result/bo/bo_best.pkl")
     final_sim_cond["cost_fun_key"] = "minimize_root_mean_square_fatigue"
 
     save_all_windows = True
@@ -672,7 +645,7 @@ def bayes_optimize_weights(
                 f'result/initial_guess/{final_sim_cond["n_cycles_simultaneous"]}_initial_guess_collocation_3_radau.pkl'
             )
             final_sim_cond["pickle_file_path"] = Path(
-                f"result/bayesian_optimization/bo_best_{final_sim_cond['n_cycles_simultaneous']}_cycles.pkl"
+                f"result/bo/bo_best_{final_sim_cond['n_cycles_simultaneous']}_cycles.pkl"
             )
             final_metric, final_sol = run_optim_bo(
                 mhe_info=mhe_info,
@@ -704,12 +677,7 @@ def bayes_optimize_weights(
 
 def main_bayes():
     # --- Model choice --- #
-    model_path = str(
-        Path(__file__).resolve().parent.parent.parent
-        / "msk_models"
-        / "Wu"
-        / "Modified_Wu_Shoulder_Model_Cycling.bioMod"
-    )
+    model_path = "../../msk_models/Wu/Modified_Wu_Shoulder_Model_Cycling.bioMod"
 
     # --- MHE parameters --- #
     ode_solver = OdeSolver.COLLOCATION(polynomial_degree=3, method="radau")
@@ -737,7 +705,7 @@ def main_bayes():
         model_path=model_path,
         stimulation_frequency=30,
         n_cycles_simultaneous_for_bo=n_cycle_simultaneous,
-        n_calls=100,  # Number of desired evaluations
+        n_calls=100,  # Desired evaluations
         n_initial_points=6,
         random_state=42,
         weight_bounds_log=(1e-5, 1e4),
@@ -754,10 +722,10 @@ def main_bayes():
 def read_pickle_file(file_type="pkl", is_numeric=False):
     bo = None
     if file_type == "pkl":
-        bo = pickle.load(open(Path("result/bayesian_optimization/bo_iter_log.pkl"), "rb"))
+        bo = pickle.load(open(Path("result/bo/bo_iter_log.pkl"), "rb"))
 
     if file_type == "npz" and is_numeric:
-        arr = np.load("result/bayesian_optimization/bo_iter_arrays.npz", allow_pickle=False)
+        arr = np.load("result/bo/bo_iter_arrays.npz", allow_pickle=False)
         iteration = arr["iteration"]
         muscle_names = [s.decode("utf-8") if isinstance(s, bytes) else str(s) for s in arr["muscle_names"]]
         weights = arr["weights"]  # shape (n_iter, n_muscles)

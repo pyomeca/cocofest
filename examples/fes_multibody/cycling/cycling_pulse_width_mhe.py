@@ -4,6 +4,7 @@ This example will perform an optimal control program moving time horizon for a h
 
 import os
 import pickle
+from time import perf_counter
 from sys import platform
 from itertools import product
 from pathlib import Path
@@ -12,14 +13,15 @@ import matplotlib.pyplot as plt
 import numpy as np
 from numpy.ma.extras import average
 
-import cocofest._matplotlib_compat  # Temporary fix, see cocofest/_matplotlib_compat.py
 from bioptim import (
     Axis,
     BiorbdModel,
     BoundsList,
     ConstraintList,
     ConstraintFcn,
+    ContactType,
     CostType,
+    DynamicsOptions,
     ExternalForceSetTimeSeries,
     InitialGuessList,
     InterpolationType,
@@ -28,6 +30,7 @@ from bioptim import (
     ObjectiveFcn,
     ObjectiveList,
     OdeSolver,
+    OptimalControlProgram,
     PhaseDynamics,
     ParameterObjectiveList,
     SolutionMerge,
@@ -43,15 +46,16 @@ from cocofest import (
     FesMskModel,
     inverse_kinematics_cycling,
     OcpFesMsk,
-    FesMheMsk,
+    FesNmpcMsk,
 )
 from examples.fes_multibody.cycling.cost_functions import CustomCostFunctions
 
+DEFAULT_SOLVER_CONFIG = "baseline"
+DEFAULT_TWO_STAGE_LM_ITER = 20
+SOLVER_CONFIG_CHOICES = ("baseline", "exact_jit", "lm", "two_stage")
 
-# --------------------#
-#    MHE functions    #
-# --------------------#
-class MyCyclicMHE(FesMheMsk):
+
+class MyCyclicNMPC(FesNmpcMsk):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self.nodes_per_cycle = self.cycle_len * (
@@ -293,10 +297,285 @@ class MyCyclicMHE(FesMheMsk):
             plt.show()
 
 
+def _safe_float(value):
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _safe_int(value):
+    if value is None:
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _max_abs_constraint(sol: Solution):
+    if sol is None or sol.constraints is None:
+        return None
+    try:
+        return float(np.max(np.abs(np.array(sol.constraints, dtype=float))))
+    except (TypeError, ValueError):
+        return None
+
+
+def _solver_config_file_suffix(config_name: str, n_lm_iter: int) -> str:
+    if config_name == "two_stage":
+        return f"_{config_name}_lm{n_lm_iter}"
+    return f"_{config_name}"
+
+
+def _append_solver_suffix_to_pickle_path(pickle_path: str, config_name: str, n_lm_iter: int) -> str:
+    path = Path(pickle_path)
+    return str(path.with_name(f"{path.stem}{_solver_config_file_suffix(config_name, n_lm_iter)}{path.suffix}"))
+
+
+def configure_casadi_interface_options(nmpc, config_name: str):
+    from bioptim.interfaces.ipopt_interface import IpoptInterface
+
+    if nmpc.ocp_solver is None:
+        nmpc.ocp_solver = IpoptInterface(nmpc)
+
+    for key in ("print_time", "record_time", "jit", "post_expand"):
+        nmpc.ocp_solver.options_common.pop(key, None)
+
+    if config_name in ("exact_jit", "lm", "two_stage"):
+        nmpc.ocp_solver.options_common["print_time"] = True
+        nmpc.ocp_solver.options_common["record_time"] = True
+        nmpc.ocp_solver.options_common["jit"] = True
+        nmpc.ocp_solver.options_common["post_expand"] = True
+
+
+def build_ipopt_solver(
+    config_name: str,
+    simulation_conditions: dict,
+    n_lm_iter: int = DEFAULT_TWO_STAGE_LM_ITER,
+    phase: str | None = None,
+):
+    max_iter = simulation_conditions.get("ipopt_max_iter", 2000)
+    if config_name == "two_stage" and phase == "lm":
+        max_iter = n_lm_iter
+
+    linear_solver = simulation_conditions.get("ipopt_linear_solver") or (
+        "ma57" if platform in ("linux", "darwin") else "mumps"
+    )
+    hsllib = simulation_conditions.get("ipopt_hsllib")
+
+    solver = Solver.IPOPT(show_online_optim=False, _max_iter=max_iter, show_options=dict(show_bounds=True))
+    solver.set_warm_start_init_point("yes")
+    solver.set_mu_init(1e-2)
+    solver.set_tol(1e-6)
+    solver.set_dual_inf_tol(1e-6)
+    solver.set_constr_viol_tol(1e-6)
+    solver.set_linear_solver(linear_solver)
+    solver.set_print_level(5)
+
+    if hsllib:
+        solver.set_option_unsafe(hsllib, "hsllib")
+    if linear_solver == "ma57":
+        solver.set_option_unsafe("yes", "ma57_automatic_scaling")
+        solver.set_option_unsafe(2.0, "ma57_pre_alloc")
+
+    solver.set_option_unsafe("yes", "print_timing_statistics")
+
+    if config_name == "lm" or (config_name == "two_stage" and phase == "lm"):
+        solver.set_hessian_approximation("limited-memory")
+    else:
+        solver.set_hessian_approximation("exact")
+
+    return solver
+
+
+def _make_window_record(sol: Solution, window_idx: int, phase: str = "single") -> dict:
+    return {
+        "window": window_idx,
+        "phase": phase,
+        "status": _safe_int(sol.status),
+        "iterations": _safe_int(sol.iterations),
+        "objective": _safe_float(sol.cost),
+        "solver_time_s": _safe_float(sol.solver_time_to_optimize),
+        "wall_time_s": _safe_float(sol.real_time_to_optimize),
+        "inf_pr": _safe_float(sol.inf_pr),
+        "inf_du": _safe_float(sol.inf_du),
+        "max_abs_constraint": _max_abs_constraint(sol),
+    }
+
+
+def _format_metric(value, fmt=".3f", fallback="n/a"):
+    if value is None:
+        return fallback
+    return format(value, fmt)
+
+
+def summarize_solver_run(config_name: str, result, phase_records: list[dict] | None = None):
+    final_solution = result[0]
+    window_solutions = result[1] if len(result) > 1 else []
+    total_windows = len(window_solutions)
+    converged_windows = sum(1 for sol in window_solutions if sol.status == 0)
+    total_iter = sum((sol.iterations or 0) for sol in window_solutions)
+    objective = _safe_float(final_solution.cost)
+    notes = []
+
+    if phase_records:
+        lm_records = [record for record in phase_records if record["phase"] == "lm"]
+        exact_records = [record for record in phase_records if record["phase"] == "exact"]
+        lm_iter = sum((record["iterations"] or 0) for record in lm_records)
+        exact_iter = sum((record["iterations"] or 0) for record in exact_records)
+        notes.append(f"two-stage per window (LM iter total={lm_iter}, exact iter total={exact_iter})")
+
+    failed_windows = total_windows - converged_windows
+    if failed_windows:
+        notes.append(f"{failed_windows} non-converged window(s)")
+
+    print("\nSolver summary")
+    print("config | converged | total_windows | total_iter | objective | wall_time_s | notes")
+    print(
+        f"{config_name} | {converged_windows == total_windows} | {total_windows} | {total_iter} | "
+        f"{_format_metric(objective, '.6f')} | {_format_metric(final_solution.real_time_to_optimize, '.3f')} | "
+        f"{'; '.join(notes) if notes else '-'}"
+    )
+
+    if total_windows:
+        print("\nPer-window summary")
+        print("window | status | iter | objective | solver_s | wall_s | inf_pr | inf_du | max|g|")
+        for idx, sol in enumerate(window_solutions):
+            record = _make_window_record(sol, idx)
+            print(
+                f"{record['window']} | {record['status']} | {record['iterations']} | "
+                f"{_format_metric(record['objective'], '.6f')} | {_format_metric(record['solver_time_s'], '.3f')} | "
+                f"{_format_metric(record['wall_time_s'], '.3f')} | {_format_metric(record['inf_pr'], '.3e')} | "
+                f"{_format_metric(record['inf_du'], '.3e')} | {_format_metric(record['max_abs_constraint'], '.3e')}"
+            )
+
+    if phase_records:
+        print("\nTwo-stage phase summary")
+        print("window | phase | status | iter | objective | solver_s | wall_s | inf_pr | inf_du | max|g|")
+        for record in phase_records:
+            print(
+                f"{record['window']} | {record['phase']} | {record['status']} | {record['iterations']} | "
+                f"{_format_metric(record['objective'], '.6f')} | {_format_metric(record['solver_time_s'], '.3f')} | "
+                f"{_format_metric(record['wall_time_s'], '.3f')} | {_format_metric(record['inf_pr'], '.3e')} | "
+                f"{_format_metric(record['inf_du'], '.3e')} | {_format_metric(record['max_abs_constraint'], '.3e')}"
+            )
+
+
+def solve_fes_nmpc_two_stage(
+    nmpc,
+    update_functions,
+    total_cycles: int,
+    external_force: dict,
+    cycle_solutions: MultiCyclicCycleSolutions,
+    cyclic_options: dict | None,
+    max_consecutive_failing: int,
+    simulation_conditions: dict,
+    n_lm_iter: int,
+):
+    lm_solver = build_ipopt_solver("two_stage", simulation_conditions, n_lm_iter=n_lm_iter, phase="lm")
+    exact_solver = build_ipopt_solver("two_stage", simulation_conditions, n_lm_iter=n_lm_iter, phase="exact")
+    configure_casadi_interface_options(nmpc, "two_stage")
+
+    if not cyclic_options:
+        cyclic_options = {}
+    nmpc._initialize_state_idx_to_cycle(cyclic_options)
+    nmpc._set_cyclic_bound()
+    if exact_solver.type == Solver.IPOPT().type:
+        nmpc.update_bounds(nmpc.nlp[0].x_bounds)
+
+    export_options = {
+        "frame_to_export": slice(0, (nmpc.time_idx_to_cycle + 1) if nmpc.time_idx_to_cycle >= 0 else None),
+    }
+    nmpc._initialize_frame_to_export(export_options)
+
+    sol = None
+    states = []
+    controls = []
+    parameters = []
+    total_time = 0.0
+    real_time = perf_counter()
+    all_solutions = []
+    consecutive_failing = 0
+    nmpc.total_optimization_run = 0
+    phase_records = []
+
+    while update_functions(nmpc, nmpc.total_optimization_run, sol) and consecutive_failing < max_consecutive_failing:
+        lm_sol = OptimalControlProgram.solve(nmpc, solver=lm_solver)
+        phase_records.append(_make_window_record(lm_sol, nmpc.total_optimization_run, phase="lm"))
+
+        sol = OptimalControlProgram.solve(nmpc, solver=exact_solver, warm_start=lm_sol)
+        phase_records.append(_make_window_record(sol, nmpc.total_optimization_run, phase="exact"))
+
+        consecutive_failing = 0 if sol.status == 0 else consecutive_failing + 1
+        total_time += (lm_sol.real_time_to_optimize or 0.0) + (sol.real_time_to_optimize or 0.0)
+
+        _states, _controls, _parameters = nmpc.export_data(sol)
+        states.append(_states)
+        controls.append(_controls)
+        parameters.append(_parameters)
+        all_solutions.append(sol)
+
+        nmpc.advance_window(sol, n_cycles_simultaneous=nmpc.n_cycles_simultaneous)
+        nmpc.total_optimization_run += 1
+
+    if sol is None:
+        raise RuntimeError("Two-stage NMPC did not execute any optimization window.")
+
+    states.append({key: sol.decision_states()[key][-1] for key in sol.decision_states().keys()})
+    real_time = perf_counter() - real_time
+
+    dt = float(sol.t_span()[0][-1])
+    final_sol = nmpc._initialize_solution(float(dt), states, controls, parameters)
+    final_sol.solver_time_to_optimize = total_time
+    final_sol.real_time_to_optimize = real_time
+
+    result = [final_sol, all_solutions]
+    cycle_solutions_output = []
+    if cycle_solutions in (MultiCyclicCycleSolutions.FIRST_CYCLES, MultiCyclicCycleSolutions.ALL_CYCLES):
+        for iter_sol in all_solutions:
+            _states, _controls, _parameters = nmpc.export_cycles(iter_sol)
+            cycle_dt = float(iter_sol.t_span()[0][-1])
+            cycle_solutions_output.append(nmpc._initialize_one_cycle(cycle_dt, _states, _controls, _parameters))
+
+    if cycle_solutions == MultiCyclicCycleSolutions.ALL_CYCLES and all_solutions:
+        for cycle_number in range(1, nmpc.n_cycles):
+            _states, _controls, _parameters = nmpc.export_cycles(all_solutions[-1], cycle_number=cycle_number)
+            cycle_dt = float(all_solutions[-1].t_span()[0][-1])
+            cycle_solutions_output.append(nmpc._initialize_one_cycle(cycle_dt, _states, _controls, _parameters))
+
+    result.append(cycle_solutions_output)
+
+    model = nmpc.nlp[0].model
+    total_nmpc_duration = nmpc.cycle_duration * total_cycles
+    total_nmpc_shooting_len = nmpc.cycle_len * total_cycles
+
+    external_force_set = ExternalForceSetTimeSeries(nb_frames=total_nmpc_shooting_len)
+    external_force_array = np.array(external_force["torque"])
+    reshape_values_array = np.tile(external_force_array[:, np.newaxis], (1, total_nmpc_shooting_len))
+    external_force_set.add_torque(
+        segment=external_force["Segment_application"], values=reshape_values_array, force_name="resistance_torque"
+    )
+    numerical_time_series = {"external_forces": external_force_set.to_numerical_time_series()}
+
+    if isinstance(model, FesMskModel):
+        all_stim_time = nmpc.get_stim_time_from_all_models()
+        nmpc.nlp[0].model.muscles_dynamics_model[0].stim_time = all_stim_time
+        numerical_data_time_series, _ = model.muscles_dynamics_model[0].get_numerical_data_time_series(
+            total_nmpc_shooting_len, total_nmpc_duration
+        )
+        numerical_time_series.update(numerical_data_time_series)
+
+    result[0].ocp.nlp[0].numerical_data_timeseries = numerical_time_series
+    return tuple(result), phase_records
+
+
 # --------------------#
 #    OCP functions    #
 # --------------------#
-def prepare_mhe(
+def prepare_nmpc(
     model: BiorbdModel | FesMskModel,
     mhe_info: dict,
     cycling_info: dict,
@@ -311,7 +590,7 @@ def prepare_mhe(
     ode_solver = mhe_info["ode_solver"]
     use_sx = mhe_info["use_sx"]
 
-    # --- Initial guess file info --- #
+    # --- Pickle file info --- #
     initial_guess_path = simulation_conditions["init_guess_file_path"]
 
     window_n_shooting = cycle_len * n_cycles_simultaneous
@@ -325,11 +604,7 @@ def prepare_mhe(
     # --- Cost function info --- #
     objective_fun_dict = {
         "cost_fun_key": simulation_conditions["cost_fun_key"],
-        "cost_fun_weight": (
-            0.1
-            if "weight" in simulation_conditions["cost_fun_key"][0]
-            else 1 if "bayesian" in simulation_conditions["cost_fun_key"][0] else 10000
-        ),
+        "cost_fun_weight": 10000,
         "individual_quadratic": True,
     }
 
@@ -344,7 +619,7 @@ def prepare_mhe(
     )
     numerical_time_series.update(numerical_data_time_series)
     # --- Dynamics --- #
-    dynamics_options = set_dynamics_options(numerical_time_series=numerical_time_series, ode_solver=ode_solver)
+    dynamics = set_dynamics(model=model, numerical_time_series=numerical_time_series, ode_solver=ode_solver)
 
     # --- Set states --- #
     # --- Set q (position and speed) initial guesses --- #
@@ -399,9 +674,9 @@ def prepare_mhe(
     # --- Update model for resistive torque --- #
     model = updating_model(model=model, external_force_set=external_force_set, parameters=parameters)
 
-    return MyCyclicMHE(
+    return MyCyclicNMPC(
         bio_model=[model],
-        dynamics=dynamics_options,
+        dynamics=dynamics,
         cycle_len=cycle_len,
         cycle_duration=cycle_duration,
         n_cycles_simultaneous=n_cycles_simultaneous,
@@ -417,7 +692,7 @@ def prepare_mhe(
         parameter_init=parameters_init,
         parameter_bounds=parameters_bounds,
         parameter_objectives=parameters_objectives,
-        n_threads=48,
+        n_threads=simulation_conditions.get("n_threads", 4),
         use_sx=use_sx,
     )
 
@@ -433,27 +708,20 @@ def set_external_forces(n_shooting, external_force_dict, force_name):
     return numerical_time_series, external_force_set
 
 
-def _existing_init_file_path(init_file_path):
-    """
-    Fall back to no initial guess when the given init_file_path does not exist.
-    """
-    if init_file_path and not Path(init_file_path).exists():
-        print(f"[warning] init_file_path '{init_file_path}' not found, running without an initial guess.")
-        return None
-    return init_file_path
-
-
-def set_dynamics_options(numerical_time_series, ode_solver):
-    dynamics_options = OcpFesMsk.declare_dynamics_options(
-        numerical_time_series=numerical_time_series, ode_solver=ode_solver
+def set_dynamics(model, numerical_time_series, ode_solver):
+    model._contact_types = (ContactType.RIGID_EXPLICIT,)
+    dynamics = DynamicsOptions(
+        expand_dynamics=True,
+        phase_dynamics=PhaseDynamics.SHARED_DURING_THE_PHASE,
+        numerical_data_timeseries=numerical_time_series,
+        ode_solver=ode_solver,
     )
-    return dynamics_options
+    return dynamics
 
 
 def set_q_qdot_init(
     n_shooting: int, pedal_config: dict, turn_number: int, ode_solver: OdeSolver, init_file_path: str
 ) -> InitialGuessList:
-    init_file_path = _existing_init_file_path(init_file_path)
     x_init = InitialGuessList()
     if init_file_path:
         with open(init_file_path, "rb") as file:
@@ -464,12 +732,7 @@ def set_q_qdot_init(
         x_init.add("qdot", qdot_guess, interpolation=InterpolationType.ALL_POINTS)
     else:
         # --- Chose the biorbd model to init the inverse kinematics --- #
-        biorbd_model_path = str(
-            Path(__file__).resolve().parent.parent.parent
-            / "msk_models"
-            / "Wu"
-            / "Modified_Wu_Shoulder_Model_Cycling_for_IK.bioMod"
-        )
+        biorbd_model_path = "../../msk_models/Wu/Modified_Wu_Shoulder_Model_Cycling_for_IK.bioMod"
         n_shooting = (
             n_shooting * (ode_solver.polynomial_degree + 1)
             if isinstance(ode_solver, OdeSolver.COLLOCATION)
@@ -501,7 +764,6 @@ def set_q_qdot_init(
 def set_x_bounds(
     model, x_init: InitialGuessList, n_shooting: int, ode_solver: OdeSolver, init_file_path: str
 ) -> tuple[BoundsList, InitialGuessList]:
-    init_file_path = _existing_init_file_path(init_file_path)
     # --- Set interpolation type according to ode_solver type --- #
     interpolation_type = InterpolationType.EACH_FRAME
     if isinstance(ode_solver, OdeSolver.COLLOCATION):
@@ -569,7 +831,6 @@ def set_x_bounds(
 
 
 def set_u_bounds_and_init(bio_model, n_shooting, init_file_path):
-    init_file_path = _existing_init_file_path(init_file_path)
     u_bounds, u_init = OcpFesMsk.set_u_bounds_fes(bio_model)
     u_init = InitialGuessList()  # Controls initial guess
     models = bio_model.muscles_dynamics_model
@@ -694,7 +955,7 @@ def set_objective_functions(objective_fun_dict, recalculate=False):
                     custom_objective_functions[keys[i]]["function"],
                     custom_type=ObjectiveFcn.Lagrange,
                     node=Node.ALL,
-                    weight=weights,
+                    weight=1,  # weight=weights,
                     quadratic=False,
                 )
 
@@ -729,7 +990,6 @@ def updating_model(model: FesMskModel, external_force_set, parameters=None) -> F
         activate_residual_torque=model.activate_residual_torque,
         parameters=parameters,
         external_force_set=external_force_set,
-        with_contact=True,
     )
     return model
 
@@ -796,7 +1056,6 @@ def set_fes_model(model_path, stim_time):
         activate_passive_force_relationship=True,
         activate_residual_torque=False,
         external_force_set=None,  # External forces will be added later (resistive_torque)
-        with_contact=True,
     )
     return fes_model
 
@@ -827,7 +1086,7 @@ def create_simulation_list(
             raise RuntimeError("ode_solver must be COLLOCATION or RK4")
 
         full_suffix = f"{weight_suffix}_{solver_suffix}_with_init"
-        pkl = str(Path("result/test") / f"{num_cycles}_cycle" / f"{num_cycles}_min_{full_suffix}.pkl")
+        pkl = str(Path("result/bayesian") / f"{num_cycles}_cycle" / f"{num_cycles}_min_{full_suffix}.pkl")
         init = str(Path("result/initial_guess") / f"{num_cycles}_initial_guess_{solver_suffix}.pkl")
         init = init if os.path.exists(init) else None
         if init is None:
@@ -854,13 +1113,14 @@ def create_simulation_list(
     return sims
 
 
-def save_sol_in_pkl(sol, simulation_conditions, mhe, is_initial_guess=False, torque=None):
+def save_sol_in_pkl(sol, simulation_conditions, nmpc, is_initial_guess=False, torque=None):
     solution = sol[0] if not is_initial_guess else sol[1][0]
     time = solution.stepwise_time(to_merge=[SolutionMerge.NODES]).T[0]
     states = solution.stepwise_states(to_merge=[SolutionMerge.NODES])
     controls = solution.stepwise_controls(to_merge=[SolutionMerge.NODES])
     stim_time = solution.ocp.nlp[0].model.muscles_dynamics_model[0].stim_time
     solving_time_per_ocp = [sol[1][i].solver_time_to_optimize for i in range(len(sol[1]))]
+    real_time_per_ocp = [sol[1][i].real_time_to_optimize for i in range(len(sol[1]))]
     objective_values_per_ocp = [float(sol[1][i].cost) for i in range(len(sol[1]))]
     objective_values_per_kept_cycle = [
         float(sol[2][i].cost) for i in range(len(sol[2]) - (simulation_conditions["n_cycles_simultaneous"] - 1))
@@ -881,6 +1141,7 @@ def save_sol_in_pkl(sol, simulation_conditions, mhe, is_initial_guess=False, tor
         "time": time,
         "stim_time": stim_time,
         "solving_time_per_ocp": solving_time_per_ocp,
+        "real_time_per_ocp": real_time_per_ocp,
         "objective_values_per_ocp": objective_values_per_ocp,
         "objective_values_per_kept_cycle": objective_values_per_kept_cycle,
         "number_of_turns_before_failing": number_of_turns_before_failing,
@@ -893,11 +1154,15 @@ def save_sol_in_pkl(sol, simulation_conditions, mhe, is_initial_guess=False, tor
         "polynomial_order": solution.ocp.nlp[0].dynamics_type.ode_solver.polynomial_degree,
         "applied_torque": torque,
         "cost_function": cost_function,
+        "solver_config": simulation_conditions.get("solver_config", DEFAULT_SOLVER_CONFIG),
+        "two_stage_lm_iter": simulation_conditions.get("two_stage_lm_iter", DEFAULT_TWO_STAGE_LM_ITER),
     }
+    if "solver_phase_records" in simulation_conditions:
+        dictionary["solver_phase_records"] = np.array(simulation_conditions["solver_phase_records"], dtype=object)
 
     recalculate_objective = False
     if recalculate_objective:
-        recalculate_objective_dict = recalculate_objective_fun(sol[1], mhe, sim_cond=simulation_conditions)
+        recalculate_objective_dict = recalculate_objective_fun(sol[1], nmpc, sim_cond=simulation_conditions)
         similar_cost_values = [
             True if objective_values_per_kept_cycle == recalculate_objective_dict[key] else False
             for key in recalculate_objective_dict
@@ -918,18 +1183,20 @@ def save_sol_in_pkl(sol, simulation_conditions, mhe, is_initial_guess=False, tor
         dictionary[key] = controls[key]
 
     pickle_file_name = simulation_conditions["pickle_file_path"]
-    # with open(pickle_file_name, "wb") as file:
-    #     pickle.dump(dictionary, file)
+    Path(pickle_file_name).parent.mkdir(parents=True, exist_ok=True)
+    with open(pickle_file_name, "wb") as file:
+        pickle.dump(dictionary, file)
 
     np.savez_compressed(str(pickle_file_name)[:-4] + ".npz", **dictionary)
     print(simulation_conditions["pickle_file_path"])
 
 
-def recalculate_objective_fun(cycle_solutions: list[Solution], mhe, sim_cond) -> dict:
+def recalculate_objective_fun(cycle_solutions: list[Solution], nmpc, sim_cond) -> dict:
     import time
 
     recalculated_cost_functions = {}
-    custom_cost_functions = CustomCostFunctions().dict_functions  # will recalculate all cost functions (long process!)
+    custom_cost_functions = CustomCostFunctions().dict_functions
+
     recalculated_cost_functions_keys = list(custom_cost_functions.keys())[:-1]
 
     for key in recalculated_cost_functions_keys:
@@ -939,12 +1206,12 @@ def recalculate_objective_fun(cycle_solutions: list[Solution], mhe, sim_cond) ->
             "cost_fun_weight": sim_cond["cost_fun_weight"],
         }
         objective = set_objective_functions(obj_fun_dict, recalculate=True)
-        mhe.common_objective_functions = objective
+        nmpc.common_objective_functions = objective
         cost_function_values = []
         for i in range(len(cycle_solutions)):
-            _states, _controls, _parameters = mhe.export_cycles(cycle_solutions[i])
+            _states, _controls, _parameters = nmpc.export_cycles(cycle_solutions[i])
             dt = float(cycle_solutions[i].t_span()[0][-1])
-            solution = mhe._initialize_one_cycle(dt, _states, _controls, _parameters)
+            solution = nmpc._initialize_one_cycle(dt, _states, _controls, _parameters)
             cost = float(solution.cost)
             cost_function_values.append(cost)
 
@@ -1014,15 +1281,15 @@ def run_optim(mhe_info, cycling_info, simulation_conditions, model_path, save_so
     mhe_info["n_cycles_simultaneous"] = simulation_conditions["n_cycles_simultaneous"]
     cycling_info["turn_number"] = simulation_conditions["n_cycles_simultaneous"]  # One turn per cycle
 
-    mhe = prepare_mhe(
+    nmpc = prepare_nmpc(
         model=model,
         mhe_info=mhe_info,
         cycling_info=cycling_info,
         simulation_conditions=simulation_conditions,
     )
-    mhe.n_cycles_simultaneous = simulation_conditions["n_cycles_simultaneous"]
+    nmpc.n_cycles_simultaneous = simulation_conditions["n_cycles_simultaneous"]
 
-    def update_functions(_mhe: MultiCyclicNonlinearModelPredictiveControl, cycle_idx: int, _sol: Solution):
+    def update_functions(_nmpc: MultiCyclicNonlinearModelPredictiveControl, cycle_idx: int, _sol: Solution):
         if _sol:
             print("Optimized window n°" + str(cycle_idx))
             result_sol = _sol.decision_states(to_merge=SolutionMerge.NODES)
@@ -1037,24 +1304,47 @@ def run_optim(mhe_info, cycling_info, simulation_conditions, model_path, save_so
         return cycle_idx < mhe_info["n_cycles"]  # True if there are still some cycle to perform
 
     # Add the penalty cost function plot
-    mhe.add_plot_penalty(CostType.ALL)
+    nmpc.add_plot_penalty(CostType.ALL)
 
-    # Set solver for the optimal control problem
-    solver = Solver.IPOPT(show_online_optim=False, _max_iter=2000, show_options=dict(show_bounds=True))
-    linear_solver = "ma57" if platform == "linux" else "mumps"
-    solver.set_linear_solver(linear_solver)
+    solver_config = simulation_conditions.get("solver_config", DEFAULT_SOLVER_CONFIG)
+    two_stage_lm_iter = simulation_conditions.get("two_stage_lm_iter", DEFAULT_TWO_STAGE_LM_ITER)
+    phase_records = None
 
-    # Solve the optimal control problem
-    sol = mhe.solve_fes_mhe(
-        update_functions,
-        solver=solver,
-        total_cycles=mhe_info["n_cycles"],
-        external_force=cycling_info["resistive_torque"],
-        cycle_solutions=MultiCyclicCycleSolutions.ALL_CYCLES,
-        get_all_iterations=True,
-        cyclic_options={"states": {}},
-        max_consecutive_failing=1,
-    )
+    if solver_config == "two_stage":
+        sol, phase_records = solve_fes_nmpc_two_stage(
+            nmpc=nmpc,
+            update_functions=update_functions,
+            total_cycles=mhe_info["n_cycles"],
+            external_force=cycling_info["resistive_torque"],
+            cycle_solutions=MultiCyclicCycleSolutions.ALL_CYCLES,
+            cyclic_options={"states": {}},
+            max_consecutive_failing=1,
+            simulation_conditions=simulation_conditions,
+            n_lm_iter=two_stage_lm_iter,
+        )
+        simulation_conditions["solver_warm_start_level"] = "primal+dual from LM to exact within each window"
+    else:
+        configure_casadi_interface_options(nmpc, solver_config)
+        solver = build_ipopt_solver(
+            config_name=solver_config,
+            simulation_conditions=simulation_conditions,
+            n_lm_iter=two_stage_lm_iter,
+        )
+        sol = nmpc.solve_fes_nmpc(
+            update_functions,
+            solver=solver,
+            total_cycles=mhe_info["n_cycles"],
+            external_force=cycling_info["resistive_torque"],
+            cycle_solutions=MultiCyclicCycleSolutions.ALL_CYCLES,
+            get_all_iterations=True,
+            cyclic_options={"states": {}},
+            max_consecutive_failing=1,
+        )
+        simulation_conditions["solver_warm_start_level"] = "Bioptim window-to-window initial guess update only"
+
+    if phase_records:
+        simulation_conditions["solver_phase_records"] = phase_records
+    summarize_solver_run(solver_config, sol, phase_records=phase_records)
 
     result_show = False
     if result_show:
@@ -1066,26 +1356,33 @@ def run_optim(mhe_info, cycling_info, simulation_conditions, model_path, save_so
         save_sol_in_pkl(
             sol,
             simulation_conditions,
-            mhe=mhe,
+            nmpc=nmpc,
             is_initial_guess=is_initial_guess,
             torque=cycling_info["resistive_torque"]["torque"][-1],
         )
 
 
 def main(
-    stimulation_frequency, n_total_cycle, n_cycles_simultaneous, resistive_torque, cost_fun_dict, init_guess, save
+    stimulation_frequency,
+    n_total_cycle,
+    n_cycles_simultaneous,
+    resistive_torque,
+    cost_fun_dict,
+    init_guess,
+    save,
+    n_threads=4,
+    ipopt_linear_solver=None,
+    ipopt_max_iter=2000,
+    ipopt_hsllib=None,
+    solver_config=DEFAULT_SOLVER_CONFIG,
+    two_stage_lm_iter=DEFAULT_TWO_STAGE_LM_ITER,
 ):
     # --- Simulation configuration --- #
     save_sol = save
     get_initial_guess = init_guess
 
     # --- Model choice --- #
-    model_path = str(
-        Path(__file__).resolve().parent.parent.parent
-        / "msk_models"
-        / "Wu"
-        / "Modified_Wu_Shoulder_Model_Cycling.bioMod"
-    )
+    model_path = "../../msk_models/Wu/Modified_Wu_Shoulder_Model_Cycling.bioMod"
 
     # --- MHE parameters --- #
     ode_solver = OdeSolver.COLLOCATION(polynomial_degree=3, method="radau")
@@ -1113,6 +1410,18 @@ def main(
         cost_fun_dict=cost_fun_dict,
         ode_solver=mhe_info["ode_solver"],
     )
+    for simulation_conditions in simulation_conditions_list:
+        simulation_conditions["n_threads"] = n_threads
+        simulation_conditions["solver_config"] = solver_config
+        simulation_conditions["two_stage_lm_iter"] = two_stage_lm_iter
+        if ipopt_linear_solver is not None:
+            simulation_conditions["ipopt_linear_solver"] = ipopt_linear_solver
+        simulation_conditions["ipopt_max_iter"] = ipopt_max_iter
+        if ipopt_hsllib:
+            simulation_conditions["ipopt_hsllib"] = ipopt_hsllib
+        simulation_conditions["pickle_file_path"] = _append_solver_suffix_to_pickle_path(
+            simulation_conditions["pickle_file_path"], solver_config, two_stage_lm_iter
+        )
 
     # --- Run the initial guess optimization --- #
     if get_initial_guess:
@@ -1140,11 +1449,10 @@ if __name__ == "__main__":
     main(
         stimulation_frequency=30,
         n_total_cycle=10000,
-        n_cycles_simultaneous=[2],  # [2, 3, 4, 5],
+        n_cycles_simultaneous=[2, 3, 4, 5],
         resistive_torque=-0.20,  # (N.m)
         cost_fun_dict={
             "optimized_function": [
-                # --- UNWEIGHTED --- #
                 # --- Pulse width --- #
                 # ["minimize_average_activation"],
                 ["minimize_root_mean_square_activation"],
@@ -1152,12 +1460,12 @@ if __name__ == "__main__":
                 # ["minimize_peak_activation"],
                 # --- Force --- #
                 # ["minimize_average_force"],
-                # ["minimize_root_mean_square_force"],
+                ["minimize_root_mean_square_force"],
                 # ["minimize_cubic_average_force"],
                 # ["minimize_peak_force"],
                 # --- Stress --- #
                 # ["minimize_average_muscle_stress"],
-                # ["minimize_root_mean_square_muscle_stress"],
+                ["minimize_root_mean_square_muscle_stress"],
                 # ["minimize_cubic_average_muscle_stress"],
                 # ["minimize_peak_muscle_stress"],
                 # --- Fatigue --- #
@@ -1166,27 +1474,15 @@ if __name__ == "__main__":
                 # ["minimize_cubic_average_fatigue"],
                 # ["minimize_peak_fatigue"],
                 # --- Power --- #
-                # ["minimize_root_mean_square_muscle_power"],
-                # --- BAYESIAN --- # (Only RMS)
-                # --- Pulse width --- #
-                # ["minimize_root_mean_square_activation_bayesian"],
-                # --- Force --- #
-                # ["minimize_root_mean_square_force_bayesian"],
-                # --- Stress --- #
-                # ["minimize_root_mean_square_muscle_stress_bayesian"],
-                # --- Fatigue --- #
-                # ["minimize_root_mean_square_fatigue_bayesian"],
-                # --- WEIGHTED --- # (Only RMS)
-                # --- Pulse width --- #
-                # ["minimize_root_mean_square_activation_weight"],
-                # --- Force --- #
-                # ["minimize_root_mean_square_force_weight"],
-                # --- Stress --- #
-                # ["minimize_root_mean_square_muscle_stress_weight"],
-                # --- Fatigue --- #
-                # ["minimize_root_mean_square_fatigue_weight"],
+                ["minimize_root_mean_square_muscle_power"],
+                # --- Recovery --- #
+                ["minimize_average_fatigue_and_recovery"],
+                # ["minimize_average_fatigue_and_recovery_2"],
+                # ["minimize_balanced_fatigue_by_contribution"],
             ]
         },
-        init_guess=False,  # Compute initial guess
+        init_guess=False,
         save=True,
+        solver_config=DEFAULT_SOLVER_CONFIG,
+        two_stage_lm_iter=DEFAULT_TWO_STAGE_LM_ITER,
     )
