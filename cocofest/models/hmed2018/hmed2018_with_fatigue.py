@@ -168,8 +168,6 @@ class DingModelPulseIntensityFrequencyWithFatigue(DingModelPulseIntensityFrequen
             t_stim_prev = numerical_timeseries
         if controls is not None:
             pulse_intensity = controls
-        if isinstance(pulse_intensity, (list, tuple)):
-            pulse_intensity = pulse_intensity[0]
         if a is None:
             a = self.a_rest
         if tau1 is None:

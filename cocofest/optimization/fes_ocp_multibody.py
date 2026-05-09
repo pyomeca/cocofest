@@ -62,7 +62,9 @@ class OcpFesMsk(OcpFes):
         **_,
     ):
         bio_models = bio_models if bio_models is not None else model
-        numerical_time_series = numerical_data_timeseries if numerical_data_timeseries is not None else numerical_time_series
+        numerical_time_series = (
+            numerical_data_timeseries if numerical_data_timeseries is not None else numerical_time_series
+        )
         if ode_solver is None:
             ode_solver = OcpFes.declare_dynamics.__defaults__[1]
         return OcpFesMsk.declare_dynamics(

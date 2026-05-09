@@ -317,13 +317,8 @@ class DingModelPulseWidthFrequencyWithFatigue(DingModelPulseWidthFrequency):
 
         defects = None
         if isinstance(nlp.dynamics_type.ode_solver, OdeSolver.COLLOCATION) and nlp.model is model:
-            state_names = [
-                f"{name}_{model.muscle_name}" if model.muscle_name and f"{name}_{model.muscle_name}" in nlp.states_dot else name
-                for name in model.name_dof
-            ]
-            states_dot = vertcat(
-                *[DynamicsFunctions.get(nlp.states_dot[state_name], nlp.states_dot.scaled.cx) for state_name in state_names]
-            )
+            state_names = DingModelPulseWidthFrequency._get_state_dot_names(nlp, model)
+            states_dot = DingModelPulseWidthFrequency._get_states_dot_scaled_cx(nlp, state_names)
             defects = states_dot * nlp.dt - dxdt * nlp.dt
 
         return DynamicsEvaluation(dxdt=dxdt, defects=defects)
