@@ -234,6 +234,37 @@ class DingModelPulseWidthFrequency(DingModelFrequency):
         self.pulse_width = value
 
     @staticmethod
+    def _get_states_dot_scaled_cx(nlp, state_names):
+        try:
+            return vertcat(
+                *[
+                    DynamicsFunctions.get(nlp.states_dot[state_name], nlp.states_dot.scaled.cx)
+                    for state_name in state_names
+                ]
+            )
+        except TypeError:
+            return nlp.states_dot.scaled.cx
+
+    @staticmethod
+    def _get_state_dot_names(nlp, model):
+        return [
+            (
+                f"{name}_{model.muscle_name}"
+                if DingModelPulseWidthFrequency._has_muscle_state_dot(nlp, model, name)
+                else name
+            )
+            for name in model.name_dof
+        ]
+
+    @staticmethod
+    def _has_muscle_state_dot(nlp, model, name):
+        return (
+            model.muscle_name
+            and hasattr(nlp.states_dot, "__contains__")
+            and f"{name}_{model.muscle_name}" in nlp.states_dot
+        )
+
+    @staticmethod
     def dynamics(
         time: MX,
         states: MX,
@@ -302,13 +333,8 @@ class DingModelPulseWidthFrequency(DingModelFrequency):
 
         defects = None
         if isinstance(nlp.dynamics_type.ode_solver, OdeSolver.COLLOCATION) and nlp.model is model:
-            state_names = [
-                f"{name}_{model.muscle_name}" if model.muscle_name and f"{name}_{model.muscle_name}" in nlp.states_dot else name
-                for name in model.name_dof
-            ]
-            states_dot = vertcat(
-                *[DynamicsFunctions.get(nlp.states_dot[state_name], nlp.states_dot.scaled.cx) for state_name in state_names]
-            )
+            state_names = DingModelPulseWidthFrequency._get_state_dot_names(nlp, model)
+            states_dot = DingModelPulseWidthFrequency._get_states_dot_scaled_cx(nlp, state_names)
             defects = states_dot * nlp.dt - dxdt * nlp.dt
 
         return DynamicsEvaluation(dxdt=dxdt, defects=defects)

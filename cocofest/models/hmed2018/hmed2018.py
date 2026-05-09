@@ -102,7 +102,10 @@ class DingModelPulseIntensityFrequency(DingModelFrequency):
         self.cr = cr
 
     def get_lambda_i(self, nb_stim: int, pulse_intensity: MX | float) -> list[MX | float]:
-        return [self.lambda_i_calculation(pulse_intensity[i]) for i in range(nb_stim)]
+        try:
+            return [self.lambda_i_calculation(pulse_intensity[i]) for i in range(nb_stim)]
+        except TypeError:
+            return [self.lambda_i_calculation(pulse_intensity) for _ in range(nb_stim)]
 
     # ---- Absolutely needed methods ---- #
     def serialize(self) -> tuple[Callable, dict]:
