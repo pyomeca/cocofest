@@ -3,7 +3,6 @@ This example will do an optimal control program of a 100 steps hand cycling moti
 muscle driven / FES driven dynamics and includes a resistive torque at the handle.
 """
 
-import argparse
 from sys import platform
 import numpy as np
 
@@ -15,7 +14,6 @@ from bioptim import (
     ConstraintFcn,
     ControlType,
     CostType,
-    DynamicsOptions,
     ExternalForceSetTimeSeries,
     InitialGuessList,
     InterpolationType,
@@ -27,10 +25,9 @@ from bioptim import (
     ParameterList,
     PhaseDynamics,
     Solver,
-    MusclesBiorbdModel,
-    TorqueBiorbdModel,
     VariableScalingList,
-    ContactType,
+    DynamicsOptionsList,
+    DynamicsOptions,
 )
 
 from cocofest import (
@@ -41,7 +38,6 @@ from cocofest import (
     OcpFesMsk,
     DingModelPulseWidthFrequency,
 )
-from examples.fes_multibody.cycling.cost_functions import CustomCostFunctions
 
 
 def set_external_forces(n_shooting: int, torque: int | float) -> tuple[dict, ExternalForceSetTimeSeries]:
@@ -102,57 +98,63 @@ def update_model(
             contact_types=model.contact_types,
         )
     else:
-        model = type(model)(
-            model.path,
-            external_force_set=external_force_set,
-            contact_types=(ContactType.RIGID_EXPLICIT,),
-        )
+        model = BiorbdModel(model.path, external_force_set=external_force_set)
 
     return model
 
 
-def set_dynamics(
-    model: BiorbdModel | FesMskModel,
-    numerical_time_series: dict,
-    dynamics_type_str: str = "torque_driven",
-    ode_solver: OdeSolver = OdeSolver.RK4(n_integration_steps=10),
-) -> DynamicsOptions:
-    """
-    Set the dynamics of the optimal control program based on the chosen dynamics type.
+# def set_dynamics(
+#     model: BiorbdModel | FesMskModel,
+#     numerical_time_series: dict,
+#     dynamics_type_str: str = "torque_driven",
+#     ode_solver: OdeSolver = OdeSolver.RK4(n_integration_steps=10),
+# ) -> DynamicsList:
+#     """
+#     Set the dynamics of the optimal control program based on the chosen dynamics type.
+#
+#     Parameters
+#     ----------
+#     model: BiorbdModel | FesMskModel
+#         The biomechanical model.
+#     numerical_time_series: dict
+#         External numerical data (e.g., external forces).
+#     dynamics_type_str: str
+#         Type of dynamics ("torque_driven", "muscle_driven", or "fes_driven").
+#
+#     Returns
+#     -------
+#         A DynamicsList configured for the problem.
+#     """
+#     dynamics_type = (
+#         DynamicsFcn.TORQUE_DRIVEN
+#         if dynamics_type_str == "torque_driven"
+#         else (
+#             DynamicsFcn.MUSCLE_DRIVEN
+#             if dynamics_type_str == "muscle_driven"
+#             else model.declare_model_variables if dynamics_type_str == "fes_driven" else None
+#         )
+#     )
+#     if dynamics_type is None:
+#         raise ValueError("Dynamics type not recognized")
+#
+#     dynamics = DynamicsList()
+#     dynamics.add(
+#         dynamics_type=dynamics_type,
+#         dynamic_function=(
+#             None if dynamics_type in (DynamicsFcn.TORQUE_DRIVEN, DynamicsFcn.MUSCLE_DRIVEN) else model.muscle_dynamic
+#         ),
+#         expand_dynamics=True,
+#         expand_continuity=False,
+#         phase_dynamics=PhaseDynamics.SHARED_DURING_THE_PHASE,
+#         numerical_data_timeseries=numerical_time_series,
+#         phase=0,
+#         ode_solver=ode_solver,
+#         contact_type=[ContactType.RIGID_EXPLICIT],
+#     )
+#     return dynamics
 
-    Parameters
-    ----------
-    model: BiorbdModel | FesMskModel
-        The biomechanical model.
-    numerical_time_series: dict
-        External numerical data (e.g., external forces).
-    dynamics_type_str: str
-        Type of dynamics ("torque_driven", "muscle_driven", or "fes_driven").
 
-    Returns
-    -------
-        Dynamics options configured for the problem.
-    """
-    if dynamics_type_str not in ("torque_driven", "muscle_driven", "fes_driven"):
-        raise ValueError("Dynamics type not recognized")
-
-    model._contact_types = (ContactType.RIGID_EXPLICIT,)
-    dynamics = DynamicsOptions(
-        expand_dynamics=True,
-        expand_continuity=False,
-        phase_dynamics=PhaseDynamics.SHARED_DURING_THE_PHASE,
-        numerical_data_timeseries=numerical_time_series,
-        ode_solver=ode_solver,
-    )
-    return dynamics
-
-
-def set_objective_functions(
-    model: BiorbdModel | FesMskModel,
-    dynamics_type: str,
-    init_x,
-    objective_mode: str = "force_production",
-) -> ObjectiveList:
+def set_objective_functions(model: BiorbdModel | FesMskModel, dynamics_type: str, init_x) -> ObjectiveList:
     """
     Configure the objective functions for the optimal control problem.
 
@@ -169,22 +171,13 @@ def set_objective_functions(
     """
     objective_functions = ObjectiveList()
     if isinstance(model, FesMskModel):
-        if objective_mode == "endurance_1500_weighted_fatigue":
-            objective_functions.add(
-                CustomCostFunctions().dict_functions["minimize_endurance_1500_weighted_fatigue"]["function"],
-                custom_type=ObjectiveFcn.Lagrange,
-                node=Node.ALL,
-                weight=10000,
-                quadratic=True,
-            )
-        else:
-            objective_functions.add(
-                CustomObjective.minimize_overall_muscle_force_production,
-                custom_type=ObjectiveFcn.Lagrange,
-                node=Node.ALL,
-                weight=10000,
-                quadratic=True,
-            )
+        objective_functions.add(
+            CustomObjective.minimize_overall_muscle_force_production,
+            custom_type=ObjectiveFcn.Lagrange,
+            node=Node.ALL,
+            weight=10000,
+            quadratic=True,
+        )
 
     else:
         control_key = "tau" if dynamics_type == "torque_driven" else "muscles"
@@ -424,7 +417,6 @@ def prepare_ocp(
     ode_solver: OdeSolver = OdeSolver.RK4(n_integration_steps=10),
     torque: int | float = -1,
     initial_guess_model_path: str = None,
-    objective_mode: str = "force_production",
 ) -> OptimalControlProgram:
     """
     Prepare the optimal control program (OCP) with the provided configuration.
@@ -461,11 +453,21 @@ def prepare_ocp(
         numerical_time_series.update(numerical_data_time_series)
 
     # Set dynamics based on the chosen dynamics type
-    dynamics = set_dynamics(
-        model,
-        numerical_time_series,
-        dynamics_type_str=dynamics_type,
-        ode_solver=ode_solver,
+    # dynamics = set_dynamics(
+    #     model,
+    #     numerical_time_series,
+    #     dynamics_type_str=dynamics_type,
+    #     ode_solver=ode_solver,
+    # )
+    dynamics_options = DynamicsOptionsList()
+    dynamics_options.add(
+        DynamicsOptions(
+            expand_dynamics=True,
+            expand_continuity=False,
+            phase_dynamics=PhaseDynamics.SHARED_DURING_THE_PHASE,
+            ode_solver=ode_solver,
+            numerical_data_timeseries=numerical_time_series,
+        )
     )
 
     # Set initial guess for state variables
@@ -488,21 +490,16 @@ def prepare_ocp(
     constraints = set_constraints(model)
 
     # Configure objective functions
-    objective_functions = set_objective_functions(
-        model,
-        dynamics_type,
-        np.array([x_init["q"].init[2][-1]]),
-        objective_mode=objective_mode,
-    )
+    objective_functions = set_objective_functions(model, dynamics_type, np.array([x_init["q"].init[2][-1]]))
 
     # Update the model with external forces and parameters
     model = update_model(model, external_force_set, parameters=ParameterList(use_sx=use_sx))
 
     return OptimalControlProgram(
-        bio_model=[model],
-        dynamics=dynamics,
-        n_shooting=n_shooting,
-        phase_time=final_time,
+        [model],
+        n_shooting,
+        final_time,
+        dynamics_options,
         x_bounds=x_bounds,
         u_bounds=u_bounds,
         x_init=x_init,
@@ -520,9 +517,6 @@ def main(
     plot=True,
     model_path: str = "../../msk_models/Wu/Modified_Wu_Shoulder_Model_Cycling.bioMod",
     initial_guess_model_path: str = "../../msk_models/Wu/Modified_Wu_Shoulder_Model_Cycling_for_IK.bioMod",
-    objective_mode: str = "endurance_1500_weighted_fatigue",
-    ipopt_linear_solver: str = "ma57",
-    ipopt_max_iter: int = 6000,
 ):
     """
     Main function to configure and solve the optimal control problem.
@@ -542,11 +536,8 @@ def main(
     pedal_config = {"x_center": 0.35, "y_center": 0.0, "radius": 0.1}
 
     # --- Load the appropriate model --- #
-    if dynamics_type == "torque_driven":
-        model = TorqueBiorbdModel(model_path)
-        n_shooting = 100 * final_time
-    elif dynamics_type == "muscle_driven":
-        model = MusclesBiorbdModel(model_path)
+    if dynamics_type in ["torque_driven", "muscle_driven"]:
+        model = BiorbdModel(model_path)
         n_shooting = 100 * final_time
     elif dynamics_type == "fes_driven":
         # Set FES model (set to Ding et al. 2007 + fatigue, for now)
@@ -583,6 +574,7 @@ def main(
             activate_passive_force_relationship=True,
             activate_residual_torque=False,
             external_force_set=None,  # External forces will be added later
+            with_contact=True,
         )
         # Adjust n_shooting based on the stimulation time
         n_shooting = model.muscles_dynamics_model[0].get_n_shooting(final_time)
@@ -598,25 +590,21 @@ def main(
         dynamics_type=dynamics_type,
         use_sx=False,
         ode_solver=OdeSolver.COLLOCATION(polynomial_degree=3, method="radau"),
-        # ode_solver=OdeSolver.RK4(n_integration_steps=5)
+        # ode_solver=OdeSolver.RK4(n_integration_steps=5),
         torque=-0.3,
         initial_guess_model_path=initial_guess_model_path,
-        objective_mode=objective_mode,
     )
 
     # Add the penalty cost function plot
     ocp.add_plot_penalty(CostType.ALL)
 
     # Solve the optimal control problem
-    linear_solver = ipopt_linear_solver if ipopt_linear_solver else ("ma57" if platform == "linux" else "mumps")
-    solver = Solver.IPOPT(show_online_optim=False, _max_iter=ipopt_max_iter, show_options=dict(show_bounds=True))
-    solver.set_linear_solver(linear_solver)
-    if linear_solver.lower() == "ma57":
-        solver.set_option_unsafe("yes", "ma57_automatic_scaling")
-        solver.set_option_unsafe(2.0, "ma57_pre_alloc")
-    solver.set_option_unsafe(1e-6, "acceptable_tol")
-    solver.set_option_unsafe(12, "acceptable_iter")
-    sol = ocp.solve(solver)
+    linear_solver = "ma57" if platform == "linux" else "mumps"
+    sol = ocp.solve(
+        Solver.IPOPT(
+            show_online_optim=False, _max_iter=10000, show_options=dict(show_bounds=True), _linear_solver=linear_solver
+        )
+    )
     sol.print_cost()
     if plot:
         sol.animate(viewer="pyorerun")
@@ -624,26 +612,4 @@ def main(
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Run the cycling OCP with different driven methods.")
-    parser.add_argument("--plot", action="store_true", help="Display animation and graphs after solving.")
-    parser.add_argument(
-        "--objective-mode",
-        type=str,
-        default="endurance_1500_weighted_fatigue",
-        choices=["force_production", "endurance_1500_weighted_fatigue"],
-        help="Objective used for the FES-driven OCP.",
-    )
-    parser.add_argument(
-        "--linear-solver",
-        type=str,
-        default="ma57",
-        help="IPOPT linear solver to use, e.g. ma57 or mumps.",
-    )
-    parser.add_argument("--max-iter", type=int, default=6000, help="Maximum IPOPT iterations.")
-    args = parser.parse_args()
-    main(
-        plot=args.plot,
-        objective_mode=args.objective_mode,
-        ipopt_linear_solver=args.linear_solver,
-        ipopt_max_iter=args.max_iter,
-    )
+    main()

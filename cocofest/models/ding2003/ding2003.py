@@ -1,4 +1,5 @@
 from typing import Callable
+import inspect
 from math import gcd
 from fractions import Fraction
 
@@ -191,13 +192,7 @@ class DingModelFrequency(FesModel):
         -------
         The value of the derivative of each state dx/dt at the current time t
         """
-        if states is not None:
-            cn = states[0]
-            f = states[1]
-        if time is not None:
-            t = time
-        if numerical_timeseries is not None:
-            t_stim_prev = numerical_timeseries
+        cn, f, t, t_stim_prev = self._legacy_state_inputs(cn, f, t, t_stim_prev, states, time, numerical_timeseries)
 
         cn_dot = self.calculate_cn_dot(cn, t, t_stim_prev)
         f_dot = self.f_dot_fun(
@@ -211,6 +206,17 @@ class DingModelFrequency(FesModel):
             passive_force_relationship=passive_force_relationship,
         )  # Equation n°2
         return vertcat(cn_dot, f_dot)
+
+    @staticmethod
+    def _legacy_state_inputs(cn, f, t, t_stim_prev, states, time, numerical_timeseries):
+        if states is not None:
+            cn = states[0]
+            f = states[1]
+        if time is not None:
+            t = time
+        if numerical_timeseries is not None:
+            t_stim_prev = numerical_timeseries
+        return cn, f, t, t_stim_prev
 
     def exp_time_fun(self, t: MX, t_stim_i: MX) -> MX | float:
         """
@@ -376,18 +382,24 @@ class DingModelFrequency(FesModel):
         """
         model = fes_model if fes_model else nlp.model
         dxdt_fun = model.system_dynamics
-
-        try:
-            dxdt = dxdt_fun(
-                cn=states[0],
-                f=states[1],
-                t=time,
-                t_stim_prev=numerical_timeseries,
-                force_length_relationship=force_length_relationship,
-                force_velocity_relationship=force_velocity_relationship,
-                passive_force_relationship=passive_force_relationship,
-            )
-        except TypeError:
+        dynamics_kwargs = {
+            "cn": states[0],
+            "f": states[1],
+            "t": time,
+            "t_stim_prev": numerical_timeseries,
+            "force_length_relationship": force_length_relationship,
+            "force_velocity_relationship": force_velocity_relationship,
+            "passive_force_relationship": passive_force_relationship,
+        }
+        if model.with_fatigue:
+            dynamics_kwargs |= {
+                "a": states[2],
+                "tau1": states[3],
+                "km": states[4],
+            }
+        if "cn" in inspect.signature(dxdt_fun).parameters:
+            dxdt = dxdt_fun(**dynamics_kwargs)
+        else:
             dxdt = dxdt_fun(
                 time=time,
                 states=states,
