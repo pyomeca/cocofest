@@ -1,4 +1,5 @@
 from typing import Callable
+import inspect
 
 import numpy as np
 from casadi import MX, vertcat, exp
@@ -153,13 +154,7 @@ class DingModelPulseWidthFrequency(DingModelFrequency):
         -------
         The value of the derivative of each state dx/dt at the current time t
         """
-        if states is not None:
-            cn = states[0]
-            f = states[1]
-        if time is not None:
-            t = time
-        if numerical_timeseries is not None:
-            t_stim_prev = numerical_timeseries
+        cn, f, t, t_stim_prev = self._legacy_state_inputs(cn, f, t, t_stim_prev, states, time, numerical_timeseries)
         if controls is not None:
             pulse_width = controls
         if isinstance(pulse_width, (list, tuple)):
@@ -311,19 +306,25 @@ class DingModelPulseWidthFrequency(DingModelFrequency):
         """
         model = fes_model if fes_model else nlp.model
         dxdt_fun = model.system_dynamics
-
-        try:
-            dxdt = dxdt_fun(
-                cn=states[0],
-                f=states[1],
-                t=time,
-                t_stim_prev=numerical_timeseries,
-                pulse_width=controls[0],
-                force_length_relationship=force_length_relationship,
-                force_velocity_relationship=force_velocity_relationship,
-                passive_force_relationship=passive_force_relationship,
-            )
-        except TypeError:
+        dynamics_kwargs = {
+            "cn": states[0],
+            "f": states[1],
+            "t": time,
+            "t_stim_prev": numerical_timeseries,
+            "pulse_width": controls[0],
+            "force_length_relationship": force_length_relationship,
+            "force_velocity_relationship": force_velocity_relationship,
+            "passive_force_relationship": passive_force_relationship,
+        }
+        if model.with_fatigue:
+            dynamics_kwargs |= {
+                "a": states[2],
+                "tau1": states[3],
+                "km": states[4],
+            }
+        if "cn" in inspect.signature(dxdt_fun).parameters:
+            dxdt = dxdt_fun(**dynamics_kwargs)
+        else:
             dxdt = dxdt_fun(
                 time=time,
                 states=states,

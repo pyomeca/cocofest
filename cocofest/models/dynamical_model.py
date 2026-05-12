@@ -140,7 +140,7 @@ class FesMskModel(BiorbdModel, StateDynamicsWithContacts):
 
     def muscle_name_dof(self, index: int = 0) -> list[str]:
         muscle = self.muscles_dynamics_model[index]
-        return [f"{name}_{muscle.muscle_name}" for name in muscle.name_dof]
+        return list(muscle.name_dofs)
 
     @property
     def nb_state(self) -> int:
@@ -156,24 +156,7 @@ class FesMskModel(BiorbdModel, StateDynamicsWithContacts):
 
     @property
     def state_configuration_functions(self):
-        state_configure = StateConfigure()
-        muscle_state_configurations = []
-        for muscle_model in self.muscles_dynamics_model:
-            for state_key in muscle_model.name_dof:
-                if state_key in state_configure.state_dictionary:
-                    muscle_state_configurations.append(
-                        lambda ocp, nlp, state_key=state_key, muscle_model=muscle_model: state_configure.state_dictionary[
-                            state_key
-                        ](
-                            ocp=ocp,
-                            nlp=nlp,
-                            as_states=True,
-                            as_controls=False,
-                            muscle_name=muscle_model.muscle_name,
-                        )
-                    )
-
-        return muscle_state_configurations + [
+        return self._muscle_state_configuration_functions() + [
             lambda ocp, nlp: ConfigureVariables.configure_q(ocp, nlp, as_states=True),
             lambda ocp, nlp: ConfigureVariables.configure_qdot(ocp, nlp, as_states=True),
         ]
@@ -185,18 +168,9 @@ class FesMskModel(BiorbdModel, StateDynamicsWithContacts):
             controls.append(lambda ocp, nlp: ConfigureVariables.configure_tau(ocp, nlp, as_controls=True))
 
         for muscle_model in self.muscles_dynamics_model:
-            if isinstance(muscle_model, DingModelPulseWidthFrequency):
-                controls.append(
-                    lambda ocp, nlp, muscle_model=muscle_model: StateConfigure().configure_last_pulse_width(
-                        ocp, nlp, muscle_model.muscle_name
-                    )
-                )
-            if isinstance(muscle_model, DingModelPulseIntensityFrequency):
-                controls.append(
-                    lambda ocp, nlp, muscle_model=muscle_model: StateConfigure().configure_pulse_intensity(
-                        ocp, nlp, muscle_model.muscle_name, muscle_model.sum_stim_truncation
-                    )
-                )
+            control = self._control_configuration_function_for_model(muscle_model)
+            if control is not None:
+                controls.append(control)
 
         return controls
 
@@ -222,6 +196,36 @@ class FesMskModel(BiorbdModel, StateDynamicsWithContacts):
             )
         state_name_list += ["q", "qdot"]
         return state_name_list
+
+    def _muscle_state_configuration_functions(self):
+        state_configure = StateConfigure()
+        state_dictionary = state_configure.state_dictionary
+        return [
+            (
+                lambda ocp, nlp, state_key=state_key, muscle_model=muscle_model: state_dictionary[state_key](
+                    ocp=ocp,
+                    nlp=nlp,
+                    as_states=True,
+                    as_controls=False,
+                    muscle_name=muscle_model.muscle_name,
+                )
+            )
+            for muscle_model in self.muscles_dynamics_model
+            for state_key in muscle_model.name_dof
+            if state_key in state_dictionary
+        ]
+
+    @staticmethod
+    def _control_configuration_function_for_model(muscle_model):
+        if isinstance(muscle_model, DingModelPulseWidthFrequency):
+            return lambda ocp, nlp, muscle_model=muscle_model: StateConfigure().configure_last_pulse_width(
+                ocp, nlp, muscle_model.muscle_name
+            )
+        if isinstance(muscle_model, DingModelPulseIntensityFrequency):
+            return lambda ocp, nlp, muscle_model=muscle_model: StateConfigure().configure_pulse_intensity(
+                ocp, nlp, muscle_model.muscle_name, muscle_model.sum_stim_truncation
+            )
+        return None
 
     def dynamics(
         self,

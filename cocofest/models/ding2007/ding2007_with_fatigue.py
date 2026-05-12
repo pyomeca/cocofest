@@ -174,16 +174,11 @@ class DingModelPulseWidthFrequencyWithFatigue(DingModelPulseWidthFrequency):
         -------
         The value of the derivative of each state dx/dt at the current time t
         """
+        cn, f, t, t_stim_prev = self._legacy_state_inputs(cn, f, t, t_stim_prev, states, time, numerical_timeseries)
         if states is not None:
-            cn = states[0]
-            f = states[1]
             a = states[2]
             tau1 = states[3]
             km = states[4]
-        if time is not None:
-            t = time
-        if numerical_timeseries is not None:
-            t_stim_prev = numerical_timeseries
         if controls is not None:
             pulse_width = controls
         if isinstance(pulse_width, (list, tuple)):

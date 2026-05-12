@@ -67,7 +67,8 @@ class DingModelPulseIntensityFrequencyWithFatigue(DingModelPulseIntensityFrequen
 
     @property
     def name_dofs(self) -> list[str]:
-        return self.name_dof
+        muscle_name = "_" + self.muscle_name if self.muscle_name is not None else ""
+        return [state_name + muscle_name for state_name in self.name_dof]
 
     @property
     def nb_state(self) -> int:
@@ -156,16 +157,11 @@ class DingModelPulseIntensityFrequencyWithFatigue(DingModelPulseIntensityFrequen
         -------
         The value of the derivative of each state dx/dt at the current time t
         """
+        cn, f, t, t_stim_prev = self._legacy_state_inputs(cn, f, t, t_stim_prev, states, time, numerical_timeseries)
         if states is not None:
-            cn = states[0]
-            f = states[1]
             a = states[2]
             tau1 = states[3]
             km = states[4]
-        if time is not None:
-            t = time
-        if numerical_timeseries is not None:
-            t_stim_prev = numerical_timeseries
         if controls is not None:
             pulse_intensity = controls
         if a is None:

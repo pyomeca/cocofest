@@ -25,8 +25,8 @@ def test_model_maker_instantiates_ding_models_on_bioptim_3_4():
 
     assert ding2003._with_fatigue is True
     assert ding2007._with_fatigue is True
-    assert ding2003.name_dofs == ["Cn", "F", "A", "Tau1", "Km"]
-    assert ding2007.name_dofs == ["Cn", "F", "A", "Tau1", "Km"]
+    assert ding2003.name_dof == ["Cn", "F", "A", "Tau1", "Km"]
+    assert ding2007.name_dof == ["Cn", "F", "A", "Tau1", "Km"]
 
 
 def test_ding2007_collocation_dynamics_returns_expected_defects():
