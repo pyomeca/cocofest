@@ -198,22 +198,27 @@ class FesMskModel(BiorbdModel, StateDynamicsWithContacts):
         return state_name_list
 
     def _muscle_state_configuration_functions(self):
-        state_configure = StateConfigure()
-        state_dictionary = state_configure.state_dictionary
-        return [
-            (
-                lambda ocp, nlp, state_key=state_key, muscle_model=muscle_model: state_dictionary[state_key](
-                    ocp=ocp,
-                    nlp=nlp,
-                    as_states=True,
-                    as_controls=False,
-                    muscle_name=muscle_model.muscle_name,
+        state_configuration_functions = []
+        for muscle_model in self.muscles_dynamics_model:
+            state_configuration_functions.extend(self._state_configuration_functions_for_model(muscle_model))
+        return state_configuration_functions
+
+    @staticmethod
+    def _state_configuration_functions_for_model(muscle_model):
+        state_dictionary = StateConfigure().state_dictionary
+        state_configuration_functions = []
+        for state_key in muscle_model.name_dof:
+            if state_key in state_dictionary:
+                state_configuration_functions.append(
+                    lambda ocp, nlp, state_key=state_key, muscle_model=muscle_model: state_dictionary[state_key](
+                        ocp=ocp,
+                        nlp=nlp,
+                        as_states=True,
+                        as_controls=False,
+                        muscle_name=muscle_model.muscle_name,
+                    )
                 )
-            )
-            for muscle_model in self.muscles_dynamics_model
-            for state_key in muscle_model.name_dof
-            if state_key in state_dictionary
-        ]
+        return state_configuration_functions
 
     @staticmethod
     def _control_configuration_function_for_model(muscle_model):

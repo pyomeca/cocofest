@@ -5,8 +5,10 @@ from casadi import DM
 from bioptim import OdeSolver
 
 from cocofest import ModelMaker
+from cocofest.models.ding2003.ding2003 import DingModelFrequency
 from cocofest.models.ding2007.ding2007 import DingModelPulseWidthFrequency
 from cocofest.models.ding2007.ding2007_with_fatigue import DingModelPulseWidthFrequencyWithFatigue
+from cocofest.models.hmed2018.hmed2018 import DingModelPulseIntensityFrequency
 from examples.getting_started.optimization.pulse_width_optimization_nmpc import prepare_nmpc
 
 
@@ -77,6 +79,69 @@ def test_ding2007_with_fatigue_rk4_dynamics_keeps_defects_disabled():
     )
 
     assert dynamics.defects is None
+
+
+def test_ding2003_collocation_dynamics_returns_expected_defects():
+    model = DingModelFrequency(stim_time=[0, 0.1], sum_stim_truncation=10)
+    states = DM([5, 100])
+    states_dot = DM([1.2, -3.4])
+    nlp = _build_fake_nlp(model=model, states_dot=states_dot, ode_solver=OdeSolver.COLLOCATION())
+
+    dynamics = model.dynamics(
+        time=0.11,
+        states=states,
+        controls=DM(),
+        parameters=DM(),
+        algebraic_states=DM(),
+        numerical_timeseries=np.array([0, 0.1]),
+        nlp=nlp,
+    )
+
+    expected_dxdt = model.system_dynamics(
+        cn=states[0],
+        f=states[1],
+        t=0.11,
+        t_stim_prev=np.array([0, 0.1]),
+    )
+    expected_defects = states_dot * nlp.dt - expected_dxdt * nlp.dt
+
+    np.testing.assert_allclose(np.array(dynamics.dxdt).squeeze(), np.array(expected_dxdt).squeeze())
+    np.testing.assert_allclose(np.array(dynamics.defects).squeeze(), np.array(expected_defects).squeeze())
+
+
+def test_hmed2018_collocation_dynamics_returns_expected_defects():
+    model = DingModelPulseIntensityFrequency(
+        stim_time=[0, 0.1],
+        previous_stim={"time": [0], "pulse_intensity": [60]},
+        sum_stim_truncation=10,
+    )
+    states = DM([5, 100])
+    controls = DM([60])
+    states_dot = DM([1.2, -3.4])
+    nlp = _build_fake_nlp(model=model, states_dot=states_dot, ode_solver=OdeSolver.COLLOCATION())
+
+    numerical_timeseries = np.array([0.0, 0.1])
+    dynamics = model.dynamics(
+        time=0.11,
+        states=states,
+        controls=controls,
+        parameters=DM(),
+        algebraic_states=DM(),
+        numerical_timeseries=numerical_timeseries,
+        nlp=nlp,
+    )
+
+    expected_dxdt = model.system_dynamics(
+        cn=states[0],
+        f=states[1],
+        t=0.11,
+        t_stim_prev=numerical_timeseries,
+        pulse_intensity=controls,
+    )
+    expected_defects = states_dot * nlp.dt - expected_dxdt * nlp.dt
+
+    np.testing.assert_allclose(np.array(dynamics.dxdt).squeeze(), np.array(expected_dxdt).squeeze())
+    np.testing.assert_allclose(np.array(dynamics.defects).squeeze(), np.array(expected_defects).squeeze())
 
 
 def test_prepare_nmpc_supports_collocation_with_ding2007_fatigue_model():

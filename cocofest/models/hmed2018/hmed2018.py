@@ -102,10 +102,11 @@ class DingModelPulseIntensityFrequency(DingModelFrequency):
         self.cr = cr
 
     def get_lambda_i(self, nb_stim: int, pulse_intensity: MX | float) -> list[MX | float]:
-        try:
+        if isinstance(pulse_intensity, (list, tuple)) and len(pulse_intensity) == nb_stim:
             return [self.lambda_i_calculation(pulse_intensity[i]) for i in range(nb_stim)]
-        except TypeError:
-            return [self.lambda_i_calculation(pulse_intensity) for _ in range(nb_stim)]
+        if hasattr(pulse_intensity, "shape") and len(pulse_intensity.shape) > 0 and pulse_intensity.shape[0] == nb_stim:
+            return [self.lambda_i_calculation(pulse_intensity[i]) for i in range(nb_stim)]
+        return [self.lambda_i_calculation(pulse_intensity) for _ in range(nb_stim)]
 
     # ---- Absolutely needed methods ---- #
     def serialize(self) -> tuple[Callable, dict]:
@@ -167,13 +168,7 @@ class DingModelPulseIntensityFrequency(DingModelFrequency):
         -------
         The value of the derivative of each state dx/dt at the current time t
         """
-        if states is not None:
-            cn = states[0]
-            f = states[1]
-        if time is not None:
-            t = time
-        if numerical_timeseries is not None:
-            t_stim_prev = numerical_timeseries
+        cn, f, t, t_stim_prev = self._resolve_legacy_inputs(cn, f, t, t_stim_prev, states, time, numerical_timeseries)
         if controls is not None:
             pulse_intensity = controls
 
@@ -288,19 +283,17 @@ class DingModelPulseIntensityFrequency(DingModelFrequency):
         model = fes_model if fes_model else nlp.model
         dxdt_fun = model.system_dynamics
 
-        return DynamicsEvaluation(
-            dxdt=dxdt_fun(
-                cn=states[0],
-                f=states[1],
-                t=time,
-                t_stim_prev=numerical_timeseries,
-                pulse_intensity=controls,
-                force_length_relationship=force_length_relationship,
-                force_velocity_relationship=force_velocity_relationship,
-                passive_force_relationship=passive_force_relationship,
-            ),
-            defects=None,
+        dxdt = dxdt_fun(
+            cn=states[0],
+            f=states[1],
+            t=time,
+            t_stim_prev=numerical_timeseries,
+            pulse_intensity=controls,
+            force_length_relationship=force_length_relationship,
+            force_velocity_relationship=force_velocity_relationship,
+            passive_force_relationship=passive_force_relationship,
         )
+        return DynamicsEvaluation(dxdt=dxdt, defects=model._collocation_defects(nlp, model, dxdt))
 
     def declare_ding_variables(
         self,
