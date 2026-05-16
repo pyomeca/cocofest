@@ -164,7 +164,7 @@ class DingModelFrequencyWithFatigue(DingModelFrequency):
         f: MX
             The value of the force (N)
         a: MX
-            The value of the scaling factor (unitless)
+            The value of the scaling factor (N.s^-1)
         tau1: MX
             The value of the time_state_force_no_cross_bridge (s)
         km: MX
@@ -184,7 +184,7 @@ class DingModelFrequencyWithFatigue(DingModelFrequency):
         -------
         The value of the derivative of each state dx/dt at the current time t
         """
-        cn, f, t, t_stim_prev = self._legacy_state_inputs(cn, f, t, t_stim_prev, states, time, numerical_timeseries)
+        cn, f, t, t_stim_prev = self._resolve_legacy_inputs(cn, f, t, t_stim_prev, states, time, numerical_timeseries)
         if states is not None:
             a = states[2]
             tau1 = states[3]
@@ -211,13 +211,13 @@ class DingModelFrequencyWithFatigue(DingModelFrequency):
         Parameters
         ----------
         a: MX
-            The previous step value of scaling factor (unitless)
+            The previous step value of scaling factor (N.s^-1)
         f: MX
             The previous step value of force (N)
 
         Returns
         -------
-        The value of the derivative scaling factor (unitless)
+        The value of the derivative scaling factor (N.s^-2)
         """
         return -(a - self.a_rest) / self.tau_fat + self.alpha_a * f  # Equation n°5
 
@@ -299,21 +299,20 @@ class DingModelFrequencyWithFatigue(DingModelFrequency):
         model = fes_model if fes_model else nlp.model
         dxdt_fun = model.system_dynamics
 
-        return DynamicsEvaluation(
-            dxdt=dxdt_fun(
-                cn=states[0],
-                f=states[1],
-                a=states[2],
-                tau1=states[3],
-                km=states[4],
-                t=time,
-                t_stim_prev=numerical_timeseries,
-                force_length_relationship=force_length_relationship,
-                force_velocity_relationship=force_velocity_relationship,
-                passive_force_relationship=passive_force_relationship,
-            ),
-            defects=None,
+        dxdt = dxdt_fun(
+            cn=states[0],
+            f=states[1],
+            a=states[2],
+            tau1=states[3],
+            km=states[4],
+            t=time,
+            t_stim_prev=numerical_timeseries,
+            force_length_relationship=force_length_relationship,
+            force_velocity_relationship=force_velocity_relationship,
+            passive_force_relationship=passive_force_relationship,
         )
+
+        return DynamicsEvaluation(dxdt=dxdt, defects=model._collocation_defects(nlp, model, dxdt))
 
     def declare_ding_variables(
         self,

@@ -8,8 +8,10 @@ from casadi import MX, exp, vertcat
 
 from bioptim import (
     ConfigureProblem,
+    DynamicsFunctions,
     DynamicsEvaluation,
     NonLinearProgram,
+    OdeSolver,
     OptimalControlProgram,
 )
 
@@ -192,7 +194,7 @@ class DingModelFrequency(FesModel):
         -------
         The value of the derivative of each state dx/dt at the current time t
         """
-        cn, f, t, t_stim_prev = self._legacy_state_inputs(cn, f, t, t_stim_prev, states, time, numerical_timeseries)
+        cn, f, t, t_stim_prev = self._resolve_legacy_inputs(cn, f, t, t_stim_prev, states, time, numerical_timeseries)
 
         cn_dot = self.calculate_cn_dot(cn, t, t_stim_prev)
         f_dot = self.f_dot_fun(
@@ -208,7 +210,11 @@ class DingModelFrequency(FesModel):
         return vertcat(cn_dot, f_dot)
 
     @staticmethod
-    def _legacy_state_inputs(cn, f, t, t_stim_prev, states, time, numerical_timeseries):
+    def _resolve_legacy_inputs(cn, f, t, t_stim_prev, states, time, numerical_timeseries):
+        """
+        Accept both the explicit bioptim 3.4 call style (`cn=..., f=..., t=...`) and the
+        historical cocofest call style (`states=..., time=..., numerical_timeseries=...`).
+        """
         if states is not None:
             cn = states[0]
             f = states[1]
@@ -217,6 +223,27 @@ class DingModelFrequency(FesModel):
         if numerical_timeseries is not None:
             t_stim_prev = numerical_timeseries
         return cn, f, t, t_stim_prev
+
+    @staticmethod
+    def _uses_explicit_state_signature(dxdt_fun) -> bool:
+        return "cn" in inspect.signature(dxdt_fun).parameters
+
+    @staticmethod
+    def _collocation_defects(nlp, model, dxdt):
+        if not isinstance(nlp.dynamics_type.ode_solver, OdeSolver.COLLOCATION) or nlp.model is not model:
+            return None
+
+        state_names = [
+            f"{name}_{model.muscle_name}" if model.muscle_name and f"{name}_{model.muscle_name}" in nlp.states_dot else name
+            for name in model.name_dof
+        ]
+        try:
+            states_dot = vertcat(
+                *[DynamicsFunctions.get(nlp.states_dot[state_name], nlp.states_dot.scaled.cx) for state_name in state_names]
+            )
+        except TypeError:
+            states_dot = nlp.states_dot.scaled.cx
+        return states_dot * nlp.dt - dxdt * nlp.dt
 
     def exp_time_fun(self, t: MX, t_stim_i: MX) -> MX | float:
         """
@@ -382,23 +409,16 @@ class DingModelFrequency(FesModel):
         """
         model = fes_model if fes_model else nlp.model
         dxdt_fun = model.system_dynamics
-        dynamics_kwargs = {
-            "cn": states[0],
-            "f": states[1],
-            "t": time,
-            "t_stim_prev": numerical_timeseries,
-            "force_length_relationship": force_length_relationship,
-            "force_velocity_relationship": force_velocity_relationship,
-            "passive_force_relationship": passive_force_relationship,
-        }
-        if model.with_fatigue:
-            dynamics_kwargs |= {
-                "a": states[2],
-                "tau1": states[3],
-                "km": states[4],
-            }
-        if "cn" in inspect.signature(dxdt_fun).parameters:
-            dxdt = dxdt_fun(**dynamics_kwargs)
+        if model._uses_explicit_state_signature(dxdt_fun):
+            dxdt = dxdt_fun(
+                cn=states[0],
+                f=states[1],
+                t=time,
+                t_stim_prev=numerical_timeseries,
+                force_length_relationship=force_length_relationship,
+                force_velocity_relationship=force_velocity_relationship,
+                passive_force_relationship=passive_force_relationship,
+            )
         else:
             dxdt = dxdt_fun(
                 time=time,
@@ -407,7 +427,7 @@ class DingModelFrequency(FesModel):
                 numerical_timeseries=numerical_timeseries,
             )
 
-        return DynamicsEvaluation(dxdt=dxdt, defects=None)
+        return DynamicsEvaluation(dxdt=dxdt, defects=model._collocation_defects(nlp, model, dxdt))
 
     def declare_ding_variables(
         self,

@@ -5,10 +5,8 @@ import numpy as np
 
 from bioptim import (
     ConfigureProblem,
-    DynamicsFunctions,
     DynamicsEvaluation,
     NonLinearProgram,
-    OdeSolver,
     OptimalControlProgram,
 )
 from cocofest.models.ding2007.ding2007 import DingModelPulseWidthFrequency
@@ -152,7 +150,7 @@ class DingModelPulseWidthFrequencyWithFatigue(DingModelPulseWidthFrequency):
         f: MX
             The value of the force (N)
         a: MX
-            The value of the scaling factor (unitless)
+            The value of the scaling factor (N.s^-1)
         tau1: MX
             The value of the time_state_force_no_cross_bridge (ms)
         km: MX
@@ -174,7 +172,7 @@ class DingModelPulseWidthFrequencyWithFatigue(DingModelPulseWidthFrequency):
         -------
         The value of the derivative of each state dx/dt at the current time t
         """
-        cn, f, t, t_stim_prev = self._legacy_state_inputs(cn, f, t, t_stim_prev, states, time, numerical_timeseries)
+        cn, f, t, t_stim_prev = self._resolve_legacy_inputs(cn, f, t, t_stim_prev, states, time, numerical_timeseries)
         if states is not None:
             a = states[2]
             tau1 = states[3]
@@ -208,13 +206,13 @@ class DingModelPulseWidthFrequencyWithFatigue(DingModelPulseWidthFrequency):
         Parameters
         ----------
         a: MX
-            The previous step value of scaling factor (unitless)
+            The previous step value of scaling factor (N.s^-1)
         f: MX
             The previous step value of force (N)
 
         Returns
         -------
-        The value of the derivative scaling factor (unitless)
+        The value of the derivative scaling factor (N.s^-2)
         """
         return -(a - self.a_scale) / self.tau_fat + self.alpha_a * f  # Equation n°5
 
@@ -310,13 +308,7 @@ class DingModelPulseWidthFrequencyWithFatigue(DingModelPulseWidthFrequency):
             passive_force_relationship=passive_force_relationship,
         )
 
-        defects = None
-        if isinstance(nlp.dynamics_type.ode_solver, OdeSolver.COLLOCATION) and nlp.model is model:
-            state_names = DingModelPulseWidthFrequency._get_state_dot_names(nlp, model)
-            states_dot = DingModelPulseWidthFrequency._get_states_dot_scaled_cx(nlp, state_names)
-            defects = states_dot * nlp.dt - dxdt * nlp.dt
-
-        return DynamicsEvaluation(dxdt=dxdt, defects=defects)
+        return DynamicsEvaluation(dxdt=dxdt, defects=model._collocation_defects(nlp, model, dxdt))
 
     def declare_ding_variables(
         self,

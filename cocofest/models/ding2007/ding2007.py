@@ -1,15 +1,12 @@
 from typing import Callable
-import inspect
 
 import numpy as np
 from casadi import MX, vertcat, exp
 
 from bioptim import (
     ConfigureProblem,
-    DynamicsFunctions,
     DynamicsEvaluation,
     NonLinearProgram,
-    OdeSolver,
     OptimalControlProgram,
 )
 from cocofest.models.ding2003.ding2003 import DingModelFrequency
@@ -154,7 +151,7 @@ class DingModelPulseWidthFrequency(DingModelFrequency):
         -------
         The value of the derivative of each state dx/dt at the current time t
         """
-        cn, f, t, t_stim_prev = self._legacy_state_inputs(cn, f, t, t_stim_prev, states, time, numerical_timeseries)
+        cn, f, t, t_stim_prev = self._resolve_legacy_inputs(cn, f, t, t_stim_prev, states, time, numerical_timeseries)
         if controls is not None:
             pulse_width = controls
         if isinstance(pulse_width, (list, tuple)):
@@ -229,37 +226,6 @@ class DingModelPulseWidthFrequency(DingModelFrequency):
         self.pulse_width = value
 
     @staticmethod
-    def _get_states_dot_scaled_cx(nlp, state_names):
-        try:
-            return vertcat(
-                *[
-                    DynamicsFunctions.get(nlp.states_dot[state_name], nlp.states_dot.scaled.cx)
-                    for state_name in state_names
-                ]
-            )
-        except TypeError:
-            return nlp.states_dot.scaled.cx
-
-    @staticmethod
-    def _get_state_dot_names(nlp, model):
-        return [
-            (
-                f"{name}_{model.muscle_name}"
-                if DingModelPulseWidthFrequency._has_muscle_state_dot(nlp, model, name)
-                else name
-            )
-            for name in model.name_dof
-        ]
-
-    @staticmethod
-    def _has_muscle_state_dot(nlp, model, name):
-        return (
-            model.muscle_name
-            and hasattr(nlp.states_dot, "__contains__")
-            and f"{name}_{model.muscle_name}" in nlp.states_dot
-        )
-
-    @staticmethod
     def dynamics(
         time: MX,
         states: MX,
@@ -306,24 +272,17 @@ class DingModelPulseWidthFrequency(DingModelFrequency):
         """
         model = fes_model if fes_model else nlp.model
         dxdt_fun = model.system_dynamics
-        dynamics_kwargs = {
-            "cn": states[0],
-            "f": states[1],
-            "t": time,
-            "t_stim_prev": numerical_timeseries,
-            "pulse_width": controls[0],
-            "force_length_relationship": force_length_relationship,
-            "force_velocity_relationship": force_velocity_relationship,
-            "passive_force_relationship": passive_force_relationship,
-        }
-        if model.with_fatigue:
-            dynamics_kwargs |= {
-                "a": states[2],
-                "tau1": states[3],
-                "km": states[4],
-            }
-        if "cn" in inspect.signature(dxdt_fun).parameters:
-            dxdt = dxdt_fun(**dynamics_kwargs)
+        if model._uses_explicit_state_signature(dxdt_fun):
+            dxdt = dxdt_fun(
+                cn=states[0],
+                f=states[1],
+                t=time,
+                t_stim_prev=numerical_timeseries,
+                pulse_width=controls[0],
+                force_length_relationship=force_length_relationship,
+                force_velocity_relationship=force_velocity_relationship,
+                passive_force_relationship=passive_force_relationship,
+            )
         else:
             dxdt = dxdt_fun(
                 time=time,
@@ -332,13 +291,7 @@ class DingModelPulseWidthFrequency(DingModelFrequency):
                 numerical_timeseries=numerical_timeseries,
             )
 
-        defects = None
-        if isinstance(nlp.dynamics_type.ode_solver, OdeSolver.COLLOCATION) and nlp.model is model:
-            state_names = DingModelPulseWidthFrequency._get_state_dot_names(nlp, model)
-            states_dot = DingModelPulseWidthFrequency._get_states_dot_scaled_cx(nlp, state_names)
-            defects = states_dot * nlp.dt - dxdt * nlp.dt
-
-        return DynamicsEvaluation(dxdt=dxdt, defects=defects)
+        return DynamicsEvaluation(dxdt=dxdt, defects=model._collocation_defects(nlp, model, dxdt))
 
     def declare_ding_variables(
         self,
