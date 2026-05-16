@@ -4,12 +4,11 @@ import biorbd
 
 from bioptim import (
     Axis,
-    BiorbdModel,
     BoundsList,
-    DynamicsFcn,
-    DynamicsList,
+    DynamicsOptions,
     InitialGuessList,
     InterpolationType,
+    MusclesBiorbdModel,
     Node,
     ObjectiveFcn,
     ObjectiveList,
@@ -120,7 +119,7 @@ def prepare_muscle_driven_ocp(
     """
 
     # Adding the models to the same phase
-    bio_model = BiorbdModel(
+    bio_model = MusclesBiorbdModel(
         biorbd_model_path,
     )
 
@@ -148,11 +147,10 @@ def prepare_muscle_driven_ocp(
     )
 
     # Dynamics
-    dynamics = DynamicsList()
-    dynamics.add(
-        DynamicsFcn.MUSCLE_DRIVEN,
+    dynamics = DynamicsOptions(
         expand_dynamics=True,
         phase_dynamics=PhaseDynamics.SHARED_DURING_THE_PHASE,
+        ode_solver=OdeSolver.RK4(),
     )
 
     # Path constraint
@@ -187,7 +185,6 @@ def prepare_muscle_driven_ocp(
             x_init=x_init,
             u_init=u_init,
             objective_functions=objective_functions,
-            ode_solver=OdeSolver.RK4(),
             n_threads=n_threads,
         ),
         q_guess,

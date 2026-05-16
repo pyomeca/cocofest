@@ -91,11 +91,11 @@ def update_model(
             previous_stim=model.muscles_dynamics_model[0].previous_stim,
             activate_force_length_relationship=model.activate_force_length_relationship,
             activate_force_velocity_relationship=model.activate_force_velocity_relationship,
-            activate_passive_force_relationship=model.activate_force_velocity_relationship,
+            activate_passive_force_relationship=model.activate_passive_force_relationship,
             activate_residual_torque=model.activate_residual_torque,
             parameters=parameters,
             external_force_set=external_force_set,
-            with_contact=model.with_contact,
+            contact_types=model.contact_types,
         )
     else:
         model = BiorbdModel(model.path, external_force_set=external_force_set)
