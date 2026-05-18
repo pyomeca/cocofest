@@ -31,9 +31,11 @@ class FesNmpcMsk(FesNmpc):
             previous_stim=previous_stim_time,
             activate_force_length_relationship=model.activate_force_length_relationship,
             activate_force_velocity_relationship=model.activate_force_velocity_relationship,
+            activate_passive_force_relationship=model.activate_passive_force_relationship,
             activate_residual_torque=model.activate_residual_torque,
             parameters=self.nlp[0].parameters,
             external_force_set=model.external_force_set,
+            contact_types=model.contact_types,
         )
         return new_model
 
@@ -188,9 +190,11 @@ class FesNmpcMsk(FesNmpc):
             previous_stim={},
             activate_force_length_relationship=self.nlp[0].model.activate_force_length_relationship,
             activate_force_velocity_relationship=self.nlp[0].model.activate_force_velocity_relationship,
+            activate_passive_force_relationship=self.nlp[0].model.activate_passive_force_relationship,
             activate_residual_torque=self.nlp[0].model.activate_residual_torque,
             parameters=self.nlp[0].model.parameters,
             external_force_set=self.nlp[0].model.external_force_set,
+            contact_types=self.nlp[0].model.contact_types,
         )
 
         return combined_model
