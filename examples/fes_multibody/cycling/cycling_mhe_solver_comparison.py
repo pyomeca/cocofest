@@ -8,6 +8,7 @@ extend.
 
 from __future__ import annotations
 
+import argparse
 import os
 
 from cycling_mhe_common import (
@@ -66,5 +67,50 @@ def main(
     )
 
 
+def build_cli() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--problem", default=None, choices=sorted(PROBLEM_LIBRARY))
+    parser.add_argument("--model-path", default=DEFAULT_MODEL_PATH)
+    parser.add_argument("--n-windows", type=int, default=2)
+    parser.add_argument("--window-len", type=int, default=5)
+    parser.add_argument("--total-angle", type=float, default=-1.0)
+    parser.add_argument("--acados-dir", default=None)
+    parser.add_argument("--acados-codegen-dir", default="result/acados/c_generated_code_compare")
+    parser.add_argument("--acados-codegen-root", default="result/acados/problem_suite")
+    parser.add_argument("--ipopt-max-iter", type=int, default=500)
+    parser.add_argument("--acados-max-iter", type=int, default=100)
+    parser.add_argument(
+        "--suite",
+        action="store_true",
+        help="Run the default stable comparison suite instead of a single problem.",
+    )
+    parser.add_argument(
+        "--list-problems",
+        action="store_true",
+        help="Print the available predefined problems and exit.",
+    )
+    return parser
+
+
 if __name__ == "__main__":
-    main()
+    args = build_cli().parse_args()
+    if args.list_problems:
+        print("Default suite:")
+        for name in DEFAULT_PROBLEM_SUITE:
+            print(f"  {name}: {PROBLEM_LIBRARY[name].description}")
+        print("Additional problems:")
+        for name in sorted(set(PROBLEM_LIBRARY) - set(DEFAULT_PROBLEM_SUITE)):
+            print(f"  {name}: {PROBLEM_LIBRARY[name].description}")
+    else:
+        main(
+            problem=None if args.suite else args.problem,
+            model_path=args.model_path,
+            n_windows=args.n_windows,
+            window_len=args.window_len,
+            total_angle=args.total_angle,
+            acados_dir=args.acados_dir,
+            acados_codegen_dir=args.acados_codegen_dir,
+            acados_codegen_root=args.acados_codegen_root,
+            ipopt_max_iter=args.ipopt_max_iter,
+            acados_max_iter=args.acados_max_iter,
+        )

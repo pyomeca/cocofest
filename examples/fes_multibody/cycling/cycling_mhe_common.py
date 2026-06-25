@@ -34,10 +34,15 @@ class CyclingMheProblem:
     name: str
     description: str
     track_wheel_weight: float = 10.0
+    shoulder_posture_weight: float = 0.0
+    elbow_posture_weight: float = 0.0
+    wheel_velocity_tracking_weight: float = 0.0
     control_weight: float = 1e-4
     qdot_weight: float = 0.0
     terminal_tracking_weight: float = 1e-2
     perturbation_scale: float = 0.03
+    shoulder_target: float = 0.75
+    elbow_target: float = 1.5
 
 
 PROBLEM_LIBRARY: dict[str, CyclingMheProblem] = {
@@ -57,6 +62,16 @@ PROBLEM_LIBRARY: dict[str, CyclingMheProblem] = {
         qdot_weight=0.0,
         terminal_tracking_weight=1e-2,
     ),
+    "posture_tracking_control": CyclingMheProblem(
+        name="posture_tracking_control",
+        description="Wheel-angle tracking with shoulder/elbow posture regulation and light torque regularization.",
+        track_wheel_weight=10.0,
+        shoulder_posture_weight=2e-1,
+        elbow_posture_weight=2e-1,
+        control_weight=1e-4,
+        qdot_weight=0.0,
+        terminal_tracking_weight=1e-2,
+    ),
     "tracking_strong_control": CyclingMheProblem(
         name="tracking_strong_control",
         description="Wheel-angle tracking with stronger torque regularization.",
@@ -69,13 +84,16 @@ PROBLEM_LIBRARY: dict[str, CyclingMheProblem] = {
         name="tracking_velocity_control",
         description="Wheel-angle tracking with wheel-speed and torque regularization (experimental).",
         track_wheel_weight=10.0,
+        shoulder_posture_weight=2e-1,
+        elbow_posture_weight=2e-1,
+        wheel_velocity_tracking_weight=5e-4,
         control_weight=1e-4,
-        qdot_weight=5e-4,
+        qdot_weight=0.0,
         terminal_tracking_weight=1e-2,
     ),
 }
 
-DEFAULT_PROBLEM_SUITE = ["tracking", "tracking_control", "tracking_strong_control"]
+DEFAULT_PROBLEM_SUITE = ["tracking", "tracking_control", "posture_tracking_control"]
 
 
 def resolve_problem(problem: str | CyclingMheProblem | None) -> CyclingMheProblem:
@@ -123,10 +141,24 @@ def build_reference_series(
     return base_target + perturbation
 
 
-def build_update_function(full_target: np.ndarray, window_len: int):
+def build_reference_velocity(reference: np.ndarray, window_duration: float, window_len: int) -> np.ndarray:
+    dt = window_duration / window_len
+    return np.gradient(reference, dt)
+
+
+def build_update_function(
+    full_target: np.ndarray,
+    window_len: int,
+    wheel_target_objective_index: int = 0,
+    velocity_target: np.ndarray | None = None,
+    wheel_velocity_objective_index: int | None = None,
+):
     def update_functions(mhe: MovingHorizonEstimator, window_idx: int, _sol):
         target = full_target[window_idx : window_idx + window_len + 1]
-        mhe.update_objectives_target(target=target[np.newaxis, :], list_index=0)
+        mhe.update_objectives_target(target=target[np.newaxis, :], list_index=wheel_target_objective_index)
+        if velocity_target is not None and wheel_velocity_objective_index is not None:
+            qdot_target = velocity_target[window_idx : window_idx + window_len]
+            mhe.update_objectives_target(target=qdot_target[np.newaxis, :], list_index=wheel_velocity_objective_index)
         return window_idx < len(full_target) - window_len - 1
 
     return update_functions
@@ -208,9 +240,14 @@ def configure_ipopt_solver(
     return solver
 
 
-def build_objectives(problem: CyclingMheProblem, q_target: np.ndarray) -> ObjectiveList:
+def build_objectives(
+    problem: CyclingMheProblem, q_target: np.ndarray, qdot_target: np.ndarray | None = None
+) -> tuple[ObjectiveList, dict[str, int]]:
     objectives = ObjectiveList()
+    target_objective_indices = {}
+    objective_count = 0
     if problem.track_wheel_weight:
+        target_objective_indices["wheel_q"] = objective_count
         objectives.add(
             ObjectiveFcn.Lagrange.MINIMIZE_STATE,
             key="q",
@@ -221,6 +258,46 @@ def build_objectives(problem: CyclingMheProblem, q_target: np.ndarray) -> Object
             quadratic=True,
             multi_thread=False,
         )
+        objective_count += 1
+    if problem.shoulder_posture_weight:
+        objectives.add(
+            ObjectiveFcn.Lagrange.MINIMIZE_STATE,
+            key="q",
+            index=0,
+            node=Node.ALL_SHOOTING,
+            target=np.full((1, q_target.shape[0] - 1), problem.shoulder_target),
+            weight=problem.shoulder_posture_weight,
+            quadratic=True,
+            multi_thread=False,
+        )
+        objective_count += 1
+    if problem.elbow_posture_weight:
+        objectives.add(
+            ObjectiveFcn.Lagrange.MINIMIZE_STATE,
+            key="q",
+            index=1,
+            node=Node.ALL_SHOOTING,
+            target=np.full((1, q_target.shape[0] - 1), problem.elbow_target),
+            weight=problem.elbow_posture_weight,
+            quadratic=True,
+            multi_thread=False,
+        )
+        objective_count += 1
+    if problem.wheel_velocity_tracking_weight:
+        if qdot_target is None:
+            raise ValueError("qdot_target is required when wheel_velocity_tracking_weight is non-zero.")
+        target_objective_indices["wheel_qdot"] = objective_count
+        objectives.add(
+            ObjectiveFcn.Lagrange.MINIMIZE_STATE,
+            key="qdot",
+            index=2,
+            node=Node.ALL_SHOOTING,
+            target=qdot_target[:-1][np.newaxis, :],
+            weight=problem.wheel_velocity_tracking_weight,
+            quadratic=True,
+            multi_thread=False,
+        )
+        objective_count += 1
     if problem.qdot_weight:
         objectives.add(
             ObjectiveFcn.Lagrange.MINIMIZE_STATE,
@@ -230,6 +307,7 @@ def build_objectives(problem: CyclingMheProblem, q_target: np.ndarray) -> Object
             quadratic=True,
             multi_thread=False,
         )
+        objective_count += 1
     if problem.control_weight:
         objectives.add(
             ObjectiveFcn.Lagrange.MINIMIZE_CONTROL,
@@ -238,6 +316,7 @@ def build_objectives(problem: CyclingMheProblem, q_target: np.ndarray) -> Object
             quadratic=True,
             multi_thread=False,
         )
+        objective_count += 1
     if problem.terminal_tracking_weight:
         objectives.add(
             ObjectiveFcn.Mayer.MINIMIZE_STATE,
@@ -249,7 +328,7 @@ def build_objectives(problem: CyclingMheProblem, q_target: np.ndarray) -> Object
             quadratic=True,
             multi_thread=False,
         )
-    return objectives
+    return objectives, target_objective_indices
 
 
 def prepare_mhe(
@@ -286,6 +365,7 @@ def prepare_mhe(
     )
 
     q_target = np.linspace(0, total_angle, n_nodes)
+    qdot_target = build_reference_velocity(q_target, window_duration=window_duration, window_len=window_len)
     x_init = InitialGuessList()
     x_init.add(
         "q",
@@ -306,7 +386,7 @@ def prepare_mhe(
             expand_dynamics=True,
             phase_dynamics=PhaseDynamics.SHARED_DURING_THE_PHASE,
         ),
-        common_objective_functions=build_objectives(problem, q_target),
+        common_objective_functions=build_objectives(problem, q_target, qdot_target)[0],
         x_bounds=x_bounds,
         x_init=x_init,
         u_bounds=u_bounds,
@@ -334,10 +414,24 @@ def compare_problem(
         total_angle=total_angle,
         perturbation_scale=problem.perturbation_scale,
     )
+    velocity_target = build_reference_velocity(full_target, window_duration=1.0, window_len=window_len)
+    objective_indices = build_objectives(
+        problem, np.linspace(0, total_angle, window_len + 1), build_reference_velocity(np.linspace(0, total_angle, window_len + 1), 1.0, window_len)
+    )[1]
 
     ipopt_mhe = prepare_mhe(model_path, problem=problem, window_len=window_len, total_angle=total_angle, use_sx=False)
     ipopt_solver = configure_ipopt_solver(max_iter=ipopt_max_iter, linear_solver="ma57", tolerance=1e-4)
-    ipopt_run = solve_windows_with_timing(ipopt_mhe, build_update_function(full_target, window_len), solver=ipopt_solver)
+    ipopt_run = solve_windows_with_timing(
+        ipopt_mhe,
+        build_update_function(
+            full_target,
+            window_len,
+            wheel_target_objective_index=objective_indices["wheel_q"],
+            velocity_target=velocity_target if "wheel_qdot" in objective_indices else None,
+            wheel_velocity_objective_index=objective_indices.get("wheel_qdot"),
+        ),
+        solver=ipopt_solver,
+    )
 
     acados_mhe = prepare_mhe(model_path, problem=problem, window_len=window_len, total_angle=total_angle, use_sx=True)
     acados_solver = configure_acados_solver(
@@ -347,7 +441,15 @@ def compare_problem(
         max_iter=acados_max_iter,
     )
     acados_run = solve_windows_with_timing(
-        acados_mhe, build_update_function(full_target, window_len), solver=acados_solver
+        acados_mhe,
+        build_update_function(
+            full_target,
+            window_len,
+            wheel_target_objective_index=objective_indices["wheel_q"],
+            velocity_target=velocity_target if "wheel_qdot" in objective_indices else None,
+            wheel_velocity_objective_index=objective_indices.get("wheel_qdot"),
+        ),
+        solver=acados_solver,
     )
 
     summaries = [
