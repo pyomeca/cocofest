@@ -49,12 +49,16 @@ class VeltinkRienerModelPulseIntensityWithFatigue(VeltinkModelPulseIntensity):
         self.T_rec = T_rec if T_rec is not None else T_REC_DEFAULT
 
     @property
-    def name_dofs(self, with_muscle_name: bool = False) -> list[str]:
+    def name_dof(self) -> list[str]:
         muscle_name = "_" + self.muscle_name if self.muscle_name is not None else ""
         return [
             "a" + muscle_name,  # Muscle activation
             "mu" + muscle_name,  # Fatigue state
         ]
+
+    @property
+    def name_dofs(self) -> list[str]:
+        return self.name_dof
 
     @property
     def nb_state(self) -> int:
@@ -110,10 +114,14 @@ class VeltinkRienerModelPulseIntensityWithFatigue(VeltinkModelPulseIntensity):
 
     def system_dynamics(
         self,
-        time: MX,
-        states: MX,
-        controls: MX,
-        numerical_timeseries: MX,
+        a: MX = None,
+        mu: MX = None,
+        I: MX = None,
+        states: MX = None,
+        controls: MX = None,
+        time: MX = None,
+        numerical_timeseries: MX = None,
+        **_,
     ) -> MX:
         """
         The system dynamics including fatigue effects.
@@ -133,9 +141,13 @@ class VeltinkRienerModelPulseIntensityWithFatigue(VeltinkModelPulseIntensity):
         -------
         The value of the derivative of each state
         """
-        a = states[0]
-        mu = states[1]
-        I = controls[0]
+        if states is not None:
+            a = states[0]
+            mu = states[1]
+        if controls is not None:
+            I = controls[0] if isinstance(controls, (list, tuple)) else controls
+        if mu is None:
+            mu = 1
         u = self.normalize_current(I)
         a_dot = self.get_muscle_activation(a=a, u=u)
         mu_dot = self.get_mu_dot(a=a, mu=mu)

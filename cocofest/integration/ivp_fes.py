@@ -1,10 +1,12 @@
 import numpy as np
 from bioptim import (
     ControlType,
+    DynamicsOptions,
     InitialGuessList,
     OdeSolver,
     OptimalControlProgram,
     ParameterList,
+    PhaseDynamics,
     BoundsList,
     InterpolationType,
     Solution,
@@ -18,7 +20,6 @@ from cocofest.models.ding2007.ding2007 import DingModelPulseWidthFrequency
 from cocofest.models.ding2007.ding2007_with_fatigue import DingModelPulseWidthFrequencyWithFatigue
 from cocofest.models.hmed2018.hmed2018 import DingModelPulseIntensityFrequency
 from cocofest.models.hmed2018.hmed2018_with_fatigue import DingModelPulseIntensityFrequencyWithFatigue
-from cocofest.optimization.fes_ocp import OcpFes
 
 
 class IvpFes:
@@ -89,10 +90,9 @@ class IvpFes:
         numerical_data_time_series, stim_idx_at_node_list = self.model.get_numerical_data_time_series(
             self.n_shooting, self.final_time
         )
+
         self.ode_solver = self.ivp_parameters["ode_solver"]
-        self.dynamics_options = OcpFes.declare_dynamics_options(
-            numerical_time_series=numerical_data_time_series, ode_solver=self.ode_solver
-        )
+        self._declare_dynamics(numerical_data_time_series)
 
         (
             self.x_init,
@@ -285,7 +285,7 @@ class IvpFes:
 
         return OptimalControlProgram(
             bio_model=[self.model],
-            dynamics=self.dynamics_options,
+            dynamics=self.dynamics,
             n_shooting=self.n_shooting,
             phase_time=self.final_time,
             x_init=self.x_init,
@@ -318,6 +318,16 @@ class IvpFes:
             duplicated_times=duplicated_times,
         )
 
+    def _declare_dynamics(self, numerical_data_time_series=None):
+
+        self.dynamics = DynamicsOptions(
+            expand_dynamics=True,
+            expand_continuity=False,
+            phase_dynamics=PhaseDynamics.SHARED_DURING_THE_PHASE,
+            numerical_data_timeseries=numerical_data_time_series,
+            ode_solver=self.ode_solver,
+        )
+
     def build_initial_guess_from_ocp(self, ocp, stim_idx_at_node_list=None):
         """
         Build a state, control, parameters and stochastic initial guesses for each phases from a given ocp
@@ -327,7 +337,9 @@ class IvpFes:
         p = InitialGuessList()
         s = InitialGuessList()
 
-        for j, key in enumerate(self.model.name_dofs):
+        muscle_name = "_" + ocp.model.muscle_name if ocp.model.muscle_name else ""
+        for j in range(len(self.model.name_dof)):
+            key = ocp.model.name_dof[j] + muscle_name
             x.add(key=key, initial_guess=ocp.model.standard_rest_values()[j], phase=0)
 
         if ocp.controls_keys:
