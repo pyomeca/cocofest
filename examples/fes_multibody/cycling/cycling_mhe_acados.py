@@ -26,6 +26,8 @@ from bioptim import (
     Solver,
     TorqueBiorbdModel,
 )
+from bioptim.misc.enums import SolverType
+from bioptim.optimization.receding_horizon_optimization import RecedingHorizonOptimization
 
 EXAMPLE_DIR = Path(__file__).resolve().parent
 REPO_ROOT = EXAMPLE_DIR.parents[3]
@@ -44,6 +46,50 @@ def _validate_window_len(window_len: int) -> None:
             "window_len must be >= 2 for the ACADOS cycling MHE. "
             "Smaller horizons can generate invalid ACADOS code because the intermediate cost uses N - 1 stages."
         )
+
+
+def build_reference_series(
+    window_len: int,
+    n_windows: int,
+    total_angle: float,
+    perturbation_scale: float = 0.03,
+) -> np.ndarray:
+    n_nodes = window_len + n_windows + 1
+    base_target = np.linspace(0, total_angle, n_nodes)
+    if perturbation_scale == 0:
+        return base_target
+
+    amplitude = perturbation_scale * max(abs(total_angle), 1.0)
+    phase = np.linspace(0, 2 * np.pi, n_nodes)
+    perturbation = amplitude * np.sin(phase)
+    perturbation[0] = 0
+    perturbation[-1] = 0
+    return base_target + perturbation
+
+
+def build_update_function(full_target: np.ndarray, window_len: int):
+    def update_functions(mhe: MovingHorizonEstimator, window_idx: int, _sol):
+        target = full_target[window_idx : window_idx + window_len + 1]
+        mhe.update_objectives_target(target=target[np.newaxis, :], list_index=0)
+        return window_idx < len(full_target) - window_len - 1
+
+    return update_functions
+
+
+def solve_windows(mhe: MovingHorizonEstimator, update_function, solver):
+    sol = None
+    window_solutions = []
+    mhe.total_optimization_run = 0
+
+    while update_function(mhe, mhe.total_optimization_run, sol):
+        sol = super(RecedingHorizonOptimization, mhe).solve(solver=solver, warm_start=None)
+        if mhe.total_optimization_run == 0 and solver.type == SolverType.IPOPT:
+            solver.online_optim = None
+        window_solutions.append(sol)
+        mhe.advance_window(sol)
+        mhe.total_optimization_run += 1
+
+    return sol, window_solutions
 
 
 def configure_acados_solver(
@@ -163,6 +209,7 @@ def main(
     n_windows: int = 2,
     window_len: int = 5,
     total_angle: float = -1.0,
+    perturbation_scale: float = 0.03,
     acados_dir: str | None = None,
     codegen_dir: str = "result/acados/c_generated_code",
 ):
@@ -170,21 +217,29 @@ def main(
     model_path = _resolve_example_path("../../msk_models/Wu/Modified_Wu_Shoulder_Model_Cycling.bioMod", EXAMPLE_DIR)
     codegen_dir = _resolve_example_path(codegen_dir, REPO_ROOT)
     mhe = prepare_mhe(model_path, window_len=window_len, total_angle=total_angle)
-    full_target = np.linspace(0, total_angle, window_len + n_windows + 1)
-
-    def update_functions(_mhe: MovingHorizonEstimator, window_idx: int, _sol):
-        target = full_target[window_idx : window_idx + window_len + 1]
-        _mhe.update_objectives_target(target=target[np.newaxis, :], list_index=0)
-        return window_idx < n_windows
+    full_target = build_reference_series(
+        window_len=window_len,
+        n_windows=n_windows,
+        total_angle=total_angle,
+        perturbation_scale=perturbation_scale,
+    )
 
     solver = configure_acados_solver(
         acados_dir=acados_dir or os.environ.get("ACADOS_SOURCE_DIR"), codegen_dir=codegen_dir
     )
-    sol = mhe.solve(update_functions, solver=solver)
+    sol, window_solutions = solve_windows(mhe, build_update_function(full_target, window_len), solver=solver)
     q_wheel = sol.decision_states(to_merge=SolutionMerge.NODES)["q"][2, :]
+    print("window | target_end | estimated_end | delta")
+    for window_idx, window_sol in enumerate(window_solutions):
+        estimated_end = window_sol.decision_states(to_merge=SolutionMerge.NODES)["q"][2, -1]
+        target_end = full_target[window_idx + window_len]
+        print(
+            f"{window_idx:>6} | {target_end:>10.6f} | {estimated_end:>13.6f} | {estimated_end - target_end:>+.6f}"
+        )
     print("ACADOS cycling MHE status:", sol.status)
     print("Estimated wheel angle:", np.array2string(q_wheel, precision=4))
-    return sol
+    print("Reference wheel angle:", np.array2string(full_target[-(window_len + 1) :], precision=4))
+    return sol, window_solutions
 
 
 if __name__ == "__main__":
