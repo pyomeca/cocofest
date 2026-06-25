@@ -7,6 +7,7 @@ the FES numerical time series to exercise the ACADOS moving-horizon pipeline end
 """
 
 import os
+from pathlib import Path
 
 import numpy as np
 
@@ -25,6 +26,24 @@ from bioptim import (
     Solver,
     TorqueBiorbdModel,
 )
+
+EXAMPLE_DIR = Path(__file__).resolve().parent
+REPO_ROOT = EXAMPLE_DIR.parents[3]
+
+
+def _resolve_example_path(path: str | os.PathLike, root: Path) -> str:
+    path = Path(path)
+    if path.is_absolute():
+        return str(path)
+    return str((root / path).resolve())
+
+
+def _validate_window_len(window_len: int) -> None:
+    if window_len < 2:
+        raise ValueError(
+            "window_len must be >= 2 for the ACADOS cycling MHE. "
+            "Smaller horizons can generate invalid ACADOS code because the intermediate cost uses N - 1 stages."
+        )
 
 
 def configure_acados_solver(
@@ -66,6 +85,7 @@ def prepare_mhe(
     use_sx: bool = True,
     n_threads: int = 1,
 ):
+    _validate_window_len(window_len)
     model = TorqueBiorbdModel(model_path)
     n_nodes = window_len + 1
 
@@ -146,7 +166,9 @@ def main(
     acados_dir: str | None = None,
     codegen_dir: str = "result/acados/c_generated_code",
 ):
-    model_path = "../../msk_models/Wu/Modified_Wu_Shoulder_Model_Cycling.bioMod"
+    os.chdir(EXAMPLE_DIR)
+    model_path = _resolve_example_path("../../msk_models/Wu/Modified_Wu_Shoulder_Model_Cycling.bioMod", EXAMPLE_DIR)
+    codegen_dir = _resolve_example_path(codegen_dir, REPO_ROOT)
     mhe = prepare_mhe(model_path, window_len=window_len, total_angle=total_angle)
     full_target = np.linspace(0, total_angle, window_len + n_windows + 1)
 

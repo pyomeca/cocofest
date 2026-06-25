@@ -23,6 +23,10 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from examples.fes_multibody.cycling.cycling_mhe_acados import (
+    EXAMPLE_DIR,
+    REPO_ROOT,
+    _resolve_example_path,
+    _validate_window_len,
     configure_acados_solver,
     configure_ipopt_solver,
     prepare_mhe,
@@ -90,6 +94,7 @@ def run_comparison(
     ipopt_max_iter: int = 500,
     acados_max_iter: int = 100,
 ):
+    _validate_window_len(window_len)
     full_target = np.linspace(0, total_angle, window_len + n_windows + 1)
 
     ipopt_mhe = prepare_mhe(model_path, window_len=window_len, total_angle=total_angle, use_sx=False, n_threads=1)
@@ -154,14 +159,14 @@ def main(
     ipopt_max_iter: int = 500,
     acados_max_iter: int = 100,
 ):
-    os.chdir(Path(__file__).resolve().parent)
+    os.chdir(EXAMPLE_DIR)
     run_comparison(
-        model_path=model_path,
+        model_path=_resolve_example_path(model_path, EXAMPLE_DIR),
         n_windows=n_windows,
         window_len=window_len,
         total_angle=total_angle,
         acados_dir=acados_dir or os.environ.get("ACADOS_SOURCE_DIR"),
-        acados_codegen_dir=str((REPO_ROOT / acados_codegen_dir).resolve()),
+        acados_codegen_dir=_resolve_example_path(acados_codegen_dir, REPO_ROOT),
         ipopt_max_iter=ipopt_max_iter,
         acados_max_iter=acados_max_iter,
     )
