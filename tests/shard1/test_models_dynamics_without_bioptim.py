@@ -153,6 +153,31 @@ def test_ding2007_dynamics():
     )
 
 
+def test_ding2007_periodic_dynamics():
+    model = ModelMaker.create_model("ding2007_with_fatigue_periodic", stim_time=[0, 0.1, 0.2, 0.3])
+    assert model.nb_state == 6
+    assert model.name_dofs == ["Cn", "Cn_sum", "F", "A", "Tau1", "Km"]
+    np.testing.assert_almost_equal(
+        model.standard_rest_values(),
+        np.array([[0], [0], [0], [model.a_scale], [model.tau1_rest], [model.km_rest]]),
+    )
+    np.testing.assert_almost_equal(model.stimulation_decay_factor(), np.exp(-0.1 / model.tauc))
+    np.testing.assert_almost_equal(model.periodic_cn_sum_gain(), 90.92114962504866)
+    np.testing.assert_almost_equal(
+        np.array(
+            model.system_dynamics(
+                states=[5, 7, 100, 4920, 0.060601, 0.137],
+                controls=[0.0002],
+            )
+        ).squeeze(),
+        np.array(DM([181.8181818, -545.4424874, -198.6449237, -40.0, 0.0021, 0.0019])).squeeze(),
+        decimal=4,
+    )
+    numerical_data, stim_idx = model.get_numerical_data_time_series(4, 1.0)
+    assert numerical_data == {}
+    assert stim_idx == [[], [], [], [], []]
+
+
 def test_hmed2018_dynamics():
     model = ModelMaker.create_model("hmed2018_with_fatigue")
     assert model.nb_state == 5

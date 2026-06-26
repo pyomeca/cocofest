@@ -123,6 +123,8 @@ class OcpFes:
         for i in range(len(variable_bound_list)):
             if variable_bound_list[i] == "Cn":
                 max_bounds[i] = 2
+            elif variable_bound_list[i] == "Cn_sum":
+                max_bounds[i] = 200
             if variable_bound_list[i] == "F":
                 max_bounds[i] = 1000
             elif variable_bound_list[i] == "Tau1" or variable_bound_list[i] == "Km":

@@ -158,6 +158,8 @@ class OcpFesMsk(OcpFes):
             for i in range(len(variable_bound_list)):
                 if variable_bound_list[i] == "Cn_" + muscle_name:
                     max_bounds[i] = 10
+                elif variable_bound_list[i] == "Cn_sum_" + muscle_name:
+                    max_bounds[i] = 200
                 elif variable_bound_list[i] == "F_" + muscle_name:
                     max_bounds[i] = model.fmax
                 elif variable_bound_list[i] == "Tau1_" + muscle_name or variable_bound_list[i] == "Km_" + muscle_name:
@@ -296,7 +298,7 @@ class OcpFesMsk(OcpFes):
         return u_bounds, u_init
 
     @staticmethod
-    def update_model(model, parameters, external_force_set):
+    def update_model(model, parameters, external_force_set, constant_external_torque=None):
         # rebuilding model for the OCP
         return FesMskModel(
             name=model.name,
@@ -310,5 +312,8 @@ class OcpFesMsk(OcpFes):
             activate_residual_torque=model.activate_residual_torque,
             parameters=parameters,
             external_force_set=external_force_set,
+            constant_external_torque=(
+                model.constant_external_torque if constant_external_torque is None else constant_external_torque
+            ),
             contact_types=model.contact_types,
         )

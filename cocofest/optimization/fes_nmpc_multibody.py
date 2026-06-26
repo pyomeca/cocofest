@@ -35,6 +35,7 @@ class FesNmpcMsk(FesNmpc):
             activate_residual_torque=model.activate_residual_torque,
             parameters=self.nlp[0].parameters,
             external_force_set=model.external_force_set,
+            constant_external_torque=model.constant_external_torque,
             contact_types=model.contact_types,
         )
         return new_model
@@ -51,7 +52,8 @@ class FesNmpcMsk(FesNmpc):
                 numerical_data_timeseries, _ = new_model.muscles_dynamics_model[0].get_numerical_data_time_series(
                     self.n_shooting, self.phase_time[0]
                 )
-                self.nlp[0].numerical_data_timeseries["stim_time"] = numerical_data_timeseries["stim_time"]
+                if "stim_time" in numerical_data_timeseries:
+                    self.nlp[0].numerical_data_timeseries["stim_time"] = numerical_data_timeseries["stim_time"]
                 self.first_run = False
 
             self.nlp[0].model = new_model
@@ -194,6 +196,7 @@ class FesNmpcMsk(FesNmpc):
             activate_residual_torque=self.nlp[0].model.activate_residual_torque,
             parameters=self.nlp[0].model.parameters,
             external_force_set=self.nlp[0].model.external_force_set,
+            constant_external_torque=self.nlp[0].model.constant_external_torque,
             contact_types=self.nlp[0].model.contact_types,
         )
 
@@ -215,7 +218,7 @@ class FesNmpcMsk(FesNmpc):
         update_functions,
         solver: Solver.IPOPT,
         total_cycles: int,
-        external_force: dict,
+        external_force: dict | None,
         cycle_solutions: MultiCyclicCycleSolutions,
         get_all_iterations: bool = True,
         cyclic_options: dict = None,
@@ -236,13 +239,17 @@ class FesNmpcMsk(FesNmpc):
         total_nmpc_duration = self.cycle_duration * total_cycles
         total_nmpc_shooting_len = self.cycle_len * total_cycles
 
-        external_force_set = ExternalForceSetTimeSeries(nb_frames=total_nmpc_shooting_len)
-        external_force_array = np.array(external_force["torque"])
-        reshape_values_array = np.tile(external_force_array[:, np.newaxis], (1, total_nmpc_shooting_len))
-        external_force_set.add_torque(
-            segment=external_force["Segment_application"], values=reshape_values_array, force_name="resistance_torque"
-        )
-        numerical_time_series = {"external_forces": external_force_set.to_numerical_time_series()}
+        numerical_time_series = {}
+        if external_force is not None:
+            external_force_set = ExternalForceSetTimeSeries(nb_frames=total_nmpc_shooting_len)
+            external_force_array = np.array(external_force["torque"])
+            reshape_values_array = np.tile(external_force_array[:, np.newaxis], (1, total_nmpc_shooting_len))
+            external_force_set.add_torque(
+                segment=external_force["Segment_application"],
+                values=reshape_values_array,
+                force_name="resistance_torque",
+            )
+            numerical_time_series = {"external_forces": external_force_set.to_numerical_time_series()}
 
         if isinstance(model, FesMskModel):
             all_stim_time = self.get_stim_time_from_all_models()

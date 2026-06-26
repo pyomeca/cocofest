@@ -47,6 +47,8 @@ class OcpFesId(OcpFes):
         for i in range(len(variable_bound_list)):
             if variable_bound_list[i] == "Cn":
                 max_bounds[i] = 10
+            elif variable_bound_list[i] == "Cn_sum":
+                max_bounds[i] = 200
             elif variable_bound_list[i] == "F":
                 max_bounds[i] = 500
             elif variable_bound_list[i] == "Tau1" or variable_bound_list[i] == "Km":
@@ -75,6 +77,8 @@ class OcpFesId(OcpFes):
             interpolation=InterpolationType.EACH_FRAME,
         )
         x_init.add("Cn", [0], phase=0, interpolation=InterpolationType.CONSTANT)
+        if "Cn_sum" in variable_bound_list:
+            x_init.add("Cn_sum", [model.standard_rest_values()[variable_bound_list.index("Cn_sum")][0]], phase=0)
         if model._with_fatigue:
             for j in range(len(variable_bound_list)):
                 if variable_bound_list[j] == "F" or variable_bound_list[j] == "Cn":

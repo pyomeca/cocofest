@@ -9,6 +9,7 @@ class StateConfigure:
     def __init__(self):
         self.state_dictionary = {
             "Cn": self.configure_ca_troponin_complex,  # Ding model
+            "Cn_sum": self.configure_cn_sum_state,  # ACADOS-friendly Ding approximation
             "F": self.configure_force,  # Ding model
             "A": self.configure_scaling_factor,  # Ding model
             "Tau1": self.configure_time_state_force_no_cross_bridge,  # Ding model
@@ -212,6 +213,30 @@ class StateConfigure:
         return ConfigureVariables.configure_new_variable(
             name,
             name_km,
+            ocp,
+            nlp,
+            as_states,
+            as_controls,
+            as_states_dot,
+        )
+
+    @staticmethod
+    def configure_cn_sum_state(
+        ocp: OptimalControlProgram,
+        nlp: NonLinearProgram,
+        as_states: bool,
+        as_controls: bool,
+        as_states_dot: bool = False,
+        muscle_name: str = None,
+    ):
+        """
+        Configure the calcium summation state used by the ACADOS-friendly Ding approximation.
+        """
+        muscle_name = "_" + muscle_name if muscle_name else ""
+        name = "Cn_sum" + muscle_name
+        return ConfigureVariables.configure_new_variable(
+            name,
+            [name],
             ocp,
             nlp,
             as_states,

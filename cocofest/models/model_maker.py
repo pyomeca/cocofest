@@ -2,6 +2,7 @@ from cocofest.models.ding2003.ding2003 import DingModelFrequency
 from cocofest.models.ding2003.ding2003_with_fatigue import DingModelFrequencyWithFatigue
 from cocofest.models.ding2007.ding2007 import DingModelPulseWidthFrequency
 from cocofest.models.ding2007.ding2007_with_fatigue import DingModelPulseWidthFrequencyWithFatigue
+from cocofest.models.ding2007.ding2007_with_fatigue_periodic import DingModelPulseWidthFrequencyWithFatiguePeriodic
 from cocofest.models.hmed2018.hmed2018 import DingModelPulseIntensityFrequency
 from cocofest.models.hmed2018.hmed2018_with_fatigue import DingModelPulseIntensityFrequencyWithFatigue
 from cocofest.models.marion2009.marion2009 import Marion2009ModelFrequency
@@ -24,6 +25,7 @@ class ModelMaker:
             "ding2003_with_fatigue": DingModelFrequencyWithFatigue,
             "ding2007": DingModelPulseWidthFrequency,
             "ding2007_with_fatigue": DingModelPulseWidthFrequencyWithFatigue,
+            "ding2007_with_fatigue_periodic": DingModelPulseWidthFrequencyWithFatiguePeriodic,
             "hmed2018": DingModelPulseIntensityFrequency,
             "hmed2018_with_fatigue": DingModelPulseIntensityFrequencyWithFatigue,
             "marion2009": Marion2009ModelFrequency,

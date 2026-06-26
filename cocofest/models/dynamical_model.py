@@ -42,6 +42,7 @@ class FesMskModel(BiorbdModel, StateDynamicsWithContacts):
         activate_residual_torque: bool = False,
         parameters: ParameterList = None,
         external_force_set: ExternalForceSetTimeSeries = None,
+        constant_external_torque: np.ndarray | list[float] | tuple[float, ...] | None = None,
         contact_types: list[ContactType] | tuple[ContactType] = (),
         with_contact: bool | None = None,
     ):
@@ -108,6 +109,7 @@ class FesMskModel(BiorbdModel, StateDynamicsWithContacts):
         self.activate_residual_torque = activate_residual_torque
         self.parameters_list = parameters
         self.external_forces_set = external_force_set
+        self.constant_external_torque = self._normalize_constant_external_torque(constant_external_torque)
 
     # ---- Absolutely needed methods ---- #
     def serialize(self) -> tuple[Callable, dict]:
@@ -125,9 +127,29 @@ class FesMskModel(BiorbdModel, StateDynamicsWithContacts):
                 "activate_residual_torque": self.activate_residual_torque,
                 "parameters": self.parameters_list,
                 "external_force_set": self.external_forces_set,
+                "constant_external_torque": self.constant_external_torque,
                 "contact_types": self.contact_types,
             },
         )
+
+    def _normalize_constant_external_torque(
+        self, constant_external_torque: np.ndarray | list[float] | tuple[float, ...] | None
+    ) -> tuple[float, ...] | None:
+        if constant_external_torque is None:
+            return None
+
+        torque = tuple(float(value) for value in np.array(constant_external_torque).squeeze().tolist())
+        if len(torque) != self.bio_model.nb_tau:
+            raise ValueError(
+                f"constant_external_torque must have length {self.bio_model.nb_tau}, "
+                f"got {len(torque)}."
+            )
+        return torque
+
+    def constant_external_torque_vector(self):
+        if self.constant_external_torque is None:
+            return 0
+        return vertcat(*self.constant_external_torque)
 
     # ---- Needed for the example ---- #
     @property
@@ -315,6 +337,7 @@ class FesMskModel(BiorbdModel, StateDynamicsWithContacts):
         # You can directly call biorbd function (as for ddq) or call bioptim accessor (as for dq)
         dq = DynamicsFunctions.compute_qdot(nlp, q, qdot)
         total_torque = muscles_tau + tau if self.activate_residual_torque else muscles_tau
+        total_torque = total_torque + nlp.model.constant_external_torque_vector()
         external_forces = nlp.get_external_forces(
             "external_forces", states, controls, algebraic_states, numerical_data_timeseries
         )
@@ -529,6 +552,7 @@ class FesMskModel(BiorbdModel, StateDynamicsWithContacts):
         )
 
         tau = muscles_joint_torque + residual_tau if residual_tau is not None else muscles_joint_torque
+        tau = tau + nlp.model.constant_external_torque_vector()
         tau = tau + nlp.model.passive_joint_torque()(q, qdot, nlp.parameters.cx) if with_passive_torque else tau
         tau = tau + nlp.model.ligament_joint_torque()(q, qdot, nlp.parameters.cx) if with_ligament else tau
 

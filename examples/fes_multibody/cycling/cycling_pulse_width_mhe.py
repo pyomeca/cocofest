@@ -37,6 +37,7 @@ from bioptim import (
 from cocofest import (
     CustomObjective,
     DingModelPulseWidthFrequencyWithFatigue,
+    DingModelPulseWidthFrequencyWithFatiguePeriodic,
     FesMskModel,
     inverse_kinematics_cycling,
     OcpFesMsk,
@@ -160,6 +161,9 @@ class MyCyclicNMPC(FesNmpcMsk):
     def set_init_continuous(self, states, key, i):
         n_plus_one_cycles = states[key][i][self.nodes_per_cycle : -1]
         last_cycle = states[key][i][-self.nodes_per_cycle - 1 :]
+        if n_plus_one_cycles.size == 0:
+            self.nlp[0].x_init[key].init[i, :] = last_cycle
+            return True
         delta = n_plus_one_cycles[-1] - last_cycle[0]
         shifted_last_cycle = states[key][i][-self.nodes_per_cycle - 1 :] + delta
         values = np.concatenate((n_plus_one_cycles, shifted_last_cycle))
@@ -169,7 +173,10 @@ class MyCyclicNMPC(FesNmpcMsk):
     def set_init_cyclical(self, data, key, i, state=True):
         n_plus_one_cycles = data[key][i][self.nodes_per_cycle : -1]
         last_cycle = data[key][i][-self.nodes_per_cycle - 1 :]
-        values = np.concatenate((n_plus_one_cycles, last_cycle))
+        if n_plus_one_cycles.size == 0:
+            values = last_cycle
+        else:
+            values = np.concatenate((n_plus_one_cycles, last_cycle))
         if state:
             self.nlp[0].x_init[key].init[i, :] = values
         else:
@@ -179,7 +186,10 @@ class MyCyclicNMPC(FesNmpcMsk):
     def set_init_cyclical_wheel(self, states, key, i):
         shifted_n_plus_one_cycles = states[key][i][self.nodes_per_cycle : -1] + self.pedal_turn_in_one_cycle
         last_cycle = states[key][i][-self.nodes_per_cycle - 1 :]
-        values = np.concatenate((shifted_n_plus_one_cycles, last_cycle))
+        if shifted_n_plus_one_cycles.size == 0:
+            values = last_cycle
+        else:
+            values = np.concatenate((shifted_n_plus_one_cycles, last_cycle))
         self.nlp[0].x_init[key].init[i, :] = values
         return True
 
@@ -291,6 +301,16 @@ class MyCyclicNMPC(FesNmpcMsk):
 # -------------------#
 
 
+EXAMPLE_DIR = Path(__file__).resolve().parent
+
+
+def resolve_example_path(path: str | os.PathLike) -> str:
+    path = Path(path)
+    if path.is_absolute():
+        return str(path)
+    return str((EXAMPLE_DIR / path).resolve())
+
+
 def prepare_nmpc(
     model: BiorbdModel | FesMskModel,
     mhe_info: dict,
@@ -310,7 +330,9 @@ def prepare_nmpc(
     # --- Cycling info --- #
     turn_number = cycling_info["turn_number"]
     pedal_config = cycling_info["pedal_config"]
-    external_force = cycling_info["resistive_torque"]
+    external_force = cycling_info.get("resistive_torque")
+    constant_crank_torque = cycling_info.get("constant_crank_torque")
+    enforce_start_constraints = cycling_info.get("enforce_start_constraints", True)
     # --- Cost function info --- #
     minimize_force = simulation_conditions["minimize_force"]
     minimize_fatigue = simulation_conditions["minimize_fatigue"]
@@ -321,9 +343,12 @@ def prepare_nmpc(
 
     # --- Set dynamics --- #
     # --- External force numerical time series --- #
-    numerical_time_series, external_force_set = set_external_forces(
-        n_shooting=window_n_shooting, external_force_dict=external_force, force_name="external_torque"
-    )
+    numerical_time_series = {}
+    external_force_set = None
+    if external_force is not None:
+        numerical_time_series, external_force_set = set_external_forces(
+            n_shooting=window_n_shooting, external_force_dict=external_force, force_name="external_torque"
+        )
     # --- Stimulation instant numerical time series --- #
     numerical_data_time_series, stim_idx_at_node_list = model.muscles_dynamics_model[0].get_numerical_data_time_series(
         window_n_shooting, window_cycle_duration
@@ -358,7 +383,7 @@ def prepare_nmpc(
     u_bounds, u_init, u_scaling = set_u_bounds_and_init(model, window_n_shooting, init_file_path=initial_guess_path)
 
     # --- Set constraints --- #
-    constraints = set_constraints(model)
+    constraints = set_constraints(model, enforce_start_constraints=enforce_start_constraints)
 
     # --- Set objective --- #
     objective_functions = set_objective_functions(
@@ -370,7 +395,14 @@ def prepare_nmpc(
     )
 
     # --- Update model for resistive torque --- #
-    model = updating_model(model=model, external_force_set=external_force_set, parameters=ParameterList(use_sx=use_sx))
+    model = updating_model(
+        model=model,
+        external_force_set=external_force_set,
+        parameters=ParameterList(use_sx=use_sx),
+        constant_external_torque=(
+            build_constant_crank_torque_vector(model, constant_crank_torque) if constant_crank_torque is not None else None
+        ),
+    )
 
     return MyCyclicNMPC(
         bio_model=[model],
@@ -423,7 +455,7 @@ def set_q_qdot_init(
         x_init.add("qdot", qdot_guess, interpolation=InterpolationType.ALL_POINTS)
     else:
         # --- Chose the biorbd model to init the inverse kinematics --- #
-        biorbd_model_path = "../../msk_models/Wu/Modified_Wu_Shoulder_Model_Cycling_for_IK.bioMod"
+        biorbd_model_path = resolve_example_path("../../msk_models/Wu/Modified_Wu_Shoulder_Model_Cycling_for_IK.bioMod")
         # biorbd_model_path = "../../msk_models/Seth/Modified_UL_Seth_2D_Cycling_for_IK.bioMod"
         n_shooting = (
             n_shooting * (ode_solver.polynomial_degree + 1)
@@ -567,8 +599,11 @@ def set_u_bounds_and_init(bio_model, n_shooting, init_file_path):
     )
 
 
-def set_constraints(bio_model):
+def set_constraints(bio_model, enforce_start_constraints: bool = True):
     constraints = ConstraintList()
+    if not enforce_start_constraints:
+        return constraints
+
     # --- Constraining wheel center position to a fix position --- #
     constraints.add(
         ConstraintFcn.TRACK_MARKERS_VELOCITY,
@@ -642,7 +677,19 @@ def set_objective_functions(minimize_force, minimize_fatigue, minimize_control, 
     return objective_functions
 
 
-def updating_model(model: FesMskModel, external_force_set, parameters=None) -> FesMskModel:
+def build_constant_crank_torque_vector(model: FesMskModel, crank_torque: float) -> np.ndarray:
+    dof_names = list(model.name_dofs)
+    if "wheel_rotation_RotZ" not in dof_names:
+        raise RuntimeError(
+            f"Could not find wheel_rotation_RotZ in model DoFs. Available DoFs: {', '.join(dof_names)}"
+        )
+
+    torque_vector = np.zeros(model.nb_tau)
+    torque_vector[dof_names.index("wheel_rotation_RotZ")] = crank_torque
+    return torque_vector
+
+
+def updating_model(model: FesMskModel, external_force_set, parameters=None, constant_external_torque=None) -> FesMskModel:
     model = FesMskModel(
         name=model.name,
         biorbd_path=model.biorbd_path,
@@ -654,6 +701,9 @@ def updating_model(model: FesMskModel, external_force_set, parameters=None) -> F
         activate_residual_torque=model.activate_residual_torque,
         parameters=parameters,
         external_force_set=external_force_set,
+        constant_external_torque=(
+            model.constant_external_torque if constant_external_torque is None else constant_external_torque
+        ),
         with_contact=True,
     )
     return model
@@ -664,12 +714,17 @@ def updating_model(model: FesMskModel, external_force_set, parameters=None) -> F
 # --------------------------#
 
 
-def set_fes_model(model_path, stim_time):
+def set_fes_model(model_path, stim_time, periodic_cn_sum_approximation: bool = False):
     # Set FES model (set to Ding et al. 2007 + fatigue, for now)
     dummy_biomodel = BiorbdModel(model_path)
     muscle_name_list = dummy_biomodel.muscle_names
+    model_cls = (
+        DingModelPulseWidthFrequencyWithFatiguePeriodic
+        if periodic_cn_sum_approximation
+        else DingModelPulseWidthFrequencyWithFatigue
+    )
     muscles_model = [
-        DingModelPulseWidthFrequencyWithFatigue(muscle_name=muscle, sum_stim_truncation=6)
+        model_cls(muscle_name=muscle, sum_stim_truncation=6, stim_time=stim_time)
         for muscle in muscle_name_list
     ]
 
@@ -884,7 +939,11 @@ def run_optim(mhe_info, cycling_info, simulation_conditions, model_path, save_so
             endpoint=False,
         )
     )
-    model = set_fes_model(model_path, stim_time)
+    model = set_fes_model(
+        model_path,
+        stim_time,
+        periodic_cn_sum_approximation=cycling_info.get("periodic_cn_sum_approximation", False),
+    )
 
     mhe_info["cycle_len"] = int(len(stim_time) / simulation_conditions["n_cycles_simultaneous"])
     mhe_info["n_cycles_simultaneous"] = simulation_conditions["n_cycles_simultaneous"]
@@ -920,7 +979,7 @@ def run_optim(mhe_info, cycling_info, simulation_conditions, model_path, save_so
         update_functions,
         solver=solver,
         total_cycles=mhe_info["n_cycles"],
-        external_force=cycling_info["resistive_torque"],
+        external_force=cycling_info.get("resistive_torque"),
         cycle_solutions=MultiCyclicCycleSolutions.ALL_CYCLES,
         get_all_iterations=True,
         cyclic_options={"states": {}},
@@ -932,16 +991,31 @@ def run_optim(mhe_info, cycling_info, simulation_conditions, model_path, save_so
 
     # Saving the data in a pickle file
     if save_sol:
+        applied_torque = (
+            cycling_info["resistive_torque"]["torque"][-1]
+            if "resistive_torque" in cycling_info
+            else cycling_info["constant_crank_torque"]
+        )
         save_sol_in_pkl(
             sol,
             simulation_conditions,
             is_initial_guess=is_initial_guess,
-            torque=cycling_info["resistive_torque"]["torque"][-1],
+            torque=applied_torque,
         )
 
 
 def main(
-    stimulation_frequency, n_total_cycle, n_cycles_simultaneous, resistive_torque, cost_fun_weight, init_guess, save
+    stimulation_frequency,
+    n_total_cycle,
+    n_cycles_simultaneous,
+    resistive_torque,
+    cost_fun_weight,
+    init_guess,
+    save,
+    use_constant_crank_torque: bool = False,
+    enforce_start_constraints: bool = True,
+    periodic_cn_sum_approximation: bool = False,
+    use_sx: bool = False,
 ):
     # --- Simulation configuration --- #
     save_sol = save
@@ -959,14 +1033,17 @@ def main(
         "n_cycles_to_advance": 1,
         "n_cycles": n_total_cycle,
         "ode_solver": ode_solver,
-        "use_sx": False,
+        "use_sx": use_sx,
     }
 
     # --- Bike parameters --- #
-    cycling_info = {
-        "pedal_config": {"x_center": 0.35, "y_center": 0.0, "radius": 0.1},
-        "resistive_torque": {"Segment_application": "wheel", "torque": np.array([0, 0, resistive_torque])},
-    }
+    cycling_info = {"pedal_config": {"x_center": 0.35, "y_center": 0.0, "radius": 0.1}}
+    cycling_info["enforce_start_constraints"] = enforce_start_constraints
+    cycling_info["periodic_cn_sum_approximation"] = periodic_cn_sum_approximation
+    if use_constant_crank_torque:
+        cycling_info["constant_crank_torque"] = resistive_torque
+    else:
+        cycling_info["resistive_torque"] = {"Segment_application": "wheel", "torque": np.array([0, 0, resistive_torque])}
 
     # --- Build simulation list --- #
     stimulation = [stimulation_frequency * i for i in n_cycles_simultaneous]

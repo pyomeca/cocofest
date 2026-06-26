@@ -5,6 +5,7 @@ from cocofest.models.ding2003.ding2003 import DingModelFrequency
 from cocofest.models.ding2003.ding2003_with_fatigue import DingModelFrequencyWithFatigue
 from cocofest.models.ding2007.ding2007 import DingModelPulseWidthFrequency
 from cocofest.models.ding2007.ding2007_with_fatigue import DingModelPulseWidthFrequencyWithFatigue
+from cocofest.models.ding2007.ding2007_with_fatigue_periodic import DingModelPulseWidthFrequencyWithFatiguePeriodic
 from cocofest.models.marion2009.marion2009 import Marion2009ModelFrequency
 from cocofest.models.marion2009.marion2009_with_fatigue import Marion2009ModelFrequencyWithFatigue
 from cocofest.models.marion2009.marion2009_modified import Marion2009ModelPulseWidthFrequency
