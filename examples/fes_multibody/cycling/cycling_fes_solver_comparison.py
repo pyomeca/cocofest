@@ -20,7 +20,6 @@ if str(REPO_ROOT) not in sys.path:
 
 from cycling_pulse_width_mhe_acados_periodic import build_argument_parser, solve_case
 
-
 EXAMPLE_DIR = Path(__file__).resolve().parent
 
 
@@ -35,9 +34,35 @@ def _namespace_from_cli(**overrides) -> argparse.Namespace:
 def _format_metric(value) -> str:
     if value is None:
         return "None"
+    if isinstance(value, bool):
+        return str(value)
     if isinstance(value, float):
         return f"{value:.6f}"
     return str(value)
+
+
+def _resample_trace(trace: np.ndarray, target_len: int) -> np.ndarray:
+    trace = np.asarray(trace, dtype=float).squeeze()
+    if trace.size == target_len:
+        return trace
+    current_grid = np.linspace(0.0, 1.0, trace.size)
+    target_grid = np.linspace(0.0, 1.0, target_len)
+    return np.interp(target_grid, current_grid, trace)
+
+
+def _trace_comparison(ipopt_result: dict, acados_result: dict) -> dict:
+    ipopt_trace = np.asarray(ipopt_result["wheel_angle_trace"], dtype=float).squeeze()
+    acados_trace = np.asarray(acados_result["wheel_angle_trace"], dtype=float).squeeze()
+    common_len = max(ipopt_trace.size, acados_trace.size)
+    ipopt_common = _resample_trace(ipopt_trace, common_len)
+    acados_common = _resample_trace(acados_trace, common_len)
+    diff = acados_common - ipopt_common
+    return {
+        "common_len": common_len,
+        "wheel_rmse": float(np.sqrt(np.mean(diff**2))),
+        "wheel_max_abs_error": float(np.max(np.abs(diff))),
+        "wheel_final_error": float(acados_common[-1] - ipopt_common[-1]),
+    }
 
 
 def _solver_config(
@@ -50,6 +75,7 @@ def _solver_config(
     resistive_torque: float,
     codegen_tag: str | None,
     ipopt_max_iter: int,
+    ipopt_linear_solver: str,
     acados_max_iter: int,
 ) -> argparse.Namespace:
     if solver_name == "ipopt":
@@ -64,6 +90,7 @@ def _solver_config(
             objective_shape=objective_shape,
             constant_crank_torque=resistive_torque,
             max_ipopt_iterations=ipopt_max_iter,
+            ipopt_linear_solver=ipopt_linear_solver,
             n_windows=n_windows,
             ode_solver="collocation",
             collocation_degree=3,
@@ -88,22 +115,25 @@ def _solver_config(
             objective_shape=objective_shape,
             constant_crank_torque=resistive_torque,
             max_acados_iterations=acados_max_iter,
+            ipopt_linear_solver=ipopt_linear_solver,
             n_windows=n_windows,
             ode_solver="rk4",
-            rk_steps=1,
+            rk_steps=5,
             collocation_degree=3,
             collocation_method="radau",
             use_sx=True,
             enforce_start_constraints=False,
-            disable_standard_ipopt_warmup=True,
-            max_consecutive_failing=10,
+            disable_standard_ipopt_warmup=False,
+            max_consecutive_failing=max(n_windows, 10),
             codegen_tag=codegen_tag,
         )
 
     raise ValueError(f"Unsupported solver_name '{solver_name}'")
 
 
-def print_comparison(ipopt_result: dict, acados_result: dict) -> None:
+def print_comparison(
+    ipopt_result: dict, acados_result: dict, print_traces: bool = False
+) -> None:
     print(
         "solver | success | status | objective | solver_time_s | wall_time_s | final_wheel_angle | "
         "requested_windows | achieved_windows"
@@ -120,10 +150,11 @@ def print_comparison(ipopt_result: dict, acados_result: dict) -> None:
             f"{_format_metric(result.get('requested_windows'))} | "
             f"{_format_metric(result.get('achieved_windows'))}"
         )
-        print(
-            f"{label} wheel angle trace: "
-            f"{np.array2string(result['wheel_angle_trace'], precision=4, suppress_small=False)}"
-        )
+        if print_traces:
+            print(
+                f"{label} wheel angle trace: "
+                f"{np.array2string(result['wheel_angle_trace'], precision=4, suppress_small=False)}"
+            )
         diagnostics = result.get("diagnostics", {})
         print(
             f"{label} diagnostics: physical={diagnostics.get('is_physical')} "
@@ -131,6 +162,15 @@ def print_comparison(ipopt_result: dict, acados_result: dict) -> None:
             f"max_abs_angle={_format_metric(diagnostics.get('max_abs_angle'))} "
             f"max_step={_format_metric(diagnostics.get('max_step'))}"
         )
+
+    trace_metrics = _trace_comparison(ipopt_result, acados_result)
+    print(
+        "wheel trace comparison | "
+        f"common_len={trace_metrics['common_len']} | "
+        f"rmse={trace_metrics['wheel_rmse']:.6f} | "
+        f"max_abs_error={trace_metrics['wheel_max_abs_error']:.6f} | "
+        f"final_error={trace_metrics['wheel_final_error']:.6f}"
+    )
 
     ipopt_solver_time = ipopt_result["solver_time_s"]
     acados_solver_time = acados_result["solver_time_s"]
@@ -158,7 +198,9 @@ def main(
     acados_dir: str | None = None,
     codegen_tag: str | None = None,
     ipopt_max_iter: int = 500,
-    acados_max_iter: int = 50,
+    ipopt_linear_solver: str = "ma57",
+    acados_max_iter: int = 100,
+    print_traces: bool = False,
 ):
     os.chdir(EXAMPLE_DIR)
     if acados_dir:
@@ -174,6 +216,7 @@ def main(
         resistive_torque=resistive_torque,
         codegen_tag=codegen_tag,
         ipopt_max_iter=ipopt_max_iter,
+        ipopt_linear_solver=ipopt_linear_solver,
         acados_max_iter=acados_max_iter,
     )
     acados_args = _solver_config(
@@ -186,6 +229,7 @@ def main(
         resistive_torque=resistive_torque,
         codegen_tag=codegen_tag,
         ipopt_max_iter=ipopt_max_iter,
+        ipopt_linear_solver=ipopt_linear_solver,
         acados_max_iter=acados_max_iter,
     )
 
@@ -195,14 +239,16 @@ def main(
     print("Running ACADOS-compatible configuration...")
     acados_result = solve_case(acados_args, echo=True)
     print()
-    print_comparison(ipopt_result, acados_result)
+    print_comparison(ipopt_result, acados_result, print_traces=print_traces)
     return {"ipopt": ipopt_result, "acados": acados_result}
 
 
 def build_cli() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--objective", default="force")
-    parser.add_argument("--objective-shape", default="quadratic", choices=("quadratic", "linear"))
+    parser.add_argument(
+        "--objective-shape", default="quadratic", choices=("quadratic", "linear")
+    )
     parser.add_argument("--cycles-per-window", type=int, default=2)
     parser.add_argument("--stimulations-per-cycle", type=int, default=30)
     parser.add_argument("--n-windows", type=int, default=2)
@@ -210,7 +256,9 @@ def build_cli() -> argparse.ArgumentParser:
     parser.add_argument("--acados-dir", default=os.environ.get("ACADOS_SOURCE_DIR"))
     parser.add_argument("--codegen-tag", default="fes_compare")
     parser.add_argument("--ipopt-max-iter", type=int, default=500)
-    parser.add_argument("--acados-max-iter", type=int, default=50)
+    parser.add_argument("--ipopt-linear-solver", default="ma57")
+    parser.add_argument("--acados-max-iter", type=int, default=100)
+    parser.add_argument("--print-traces", action="store_true")
     return parser
 
 
@@ -226,5 +274,7 @@ if __name__ == "__main__":
         acados_dir=args.acados_dir,
         codegen_tag=args.codegen_tag,
         ipopt_max_iter=args.ipopt_max_iter,
+        ipopt_linear_solver=args.ipopt_linear_solver,
         acados_max_iter=args.acados_max_iter,
+        print_traces=args.print_traces,
     )
