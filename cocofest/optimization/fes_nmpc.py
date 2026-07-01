@@ -127,16 +127,29 @@ class FesNmpc(MultiCyclicNonlinearModelPredictiveControl):
         cyclic_options: dict = None,
         max_consecutive_failing: int = 3,
     ):
+        try:
+            sol = self.solve(
+                update_functions,
+                solver=solver,
+                cycle_solutions=cycle_solutions,
+                get_all_iterations=get_all_iterations,
+                cyclic_options=cyclic_options,
+                n_cycles_simultaneous=self.n_cycles_simultaneous,
+                max_consecutive_failing=max_consecutive_failing,
+            )
+        except AttributeError as exc:
+            if "decision_states" in str(exc):
+                raise RuntimeError(
+                    "The receding-horizon solve did not produce a valid solution for at least one window. "
+                    "This usually means the solver failed before returning the first feasible iterate."
+                ) from exc
+            raise
 
-        sol = self.solve(
-            update_functions,
-            solver=solver,
-            cycle_solutions=cycle_solutions,
-            get_all_iterations=get_all_iterations,
-            cyclic_options=cyclic_options,
-            n_cycles_simultaneous=self.n_cycles_simultaneous,
-            max_consecutive_failing=max_consecutive_failing,
-        )
+        if sol is None or not isinstance(sol, (list, tuple)) or not sol or sol[0] is None:
+            raise RuntimeError(
+                "The receding-horizon solve returned no solution. "
+                "The solver likely stopped before producing a feasible window."
+            )
         model = self.nlp[0].model
 
         total_nmpc_duration = self.cycle_duration * total_cycles

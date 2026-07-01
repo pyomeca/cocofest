@@ -7,10 +7,15 @@ import pickle
 from sys import platform
 from itertools import product
 from pathlib import Path
+import sys
 
 import matplotlib.pyplot as plt
 import numpy as np
 from numpy.ma.extras import average
+
+REPO_ROOT = Path(__file__).resolve().parents[3]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
 
 from bioptim import (
     Axis,
@@ -97,7 +102,7 @@ class MyCyclicNMPC(FesNmpcMsk):
         # --- Get states results --- #
         states = sol.decision_states(to_merge=SolutionMerge.NODES)
         states_keys = states.keys()
-        cyclical_keys = [s for s in states if any(s.startswith(prefix) for prefix in ("Cn_", "F_", "q", "qdot"))]
+        cyclical_keys = [s for s in states if any(s.startswith(prefix) for prefix in ("Cn_", "Cn_sum_", "F_", "q", "qdot"))]
         continuous_keys = [s for s in states if any(s.startswith(prefix) for prefix in ("A_", "Tau1_", "Km_"))]
         # --- Set initial guesses for cyclical and continuous states --- #
         for key in states_keys:
@@ -338,6 +343,7 @@ def prepare_nmpc(
     minimize_fatigue = simulation_conditions["minimize_fatigue"]
     minimize_control = simulation_conditions["minimize_control"]
     cost_fun_weight = simulation_conditions["cost_fun_weight"]
+    objective_shape = simulation_conditions.get("objective_shape", "quadratic")
     # --- Pickle file info --- #
     initial_guess_path = simulation_conditions["init_guess_file_path"]
 
@@ -355,7 +361,10 @@ def prepare_nmpc(
     )
     numerical_time_series.update(numerical_data_time_series)
     # --- Dynamics --- #
-    dynamics_options = set_dynamics_options(numerical_time_series=numerical_time_series, ode_solver=ode_solver)
+    dynamics_options = set_dynamics_options(
+        numerical_time_series=numerical_time_series if numerical_time_series else None,
+        ode_solver=ode_solver,
+    )
 
     # --- Set states --- #
     # --- Set q (position and speed) initial guesses --- #
@@ -392,6 +401,7 @@ def prepare_nmpc(
         minimize_control,
         cost_fun_weight,
         target=x_init["q"].init[2][-1],
+        objective_shape=objective_shape,
     )
 
     # --- Update model for resistive torque --- #
@@ -622,8 +632,16 @@ def set_constraints(bio_model, enforce_start_constraints: bool = True):
     return constraints
 
 
-def set_objective_functions(minimize_force, minimize_fatigue, minimize_control, cost_fun_weight, target):
+def set_objective_functions(
+    minimize_force,
+    minimize_fatigue,
+    minimize_control,
+    cost_fun_weight,
+    target,
+    objective_shape: str = "quadratic",
+):
     objective_functions = ObjectiveList()
+    is_quadratic = objective_shape == "quadratic"
     # --- Set main cost function --- #
     if minimize_force:
         objective_functions.add(
@@ -631,7 +649,7 @@ def set_objective_functions(minimize_force, minimize_fatigue, minimize_control, 
             custom_type=ObjectiveFcn.Lagrange,
             node=Node.ALL,
             weight=10000 * cost_fun_weight[0],
-            quadratic=True,
+            quadratic=is_quadratic,
         )
     if minimize_fatigue:
         objective_functions.add(
@@ -639,7 +657,7 @@ def set_objective_functions(minimize_force, minimize_fatigue, minimize_control, 
             custom_type=ObjectiveFcn.Lagrange,
             node=Node.ALL,
             weight=10000 * cost_fun_weight[1],
-            quadratic=True,
+            quadratic=is_quadratic,
         )
     if minimize_control:
         objective_functions.add(
@@ -647,7 +665,7 @@ def set_objective_functions(minimize_force, minimize_fatigue, minimize_control, 
             custom_type=ObjectiveFcn.Lagrange,
             node=Node.ALL,
             weight=10000 * cost_fun_weight[2],
-            quadratic=True,
+            quadratic=is_quadratic,
         )
 
     # --- Set cost function for initial_guess ocp --- #
@@ -659,7 +677,7 @@ def set_objective_functions(minimize_force, minimize_fatigue, minimize_control, 
             node=Node.END,
             weight=1e6,
             target=target,
-            quadratic=True,
+            quadratic=is_quadratic,
         )
 
     # --- Set regulation cost function --- #
@@ -671,7 +689,7 @@ def set_objective_functions(minimize_force, minimize_fatigue, minimize_control, 
             node=Node.END,
             weight=1e-2,
             target=target,
-            quadratic=True,
+            quadratic=is_quadratic,
         )
 
     return objective_functions
@@ -965,7 +983,7 @@ def run_optim(mhe_info, cycling_info, simulation_conditions, model_path, save_so
     nmpc.add_plot_penalty(CostType.ALL)
 
     # Set solver for the optimal control problem
-    solver = Solver.IPOPT(show_online_optim=False, _max_iter=1000, show_options=dict(show_bounds=True))
+    solver = Solver.IPOPT(show_online_optim=False, _max_iter=2000, show_options=dict(show_bounds=True))
     solver.set_warm_start_init_point("yes")
     solver.set_mu_init(1e-2)
     solver.set_tol(1e-6)
