@@ -252,6 +252,7 @@ def build_window_summary(sol, requested_windows: int) -> dict:
     achieved_windows = 1 + len(window_solutions)
     wheel_trace = merged_solution.decision_states(to_merge=SolutionMerge.NODES)["q"][2, :]
     objective = float(np.nansum(merged_solution.cost)) if getattr(merged_solution, "cost", None) is not None else float("nan")
+    diagnostics = diagnose_wheel_trace(wheel_trace, requested_windows=requested_windows)
     return {
         "mode": "rho",
         "status": merged_solution.status,
@@ -265,6 +266,8 @@ def build_window_summary(sol, requested_windows: int) -> dict:
         "wheel_angle_trace": wheel_trace,
         "solution": merged_solution,
         "window_solutions": window_solutions,
+        "diagnostics": diagnostics,
+        "success": diagnostics["is_physical"] and achieved_windows >= requested_windows,
     }
 
 
@@ -281,6 +284,7 @@ def summarize_single_shot(sol) -> None:
 def build_single_shot_summary(sol) -> dict:
     wheel_trace = sol.decision_states(to_merge=SolutionMerge.NODES)["q"][2, :]
     objective = float(np.nansum(sol.cost)) if getattr(sol, "cost", None) is not None else float("nan")
+    diagnostics = diagnose_wheel_trace(wheel_trace, requested_windows=1)
     return {
         "mode": "single_shot",
         "status": sol.status,
@@ -291,6 +295,36 @@ def build_single_shot_summary(sol) -> dict:
         "wheel_angle_trace": wheel_trace,
         "solution": sol,
         "window_solutions": [],
+        "diagnostics": diagnostics,
+        "success": diagnostics["is_physical"],
+    }
+
+
+def diagnose_wheel_trace(wheel_trace: np.ndarray, requested_windows: int) -> dict:
+    trace = np.asarray(wheel_trace, dtype=float).squeeze()
+    finite = bool(np.all(np.isfinite(trace)))
+    final_angle = float(trace[-1]) if trace.size else float("nan")
+    max_abs_angle = float(np.max(np.abs(trace))) if trace.size else float("nan")
+    max_step = float(np.max(np.abs(np.diff(trace)))) if trace.size > 1 else 0.0
+    expected_scale = max(2 * np.pi * max(requested_windows, 1), 1.0)
+    angle_limit = 10.0 * expected_scale
+    jump_limit = 2.0 * np.pi
+    issues = []
+    if not finite:
+        issues.append("non_finite_wheel_trace")
+    if finite and max_abs_angle > angle_limit:
+        issues.append("wheel_angle_out_of_bounds")
+    if finite and max_step > jump_limit:
+        issues.append("wheel_angle_jump_out_of_bounds")
+
+    return {
+        "is_physical": not issues,
+        "issues": issues,
+        "final_angle": final_angle,
+        "max_abs_angle": max_abs_angle,
+        "max_step": max_step,
+        "angle_limit": angle_limit,
+        "jump_limit": jump_limit,
     }
 
 

@@ -104,10 +104,14 @@ def _solver_config(
 
 
 def print_comparison(ipopt_result: dict, acados_result: dict) -> None:
-    print("solver | status | objective | solver_time_s | wall_time_s | final_wheel_angle | requested_windows | achieved_windows")
+    print(
+        "solver | success | status | objective | solver_time_s | wall_time_s | final_wheel_angle | "
+        "requested_windows | achieved_windows"
+    )
     for label, result in (("IPOPT", ipopt_result), ("ACADOS", acados_result)):
         print(
             f"{label} | "
+            f"{_format_metric(result.get('success'))} | "
             f"{_format_metric(result['status'])} | "
             f"{_format_metric(result['objective'])} | "
             f"{_format_metric(result['solver_time_s'])} | "
@@ -119,6 +123,13 @@ def print_comparison(ipopt_result: dict, acados_result: dict) -> None:
         print(
             f"{label} wheel angle trace: "
             f"{np.array2string(result['wheel_angle_trace'], precision=4, suppress_small=False)}"
+        )
+        diagnostics = result.get("diagnostics", {})
+        print(
+            f"{label} diagnostics: physical={diagnostics.get('is_physical')} "
+            f"issues={diagnostics.get('issues')} "
+            f"max_abs_angle={_format_metric(diagnostics.get('max_abs_angle'))} "
+            f"max_step={_format_metric(diagnostics.get('max_step'))}"
         )
 
     ipopt_solver_time = ipopt_result["solver_time_s"]
