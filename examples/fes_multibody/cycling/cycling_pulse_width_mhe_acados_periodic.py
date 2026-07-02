@@ -131,6 +131,36 @@ def build_argument_parser() -> argparse.ArgumentParser:
         help="Shape of the objective terms passed to bioptim.",
     )
     parser.add_argument(
+        "--control-regularization-weight",
+        type=float,
+        default=0.0,
+        help="Optional quadratic MINIMIZE_CONTROL weight on each pulse-width control.",
+    )
+    parser.add_argument(
+        "--control-regularization-target",
+        type=float,
+        default=None,
+        help="Optional pulse-width target, in seconds, for the control regularization.",
+    )
+    parser.add_argument(
+        "--control-regularization-target-source",
+        choices=("constant", "warmup"),
+        default="constant",
+        help="Use a constant pulse-width target or the standard IPOPT warmup controls as the target.",
+    )
+    parser.add_argument(
+        "--wheel-qdot-regularization-weight",
+        type=float,
+        default=0.0,
+        help="Optional quadratic MINIMIZE_STATE weight on the crank/wheel qdot.",
+    )
+    parser.add_argument(
+        "--wheel-qdot-regularization-target",
+        type=float,
+        default=-float(2 * np.pi),
+        help="Target wheel angular velocity, in rad/s, for qdot regularization.",
+    )
+    parser.add_argument(
         "--constant-crank-torque",
         type=float,
         default=-0.2,
@@ -172,6 +202,11 @@ def build_argument_parser() -> argparse.ArgumentParser:
         help="Skip the one-window IPOPT warmup with the standard Ding formulation before periodic MHE.",
     )
     parser.add_argument(
+        "--disable-historical-ipopt-initial-guess",
+        action="store_true",
+        help="Do not reuse the historical IPOPT initial guess file from result/initial_guess when it exists.",
+    )
+    parser.add_argument(
         "--use-sx",
         dest="use_sx",
         action="store_true",
@@ -205,6 +240,26 @@ def build_ode_solver(args: argparse.Namespace):
             polynomial_degree=args.collocation_degree, method=args.collocation_method
         )
     return OdeSolver.RK4(n_integration_steps=args.rk_steps)
+
+
+def _ode_solver_suffix(ode_solver) -> str:
+    if isinstance(ode_solver, OdeSolver.COLLOCATION):
+        return f"collocation_{ode_solver.polynomial_degree}_{ode_solver.method}"
+    if isinstance(ode_solver, OdeSolver.RK4):
+        return f"rk4_{ode_solver.n_integration_steps}"
+    raise RuntimeError("ode_solver must be COLLOCATION or RK4")
+
+
+def _historical_initial_guess_path(cycles_per_window: int, ode_solver) -> Path | None:
+    filename = f"{cycles_per_window}_initial_guess_{_ode_solver_suffix(ode_solver)}.pkl"
+    candidates = (
+        Path.cwd() / "result" / "initial_guess" / filename,
+        Path(__file__).resolve().parent / "result" / "initial_guess" / filename,
+    )
+    for path in candidates:
+        if path.exists():
+            return path.resolve()
+    return None
 
 
 def ensure_acados_environment(acados_source_dir: str | None = None) -> Path:
@@ -349,6 +404,11 @@ def _codegen_signature(args: argparse.Namespace) -> str:
         "constant_crank_torque": args.constant_crank_torque,
         "use_sx": args.use_sx,
         "enforce_start_constraints": args.enforce_start_constraints,
+        "control_regularization_weight": args.control_regularization_weight,
+        "control_regularization_target": args.control_regularization_target,
+        "control_regularization_target_source": args.control_regularization_target_source,
+        "wheel_qdot_regularization_weight": args.wheel_qdot_regularization_weight,
+        "wheel_qdot_regularization_target": args.wheel_qdot_regularization_target,
         "max_acados_iterations": args.max_acados_iterations,
         "sources": [
             _source_stamp(Path(__file__).resolve()),
@@ -438,35 +498,134 @@ def configure_ipopt_solver(
     return solver
 
 
-def summarize_windows(sol, requested_windows: int) -> None:
+def _split_receding_solution(sol) -> tuple:
+    merged_solution = sol[0]
+    source_window_solutions = []
+    exported_cycle_solutions = []
+
+    if len(sol) == 3:
+        source_window_solutions = sol[1]
+        exported_cycle_solutions = sol[2]
+    elif len(sol) == 2:
+        exported_cycle_solutions = sol[1]
+
+    return merged_solution, source_window_solutions, exported_cycle_solutions
+
+
+def _wheel_trace_from_exported_cycles(
+    merged_solution, exported_cycle_solutions: list
+) -> np.ndarray:
+    if not exported_cycle_solutions:
+        return merged_solution.decision_states(to_merge=SolutionMerge.NODES)["q"][2, :]
+
+    cycle_traces = [
+        cycle_solution.decision_states(to_merge=SolutionMerge.NODES)["q"][2, :]
+        for cycle_solution in exported_cycle_solutions
+    ]
+    return np.concatenate(
+        [trace[:-1] for trace in cycle_traces[:-1]] + [cycle_traces[-1]]
+    )
+
+
+def _control_traces_from_exported_cycles(
+    merged_solution, exported_cycle_solutions: list
+) -> dict[str, np.ndarray]:
+    if not exported_cycle_solutions:
+        controls = merged_solution.decision_controls(to_merge=SolutionMerge.NODES)
+        return {key: np.asarray(values) for key, values in controls.items()}
+
+    control_traces = {}
+    reference_controls = exported_cycle_solutions[0].decision_controls(
+        to_merge=SolutionMerge.NODES
+    )
+    for key in reference_controls.keys():
+        cycle_values = []
+        for cycle_solution in exported_cycle_solutions:
+            controls = cycle_solution.decision_controls(to_merge=SolutionMerge.NODES)
+            values = np.asarray(controls[key])
+            if values.ndim == 1:
+                values = values[np.newaxis, :]
+            cycle_values.append(values)
+        control_traces[key] = np.concatenate(cycle_values, axis=1)
+
+    return control_traces
+
+
+def _status_is_success(status) -> bool:
+    return status == 0
+
+
+def _window_accounting(
+    source_window_solutions: list,
+    exported_cycle_solutions: list,
+    cycles_per_window: int,
+) -> dict:
+    attempted_windows = len(source_window_solutions)
+    window_statuses = [
+        window_solution.status for window_solution in source_window_solutions
+    ]
+    successful_windows = sum(_status_is_success(status) for status in window_statuses)
+    failed_windows = attempted_windows - successful_windows
+    exported_cycles = len(exported_cycle_solutions)
+    covered_cycles = successful_windows
+    if attempted_windows and successful_windows == attempted_windows:
+        covered_cycles += cycles_per_window - 1
+
+    return {
+        "attempted_windows": attempted_windows,
+        "successful_windows": successful_windows,
+        "failed_windows": failed_windows,
+        "exported_cycles": exported_cycles,
+        "covered_cycles": covered_cycles,
+        "window_statuses": window_statuses,
+    }
+
+
+def summarize_windows(sol, requested_windows: int, cycles_per_window: int) -> None:
     def _fmt(value) -> str:
         return "None" if value is None else f"{value:.6f}"
 
-    merged_solution = sol[0]
-    window_solutions = sol[1] if len(sol) > 1 else []
-    achieved_windows = 1 + len(window_solutions)
-    wheel_trace = merged_solution.decision_states(to_merge=SolutionMerge.NODES)["q"][
-        2, :
-    ]
+    merged_solution, source_window_solutions, exported_cycle_solutions = (
+        _split_receding_solution(sol)
+    )
+    accounting = _window_accounting(
+        source_window_solutions, exported_cycle_solutions, cycles_per_window
+    )
+    wheel_trace = _wheel_trace_from_exported_cycles(
+        merged_solution, exported_cycle_solutions
+    )
     diagnostics = diagnose_wheel_trace(wheel_trace, requested_windows=requested_windows)
+    solver_success = (
+        accounting["covered_cycles"] >= requested_windows
+        and accounting["failed_windows"] == 0
+    )
+    physical_success = (
+        diagnostics["is_physical"]
+        and accounting["exported_cycles"] >= requested_windows
+    )
+    success = solver_success and physical_success
 
     print(f"merged_status: {merged_solution.status}")
     print(f"merged_cost: {merged_solution.cost}")
     print(f"merged_solver_time_s: {_fmt(merged_solution.solver_time_to_optimize)}")
     print(f"merged_wall_time_s: {_fmt(merged_solution.real_time_to_optimize)}")
     print(f"requested_windows: {requested_windows}")
-    print(f"achieved_windows: {achieved_windows}")
-    print(
-        f"physical_success: {diagnostics['is_physical'] and achieved_windows >= requested_windows}"
-    )
+    print(f"attempted_windows: {accounting['attempted_windows']}")
+    print(f"successful_windows: {accounting['successful_windows']}")
+    print(f"failed_windows: {accounting['failed_windows']}")
+    print(f"exported_cycles: {accounting['exported_cycles']}")
+    print(f"covered_cycles: {accounting['covered_cycles']}")
+    print(f"solver_success: {solver_success}")
+    print(f"physical_success: {physical_success}")
+    print(f"success: {success}")
     print(f"final_wheel_angle: {diagnostics['final_angle']:.6f}")
     print(f"max_wheel_step: {diagnostics['max_step']:.6f}")
     if diagnostics["issues"]:
         print(f"diagnostic_issues: {', '.join(diagnostics['issues'])}")
 
-    if window_solutions:
-        print(f"additional_window_count: {len(window_solutions)}")
-        for idx, window_solution in enumerate(window_solutions):
+    if source_window_solutions:
+        print(f"source_window_count: {len(source_window_solutions)}")
+        for idx, window_solution in enumerate(source_window_solutions):
             print(
                 f"window[{idx}] status={window_solution.status} "
                 f"solver_time_s={_fmt(window_solution.solver_time_to_optimize)} "
@@ -474,19 +633,34 @@ def summarize_windows(sol, requested_windows: int) -> None:
             )
 
 
-def build_window_summary(sol, requested_windows: int) -> dict:
-    merged_solution = sol[0]
-    window_solutions = sol[1] if len(sol) > 1 else []
-    achieved_windows = 1 + len(window_solutions)
-    wheel_trace = merged_solution.decision_states(to_merge=SolutionMerge.NODES)["q"][
-        2, :
-    ]
+def build_window_summary(sol, requested_windows: int, cycles_per_window: int) -> dict:
+    merged_solution, source_window_solutions, exported_cycle_solutions = (
+        _split_receding_solution(sol)
+    )
+    accounting = _window_accounting(
+        source_window_solutions, exported_cycle_solutions, cycles_per_window
+    )
+    wheel_trace = _wheel_trace_from_exported_cycles(
+        merged_solution, exported_cycle_solutions
+    )
+    control_traces = _control_traces_from_exported_cycles(
+        merged_solution, exported_cycle_solutions
+    )
     objective = (
         float(np.nansum(merged_solution.cost))
         if getattr(merged_solution, "cost", None) is not None
         else float("nan")
     )
     diagnostics = diagnose_wheel_trace(wheel_trace, requested_windows=requested_windows)
+    solver_success = (
+        accounting["covered_cycles"] >= requested_windows
+        and accounting["failed_windows"] == 0
+    )
+    physical_success = (
+        diagnostics["is_physical"]
+        and accounting["exported_cycles"] >= requested_windows
+    )
+    success = solver_success and physical_success
     return {
         "mode": "rho",
         "status": merged_solution.status,
@@ -494,14 +668,24 @@ def build_window_summary(sol, requested_windows: int) -> dict:
         "solver_time_s": merged_solution.solver_time_to_optimize,
         "wall_time_s": merged_solution.real_time_to_optimize,
         "requested_windows": requested_windows,
-        "achieved_windows": achieved_windows,
-        "window_count": len(window_solutions),
+        "achieved_windows": accounting["attempted_windows"],
+        "attempted_windows": accounting["attempted_windows"],
+        "successful_windows": accounting["successful_windows"],
+        "failed_windows": accounting["failed_windows"],
+        "exported_cycles": accounting["exported_cycles"],
+        "covered_cycles": accounting["covered_cycles"],
+        "window_statuses": accounting["window_statuses"],
+        "solver_success": solver_success,
+        "physical_success": physical_success,
+        "window_count": accounting["attempted_windows"],
         "final_wheel_angle": float(wheel_trace[-1]),
         "wheel_angle_trace": wheel_trace,
+        "control_traces": control_traces,
         "solution": merged_solution,
-        "window_solutions": window_solutions,
+        "window_solutions": source_window_solutions,
+        "cycle_solutions": exported_cycle_solutions,
         "diagnostics": diagnostics,
-        "success": diagnostics["is_physical"] and achieved_windows >= requested_windows,
+        "success": success,
     }
 
 
@@ -517,6 +701,10 @@ def summarize_single_shot(sol) -> None:
 
 def build_single_shot_summary(sol) -> dict:
     wheel_trace = sol.decision_states(to_merge=SolutionMerge.NODES)["q"][2, :]
+    control_traces = {
+        key: np.asarray(values)
+        for key, values in sol.decision_controls(to_merge=SolutionMerge.NODES).items()
+    }
     objective = (
         float(np.nansum(sol.cost))
         if getattr(sol, "cost", None) is not None
@@ -531,6 +719,7 @@ def build_single_shot_summary(sol) -> dict:
         "wall_time_s": sol.real_time_to_optimize,
         "final_wheel_angle": float(wheel_trace[-1]),
         "wheel_angle_trace": wheel_trace,
+        "control_traces": control_traces,
         "solution": sol,
         "window_solutions": [],
         "diagnostics": diagnostics,
@@ -643,7 +832,7 @@ def _adapt_warmup_solution_to_periodic_nodes(
     return _WarmupSolutionAdapter(adapted_states, adapted_controls)
 
 
-def apply_standard_warmup_to_periodic_nmpc(periodic_nmpc, warmup_solution) -> None:
+def apply_standard_warmup_to_periodic_nmpc(periodic_nmpc, warmup_solution):
     adapted_solution = _adapt_warmup_solution_to_periodic_nodes(
         periodic_nmpc, warmup_solution
     )
@@ -684,6 +873,39 @@ def apply_standard_warmup_to_periodic_nmpc(periodic_nmpc, warmup_solution) -> No
             )
             periodic_nmpc.nlp[0].x_bounds[key].min[0, 0] = center - slack
             periodic_nmpc.nlp[0].x_bounds[key].max[0, 0] = center + slack
+
+    return adapted_solution
+
+
+def apply_warmup_control_regularization_targets(
+    periodic_nmpc, adapted_warmup_solution
+) -> list[str]:
+    warmup_controls = adapted_warmup_solution.decision_controls(
+        to_merge=SolutionMerge.NODES
+    )
+    updated_keys = []
+    for penalty in periodic_nmpc.nlp[0].J:
+        if not penalty:
+            continue
+
+        key = getattr(penalty, "extra_parameters", {}).get("key")
+        if key not in warmup_controls:
+            continue
+
+        target = np.asarray(warmup_controls[key], dtype=float)
+        if target.ndim == 1:
+            target = target[np.newaxis, :]
+
+        target_len = len(penalty.node_idx)
+        if target.shape[1] == target_len - 1:
+            target = np.concatenate((target, target[:, -1:]), axis=1)
+        elif target.shape[1] != target_len:
+            target = _resample_warmup_data(target, target_len, has_terminal_node=False)
+
+        penalty.target = target
+        updated_keys.append(key)
+
+    return updated_keys
 
 
 def run_standard_ipopt_warmup(
@@ -773,6 +995,11 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
     periodic_cn_sum_approximation = args.model_formulation == "periodic"
     use_external_forces = args.torque_application == "external_forces"
     ode_solver = build_ode_solver(args)
+    historical_init_guess_path = None
+    if args.solver == "ipopt" and not args.disable_historical_ipopt_initial_guess:
+        historical_init_guess_path = _historical_initial_guess_path(
+            args.cycles_per_window, ode_solver
+        )
     model = set_fes_model(
         str(model_path),
         stim_time,
@@ -809,10 +1036,24 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
         "minimize_control": "control" in objectives,
         "cost_fun_weight": build_cost_fun_weight(objectives),
         "objective_shape": args.objective_shape,
-        "init_guess_file_path": None,
+        "control_regularization_weight": args.control_regularization_weight,
+        "control_regularization_target": args.control_regularization_target,
+        "wheel_qdot_regularization_weight": args.wheel_qdot_regularization_weight,
+        "wheel_qdot_regularization_target": args.wheel_qdot_regularization_target,
+        "init_guess_file_path": (
+            str(historical_init_guess_path)
+            if historical_init_guess_path is not None
+            else None
+        ),
     }
+    nmpc_simulation_conditions = dict(simulation_conditions)
+    if (
+        args.solver == "acados"
+        and args.control_regularization_target_source == "warmup"
+    ):
+        nmpc_simulation_conditions["control_regularization_target"] = None
 
-    nmpc = prepare_nmpc(model, mhe_info, cycling_info, simulation_conditions)
+    nmpc = prepare_nmpc(model, mhe_info, cycling_info, nmpc_simulation_conditions)
     nmpc.n_cycles_simultaneous = args.cycles_per_window
     if args.solver == "acados":
         nmpc.first_node_state_slack = {
@@ -828,6 +1069,7 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
         nmpc.bound_first_node_all_states = False
         nmpc.bound_first_node_wheel_qdot = False
         nmpc.advance_wheel_q_bounds = True
+        nmpc.use_signed_wheel_shift = True
         nmpc.transfer_debug = echo
 
     if echo:
@@ -843,18 +1085,57 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
             print(f"collocation_method: {args.collocation_method}")
         print(f"use_sx: {args.use_sx}")
         print(f"enforce_start_constraints: {args.enforce_start_constraints}")
+        print(f"control_regularization_weight: {args.control_regularization_weight}")
+        print(f"control_regularization_target: {args.control_regularization_target}")
+        print(
+            "control_regularization_target_source: "
+            f"{args.control_regularization_target_source}"
+        )
+        print(
+            f"wheel_qdot_regularization_weight: {args.wheel_qdot_regularization_weight}"
+        )
+        print(
+            f"wheel_qdot_regularization_target: {args.wheel_qdot_regularization_target}"
+        )
         if args.solver == "ipopt" or (
             periodic_cn_sum_approximation and not args.disable_standard_ipopt_warmup
         ):
             print(f"ipopt_linear_solver: {args.ipopt_linear_solver}")
+        if args.solver == "ipopt":
+            print(
+                "historical_initial_guess: "
+                f"{historical_init_guess_path if historical_init_guess_path else 'None'}"
+            )
 
     if periodic_cn_sum_approximation and not args.disable_standard_ipopt_warmup:
         if echo:
             print("running_standard_ipopt_warmup: True")
+        warmup_simulation_conditions = dict(simulation_conditions)
+        if (
+            args.solver == "acados"
+            and args.control_regularization_target_source == "warmup"
+        ):
+            warmup_simulation_conditions["control_regularization_weight"] = 0.0
+            warmup_simulation_conditions["control_regularization_target"] = None
         warmup_solution = run_standard_ipopt_warmup(
-            args, mhe_info, cycling_info, simulation_conditions, model_path
+            args, mhe_info, cycling_info, warmup_simulation_conditions, model_path
         )
-        apply_standard_warmup_to_periodic_nmpc(nmpc, warmup_solution)
+        adapted_warmup_solution = apply_standard_warmup_to_periodic_nmpc(
+            nmpc, warmup_solution
+        )
+        if (
+            args.solver == "acados"
+            and args.control_regularization_target_source == "warmup"
+            and args.control_regularization_weight
+        ):
+            target_keys = apply_warmup_control_regularization_targets(
+                nmpc, adapted_warmup_solution
+            )
+            if echo:
+                print(
+                    "warmup_control_regularization_targets: "
+                    f"{', '.join(target_keys) if target_keys else 'None'}"
+                )
 
     def update_functions(_nmpc, cycle_idx, _sol):
         print(f"window {cycle_idx}")
@@ -896,14 +1177,20 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
         solver=solver,
         total_cycles=args.n_windows,
         external_force=cycling_info.get("resistive_torque"),
-        cycle_solutions=MultiCyclicCycleSolutions.FIRST_CYCLES,
-        get_all_iterations=False,
+        cycle_solutions=MultiCyclicCycleSolutions.ALL_CYCLES,
+        get_all_iterations=True,
         cyclic_options={"states": {}},
         max_consecutive_failing=args.max_consecutive_failing,
     )
     if echo:
-        summarize_windows(sol, requested_windows=args.n_windows)
-    summary = build_window_summary(sol, requested_windows=args.n_windows)
+        summarize_windows(
+            sol,
+            requested_windows=args.n_windows,
+            cycles_per_window=args.cycles_per_window,
+        )
+    summary = build_window_summary(
+        sol, requested_windows=args.n_windows, cycles_per_window=args.cycles_per_window
+    )
     summary["args"] = args
     return summary
 

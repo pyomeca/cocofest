@@ -68,6 +68,7 @@ class MyCyclicNMPC(FesNmpcMsk):
         self.bound_first_node_wheel_qdot = True
         self.advance_wheel_q_bounds = False
         self.wheel_q_path_margin = 2.0
+        self.use_signed_wheel_shift = False
 
     def _state_slack_for(self, key: str, index: int) -> float:
         if key in self.first_node_state_slack:
@@ -140,6 +141,13 @@ class MyCyclicNMPC(FesNmpcMsk):
                             self.nlp[0].x_bounds[key].max[i, 2] = (
                                 terminal_center + slack
                             )
+                        elif key == "q" and not self.use_signed_wheel_shift:
+                            self.nlp[0].x_bounds[key].min[
+                                i, 0
+                            ] += self.pedal_turn_in_one_cycle
+                            self.nlp[0].x_bounds[key].max[
+                                i, 0
+                            ] += self.pedal_turn_in_one_cycle
                 else:
                     if not self.bound_first_node_all_states:
                         continue
@@ -291,6 +299,18 @@ class MyCyclicNMPC(FesNmpcMsk):
         return True
 
     def set_init_cyclical_wheel(self, states, key, i):
+        if not self.use_signed_wheel_shift:
+            shifted_n_plus_one_cycles = (
+                states[key][i][self.nodes_per_cycle : -1] + self.pedal_turn_in_one_cycle
+            )
+            last_cycle = states[key][i][-self.nodes_per_cycle - 1 :]
+            if shifted_n_plus_one_cycles.size == 0:
+                values = last_cycle
+            else:
+                values = np.concatenate((shifted_n_plus_one_cycles, last_cycle))
+            self.nlp[0].x_init[key].init[i, :] = values
+            return True
+
         wheel_cycle_shift = self._wheel_cycle_shift(states)
         n_plus_one_cycles = states[key][i][self.nodes_per_cycle : -1]
         shifted_last_cycle = (
@@ -514,6 +534,18 @@ def prepare_nmpc(
     minimize_control = simulation_conditions["minimize_control"]
     cost_fun_weight = simulation_conditions["cost_fun_weight"]
     objective_shape = simulation_conditions.get("objective_shape", "quadratic")
+    control_regularization_weight = simulation_conditions.get(
+        "control_regularization_weight", 0.0
+    )
+    control_regularization_target = simulation_conditions.get(
+        "control_regularization_target"
+    )
+    wheel_qdot_regularization_weight = simulation_conditions.get(
+        "wheel_qdot_regularization_weight", 0.0
+    )
+    wheel_qdot_regularization_target = simulation_conditions.get(
+        "wheel_qdot_regularization_target", -float(2 * np.pi)
+    )
     # --- Pickle file info --- #
     initial_guess_path = simulation_conditions["init_guess_file_path"]
 
@@ -572,12 +604,17 @@ def prepare_nmpc(
 
     # --- Set objective --- #
     objective_functions = set_objective_functions(
+        model,
         minimize_force,
         minimize_fatigue,
         minimize_control,
         cost_fun_weight,
         target=x_init["q"].init[2][-1],
         objective_shape=objective_shape,
+        control_regularization_weight=control_regularization_weight,
+        control_regularization_target=control_regularization_target,
+        wheel_qdot_regularization_weight=wheel_qdot_regularization_weight,
+        wheel_qdot_regularization_target=wheel_qdot_regularization_target,
     )
 
     # --- Update model for resistive torque --- #
@@ -848,12 +885,17 @@ def set_constraints(bio_model, enforce_start_constraints: bool = True):
 
 
 def set_objective_functions(
+    model,
     minimize_force,
     minimize_fatigue,
     minimize_control,
     cost_fun_weight,
     target,
     objective_shape: str = "quadratic",
+    control_regularization_weight: float = 0.0,
+    control_regularization_target: float | None = None,
+    wheel_qdot_regularization_weight: float = 0.0,
+    wheel_qdot_regularization_target: float = -float(2 * np.pi),
 ):
     objective_functions = ObjectiveList()
     is_quadratic = objective_shape == "quadratic"
@@ -881,6 +923,34 @@ def set_objective_functions(
             node=Node.ALL,
             weight=10000 * cost_fun_weight[2],
             quadratic=is_quadratic,
+        )
+
+    # --- Numerical regularization for ACADOS-compatible solves --- #
+    if control_regularization_weight:
+        target_kwargs = (
+            {"target": np.array([[control_regularization_target]])}
+            if control_regularization_target is not None
+            else {}
+        )
+        for muscle_model in model.muscles_dynamics_model:
+            objective_functions.add(
+                ObjectiveFcn.Lagrange.MINIMIZE_CONTROL,
+                key=f"last_pulse_width_{muscle_model.muscle_name}",
+                weight=control_regularization_weight,
+                quadratic=True,
+                multi_thread=False,
+                **target_kwargs,
+            )
+
+    if wheel_qdot_regularization_weight:
+        objective_functions.add(
+            ObjectiveFcn.Lagrange.MINIMIZE_STATE,
+            key="qdot",
+            index=2,
+            weight=wheel_qdot_regularization_weight,
+            target=np.array([[wheel_qdot_regularization_target]]),
+            quadratic=True,
+            multi_thread=False,
         )
 
     # --- Set cost function for initial_guess ocp --- #

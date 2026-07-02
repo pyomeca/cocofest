@@ -41,6 +41,12 @@ def _format_metric(value) -> str:
     return str(value)
 
 
+def _format_control_metric(value) -> str:
+    if value is None:
+        return "None"
+    return f"{float(value):.6g}"
+
+
 def _resample_trace(trace: np.ndarray, target_len: int) -> np.ndarray:
     trace = np.asarray(trace, dtype=float).squeeze()
     if trace.size == target_len:
@@ -50,19 +56,77 @@ def _resample_trace(trace: np.ndarray, target_len: int) -> np.ndarray:
     return np.interp(target_grid, current_grid, trace)
 
 
+def _wrap_to_pi(values: np.ndarray) -> np.ndarray:
+    return (values + np.pi) % (2 * np.pi) - np.pi
+
+
 def _trace_comparison(ipopt_result: dict, acados_result: dict) -> dict:
     ipopt_trace = np.asarray(ipopt_result["wheel_angle_trace"], dtype=float).squeeze()
     acados_trace = np.asarray(acados_result["wheel_angle_trace"], dtype=float).squeeze()
     common_len = max(ipopt_trace.size, acados_trace.size)
-    ipopt_common = _resample_trace(ipopt_trace, common_len)
-    acados_common = _resample_trace(acados_trace, common_len)
-    diff = acados_common - ipopt_common
+    ipopt_common = _resample_trace(np.unwrap(ipopt_trace), common_len)
+    acados_common = _resample_trace(np.unwrap(acados_trace), common_len)
+    unwrapped_diff = acados_common - ipopt_common
+    unwrapped_turn_offset = int(np.rint(np.median(unwrapped_diff / (2 * np.pi))))
+    turn_aligned_unwrapped_diff = unwrapped_diff - unwrapped_turn_offset * 2 * np.pi
+    phase_diff = _wrap_to_pi(unwrapped_diff)
+    raw_final_error = float(acados_trace[-1] - ipopt_trace[-1])
     return {
         "common_len": common_len,
-        "wheel_rmse": float(np.sqrt(np.mean(diff**2))),
-        "wheel_max_abs_error": float(np.max(np.abs(diff))),
-        "wheel_final_error": float(acados_common[-1] - ipopt_common[-1]),
+        "unwrapped_wheel_rmse": float(np.sqrt(np.mean(unwrapped_diff**2))),
+        "unwrapped_wheel_max_abs_error": float(np.max(np.abs(unwrapped_diff))),
+        "unwrapped_wheel_final_error": float(acados_common[-1] - ipopt_common[-1]),
+        "turn_aligned_unwrapped_rmse": float(
+            np.sqrt(np.mean(turn_aligned_unwrapped_diff**2))
+        ),
+        "turn_aligned_unwrapped_max_abs_error": float(
+            np.max(np.abs(turn_aligned_unwrapped_diff))
+        ),
+        "turn_aligned_unwrapped_final_error": float(turn_aligned_unwrapped_diff[-1]),
+        "unwrapped_turn_offset": unwrapped_turn_offset,
+        "phase_rmse": float(np.sqrt(np.mean(phase_diff**2))),
+        "phase_max_abs_error": float(np.max(np.abs(phase_diff))),
+        "phase_final_error": float(phase_diff[-1]),
+        "raw_final_error": raw_final_error,
+        "raw_final_turn_offset": int(np.rint(raw_final_error / (2 * np.pi))),
     }
+
+
+def _control_comparisons(ipopt_result: dict, acados_result: dict) -> list[dict]:
+    ipopt_controls = ipopt_result.get("control_traces", {})
+    acados_controls = acados_result.get("control_traces", {})
+    common_keys = sorted(set(ipopt_controls).intersection(acados_controls))
+    comparisons = []
+
+    for key in common_keys:
+        ipopt_values = np.asarray(ipopt_controls[key], dtype=float).reshape(-1)
+        acados_values = np.asarray(acados_controls[key], dtype=float).reshape(-1)
+        if ipopt_values.size == 0 or acados_values.size == 0:
+            continue
+        common_len = max(ipopt_values.size, acados_values.size)
+        ipopt_common = _resample_trace(ipopt_values, common_len)
+        acados_common = _resample_trace(acados_values, common_len)
+        diff = acados_common - ipopt_common
+        comparisons.append(
+            {
+                "key": key,
+                "common_len": common_len,
+                "rmse": float(np.sqrt(np.mean(diff**2))),
+                "mae": float(np.mean(np.abs(diff))),
+                "max_abs_error": float(np.max(np.abs(diff))),
+                "final_error": float(diff[-1]),
+                "ipopt_mean": float(np.mean(ipopt_common)),
+                "acados_mean": float(np.mean(acados_common)),
+                "ipopt_sum": float(np.sum(ipopt_common)),
+                "acados_sum": float(np.sum(acados_common)),
+                "ipopt_min": float(np.min(ipopt_common)),
+                "ipopt_max": float(np.max(ipopt_common)),
+                "acados_min": float(np.min(acados_common)),
+                "acados_max": float(np.max(acados_common)),
+            }
+        )
+
+    return comparisons
 
 
 def _solver_config(
@@ -77,6 +141,11 @@ def _solver_config(
     ipopt_max_iter: int,
     ipopt_linear_solver: str,
     acados_max_iter: int,
+    control_regularization_weight: float,
+    control_regularization_target: float | None,
+    control_regularization_target_source: str,
+    wheel_qdot_regularization_weight: float,
+    wheel_qdot_regularization_target: float,
 ) -> argparse.Namespace:
     if solver_name == "ipopt":
         return _namespace_from_cli(
@@ -101,6 +170,11 @@ def _solver_config(
             disable_standard_ipopt_warmup=False,
             max_consecutive_failing=1,
             codegen_tag=codegen_tag,
+            control_regularization_weight=control_regularization_weight,
+            control_regularization_target=control_regularization_target,
+            control_regularization_target_source=control_regularization_target_source,
+            wheel_qdot_regularization_weight=wheel_qdot_regularization_weight,
+            wheel_qdot_regularization_target=wheel_qdot_regularization_target,
         )
 
     if solver_name == "acados":
@@ -126,6 +200,11 @@ def _solver_config(
             disable_standard_ipopt_warmup=False,
             max_consecutive_failing=max(n_windows, 10),
             codegen_tag=codegen_tag,
+            control_regularization_weight=control_regularization_weight,
+            control_regularization_target=control_regularization_target,
+            control_regularization_target_source=control_regularization_target_source,
+            wheel_qdot_regularization_weight=wheel_qdot_regularization_weight,
+            wheel_qdot_regularization_target=wheel_qdot_regularization_target,
         )
 
     raise ValueError(f"Unsupported solver_name '{solver_name}'")
@@ -135,20 +214,25 @@ def print_comparison(
     ipopt_result: dict, acados_result: dict, print_traces: bool = False
 ) -> None:
     print(
-        "solver | success | status | objective | solver_time_s | wall_time_s | final_wheel_angle | "
-        "requested_windows | achieved_windows"
+        "solver | success | solver_success | physical_success | status | objective | solver_time_s | wall_time_s | final_wheel_angle | "
+        "requested_cycles | attempted_windows | successful_windows | exported_cycles | covered_cycles"
     )
     for label, result in (("IPOPT", ipopt_result), ("ACADOS", acados_result)):
         print(
             f"{label} | "
             f"{_format_metric(result.get('success'))} | "
+            f"{_format_metric(result.get('solver_success'))} | "
+            f"{_format_metric(result.get('physical_success'))} | "
             f"{_format_metric(result['status'])} | "
             f"{_format_metric(result['objective'])} | "
             f"{_format_metric(result['solver_time_s'])} | "
             f"{_format_metric(result['wall_time_s'])} | "
             f"{_format_metric(result['final_wheel_angle'])} | "
             f"{_format_metric(result.get('requested_windows'))} | "
-            f"{_format_metric(result.get('achieved_windows'))}"
+            f"{_format_metric(result.get('attempted_windows'))} | "
+            f"{_format_metric(result.get('successful_windows'))} | "
+            f"{_format_metric(result.get('exported_cycles'))} | "
+            f"{_format_metric(result.get('covered_cycles'))}"
         )
         if print_traces:
             print(
@@ -160,17 +244,59 @@ def print_comparison(
             f"{label} diagnostics: physical={diagnostics.get('is_physical')} "
             f"issues={diagnostics.get('issues')} "
             f"max_abs_angle={_format_metric(diagnostics.get('max_abs_angle'))} "
-            f"max_step={_format_metric(diagnostics.get('max_step'))}"
+            f"max_step={_format_metric(diagnostics.get('max_step'))} "
+            f"window_statuses={result.get('window_statuses')}"
         )
 
+    if not (ipopt_result.get("success") and acados_result.get("success")):
+        print(
+            "wheel trace comparison warning: at least one solver did not cover all requested cycles successfully."
+        )
     trace_metrics = _trace_comparison(ipopt_result, acados_result)
     print(
         "wheel trace comparison | "
         f"common_len={trace_metrics['common_len']} | "
-        f"rmse={trace_metrics['wheel_rmse']:.6f} | "
-        f"max_abs_error={trace_metrics['wheel_max_abs_error']:.6f} | "
-        f"final_error={trace_metrics['wheel_final_error']:.6f}"
+        f"unwrapped_rmse={trace_metrics['unwrapped_wheel_rmse']:.6f} | "
+        f"unwrapped_max_abs_error={trace_metrics['unwrapped_wheel_max_abs_error']:.6f} | "
+        f"unwrapped_final_error={trace_metrics['unwrapped_wheel_final_error']:.6f} | "
+        f"turn_aligned_unwrapped_rmse={trace_metrics['turn_aligned_unwrapped_rmse']:.6f} | "
+        f"turn_aligned_unwrapped_max_abs_error={trace_metrics['turn_aligned_unwrapped_max_abs_error']:.6f} | "
+        f"turn_aligned_unwrapped_final_error={trace_metrics['turn_aligned_unwrapped_final_error']:.6f} | "
+        f"unwrapped_turn_offset={trace_metrics['unwrapped_turn_offset']} | "
+        f"phase_rmse={trace_metrics['phase_rmse']:.6f} | "
+        f"phase_max_abs_error={trace_metrics['phase_max_abs_error']:.6f} | "
+        f"phase_final_error={trace_metrics['phase_final_error']:.6f}"
     )
+    print(
+        "raw wheel final-angle representation | "
+        f"raw_final_error={trace_metrics['raw_final_error']:.6f} | "
+        f"raw_final_turn_offset={trace_metrics['raw_final_turn_offset']}"
+    )
+
+    control_metrics = _control_comparisons(ipopt_result, acados_result)
+    if control_metrics:
+        print(
+            "control comparison | key | common_len | rmse | mae | max_abs_error | final_error | "
+            "ipopt_mean | acados_mean | ipopt_sum | acados_sum | ipopt_range | acados_range"
+        )
+        for metric in control_metrics:
+            print(
+                "control comparison | "
+                f"{metric['key']} | "
+                f"{metric['common_len']} | "
+                f"{_format_control_metric(metric['rmse'])} | "
+                f"{_format_control_metric(metric['mae'])} | "
+                f"{_format_control_metric(metric['max_abs_error'])} | "
+                f"{_format_control_metric(metric['final_error'])} | "
+                f"{_format_control_metric(metric['ipopt_mean'])} | "
+                f"{_format_control_metric(metric['acados_mean'])} | "
+                f"{_format_control_metric(metric['ipopt_sum'])} | "
+                f"{_format_control_metric(metric['acados_sum'])} | "
+                f"[{_format_control_metric(metric['ipopt_min'])}, {_format_control_metric(metric['ipopt_max'])}] | "
+                f"[{_format_control_metric(metric['acados_min'])}, {_format_control_metric(metric['acados_max'])}]"
+            )
+    else:
+        print("control comparison warning: no common control keys were found.")
 
     ipopt_solver_time = ipopt_result["solver_time_s"]
     acados_solver_time = acados_result["solver_time_s"]
@@ -197,9 +323,17 @@ def main(
     resistive_torque: float = -0.2,
     acados_dir: str | None = None,
     codegen_tag: str | None = None,
-    ipopt_max_iter: int = 500,
+    ipopt_max_iter: int = 2000,
     ipopt_linear_solver: str = "ma57",
     acados_max_iter: int = 100,
+    control_regularization_weight: float = 0.0,
+    acados_control_regularization_weight: float | None = None,
+    control_regularization_target: float | None = None,
+    control_regularization_target_source: str = "constant",
+    acados_control_regularization_target_source: str | None = None,
+    wheel_qdot_regularization_weight: float = 0.0,
+    acados_wheel_qdot_regularization_weight: float | None = None,
+    wheel_qdot_regularization_target: float = -float(2 * np.pi),
     print_traces: bool = False,
 ):
     os.chdir(EXAMPLE_DIR)
@@ -218,6 +352,11 @@ def main(
         ipopt_max_iter=ipopt_max_iter,
         ipopt_linear_solver=ipopt_linear_solver,
         acados_max_iter=acados_max_iter,
+        control_regularization_weight=control_regularization_weight,
+        control_regularization_target=control_regularization_target,
+        control_regularization_target_source=control_regularization_target_source,
+        wheel_qdot_regularization_weight=wheel_qdot_regularization_weight,
+        wheel_qdot_regularization_target=wheel_qdot_regularization_target,
     )
     acados_args = _solver_config(
         "acados",
@@ -231,6 +370,23 @@ def main(
         ipopt_max_iter=ipopt_max_iter,
         ipopt_linear_solver=ipopt_linear_solver,
         acados_max_iter=acados_max_iter,
+        control_regularization_weight=(
+            acados_control_regularization_weight
+            if acados_control_regularization_weight is not None
+            else control_regularization_weight
+        ),
+        control_regularization_target=control_regularization_target,
+        control_regularization_target_source=(
+            acados_control_regularization_target_source
+            if acados_control_regularization_target_source is not None
+            else control_regularization_target_source
+        ),
+        wheel_qdot_regularization_weight=(
+            acados_wheel_qdot_regularization_weight
+            if acados_wheel_qdot_regularization_weight is not None
+            else wheel_qdot_regularization_weight
+        ),
+        wheel_qdot_regularization_target=wheel_qdot_regularization_target,
     )
 
     print("Running IPOPT reference configuration...")
@@ -255,9 +411,33 @@ def build_cli() -> argparse.ArgumentParser:
     parser.add_argument("--resistive-torque", type=float, default=-0.2)
     parser.add_argument("--acados-dir", default=os.environ.get("ACADOS_SOURCE_DIR"))
     parser.add_argument("--codegen-tag", default="fes_compare")
-    parser.add_argument("--ipopt-max-iter", type=int, default=500)
+    parser.add_argument("--ipopt-max-iter", type=int, default=2000)
     parser.add_argument("--ipopt-linear-solver", default="ma57")
     parser.add_argument("--acados-max-iter", type=int, default=100)
+    parser.add_argument("--control-regularization-weight", type=float, default=0.0)
+    parser.add_argument(
+        "--acados-control-regularization-weight", type=float, default=None
+    )
+    parser.add_argument("--control-regularization-target", type=float, default=None)
+    parser.add_argument(
+        "--control-regularization-target-source",
+        choices=("constant", "warmup"),
+        default="constant",
+        help="Use a constant pulse-width target or the IPOPT warmup control trajectory.",
+    )
+    parser.add_argument(
+        "--acados-control-regularization-target-source",
+        choices=("constant", "warmup"),
+        default=None,
+        help="Override --control-regularization-target-source for ACADOS only.",
+    )
+    parser.add_argument("--wheel-qdot-regularization-weight", type=float, default=0.0)
+    parser.add_argument(
+        "--acados-wheel-qdot-regularization-weight", type=float, default=None
+    )
+    parser.add_argument(
+        "--wheel-qdot-regularization-target", type=float, default=-float(2 * np.pi)
+    )
     parser.add_argument("--print-traces", action="store_true")
     return parser
 
@@ -276,5 +456,13 @@ if __name__ == "__main__":
         ipopt_max_iter=args.ipopt_max_iter,
         ipopt_linear_solver=args.ipopt_linear_solver,
         acados_max_iter=args.acados_max_iter,
+        control_regularization_weight=args.control_regularization_weight,
+        acados_control_regularization_weight=args.acados_control_regularization_weight,
+        control_regularization_target=args.control_regularization_target,
+        control_regularization_target_source=args.control_regularization_target_source,
+        acados_control_regularization_target_source=args.acados_control_regularization_target_source,
+        wheel_qdot_regularization_weight=args.wheel_qdot_regularization_weight,
+        acados_wheel_qdot_regularization_weight=args.acados_wheel_qdot_regularization_weight,
+        wheel_qdot_regularization_target=args.wheel_qdot_regularization_target,
         print_traces=args.print_traces,
     )
