@@ -365,7 +365,7 @@ def build_argument_parser() -> argparse.ArgumentParser:
         "--periodic-fes-warmup-projection-weight",
         type=float,
         default=1.0,
-        help="Blend weight between the original warmup FES states and the periodic Ding rollout.",
+        help="Blend weight between the original warmup FES states and the projected periodic Ding states.",
     )
     parser.add_argument(
         "--periodic-fes-warmup-projection-mode",
@@ -374,10 +374,40 @@ def build_argument_parser() -> argparse.ArgumentParser:
         help="Project only the periodic calcium states or all Ding fatigue states.",
     )
     parser.add_argument(
+        "--periodic-fes-warmup-projection-strategy",
+        choices=("rollout", "sequential", "least_squares"),
+        default="sequential",
+        help="Project FES warmup states by direct rollout, sequential proximal rollout, or bounded least squares.",
+    )
+    parser.add_argument(
         "--periodic-fes-warmup-projection-substeps",
         type=int,
         default=10,
         help="RK4 substeps per shooting interval used by the periodic FES warmup projection.",
+    )
+    parser.add_argument(
+        "--periodic-fes-warmup-projection-proximity-weight",
+        type=float,
+        default=1.0,
+        help="Projection weight that keeps projected FES states close to the IPOPT warmup.",
+    )
+    parser.add_argument(
+        "--periodic-fes-warmup-projection-defect-weight",
+        type=float,
+        default=100.0,
+        help="Projection weight applied to normalized periodic FES dynamic defects.",
+    )
+    parser.add_argument(
+        "--periodic-fes-warmup-projection-trust-radius",
+        type=float,
+        default=None,
+        help="Optional trust radius, in normalized state units, around the warmup FES states.",
+    )
+    parser.add_argument(
+        "--periodic-fes-warmup-projection-max-iterations",
+        type=int,
+        default=200,
+        help="Maximum number of function evaluations for the least-squares FES projection.",
     )
     parser.add_argument(
         "--disable-historical-ipopt-initial-guess",
@@ -1366,15 +1396,279 @@ def _project_periodic_states(
     return projected_states
 
 
+def _projection_state_scales(
+    states: np.ndarray, lower_bounds: np.ndarray, upper_bounds: np.ndarray
+) -> np.ndarray:
+    scales = np.ones((states.shape[0], 1))
+    for idx in range(states.shape[0]):
+        values = [np.abs(states[idx, :])]
+        finite_lower = lower_bounds[idx, np.isfinite(lower_bounds[idx, :])]
+        finite_upper = upper_bounds[idx, np.isfinite(upper_bounds[idx, :])]
+        if finite_lower.size:
+            values.append(np.abs(finite_lower))
+        if finite_upper.size:
+            values.append(np.abs(finite_upper))
+        scale = float(np.max(np.concatenate(values)))
+        scales[idx, 0] = scale if np.isfinite(scale) and scale > 1.0 else 1.0
+    return scales
+
+
+def _strict_projection_bounds(
+    lower_bounds: np.ndarray, upper_bounds: np.ndarray, scales: np.ndarray
+) -> tuple[np.ndarray, np.ndarray]:
+    lower_flat = lower_bounds.reshape((-1,)).astype(float, copy=True)
+    upper_flat = upper_bounds.reshape((-1,)).astype(float, copy=True)
+    scale_flat = np.broadcast_to(scales, lower_bounds.shape).reshape((-1,))
+    eps = np.maximum(1e-12 * scale_flat, 1e-12)
+    locked = upper_flat <= lower_flat
+    centers = 0.5 * (lower_flat[locked] + upper_flat[locked])
+    lower_flat[locked] = centers - eps[locked]
+    upper_flat[locked] = centers + eps[locked]
+    return lower_flat, upper_flat
+
+
+def _projection_jacobian_sparsity(
+    n_states: int,
+    n_nodes: int,
+    include_defects: bool,
+    include_proximity: bool,
+):
+    from scipy.sparse import lil_matrix
+
+    n_variables = n_states * (n_nodes - 1)
+    n_defect_rows = n_states * (n_nodes - 1) if include_defects else 0
+    n_proximity_rows = n_states * (n_nodes - 1) if include_proximity else 0
+    sparsity = lil_matrix((n_defect_rows + n_proximity_rows, n_variables), dtype=int)
+
+    def variable_column(state_idx: int, node_idx: int) -> int:
+        return state_idx * (n_nodes - 1) + node_idx - 1
+
+    if include_defects:
+        for interval_idx in range(n_nodes - 1):
+            for residual_state_idx in range(n_states):
+                row = interval_idx * n_states + residual_state_idx
+                if interval_idx > 0:
+                    for state_idx in range(n_states):
+                        sparsity[row, variable_column(state_idx, interval_idx)] = 1
+                for state_idx in range(n_states):
+                    sparsity[row, variable_column(state_idx, interval_idx + 1)] = 1
+
+    if include_proximity:
+        row_offset = n_defect_rows
+        for state_idx in range(n_states):
+            for node_idx in range(1, n_nodes):
+                row = row_offset + state_idx * (n_nodes - 1) + node_idx - 1
+                sparsity[row, variable_column(state_idx, node_idx)] = 1
+
+    return sparsity.tocsr()
+
+
+def _bounded_least_squares_project_periodic_states(
+    muscle_model,
+    original_states: np.ndarray,
+    controls: np.ndarray,
+    lower_bounds: np.ndarray,
+    upper_bounds: np.ndarray,
+    dt: float,
+    projection_mode: str,
+    projection_substeps: int,
+    proximity_weight: float,
+    defect_weight: float,
+    trust_radius: float | None,
+    max_iterations: int,
+) -> tuple[np.ndarray, dict[str, float]]:
+    try:
+        from scipy.optimize import least_squares
+    except ImportError as exc:
+        raise RuntimeError(
+            "The least-squares FES warmup projection requires scipy."
+        ) from exc
+
+    if proximity_weight < 0.0:
+        raise ValueError(
+            "--periodic-fes-warmup-projection-proximity-weight must be >= 0."
+        )
+    if defect_weight < 0.0:
+        raise ValueError("--periodic-fes-warmup-projection-defect-weight must be >= 0.")
+    if trust_radius is not None and trust_radius < 0.0:
+        raise ValueError("--periodic-fes-warmup-projection-trust-radius must be >= 0.")
+    if max_iterations <= 0:
+        raise ValueError(
+            "--periodic-fes-warmup-projection-max-iterations must be strictly positive."
+        )
+
+    clipped_original = np.minimum(
+        np.maximum(original_states, lower_bounds), upper_bounds
+    )
+    scales = _projection_state_scales(clipped_original, lower_bounds, upper_bounds)
+    variable_lower = lower_bounds[:, 1:].copy()
+    variable_upper = upper_bounds[:, 1:].copy()
+
+    if trust_radius is not None:
+        trust = trust_radius * scales
+        variable_center = clipped_original[:, 1:]
+        variable_lower = np.maximum(variable_lower, variable_center - trust)
+        variable_upper = np.minimum(variable_upper, variable_center + trust)
+
+    lower_flat, upper_flat = _strict_projection_bounds(
+        variable_lower, variable_upper, scales
+    )
+    x0 = np.minimum(
+        np.maximum(clipped_original[:, 1:].reshape((-1,)), lower_flat), upper_flat
+    )
+    first_node = clipped_original[:, 0].copy()
+    warmup_variable = clipped_original[:, 1:]
+    sqrt_proximity_weight = float(np.sqrt(proximity_weight))
+    sqrt_defect_weight = float(np.sqrt(defect_weight))
+    include_defects = bool(sqrt_defect_weight)
+    include_proximity = bool(sqrt_proximity_weight)
+    jac_sparsity = _projection_jacobian_sparsity(
+        clipped_original.shape[0],
+        clipped_original.shape[1],
+        include_defects=include_defects,
+        include_proximity=include_proximity,
+    )
+
+    def unpack(variable_flat: np.ndarray) -> np.ndarray:
+        states = np.empty_like(clipped_original)
+        states[:, 0] = first_node
+        states[:, 1:] = variable_flat.reshape((clipped_original.shape[0], -1))
+        return states
+
+    def step(state: np.ndarray, pulse_width: float) -> np.ndarray:
+        if projection_mode == "calcium":
+            return _exact_periodic_calcium_step(muscle_model, state, dt)
+        return _rk4_periodic_ding_step(
+            muscle_model,
+            state,
+            pulse_width,
+            dt,
+            n_substeps=projection_substeps,
+        )
+
+    def residual(variable_flat: np.ndarray) -> np.ndarray:
+        states = unpack(variable_flat)
+        pieces = []
+        if include_defects:
+            defects = []
+            for node, pulse_width in enumerate(controls):
+                expected = step(states[:, node], pulse_width)
+                defects.append((states[:, node + 1] - expected) / scales[:, 0])
+            pieces.append(sqrt_defect_weight * np.concatenate(defects))
+        if include_proximity:
+            proximity = (states[:, 1:] - warmup_variable) / scales
+            pieces.append(sqrt_proximity_weight * proximity.reshape((-1,)))
+        if not pieces:
+            return np.zeros_like(variable_flat)
+        return np.nan_to_num(
+            np.concatenate(pieces),
+            nan=1e20,
+            posinf=1e20,
+            neginf=-1e20,
+        )
+
+    result = least_squares(
+        residual,
+        x0,
+        bounds=(lower_flat, upper_flat),
+        max_nfev=max_iterations,
+        method="trf",
+        x_scale="jac",
+        jac_sparsity=jac_sparsity,
+    )
+    projected_states = unpack(result.x)
+    projected_states = np.minimum(
+        np.maximum(projected_states, lower_bounds), upper_bounds
+    )
+    stats = {
+        "success": bool(result.success),
+        "status": float(result.status),
+        "cost": float(result.cost),
+        "optimality": float(result.optimality),
+        "nfev": float(result.nfev),
+    }
+    return projected_states, stats
+
+
+def _sequential_project_periodic_states(
+    muscle_model,
+    original_states: np.ndarray,
+    controls: np.ndarray,
+    lower_bounds: np.ndarray,
+    upper_bounds: np.ndarray,
+    dt: float,
+    projection_mode: str,
+    projection_substeps: int,
+    proximity_weight: float,
+    defect_weight: float,
+    trust_radius: float | None,
+) -> np.ndarray:
+    if proximity_weight < 0.0:
+        raise ValueError(
+            "--periodic-fes-warmup-projection-proximity-weight must be >= 0."
+        )
+    if defect_weight < 0.0:
+        raise ValueError("--periodic-fes-warmup-projection-defect-weight must be >= 0.")
+    if trust_radius is not None and trust_radius < 0.0:
+        raise ValueError("--periodic-fes-warmup-projection-trust-radius must be >= 0.")
+
+    clipped_original = np.minimum(
+        np.maximum(original_states, lower_bounds), upper_bounds
+    )
+    if proximity_weight == 0.0 and defect_weight == 0.0:
+        return clipped_original
+
+    projected_states = np.empty_like(clipped_original)
+    projected_states[:, 0] = clipped_original[:, 0]
+    scales = _projection_state_scales(clipped_original, lower_bounds, upper_bounds)
+    denominator = proximity_weight + defect_weight
+    for node, pulse_width in enumerate(controls):
+        if projection_mode == "calcium":
+            expected = _exact_periodic_calcium_step(
+                muscle_model, projected_states[:, node], dt
+            )
+        else:
+            expected = _rk4_periodic_ding_step(
+                muscle_model,
+                projected_states[:, node],
+                pulse_width,
+                dt,
+                n_substeps=projection_substeps,
+            )
+        next_values = (
+            defect_weight * expected + proximity_weight * clipped_original[:, node + 1]
+        ) / denominator
+        lower = lower_bounds[:, node + 1]
+        upper = upper_bounds[:, node + 1]
+        if trust_radius is not None:
+            center = clipped_original[:, node + 1]
+            trust = trust_radius * scales[:, 0]
+            lower = np.maximum(lower, center - trust)
+            upper = np.minimum(upper, center + trust)
+        projected_states[:, node + 1] = np.minimum(
+            np.maximum(next_values, lower), upper
+        )
+    return projected_states
+
+
 def project_periodic_fes_initial_guess(
     periodic_nmpc,
     projection_weight: float = 1.0,
     projection_mode: str = "all",
+    projection_strategy: str = "sequential",
     projection_substeps: int = 10,
+    projection_proximity_weight: float = 1.0,
+    projection_defect_weight: float = 100.0,
+    projection_trust_radius: float | None = None,
+    projection_max_iterations: int = 200,
 ) -> dict[str, float]:
     if projection_weight < 0.0 or projection_weight > 1.0:
         raise ValueError(
             "--periodic-fes-warmup-projection-weight must be between 0 and 1."
+        )
+    if projection_strategy not in ("rollout", "sequential", "least_squares"):
+        raise ValueError(
+            "--periodic-fes-warmup-projection-strategy must be 'rollout', 'sequential' or 'least_squares'."
         )
 
     dt = periodic_nmpc.cycle_duration / periodic_nmpc.cycle_len
@@ -1384,6 +1678,10 @@ def project_periodic_fes_initial_guess(
     projected_muscles = 0
     clipped_values = 0
     max_bound_violation = 0.0
+    ls_failures = 0
+    ls_total_nfev = 0
+    ls_max_cost = 0.0
+    ls_max_optimality = 0.0
 
     for muscle_model in periodic_nmpc.nlp[0].model.muscles_dynamics_model:
         muscle_name = muscle_model.muscle_name
@@ -1398,14 +1696,58 @@ def project_periodic_fes_initial_guess(
             [periodic_nmpc.nlp[0].x_init[key].init[0, :] for key in state_keys]
         )
         controls = periodic_nmpc.nlp[0].u_init[control_key].init[0, :]
-        projected_states = _project_periodic_states(
-            muscle_model,
-            original_states,
-            controls,
-            dt,
-            projection_mode,
-            projection_substeps,
-        )
+        lower_bounds = []
+        upper_bounds = []
+        for key in state_keys:
+            lower, upper = _state_trajectory_bounds(
+                periodic_nmpc, key, original_states.shape[1]
+            )
+            lower_bounds.append(lower)
+            upper_bounds.append(upper)
+        lower_bounds = np.vstack(lower_bounds)
+        upper_bounds = np.vstack(upper_bounds)
+        if projection_strategy == "least_squares":
+            projected_states, ls_stats = _bounded_least_squares_project_periodic_states(
+                muscle_model,
+                original_states,
+                controls,
+                lower_bounds,
+                upper_bounds,
+                dt,
+                projection_mode,
+                projection_substeps,
+                projection_proximity_weight,
+                projection_defect_weight,
+                projection_trust_radius,
+                projection_max_iterations,
+            )
+            ls_failures += 0 if ls_stats["success"] else 1
+            ls_total_nfev += int(ls_stats["nfev"])
+            ls_max_cost = max(ls_max_cost, ls_stats["cost"])
+            ls_max_optimality = max(ls_max_optimality, ls_stats["optimality"])
+        elif projection_strategy == "sequential":
+            projected_states = _sequential_project_periodic_states(
+                muscle_model,
+                original_states,
+                controls,
+                lower_bounds,
+                upper_bounds,
+                dt,
+                projection_mode,
+                projection_substeps,
+                projection_proximity_weight,
+                projection_defect_weight,
+                projection_trust_radius,
+            )
+        else:
+            projected_states = _project_periodic_states(
+                muscle_model,
+                original_states,
+                controls,
+                dt,
+                projection_mode,
+                projection_substeps,
+            )
 
         blended_states = (
             projection_weight * projected_states
@@ -1436,11 +1778,22 @@ def project_periodic_fes_initial_guess(
         "projected_muscles": projected_muscles,
         "projection_weight": projection_weight,
         "projection_mode": projection_mode,
+        "projection_strategy": projection_strategy,
         "projection_substeps": projection_substeps,
+        "projection_proximity_weight": projection_proximity_weight,
+        "projection_defect_weight": projection_defect_weight,
+        "projection_trust_radius": (
+            -1.0 if projection_trust_radius is None else projection_trust_radius
+        ),
+        "projection_max_iterations": projection_max_iterations,
         "max_defect_before": max_before,
         "max_defect_after": max_after,
         "clipped_values": clipped_values,
         "max_bound_violation": max_bound_violation,
+        "least_squares_failures": ls_failures,
+        "least_squares_total_nfev": ls_total_nfev,
+        "least_squares_max_cost": ls_max_cost,
+        "least_squares_max_optimality": ls_max_optimality,
     }
 
 
@@ -1510,7 +1863,12 @@ def apply_standard_warmup_to_periodic_nmpc(
     project_fes_warmup: bool = True,
     projection_weight: float = 1.0,
     projection_mode: str = "all",
+    projection_strategy: str = "sequential",
     projection_substeps: int = 10,
+    projection_proximity_weight: float = 1.0,
+    projection_defect_weight: float = 100.0,
+    projection_trust_radius: float | None = None,
+    projection_max_iterations: int = 200,
     echo: bool = False,
 ):
     adapted_solution = _adapt_warmup_solution_to_periodic_nodes(
@@ -1559,13 +1917,19 @@ def apply_standard_warmup_to_periodic_nmpc(
             periodic_nmpc,
             projection_weight=projection_weight,
             projection_mode=projection_mode,
+            projection_strategy=projection_strategy,
             projection_substeps=projection_substeps,
+            projection_proximity_weight=projection_proximity_weight,
+            projection_defect_weight=projection_defect_weight,
+            projection_trust_radius=projection_trust_radius,
+            projection_max_iterations=projection_max_iterations,
         )
         if echo:
             print(
                 "periodic_fes_warmup_projection: "
                 f"projected_muscles={projection_summary['projected_muscles']} "
                 f"mode={projection_summary['projection_mode']} "
+                f"strategy={projection_summary['projection_strategy']} "
                 f"weight={projection_summary['projection_weight']:.3g} "
                 f"substeps={projection_summary['projection_substeps']} "
                 f"max_defect_before={projection_summary['max_defect_before']:.6g} "
@@ -1573,6 +1937,14 @@ def apply_standard_warmup_to_periodic_nmpc(
                 f"clipped_values={projection_summary['clipped_values']} "
                 f"max_bound_violation={projection_summary['max_bound_violation']:.6g}"
             )
+            if projection_summary["projection_strategy"] == "least_squares":
+                print(
+                    "periodic_fes_warmup_projection_ls: "
+                    f"failures={projection_summary['least_squares_failures']} "
+                    f"total_nfev={projection_summary['least_squares_total_nfev']} "
+                    f"max_cost={projection_summary['least_squares_max_cost']:.6g} "
+                    f"max_optimality={projection_summary['least_squares_max_optimality']:.6g}"
+                )
 
     return adapted_solution
 
@@ -1815,8 +2187,28 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
                 f"{args.periodic_fes_warmup_projection_mode}"
             )
             print(
+                "periodic_fes_warmup_projection_strategy: "
+                f"{args.periodic_fes_warmup_projection_strategy}"
+            )
+            print(
                 "periodic_fes_warmup_projection_substeps: "
                 f"{args.periodic_fes_warmup_projection_substeps}"
+            )
+            print(
+                "periodic_fes_warmup_projection_proximity_weight: "
+                f"{args.periodic_fes_warmup_projection_proximity_weight}"
+            )
+            print(
+                "periodic_fes_warmup_projection_defect_weight: "
+                f"{args.periodic_fes_warmup_projection_defect_weight}"
+            )
+            print(
+                "periodic_fes_warmup_projection_trust_radius: "
+                f"{args.periodic_fes_warmup_projection_trust_radius}"
+            )
+            print(
+                "periodic_fes_warmup_projection_max_iterations: "
+                f"{args.periodic_fes_warmup_projection_max_iterations}"
             )
             print(f"acados_collocation_type: {args.acados_collocation_type}")
             print(f"acados_sim_stages: {args.acados_sim_stages}")
@@ -1879,7 +2271,16 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
             project_fes_warmup=not args.disable_periodic_fes_warmup_projection,
             projection_weight=args.periodic_fes_warmup_projection_weight,
             projection_mode=args.periodic_fes_warmup_projection_mode,
+            projection_strategy=args.periodic_fes_warmup_projection_strategy,
             projection_substeps=args.periodic_fes_warmup_projection_substeps,
+            projection_proximity_weight=(
+                args.periodic_fes_warmup_projection_proximity_weight
+            ),
+            projection_defect_weight=args.periodic_fes_warmup_projection_defect_weight,
+            projection_trust_radius=args.periodic_fes_warmup_projection_trust_radius,
+            projection_max_iterations=(
+                args.periodic_fes_warmup_projection_max_iterations
+            ),
             echo=echo,
         )
         if (
