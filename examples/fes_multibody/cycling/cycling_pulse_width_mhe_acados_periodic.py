@@ -374,6 +374,12 @@ def build_argument_parser() -> argparse.ArgumentParser:
         help="Project only the periodic calcium states or all Ding fatigue states.",
     )
     parser.add_argument(
+        "--periodic-fes-warmup-projection-substeps",
+        type=int,
+        default=10,
+        help="RK4 substeps per shooting interval used by the periodic FES warmup projection.",
+    )
+    parser.add_argument(
         "--disable-historical-ipopt-initial-guess",
         action="store_true",
         help="Do not reuse the historical IPOPT initial guess file from result/initial_guess when it exists.",
@@ -1248,26 +1254,50 @@ def _periodic_calcium_rhs(muscle_model, state: np.ndarray) -> np.ndarray:
 
 
 def _rk4_periodic_ding_step(
-    muscle_model, state: np.ndarray, pulse_width: float, dt: float
+    muscle_model,
+    state: np.ndarray,
+    pulse_width: float,
+    dt: float,
+    n_substeps: int = 1,
 ) -> np.ndarray:
-    k1 = _periodic_ding_rhs(muscle_model, state, pulse_width)
-    k2 = _periodic_ding_rhs(muscle_model, state + 0.5 * dt * k1, pulse_width)
-    k3 = _periodic_ding_rhs(muscle_model, state + 0.5 * dt * k2, pulse_width)
-    k4 = _periodic_ding_rhs(muscle_model, state + dt * k3, pulse_width)
-    return state + dt * (k1 + 2 * k2 + 2 * k3 + k4) / 6
+    if n_substeps < 1:
+        raise ValueError("--periodic-fes-warmup-projection-substeps must be >= 1.")
+
+    sub_dt = dt / n_substeps
+    next_state = np.array(state, dtype=float, copy=True)
+    for _ in range(n_substeps):
+        k1 = _periodic_ding_rhs(muscle_model, next_state, pulse_width)
+        k2 = _periodic_ding_rhs(
+            muscle_model, next_state + 0.5 * sub_dt * k1, pulse_width
+        )
+        k3 = _periodic_ding_rhs(
+            muscle_model, next_state + 0.5 * sub_dt * k2, pulse_width
+        )
+        k4 = _periodic_ding_rhs(muscle_model, next_state + sub_dt * k3, pulse_width)
+        next_state = next_state + sub_dt * (k1 + 2 * k2 + 2 * k3 + k4) / 6
+    return next_state
 
 
-def _rk4_periodic_calcium_step(
+def _exact_periodic_calcium_step(
     muscle_model, state: np.ndarray, dt: float
 ) -> np.ndarray:
-    k1 = _periodic_calcium_rhs(muscle_model, state)
-    k2 = _periodic_calcium_rhs(muscle_model, state + 0.5 * dt * k1)
-    k3 = _periodic_calcium_rhs(muscle_model, state + 0.5 * dt * k2)
-    k4 = _periodic_calcium_rhs(muscle_model, state + dt * k3)
-    return state + dt * (k1 + 2 * k2 + 2 * k3 + k4) / 6
+    tau = muscle_model.tauc
+    decay = np.exp(-dt / tau)
+    cn = state[0]
+    cn_sum = state[1]
+    cn_sum_steady = tau * muscle_model.periodic_cn_sum_gain()
+    next_cn_sum = cn_sum_steady + (cn_sum - cn_sum_steady) * decay
+    next_cn = (
+        decay * cn
+        + cn_sum_steady * (1 - decay)
+        + (cn_sum - cn_sum_steady) * (dt / tau) * decay
+    )
+    return np.array([next_cn, next_cn_sum])
 
 
-def _periodic_fes_rollout_defects(periodic_nmpc) -> dict[str, float]:
+def _periodic_fes_rollout_defects(
+    periodic_nmpc, projection_substeps: int = 10
+) -> dict[str, float]:
     dt = periodic_nmpc.cycle_duration / periodic_nmpc.cycle_len
     defects = {}
     for muscle_model in periodic_nmpc.nlp[0].model.muscles_dynamics_model:
@@ -1286,7 +1316,11 @@ def _periodic_fes_rollout_defects(periodic_nmpc) -> dict[str, float]:
         max_defect = 0.0
         for node, pulse_width in enumerate(controls):
             expected = _rk4_periodic_ding_step(
-                muscle_model, states[:, node], pulse_width, dt
+                muscle_model,
+                states[:, node],
+                pulse_width,
+                dt,
+                n_substeps=projection_substeps,
             )
             max_defect = max(
                 max_defect, float(np.max(np.abs(states[:, node + 1] - expected)))
@@ -1312,17 +1346,22 @@ def _project_periodic_states(
     controls: np.ndarray,
     dt: float,
     projection_mode: str,
+    projection_substeps: int,
 ) -> np.ndarray:
     projected_states = np.empty_like(original_states)
     projected_states[:, 0] = original_states[:, 0]
     for node in range(controls.size):
         if projection_mode == "calcium":
-            projected_states[:, node + 1] = _rk4_periodic_calcium_step(
+            projected_states[:, node + 1] = _exact_periodic_calcium_step(
                 muscle_model, projected_states[:, node], dt
             )
         else:
             projected_states[:, node + 1] = _rk4_periodic_ding_step(
-                muscle_model, projected_states[:, node], controls[node], dt
+                muscle_model,
+                projected_states[:, node],
+                controls[node],
+                dt,
+                n_substeps=projection_substeps,
             )
     return projected_states
 
@@ -1331,6 +1370,7 @@ def project_periodic_fes_initial_guess(
     periodic_nmpc,
     projection_weight: float = 1.0,
     projection_mode: str = "all",
+    projection_substeps: int = 10,
 ) -> dict[str, float]:
     if projection_weight < 0.0 or projection_weight > 1.0:
         raise ValueError(
@@ -1338,7 +1378,9 @@ def project_periodic_fes_initial_guess(
         )
 
     dt = periodic_nmpc.cycle_duration / periodic_nmpc.cycle_len
-    defects_before = _periodic_fes_rollout_defects(periodic_nmpc)
+    defects_before = _periodic_fes_rollout_defects(
+        periodic_nmpc, projection_substeps=projection_substeps
+    )
     projected_muscles = 0
     clipped_values = 0
     max_bound_violation = 0.0
@@ -1357,7 +1399,12 @@ def project_periodic_fes_initial_guess(
         )
         controls = periodic_nmpc.nlp[0].u_init[control_key].init[0, :]
         projected_states = _project_periodic_states(
-            muscle_model, original_states, controls, dt, projection_mode
+            muscle_model,
+            original_states,
+            controls,
+            dt,
+            projection_mode,
+            projection_substeps,
         )
 
         blended_states = (
@@ -1377,7 +1424,9 @@ def project_periodic_fes_initial_guess(
             )
         projected_muscles += 1
 
-    defects_after = _periodic_fes_rollout_defects(periodic_nmpc)
+    defects_after = _periodic_fes_rollout_defects(
+        periodic_nmpc, projection_substeps=projection_substeps
+    )
     periodic_nmpc._correct_init_guess_to_fit_bounds(corrected_input="states")
     periodic_nmpc._sync_acados_state_bounds()
 
@@ -1387,6 +1436,7 @@ def project_periodic_fes_initial_guess(
         "projected_muscles": projected_muscles,
         "projection_weight": projection_weight,
         "projection_mode": projection_mode,
+        "projection_substeps": projection_substeps,
         "max_defect_before": max_before,
         "max_defect_after": max_after,
         "clipped_values": clipped_values,
@@ -1460,6 +1510,7 @@ def apply_standard_warmup_to_periodic_nmpc(
     project_fes_warmup: bool = True,
     projection_weight: float = 1.0,
     projection_mode: str = "all",
+    projection_substeps: int = 10,
     echo: bool = False,
 ):
     adapted_solution = _adapt_warmup_solution_to_periodic_nodes(
@@ -1508,6 +1559,7 @@ def apply_standard_warmup_to_periodic_nmpc(
             periodic_nmpc,
             projection_weight=projection_weight,
             projection_mode=projection_mode,
+            projection_substeps=projection_substeps,
         )
         if echo:
             print(
@@ -1515,6 +1567,7 @@ def apply_standard_warmup_to_periodic_nmpc(
                 f"projected_muscles={projection_summary['projected_muscles']} "
                 f"mode={projection_summary['projection_mode']} "
                 f"weight={projection_summary['projection_weight']:.3g} "
+                f"substeps={projection_summary['projection_substeps']} "
                 f"max_defect_before={projection_summary['max_defect_before']:.6g} "
                 f"max_defect_after={projection_summary['max_defect_after']:.6g} "
                 f"clipped_values={projection_summary['clipped_values']} "
@@ -1761,6 +1814,10 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
                 "periodic_fes_warmup_projection_mode: "
                 f"{args.periodic_fes_warmup_projection_mode}"
             )
+            print(
+                "periodic_fes_warmup_projection_substeps: "
+                f"{args.periodic_fes_warmup_projection_substeps}"
+            )
             print(f"acados_collocation_type: {args.acados_collocation_type}")
             print(f"acados_sim_stages: {args.acados_sim_stages}")
             print(
@@ -1822,6 +1879,7 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
             project_fes_warmup=not args.disable_periodic_fes_warmup_projection,
             projection_weight=args.periodic_fes_warmup_projection_weight,
             projection_mode=args.periodic_fes_warmup_projection_mode,
+            projection_substeps=args.periodic_fes_warmup_projection_substeps,
             echo=echo,
         )
         if (
