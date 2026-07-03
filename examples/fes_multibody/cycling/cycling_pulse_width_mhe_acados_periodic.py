@@ -501,9 +501,12 @@ def build_argument_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--periodic-fes-warmup-projection-mode",
-        choices=("calcium", "all"),
+        choices=("calcium", "all", "all_except_force"),
         default="all",
-        help="Project only the periodic calcium states or all Ding fatigue states.",
+        help=(
+            "Project only the periodic calcium states, all Ding fatigue states, "
+            "or all states except F to preserve the multibody force trajectory."
+        ),
     )
     parser.add_argument(
         "--periodic-fes-warmup-projection-strategy",
@@ -1227,6 +1230,31 @@ def print_initial_guess_diagnostics(nmpc) -> None:
             f"{_format_named_values(fes_defects['scaled_by_state'])}"
         )
 
+    full_defects = _full_dynamics_rollout_defect_details(nmpc)
+    if full_defects:
+        print(
+            "initial_guess_full_rk4_defect_by_block: "
+            f"{_format_named_values(full_defects['absolute_by_block'])}"
+        )
+        print(
+            "initial_guess_full_rk4_scaled_defect_by_block: "
+            f"{_format_named_values(full_defects['scaled_by_block'])}"
+        )
+        print(
+            "initial_guess_full_rk4_defect_top_keys: "
+            f"{_format_named_values(full_defects['top_keys'])}"
+        )
+        if full_defects["q_by_dof"]:
+            print(
+                "initial_guess_full_rk4_defect_q_by_dof: "
+                f"{_format_named_values(full_defects['q_by_dof'])}"
+            )
+        if full_defects["qdot_by_dof"]:
+            print(
+                "initial_guess_full_rk4_defect_qdot_by_dof: "
+                f"{_format_named_values(full_defects['qdot_by_dof'])}"
+            )
+
 
 def project_qdot_initial_guess_from_q(nmpc) -> None:
     if "q" not in nmpc.nlp[0].x_init.keys() or "qdot" not in nmpc.nlp[0].x_init.keys():
@@ -1655,15 +1683,172 @@ def _periodic_fes_rollout_defect_details(
     }
 
 
+def _stack_initial_guess_values(container, variables, n_nodes: int) -> np.ndarray:
+    values = np.zeros((variables.shape, n_nodes))
+    for key in variables.keys():
+        values[variables[key].index, :] = np.asarray(container[key].init, dtype=float)
+    return values
+
+
+def _full_dynamics_rhs(
+    nlp, time: float, dt: float, state: np.ndarray, control: np.ndarray
+) -> np.ndarray:
+    return _to_numpy_vector(
+        nlp.dynamics_func(
+            np.array([time, dt], dtype=float),
+            state,
+            control,
+            np.array([], dtype=float),
+            np.array([], dtype=float),
+            np.array([], dtype=float),
+        )
+    )
+
+
+def _rk4_full_dynamics_step(
+    nlp,
+    state: np.ndarray,
+    control: np.ndarray,
+    time: float,
+    dt: float,
+    n_substeps: int,
+) -> np.ndarray:
+    sub_dt = dt / n_substeps
+    next_state = np.array(state, dtype=float, copy=True)
+    for substep in range(n_substeps):
+        sub_time = time + substep * sub_dt
+        k1 = _full_dynamics_rhs(nlp, sub_time, sub_dt, next_state, control)
+        k2 = _full_dynamics_rhs(
+            nlp,
+            sub_time + 0.5 * sub_dt,
+            sub_dt,
+            next_state + 0.5 * sub_dt * k1,
+            control,
+        )
+        k3 = _full_dynamics_rhs(
+            nlp,
+            sub_time + 0.5 * sub_dt,
+            sub_dt,
+            next_state + 0.5 * sub_dt * k2,
+            control,
+        )
+        k4 = _full_dynamics_rhs(
+            nlp, sub_time + sub_dt, sub_dt, next_state + sub_dt * k3, control
+        )
+        next_state = next_state + sub_dt * (k1 + 2 * k2 + 2 * k3 + k4) / 6
+    return next_state
+
+
+def _full_dynamics_rollout_defect_details(
+    nmpc, n_substeps: int = 5, top_key_count: int = 8
+) -> dict[str, dict[str, float]]:
+    nlp = nmpc.nlp[0]
+    if not hasattr(nlp, "dynamics_func") or nlp.dynamics_func is None:
+        return {}
+    if nlp.states.shape == 0 or nlp.controls.shape == 0:
+        return {}
+
+    first_state_key = next(iter(nlp.x_init.keys()))
+    first_control_key = next(iter(nlp.u_init.keys()))
+    n_state_nodes = nlp.x_init[first_state_key].init.shape[1]
+    n_control_nodes = nlp.u_init[first_control_key].init.shape[1]
+    if n_state_nodes != n_control_nodes + 1:
+        return {}
+
+    states = _stack_initial_guess_values(nlp.x_init, nlp.states, n_state_nodes)
+    controls = _stack_initial_guess_values(nlp.u_init, nlp.controls, n_control_nodes)
+    dt = nmpc.cycle_duration / nmpc.cycle_len
+
+    predicted = np.empty_like(states)
+    predicted[:, 0] = states[:, 0]
+    for node in range(n_control_nodes):
+        predicted[:, node + 1] = _rk4_full_dynamics_step(
+            nlp,
+            states[:, node],
+            controls[:, node],
+            node * dt,
+            dt,
+            n_substeps=n_substeps,
+        )
+
+    defects = states[:, 1:] - predicted[:, 1:]
+    state_scales = np.maximum(np.max(np.abs(states), axis=1, keepdims=True), 1.0)
+    scaled_defects = defects / state_scales
+
+    absolute_by_block = {}
+    scaled_by_block = {}
+    key_defects = {}
+    for block_name, key_names in {
+        "q": ("q",),
+        "qdot": ("qdot",),
+        "fes": tuple(key for key in nlp.states.keys() if key not in ("q", "qdot")),
+    }.items():
+        indexes = []
+        for key in key_names:
+            if key in nlp.states.keys():
+                indexes.extend(
+                    np.asarray(nlp.states[key].index).reshape((-1,)).tolist()
+                )
+        if not indexes:
+            continue
+        absolute_by_block[block_name] = float(np.max(np.abs(defects[indexes, :])))
+        scaled_by_block[block_name] = float(np.max(np.abs(scaled_defects[indexes, :])))
+
+    for key in nlp.states.keys():
+        indexes = np.asarray(nlp.states[key].index).reshape((-1,)).tolist()
+        key_defects[key] = float(np.max(np.abs(defects[indexes, :])))
+
+    top_keys = dict(
+        sorted(key_defects.items(), key=lambda item: item[1], reverse=True)[
+            :top_key_count
+        ]
+    )
+    dof_names = tuple(getattr(nlp.model, "name_dofs", ())) or tuple(
+        f"dof_{idx}" for idx in range(nlp.model.nb_q)
+    )
+
+    def defects_by_dof(key: str) -> dict[str, float]:
+        if key not in nlp.states.keys():
+            return {}
+        indexes = np.asarray(nlp.states[key].index).reshape((-1,)).tolist()
+        values = {}
+        for dof_idx, state_idx in enumerate(indexes):
+            name = (
+                str(dof_names[dof_idx])
+                if dof_idx < len(dof_names)
+                else f"dof_{dof_idx}"
+            )
+            values[name] = float(np.max(np.abs(defects[state_idx, :])))
+        return values
+
+    return {
+        "absolute_by_block": absolute_by_block,
+        "scaled_by_block": scaled_by_block,
+        "top_keys": top_keys,
+        "q_by_dof": defects_by_dof("q"),
+        "qdot_by_dof": defects_by_dof("qdot"),
+    }
+
+
 def _projection_state_keys(muscle_name: str, projection_mode: str) -> tuple[str, ...]:
     state_keys = _ding_state_keys(muscle_name)
     if projection_mode == "calcium":
         return state_keys[:2]
-    if projection_mode == "all":
+    if projection_mode in ("all", "all_except_force"):
         return state_keys
     raise ValueError(
-        "--periodic-fes-warmup-projection-mode must be 'calcium' or 'all'."
+        "--periodic-fes-warmup-projection-mode must be 'calcium', 'all' or 'all_except_force'."
     )
+
+
+def _projection_write_state_keys(
+    muscle_name: str, projection_mode: str
+) -> tuple[str, ...]:
+    state_keys = _projection_state_keys(muscle_name, projection_mode)
+    if projection_mode == "all_except_force":
+        force_key = f"F_{muscle_name}"
+        return tuple(key for key in state_keys if key != force_key)
+    return state_keys
 
 
 def _project_periodic_states(
@@ -2049,7 +2234,10 @@ def project_periodic_fes_initial_guess(
             projection_weight * projected_states
             + (1.0 - projection_weight) * original_states
         )
+        write_state_keys = _projection_write_state_keys(muscle_name, projection_mode)
         for state_idx, key in enumerate(state_keys):
+            if key not in write_state_keys:
+                continue
             values = blended_states[state_idx, :]
             lower, upper = _state_trajectory_bounds(periodic_nmpc, key, values.size)
             lower_violation = np.maximum(lower - values, 0.0)
