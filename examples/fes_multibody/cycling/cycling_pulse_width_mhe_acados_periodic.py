@@ -1114,6 +1114,12 @@ def _format_array(values) -> str:
     return np.array2string(array, precision=3, suppress_small=False)
 
 
+def _format_named_values(values: dict[str, float]) -> str:
+    if not values:
+        return "None"
+    return " ".join(f"{key}={value:.6g}" for key, value in values.items())
+
+
 def print_acados_diagnostics(label: str, diagnostics: dict) -> None:
     print(
         f"{label} acados_status={diagnostics.get('status')} "
@@ -1205,6 +1211,21 @@ def print_initial_guess_diagnostics(nmpc) -> None:
         "initial_guess_control_bound_violations: "
         f"{control_violations if control_violations else 'None'}"
     )
+
+    fes_defects = _periodic_fes_rollout_defect_details(nmpc)
+    if fes_defects:
+        print(
+            "initial_guess_periodic_fes_defect_by_state: "
+            f"{_format_named_values(fes_defects['absolute_by_state'])}"
+        )
+        print(
+            "initial_guess_periodic_fes_defect_by_muscle: "
+            f"{_format_named_values(fes_defects['absolute_by_muscle'])}"
+        )
+        print(
+            "initial_guess_periodic_fes_scaled_defect_by_state: "
+            f"{_format_named_values(fes_defects['scaled_by_state'])}"
+        )
 
 
 def project_qdot_initial_guess_from_q(nmpc) -> None:
@@ -1577,6 +1598,61 @@ def _periodic_fes_rollout_defects(
             )
         defects[muscle_name] = max_defect
     return defects
+
+
+def _periodic_fes_rollout_defect_details(
+    periodic_nmpc, projection_substeps: int = 10
+) -> dict[str, dict[str, float]]:
+    dt = periodic_nmpc.cycle_duration / periodic_nmpc.cycle_len
+    state_labels = ("Cn", "Cn_sum", "F", "A", "Tau1", "Km")
+    absolute_by_state = dict.fromkeys(state_labels, 0.0)
+    scaled_by_state = dict.fromkeys(state_labels, 0.0)
+    absolute_by_muscle = {}
+
+    for muscle_model in periodic_nmpc.nlp[0].model.muscles_dynamics_model:
+        muscle_name = muscle_model.muscle_name
+        state_keys = _ding_state_keys(muscle_name)
+        control_key = f"last_pulse_width_{muscle_name}"
+        if any(key not in periodic_nmpc.nlp[0].x_init.keys() for key in state_keys):
+            continue
+        if control_key not in periodic_nmpc.nlp[0].u_init.keys():
+            continue
+
+        states = np.vstack(
+            [periodic_nmpc.nlp[0].x_init[key].init[0, :] for key in state_keys]
+        )
+        controls = periodic_nmpc.nlp[0].u_init[control_key].init[0, :]
+        state_scales = np.maximum(np.max(np.abs(states), axis=1), 1.0)
+        muscle_max = 0.0
+        for node, pulse_width in enumerate(controls):
+            expected = _rk4_periodic_ding_step(
+                muscle_model,
+                states[:, node],
+                pulse_width,
+                dt,
+                n_substeps=projection_substeps,
+            )
+            defects = np.abs(states[:, node + 1] - expected)
+            muscle_max = max(muscle_max, float(np.max(defects)))
+            for label, absolute_defect, scale in zip(
+                state_labels, defects, state_scales, strict=True
+            ):
+                absolute_by_state[label] = max(
+                    absolute_by_state[label], float(absolute_defect)
+                )
+                scaled_by_state[label] = max(
+                    scaled_by_state[label], float(absolute_defect / scale)
+                )
+        absolute_by_muscle[muscle_name] = muscle_max
+
+    if not absolute_by_muscle:
+        return {}
+
+    return {
+        "absolute_by_state": absolute_by_state,
+        "absolute_by_muscle": absolute_by_muscle,
+        "scaled_by_state": scaled_by_state,
+    }
 
 
 def _projection_state_keys(muscle_name: str, projection_mode: str) -> tuple[str, ...]:
