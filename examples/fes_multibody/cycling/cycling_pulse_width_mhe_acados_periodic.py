@@ -4,6 +4,7 @@ CLI-friendly ACADOS example for the periodic Ding pulse-width cycling MHE with a
 
 import argparse
 import ctypes
+from copy import deepcopy
 import hashlib
 import json
 import os
@@ -492,6 +493,25 @@ def build_argument_parser() -> argparse.ArgumentParser:
         "--disable-periodic-fes-warmup-projection",
         action="store_true",
         help="Do not project periodic Ding FES initial guesses with a local rollout before ACADOS.",
+    )
+    parser.add_argument(
+        "--periodic-ipopt-refinement",
+        action="store_true",
+        help=(
+            "Run a one-window IPOPT refinement on the periodic formulation "
+            "before handing the initial guess to ACADOS."
+        ),
+    )
+    parser.add_argument(
+        "--disable-periodic-ipopt-refinement",
+        action="store_true",
+        help=argparse.SUPPRESS,
+    )
+    parser.add_argument(
+        "--periodic-ipopt-refinement-iterations",
+        type=int,
+        default=300,
+        help="Maximum IPOPT iterations for the periodic warmstart refinement.",
     )
     parser.add_argument(
         "--periodic-fes-warmup-projection-weight",
@@ -2433,6 +2453,174 @@ def apply_standard_warmup_to_periodic_nmpc(
     return adapted_solution
 
 
+def apply_solution_directly_to_periodic_nmpc_initial_guess(periodic_nmpc, solution):
+    adapted_solution = _adapt_warmup_solution_to_periodic_nodes(periodic_nmpc, solution)
+    states = adapted_solution.decision_states(to_merge=SolutionMerge.NODES)
+    controls = adapted_solution.decision_controls(to_merge=SolutionMerge.NODES)
+
+    for key in periodic_nmpc.nlp[0].x_init.keys():
+        if key not in states:
+            continue
+        values = np.asarray(states[key], dtype=float)
+        target = periodic_nmpc.nlp[0].x_init[key].init
+        if values.shape != target.shape:
+            raise ValueError(
+                f"Cannot copy refined state '{key}' with shape {values.shape} "
+                f"into initial guess shape {target.shape}."
+            )
+        target[:, :] = values
+
+    for key in periodic_nmpc.nlp[0].u_init.keys():
+        if key not in controls:
+            continue
+        values = np.asarray(controls[key], dtype=float)
+        target = periodic_nmpc.nlp[0].u_init[key].init
+        if values.shape != target.shape:
+            raise ValueError(
+                f"Cannot copy refined control '{key}' with shape {values.shape} "
+                f"into initial guess shape {target.shape}."
+            )
+        target[:, :] = values
+
+    periodic_nmpc._correct_init_guess_to_fit_bounds(corrected_input="states")
+    periodic_nmpc._correct_init_guess_to_fit_bounds(corrected_input="controls")
+    periodic_nmpc._sync_acados_state_bounds()
+    return adapted_solution
+
+
+def _copy_list_values(source, target, attribute_name: str) -> None:
+    source_keys = set(source.keys())
+    for key in target.keys():
+        if key not in source_keys:
+            continue
+        source_values = np.asarray(getattr(source[key], attribute_name), dtype=float)
+        target_values = getattr(target[key], attribute_name)
+        if source_values.shape != target_values.shape:
+            raise ValueError(
+                f"Cannot copy '{key}' {attribute_name} with shape {source_values.shape} "
+                f"into shape {target_values.shape}."
+            )
+        target_values[:, :] = source_values
+
+
+def _copy_initial_guesses_and_bounds(source_nmpc, target_nmpc) -> None:
+    _copy_list_values(source_nmpc.nlp[0].x_init, target_nmpc.nlp[0].x_init, "init")
+    _copy_list_values(source_nmpc.nlp[0].u_init, target_nmpc.nlp[0].u_init, "init")
+    _copy_list_values(source_nmpc.nlp[0].x_bounds, target_nmpc.nlp[0].x_bounds, "min")
+    _copy_list_values(source_nmpc.nlp[0].x_bounds, target_nmpc.nlp[0].x_bounds, "max")
+    _copy_list_values(source_nmpc.nlp[0].u_bounds, target_nmpc.nlp[0].u_bounds, "min")
+    _copy_list_values(source_nmpc.nlp[0].u_bounds, target_nmpc.nlp[0].u_bounds, "max")
+
+
+def _copy_objective_targets(source_nmpc, target_nmpc) -> None:
+    for source_penalty, target_penalty in zip(
+        source_nmpc.nlp[0].J, target_nmpc.nlp[0].J
+    ):
+        if not source_penalty or not target_penalty:
+            continue
+        if getattr(source_penalty, "target", None) is not None:
+            target_penalty.target = np.array(source_penalty.target, copy=True)
+
+
+def _copy_periodic_runtime_settings(source_nmpc, target_nmpc) -> None:
+    target_nmpc.n_cycles_simultaneous = source_nmpc.n_cycles_simultaneous
+    for attribute_name in (
+        "first_node_state_slack",
+        "bound_first_node_all_states",
+        "bound_first_node_wheel_qdot",
+        "advance_wheel_q_bounds",
+        "wheel_q_path_margin",
+        "use_signed_wheel_shift",
+    ):
+        if hasattr(source_nmpc, attribute_name):
+            setattr(
+                target_nmpc,
+                attribute_name,
+                deepcopy(getattr(source_nmpc, attribute_name)),
+            )
+    target_nmpc.transfer_debug = False
+
+
+def build_periodic_ipopt_refinement_nmpc(
+    source_nmpc,
+    model_path: Path,
+    stim_time: list[float],
+    mhe_info: dict,
+    cycling_info: dict,
+    simulation_conditions: dict,
+):
+    refinement_model = set_fes_model(
+        str(model_path),
+        stim_time,
+        periodic_cn_sum_approximation=True,
+    )
+    refinement_nmpc = prepare_nmpc(
+        refinement_model,
+        dict(mhe_info),
+        dict(cycling_info),
+        dict(simulation_conditions),
+    )
+    _copy_periodic_runtime_settings(source_nmpc, refinement_nmpc)
+    _copy_initial_guesses_and_bounds(source_nmpc, refinement_nmpc)
+    _copy_objective_targets(source_nmpc, refinement_nmpc)
+    refinement_nmpc._correct_init_guess_to_fit_bounds(corrected_input="states")
+    refinement_nmpc._correct_init_guess_to_fit_bounds(corrected_input="controls")
+    return refinement_nmpc
+
+
+def run_periodic_ipopt_refinement(
+    refinement_nmpc,
+    target_nmpc,
+    max_iterations: int,
+    linear_solver: str,
+    echo: bool = False,
+):
+    solver = configure_ipopt_solver(
+        max_iterations=max_iterations,
+        linear_solver=linear_solver,
+    )
+    try:
+        refinement_sol = super(RecedingHorizonOptimization, refinement_nmpc).solve(
+            solver=solver,
+            warm_start=None,
+        )
+    except Exception as exc:
+        if echo:
+            print("periodic_ipopt_refinement_error: " f"{type(exc).__name__}: {exc}")
+            print("periodic_ipopt_refinement_applied: False")
+        return None
+
+    success = _status_is_success(refinement_sol.status)
+    if echo:
+        cost = (
+            float(np.nansum(refinement_sol.cost))
+            if getattr(refinement_sol, "cost", None) is not None
+            else float("nan")
+        )
+        print(f"periodic_ipopt_refinement_status: {refinement_sol.status}")
+        print(f"periodic_ipopt_refinement_success: {success}")
+        print(f"periodic_ipopt_refinement_cost: {cost:.6g}")
+        print(
+            "periodic_ipopt_refinement_solver_time_s: "
+            f"{refinement_sol.solver_time_to_optimize}"
+        )
+        print(
+            "periodic_ipopt_refinement_wall_time_s: "
+            f"{refinement_sol.real_time_to_optimize}"
+        )
+
+    if success:
+        apply_solution_directly_to_periodic_nmpc_initial_guess(
+            target_nmpc, refinement_sol
+        )
+        if echo:
+            print("periodic_ipopt_refinement_applied: True")
+    elif echo:
+        print("periodic_ipopt_refinement_applied: False")
+
+    return refinement_sol
+
+
 def apply_warmup_control_regularization_targets(
     periodic_nmpc, adapted_warmup_solution
 ) -> list[str]:
@@ -2537,6 +2725,10 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
         raise ValueError("--cycles-per-window must be >= 1")
     if args.stimulations_per_cycle < 1:
         raise ValueError("--stimulations-per-cycle must be >= 1")
+
+    periodic_ipopt_refinement_enabled = (
+        args.periodic_ipopt_refinement and not args.disable_periodic_ipopt_refinement
+    )
 
     example_dir = Path(__file__).resolve().parent
     model_path = (
@@ -2696,6 +2888,11 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
                 "periodic_fes_warmup_projection_max_iterations: "
                 f"{args.periodic_fes_warmup_projection_max_iterations}"
             )
+            print("periodic_ipopt_refinement: " f"{periodic_ipopt_refinement_enabled}")
+            print(
+                "periodic_ipopt_refinement_iterations: "
+                f"{args.periodic_ipopt_refinement_iterations}"
+            )
             print(f"acados_collocation_type: {args.acados_collocation_type}")
             print(f"acados_sim_stages: {args.acados_sim_stages}")
             print(
@@ -2742,8 +2939,16 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
             print(f"acados_wheel_q_slack: {args.acados_wheel_q_slack}")
             print(f"acados_wheel_qdot_slack: {args.acados_wheel_qdot_slack}")
             print(f"acados_wheel_q_path_margin: {args.acados_wheel_q_path_margin}")
-        if args.solver == "ipopt" or (
-            periodic_cn_sum_approximation and not args.disable_standard_ipopt_warmup
+        if (
+            args.solver == "ipopt"
+            or (
+                periodic_cn_sum_approximation and not args.disable_standard_ipopt_warmup
+            )
+            or (
+                args.solver == "acados"
+                and periodic_cn_sum_approximation
+                and periodic_ipopt_refinement_enabled
+            )
         ):
             print(f"ipopt_linear_solver: {args.ipopt_linear_solver}")
         if args.solver == "ipopt":
@@ -2796,6 +3001,32 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
                     "warmup_control_regularization_targets: "
                     f"{', '.join(target_keys) if target_keys else 'None'}"
                 )
+
+    if (
+        args.solver == "acados"
+        and periodic_cn_sum_approximation
+        and periodic_ipopt_refinement_enabled
+    ):
+        if echo:
+            print("running_periodic_ipopt_refinement: True")
+            if args.acados_diagnostics:
+                print("periodic_ipopt_refinement_initial_defects:")
+                print_initial_guess_diagnostics(nmpc)
+        refinement_nmpc = build_periodic_ipopt_refinement_nmpc(
+            source_nmpc=nmpc,
+            model_path=model_path,
+            stim_time=stim_time,
+            mhe_info=mhe_info,
+            cycling_info=cycling_info,
+            simulation_conditions=nmpc_simulation_conditions,
+        )
+        run_periodic_ipopt_refinement(
+            refinement_nmpc,
+            target_nmpc=nmpc,
+            max_iterations=args.periodic_ipopt_refinement_iterations,
+            linear_solver=args.ipopt_linear_solver,
+            echo=echo,
+        )
 
     if args.solver == "acados" and args.acados_project_qdot_from_q:
         project_qdot_initial_guess_from_q(nmpc)
