@@ -25,6 +25,17 @@ from bioptim.optimization.receding_horizon_optimization import (
 from cycling_pulse_width_mhe import prepare_nmpc, set_fes_model
 
 OBJECTIVE_TO_WEIGHT_INDEX = {"force": 0, "fatigue": 1, "control": 2}
+ACADOS_STATUS_NAMES = {
+    0: "ACADOS_SUCCESS",
+    1: "ACADOS_NAN_DETECTED",
+    2: "ACADOS_MAXITER",
+    3: "ACADOS_MINSTEP",
+    4: "ACADOS_QP_FAILURE",
+    5: "ACADOS_READY",
+    6: "ACADOS_UNBOUNDED",
+    7: "ACADOS_TIMEOUT",
+    8: "ACADOS_QPSCALING_BOUNDS_NOT_SATISFIED",
+}
 
 
 def parse_objectives(raw_objective: str) -> set[str]:
@@ -228,6 +239,93 @@ def build_argument_parser() -> argparse.ArgumentParser:
         choices=(0, 1),
         default=0,
         help="Reuse the ACADOS implicit integrator Jacobian across Newton iterations.",
+    )
+    parser.add_argument(
+        "--acados-hessian-approx",
+        choices=("GAUSS_NEWTON", "EXACT"),
+        default="GAUSS_NEWTON",
+        help="Hessian approximation used by ACADOS.",
+    )
+    parser.add_argument(
+        "--acados-nlp-solver-type",
+        choices=("SQP", "SQP_WITH_FEASIBLE_QP"),
+        default="SQP",
+        help="ACADOS NLP solver type.",
+    )
+    parser.add_argument(
+        "--acados-search-direction-mode",
+        choices=("NOMINAL_QP", "BYRD_OMOJOKUN", "FEASIBILITY_QP"),
+        default="NOMINAL_QP",
+        help="Search direction mode used by ACADOS, mainly for SQP_WITH_FEASIBLE_QP.",
+    )
+    parser.add_argument(
+        "--acados-use-constraint-hessian-in-feas-qp",
+        action="store_true",
+        help="Use constraint Hessians in the feasibility QP of SQP_WITH_FEASIBLE_QP.",
+    )
+    parser.add_argument(
+        "--acados-disable-direction-mode-switch-to-nominal",
+        action="store_true",
+        help="Keep ACADOS in the selected non-nominal search direction mode.",
+    )
+    parser.add_argument(
+        "--acados-regularize-method",
+        choices=(
+            "NO_REGULARIZE",
+            "MIRROR",
+            "PROJECT",
+            "PROJECT_REDUC_HESS",
+            "CONVEXIFY",
+            "GERSHGORIN_LEVENBERG_MARQUARDT",
+        ),
+        default="GERSHGORIN_LEVENBERG_MARQUARDT",
+        help="ACADOS Hessian regularization method.",
+    )
+    parser.add_argument(
+        "--acados-levenberg-marquardt",
+        type=float,
+        default=0.0,
+        help="Additional Levenberg-Marquardt diagonal regularization for ACADOS.",
+    )
+    parser.add_argument(
+        "--acados-globalization",
+        choices=("FIXED_STEP", "MERIT_BACKTRACKING", "FUNNEL_L1PEN_LINESEARCH"),
+        default="MERIT_BACKTRACKING",
+        help="ACADOS globalization strategy.",
+    )
+    parser.add_argument(
+        "--acados-fixed-step-length",
+        type=float,
+        default=1.0,
+        help="Step length used when --acados-globalization=FIXED_STEP.",
+    )
+    parser.add_argument(
+        "--acados-nlp-qp-tol-strategy",
+        choices=("FIXED_QP_TOL", "ADAPTIVE_CURRENT_RES_JOINT", "ADAPTIVE_QPSCALING"),
+        default="ADAPTIVE_QPSCALING",
+        help="Strategy used by ACADOS to set QP tolerances inside SQP.",
+    )
+    parser.add_argument(
+        "--acados-qp-iter-max",
+        type=int,
+        default=50,
+        help="Maximum number of HPIPM QP iterations.",
+    )
+    parser.add_argument(
+        "--acados-ext-qp-res",
+        action="store_true",
+        help="Ask ACADOS to log extended QP residuals in the statistics table.",
+    )
+    parser.add_argument(
+        "--acados-diagnostics",
+        action="store_true",
+        help="Print ACADOS residuals, SQP/QP stats and finite-value checks after the solve.",
+    )
+    parser.add_argument(
+        "--acados-print-level",
+        type=int,
+        default=0,
+        help="Verbosity passed to ACADOS.",
     )
     parser.add_argument(
         "--max-ipopt-iterations",
@@ -488,6 +586,23 @@ def _codegen_signature(args: argparse.Namespace) -> str:
         "acados_newton_iter": args.acados_newton_iter,
         "acados_newton_tol": args.acados_newton_tol,
         "acados_jac_reuse": args.acados_jac_reuse,
+        "acados_hessian_approx": args.acados_hessian_approx,
+        "acados_nlp_solver_type": args.acados_nlp_solver_type,
+        "acados_search_direction_mode": args.acados_search_direction_mode,
+        "acados_use_constraint_hessian_in_feas_qp": (
+            args.acados_use_constraint_hessian_in_feas_qp
+        ),
+        "acados_disable_direction_mode_switch_to_nominal": (
+            args.acados_disable_direction_mode_switch_to_nominal
+        ),
+        "acados_regularize_method": args.acados_regularize_method,
+        "acados_levenberg_marquardt": args.acados_levenberg_marquardt,
+        "acados_globalization": args.acados_globalization,
+        "acados_fixed_step_length": args.acados_fixed_step_length,
+        "acados_nlp_qp_tol_strategy": args.acados_nlp_qp_tol_strategy,
+        "acados_qp_iter_max": args.acados_qp_iter_max,
+        "acados_ext_qp_res": args.acados_ext_qp_res,
+        "acados_print_level": args.acados_print_level,
         "sources": [
             _source_stamp(Path(__file__).resolve()),
             _source_stamp(
@@ -528,6 +643,18 @@ def configure_acados_solver(
     sim_method_newton_iter: int,
     sim_method_newton_tol: float | None,
     sim_method_jac_reuse: int,
+    hessian_approx: str,
+    nlp_solver_type: str,
+    search_direction_mode: str,
+    use_constraint_hessian_in_feas_qp: bool,
+    allow_direction_mode_switch_to_nominal: bool,
+    regularize_method: str,
+    levenberg_marquardt: float,
+    globalization: str,
+    fixed_step_length: float,
+    nlp_qp_tol_strategy: str,
+    qp_iter_max: int,
+    ext_qp_res: bool,
     print_level: int = 0,
 ) -> Solver.ACADOS:
     solver = Solver.ACADOS()
@@ -541,8 +668,8 @@ def configure_acados_solver(
     solver.set_c_compile(not shared_lib_path.exists())
     solver.set_qp_solver("PARTIAL_CONDENSING_HPIPM")
     solver.set_integrator_type("IRK")
-    solver.set_nlp_solver_type("SQP")
-    solver.set_hessian_approx("GAUSS_NEWTON")
+    solver.set_nlp_solver_type(nlp_solver_type)
+    solver.set_hessian_approx(hessian_approx)
     solver.set_sim_method_num_stages(sim_method_num_stages)
     solver.set_sim_method_num_steps(sim_method_num_steps)
     solver.set_sim_method_newton_iter(sim_method_newton_iter)
@@ -552,17 +679,30 @@ def configure_acados_solver(
     solver.set_print_level(print_level)
     solver.set_option_unsafe(collocation_type, "collocation_type")
     solver.set_option_unsafe(sim_method_jac_reuse, "sim_method_jac_reuse")
+    solver.set_option_unsafe(search_direction_mode, "search_direction_mode")
+    solver.set_option_unsafe(
+        use_constraint_hessian_in_feas_qp,
+        "use_constraint_hessian_in_feas_qp",
+    )
+    solver.set_option_unsafe(
+        allow_direction_mode_switch_to_nominal,
+        "allow_direction_mode_switch_to_nominal",
+    )
     if sim_method_newton_tol is not None:
         solver.set_option_unsafe(float(sim_method_newton_tol), "sim_method_newton_tol")
     # Favor numerical robustness over raw speed for this periodic MHE.
-    solver.set_option_unsafe("MERIT_BACKTRACKING", "globalization")
+    solver.set_option_unsafe(globalization, "globalization")
+    solver.set_option_unsafe(fixed_step_length, "globalization_fixed_step_length")
     solver.set_option_unsafe(1, "globalization_line_search_use_sufficient_descent")
     solver.set_option_unsafe(0, "globalization_use_SOC")
     solver.set_option_unsafe("ROBUST", "hpipm_mode")
-    solver.set_option_unsafe("GERSHGORIN_LEVENBERG_MARQUARDT", "regularize_method")
+    solver.set_option_unsafe(regularize_method, "regularize_method")
+    solver.set_option_unsafe(levenberg_marquardt, "levenberg_marquardt")
     solver.set_option_unsafe("OBJECTIVE_GERSHGORIN", "qpscaling_scale_objective")
     solver.set_option_unsafe("INF_NORM", "qpscaling_scale_constraints")
-    solver.set_option_unsafe("ADAPTIVE_QPSCALING", "nlp_qp_tol_strategy")
+    solver.set_option_unsafe(nlp_qp_tol_strategy, "nlp_qp_tol_strategy")
+    solver.set_option_unsafe(qp_iter_max, "qp_solver_iter_max")
+    solver.set_option_unsafe(1 if ext_qp_res else 0, "nlp_solver_ext_qp_res")
     solver.set_option_unsafe(0, "qp_solver_warm_start")
     solver.set_option_unsafe(0, "qp_solver_ric_alg")
     solver.set_option_unsafe(0, "qp_solver_cond_ric_alg")
@@ -643,6 +783,172 @@ def _control_traces_from_exported_cycles(
 
 def _status_is_success(status) -> bool:
     return status == 0
+
+
+def _status_label(status) -> str:
+    if status is None:
+        return "None"
+    return ACADOS_STATUS_NAMES.get(status, str(status))
+
+
+def _array_finite_summary(values) -> dict:
+    array = np.asarray(values, dtype=float)
+    finite = np.isfinite(array)
+    finite_values = array[finite]
+    return {
+        "shape": array.shape,
+        "finite": bool(np.all(finite)),
+        "nonfinite_count": int(array.size - np.count_nonzero(finite)),
+        "min": float(np.min(finite_values)) if finite_values.size else float("nan"),
+        "max": float(np.max(finite_values)) if finite_values.size else float("nan"),
+    }
+
+
+def _dict_finite_summary(values_by_key: dict) -> dict:
+    summary = {}
+    for key, values in values_by_key.items():
+        item = _array_finite_summary(values)
+        if not item["finite"]:
+            summary[key] = item
+    return summary
+
+
+def _get_acados_template_solver(solution):
+    ocp = getattr(solution, "ocp", None)
+    interface = getattr(ocp, "ocp_solver", None)
+    return getattr(interface, "ocp_solver", None)
+
+
+def _safe_acados_stat(acados_solver, field: str):
+    try:
+        return acados_solver.get_stats(field)
+    except Exception as exc:  # noqa: BLE001 - diagnostics should not mask a solve.
+        return {"error": str(exc)}
+
+
+def _safe_acados_stage_field(acados_solver, stage: int, field: str):
+    try:
+        return acados_solver.get(stage, field)
+    except Exception as exc:  # noqa: BLE001 - diagnostics should not mask a solve.
+        return {"error": str(exc)}
+
+
+def collect_acados_diagnostics(solution) -> dict:
+    diagnostics = {
+        "status": solution.status,
+        "status_label": _status_label(solution.status),
+        "state_nonfinite": {},
+        "control_nonfinite": {},
+        "solver_available": False,
+    }
+
+    try:
+        states = solution.decision_states(to_merge=SolutionMerge.NODES)
+        diagnostics["state_nonfinite"] = _dict_finite_summary(states)
+    except Exception as exc:  # noqa: BLE001 - diagnostics should not mask a solve.
+        diagnostics["state_error"] = str(exc)
+
+    try:
+        controls = solution.decision_controls(to_merge=SolutionMerge.NODES)
+        diagnostics["control_nonfinite"] = _dict_finite_summary(controls)
+    except Exception as exc:  # noqa: BLE001 - diagnostics should not mask a solve.
+        diagnostics["control_error"] = str(exc)
+
+    acados_solver = _get_acados_template_solver(solution)
+    if acados_solver is None:
+        return diagnostics
+
+    diagnostics["solver_available"] = True
+    for field in (
+        "sqp_iter",
+        "nlp_iter",
+        "qp_iter",
+        "qp_stat",
+        "alpha",
+        "residuals",
+        "qpscaling_status",
+        "time_tot",
+        "time_qp",
+        "time_qp_solver_call",
+        "time_sim",
+        "time_glob",
+        "time_reg",
+        "time_qpscaling",
+    ):
+        diagnostics[field] = _safe_acados_stat(acados_solver, field)
+
+    stats = _safe_acados_stat(acados_solver, "statistics")
+    diagnostics["statistics"] = stats
+    if not isinstance(stats, dict):
+        stats_array = np.asarray(stats, dtype=float)
+        diagnostics["statistics_finite"] = _array_finite_summary(stats_array)
+        if stats_array.size and stats_array.ndim == 2:
+            diagnostics["statistics_last_column"] = stats_array[:, -1]
+
+    stage_nonfinite = []
+    stage = 0
+    while True:
+        stage_items = {}
+        any_available = False
+        for field in ("x", "u", "pi", "lam"):
+            values = _safe_acados_stage_field(acados_solver, stage, field)
+            if isinstance(values, dict):
+                continue
+            any_available = True
+            item = _array_finite_summary(values)
+            if not item["finite"]:
+                stage_items[field] = item
+        if stage_items:
+            stage_nonfinite.append({"stage": stage, "fields": stage_items})
+        if not any_available:
+            break
+        stage += 1
+        if stage > 10000:
+            diagnostics["stage_scan_error"] = "Stopped after 10000 stages."
+            break
+
+    diagnostics["stage_nonfinite"] = stage_nonfinite
+    diagnostics["n_stages_scanned"] = stage
+    return diagnostics
+
+
+def _format_array(values) -> str:
+    if values is None:
+        return "None"
+    if isinstance(values, dict):
+        return f"error={values.get('error')}"
+    array = np.asarray(values, dtype=float).squeeze()
+    return np.array2string(array, precision=3, suppress_small=False)
+
+
+def print_acados_diagnostics(label: str, diagnostics: dict) -> None:
+    print(
+        f"{label} acados_status={diagnostics.get('status')} "
+        f"({diagnostics.get('status_label')})"
+    )
+    print(f"{label} solver_available={diagnostics.get('solver_available')}")
+    if diagnostics.get("state_nonfinite"):
+        print(f"{label} state_nonfinite={diagnostics['state_nonfinite']}")
+    if diagnostics.get("control_nonfinite"):
+        print(f"{label} control_nonfinite={diagnostics['control_nonfinite']}")
+    if diagnostics.get("stage_nonfinite"):
+        print(f"{label} stage_nonfinite={diagnostics['stage_nonfinite'][:5]}")
+    print(f"{label} residuals={_format_array(diagnostics.get('residuals'))}")
+    print(f"{label} sqp_iter={_format_array(diagnostics.get('sqp_iter'))}")
+    print(f"{label} qp_iter={_format_array(diagnostics.get('qp_iter'))}")
+    print(f"{label} qp_stat={_format_array(diagnostics.get('qp_stat'))}")
+    print(f"{label} alpha={_format_array(diagnostics.get('alpha'))}")
+    print(
+        f"{label} qpscaling_status="
+        f"{_format_array(diagnostics.get('qpscaling_status'))}"
+    )
+    if "statistics_finite" in diagnostics:
+        print(f"{label} statistics_finite={diagnostics['statistics_finite']}")
+    if "statistics_last_column" in diagnostics:
+        print(
+            f"{label} statistics_last_column="
+            f"{_format_array(diagnostics['statistics_last_column'])}"
+        )
 
 
 def _window_accounting(
@@ -1202,6 +1508,28 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
             print(f"acados_newton_tol: {args.acados_newton_tol}")
             print(f"acados_jac_reuse: {args.acados_jac_reuse}")
             print(f"acados_tolerance: {args.acados_tolerance}")
+            print(f"acados_hessian_approx: {args.acados_hessian_approx}")
+            print(f"acados_nlp_solver_type: {args.acados_nlp_solver_type}")
+            print(
+                "acados_search_direction_mode: " f"{args.acados_search_direction_mode}"
+            )
+            print(
+                "acados_use_constraint_hessian_in_feas_qp: "
+                f"{args.acados_use_constraint_hessian_in_feas_qp}"
+            )
+            print(
+                "acados_allow_direction_mode_switch_to_nominal: "
+                f"{not args.acados_disable_direction_mode_switch_to_nominal}"
+            )
+            print(f"acados_regularize_method: {args.acados_regularize_method}")
+            print(f"acados_levenberg_marquardt: {args.acados_levenberg_marquardt}")
+            print(f"acados_globalization: {args.acados_globalization}")
+            print(f"acados_fixed_step_length: {args.acados_fixed_step_length}")
+            print(f"acados_nlp_qp_tol_strategy: {args.acados_nlp_qp_tol_strategy}")
+            print(f"acados_qp_iter_max: {args.acados_qp_iter_max}")
+            print(f"acados_ext_qp_res: {args.acados_ext_qp_res}")
+            print(f"acados_diagnostics: {args.acados_diagnostics}")
+            print(f"acados_print_level: {args.acados_print_level}")
         if args.solver == "ipopt" or (
             periodic_cn_sum_approximation and not args.disable_standard_ipopt_warmup
         ):
@@ -1269,6 +1597,23 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
             sim_method_newton_iter=args.acados_newton_iter,
             sim_method_newton_tol=args.acados_newton_tol,
             sim_method_jac_reuse=args.acados_jac_reuse,
+            hessian_approx=args.acados_hessian_approx,
+            nlp_solver_type=args.acados_nlp_solver_type,
+            search_direction_mode=args.acados_search_direction_mode,
+            use_constraint_hessian_in_feas_qp=(
+                args.acados_use_constraint_hessian_in_feas_qp
+            ),
+            allow_direction_mode_switch_to_nominal=(
+                not args.acados_disable_direction_mode_switch_to_nominal
+            ),
+            regularize_method=args.acados_regularize_method,
+            levenberg_marquardt=args.acados_levenberg_marquardt,
+            globalization=args.acados_globalization,
+            fixed_step_length=args.acados_fixed_step_length,
+            nlp_qp_tol_strategy=args.acados_nlp_qp_tol_strategy,
+            qp_iter_max=args.acados_qp_iter_max,
+            ext_qp_res=args.acados_ext_qp_res,
+            print_level=args.acados_print_level,
         )
     else:
         solver = configure_ipopt_solver(
@@ -1283,7 +1628,11 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
         )
         if echo:
             summarize_single_shot(sol)
+            if args.solver == "acados" and args.acados_diagnostics:
+                print_acados_diagnostics("single_shot", collect_acados_diagnostics(sol))
         summary = build_single_shot_summary(sol)
+        if args.solver == "acados" and args.acados_diagnostics:
+            summary["acados_diagnostics"] = collect_acados_diagnostics(sol)
         summary["args"] = args
         return summary
 
@@ -1303,9 +1652,25 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
             requested_windows=args.n_windows,
             cycles_per_window=args.cycles_per_window,
         )
+        if args.solver == "acados" and args.acados_diagnostics:
+            _, source_window_solutions, _ = _split_receding_solution(sol)
+            if source_window_solutions:
+                for idx, window_solution in enumerate(source_window_solutions):
+                    print_acados_diagnostics(
+                        f"window[{idx}]",
+                        collect_acados_diagnostics(window_solution),
+                    )
+            else:
+                print_acados_diagnostics("merged", collect_acados_diagnostics(sol[0]))
     summary = build_window_summary(
         sol, requested_windows=args.n_windows, cycles_per_window=args.cycles_per_window
     )
+    if args.solver == "acados" and args.acados_diagnostics:
+        _, source_window_solutions, _ = _split_receding_solution(sol)
+        summary["acados_diagnostics"] = [
+            collect_acados_diagnostics(window_solution)
+            for window_solution in source_window_solutions
+        ]
     summary["args"] = args
     return summary
 
