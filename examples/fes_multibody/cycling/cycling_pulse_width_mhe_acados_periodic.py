@@ -38,6 +38,87 @@ ACADOS_STATUS_NAMES = {
 }
 
 
+def patch_bioptim_acados_control_bounds() -> None:
+    """
+    Patch the Bioptim 3.4 ACADOS interface control bounds for this example.
+
+    The installed Bioptim interface currently exports control bounds as
+    ``lbu=max`` and ``ubu=min`` during code generation, then later updates the
+    solver with unscaled control bounds. The ACADOS variables are scaled, so both
+    steps make the pulse-width QP infeasible. This local patch keeps the example
+    self-contained until the upstream interface is fixed.
+    """
+    from bioptim.interfaces.acados_interface import AcadosInterface
+
+    if getattr(AcadosInterface, "_cocofest_control_bounds_patch", False):
+        return
+
+    original_set_constraints = AcadosInterface._AcadosInterface__set_constraints
+    original_update_solver = AcadosInterface._AcadosInterface__update_solver
+
+    def scaled_control_bounds(interface) -> tuple[np.ndarray, np.ndarray]:
+        lower = np.empty(interface.acados_ocp.dims.nu)
+        upper = np.empty(interface.acados_ocp.dims.nu)
+        for key in interface.ocp.nlp[0].controls.keys():
+            control_bounds = (
+                interface.ocp.nlp[0]
+                .u_bounds[key]
+                .scale(interface.ocp.nlp[0].u_scaling[key].scaling)
+            )
+            index = interface.ocp.nlp[0].controls[key].index
+            lower[index] = np.asarray(control_bounds.min[:, 0], dtype=float)
+            upper[index] = np.asarray(control_bounds.max[:, 0], dtype=float)
+
+        if np.any(lower > upper):
+            raise RuntimeError(
+                "Scaled ACADOS control bounds are inconsistent "
+                f"(lower={lower}, upper={upper})."
+            )
+        return lower, upper
+
+    def patched_set_constraints(self, ocp):
+        original_set_constraints(self, ocp)
+        lower, upper = scaled_control_bounds(self)
+        self.acados_ocp.constraints.lbu = lower.reshape((-1, 1))
+        self.acados_ocp.constraints.ubu = upper.reshape((-1, 1))
+
+    def patched_update_solver(self):
+        original_update_solver(self)
+        if self.ocp_solver is None:
+            return
+
+        param_init = []
+        for key in self.ocp.nlp[0].parameters.keys():
+            scaled_init = self.ocp.parameter_init[key].scale(
+                self.ocp.parameters[key].scaling.scaling
+            )
+            param_init = np.concatenate((param_init, scaled_init.init[:, 0]))
+
+        terminal_node = self.acados_ocp.solver_options.N_horizon
+        terminal_x = np.empty((self.ocp.nlp[0].states.shape))
+        for key in self.ocp.nlp[0].states.keys():
+            index = self.ocp.nlp[0].states[key].index
+            self.ocp.nlp[0].x_init[key].check_and_adjust_dimensions(
+                self.ocp.nlp[0].states[key].shape, self.ocp.nlp[0].ns
+            )
+            terminal_x[index] = (
+                self.ocp.nlp[0].x_init[key].init.evaluate_at(terminal_node)
+                / self.ocp.nlp[0].x_scaling[key].scaling[:, 0]
+            )
+        self.ocp_solver.set(
+            terminal_node, "x", np.concatenate((param_init, terminal_x))
+        )
+
+        lower, upper = scaled_control_bounds(self)
+        for stage in range(self.acados_ocp.solver_options.N_horizon):
+            self.ocp_solver.constraints_set(stage, "lbu", lower)
+            self.ocp_solver.constraints_set(stage, "ubu", upper)
+
+    AcadosInterface._AcadosInterface__set_constraints = patched_set_constraints
+    AcadosInterface._AcadosInterface__update_solver = patched_update_solver
+    AcadosInterface._cocofest_control_bounds_patch = True
+
+
 def parse_objectives(raw_objective: str) -> set[str]:
     values = {item.strip().lower() for item in raw_objective.split(",") if item.strip()}
     allowed = set(OBJECTIVE_TO_WEIGHT_INDEX) | {"none"}
@@ -203,6 +284,22 @@ def build_argument_parser() -> argparse.ArgumentParser:
         help="Optional ACADOS NLP convergence tolerance applied to stationarity, constraints and complementarity.",
     )
     parser.add_argument(
+        "--acados-qp-solver",
+        choices=(
+            "PARTIAL_CONDENSING_HPIPM",
+            "FULL_CONDENSING_HPIPM",
+            "FULL_CONDENSING_QPOASES",
+        ),
+        default="PARTIAL_CONDENSING_HPIPM",
+        help="QP solver backend used by ACADOS.",
+    )
+    parser.add_argument(
+        "--acados-integrator-type",
+        choices=("ERK", "IRK"),
+        default="IRK",
+        help="ACADOS integrator type used on the generated shooting model.",
+    )
+    parser.add_argument(
         "--acados-collocation-type",
         type=str,
         choices=("GAUSS_LEGENDRE", "GAUSS_RADAU_IIA", "EXPLICIT_RUNGE_KUTTA"),
@@ -312,6 +409,18 @@ def build_argument_parser() -> argparse.ArgumentParser:
         help="Maximum number of HPIPM QP iterations.",
     )
     parser.add_argument(
+        "--acados-qpscaling-scale-objective",
+        choices=("NO_OBJECTIVE_SCALING", "OBJECTIVE_GERSHGORIN"),
+        default="OBJECTIVE_GERSHGORIN",
+        help="Objective scaling strategy used by the ACADOS QP scaling module.",
+    )
+    parser.add_argument(
+        "--acados-qpscaling-scale-constraints",
+        choices=("NO_CONSTRAINT_SCALING", "INF_NORM"),
+        default="INF_NORM",
+        help="Constraint scaling strategy used by the ACADOS QP scaling module.",
+    )
+    parser.add_argument(
         "--acados-ext-qp-res",
         action="store_true",
         help="Ask ACADOS to log extended QP residuals in the statistics table.",
@@ -326,6 +435,29 @@ def build_argument_parser() -> argparse.ArgumentParser:
         type=int,
         default=0,
         help="Verbosity passed to ACADOS.",
+    )
+    parser.add_argument(
+        "--acados-wheel-q-slack",
+        type=float,
+        default=0.02,
+        help="First and terminal node slack, in rad, for the ACADOS wheel/crank angle transfer bounds.",
+    )
+    parser.add_argument(
+        "--acados-wheel-qdot-slack",
+        type=float,
+        default=0.5,
+        help="First node slack, in rad/s, for the ACADOS wheel/crank velocity transfer bound when enabled.",
+    )
+    parser.add_argument(
+        "--acados-wheel-q-path-margin",
+        type=float,
+        default=2.0,
+        help="Path margin, in rad, around the transferred ACADOS wheel/crank angle interval.",
+    )
+    parser.add_argument(
+        "--acados-project-qdot-from-q",
+        action="store_true",
+        help="Project the ACADOS qdot initial guess from finite differences of q before solving.",
     )
     parser.add_argument(
         "--max-ipopt-iterations",
@@ -633,6 +765,8 @@ def _codegen_signature(args: argparse.Namespace) -> str:
         "pulse_width_scaling": args.pulse_width_scaling,
         "max_acados_iterations": args.max_acados_iterations,
         "acados_tolerance": args.acados_tolerance,
+        "acados_qp_solver": args.acados_qp_solver,
+        "acados_integrator_type": args.acados_integrator_type,
         "acados_collocation_type": args.acados_collocation_type,
         "acados_sim_stages": args.acados_sim_stages,
         "acados_sim_steps": args.acados_sim_steps,
@@ -654,6 +788,8 @@ def _codegen_signature(args: argparse.Namespace) -> str:
         "acados_fixed_step_length": args.acados_fixed_step_length,
         "acados_nlp_qp_tol_strategy": args.acados_nlp_qp_tol_strategy,
         "acados_qp_iter_max": args.acados_qp_iter_max,
+        "acados_qpscaling_scale_objective": args.acados_qpscaling_scale_objective,
+        "acados_qpscaling_scale_constraints": args.acados_qpscaling_scale_constraints,
         "acados_ext_qp_res": args.acados_ext_qp_res,
         "acados_print_level": args.acados_print_level,
         "sources": [
@@ -690,6 +826,8 @@ def configure_acados_solver(
     generated_code_path: str,
     max_iterations: int,
     convergence_tolerance: float | None,
+    qp_solver: str,
+    integrator_type: str,
     collocation_type: str,
     sim_method_num_stages: int,
     sim_method_num_steps: int,
@@ -707,6 +845,8 @@ def configure_acados_solver(
     fixed_step_length: float,
     nlp_qp_tol_strategy: str,
     qp_iter_max: int,
+    qpscaling_scale_objective: str,
+    qpscaling_scale_constraints: str,
     ext_qp_res: bool,
     print_level: int = 0,
 ) -> Solver.ACADOS:
@@ -719,8 +859,8 @@ def configure_acados_solver(
         / f"libacados_ocp_solver_{model_name}{_shared_lib_ext()}"
     )
     solver.set_c_compile(not shared_lib_path.exists())
-    solver.set_qp_solver("PARTIAL_CONDENSING_HPIPM")
-    solver.set_integrator_type("IRK")
+    solver.set_qp_solver(qp_solver)
+    solver.set_integrator_type(integrator_type)
     solver.set_nlp_solver_type(nlp_solver_type)
     solver.set_hessian_approx(hessian_approx)
     solver.set_sim_method_num_stages(sim_method_num_stages)
@@ -751,8 +891,8 @@ def configure_acados_solver(
     solver.set_option_unsafe("ROBUST", "hpipm_mode")
     solver.set_option_unsafe(regularize_method, "regularize_method")
     solver.set_option_unsafe(levenberg_marquardt, "levenberg_marquardt")
-    solver.set_option_unsafe("OBJECTIVE_GERSHGORIN", "qpscaling_scale_objective")
-    solver.set_option_unsafe("INF_NORM", "qpscaling_scale_constraints")
+    solver.set_option_unsafe(qpscaling_scale_objective, "qpscaling_scale_objective")
+    solver.set_option_unsafe(qpscaling_scale_constraints, "qpscaling_scale_constraints")
     solver.set_option_unsafe(nlp_qp_tol_strategy, "nlp_qp_tol_strategy")
     solver.set_option_unsafe(qp_iter_max, "qp_solver_iter_max")
     solver.set_option_unsafe(1 if ext_qp_res else 0, "nlp_solver_ext_qp_res")
@@ -1002,6 +1142,86 @@ def print_acados_diagnostics(label: str, diagnostics: dict) -> None:
             f"{label} statistics_last_column="
             f"{_format_array(diagnostics['statistics_last_column'])}"
         )
+
+
+def _trajectory_bounds_for_guess(bounds, n_nodes: int) -> tuple[np.ndarray, np.ndarray]:
+    lower = np.empty((bounds.min.shape[0], n_nodes))
+    upper = np.empty((bounds.max.shape[0], n_nodes))
+    for node in range(n_nodes):
+        column = 0 if node == 0 else 2 if node == n_nodes - 1 else 1
+        lower[:, node] = bounds.min[:, column]
+        upper[:, node] = bounds.max[:, column]
+    return lower, upper
+
+
+def print_initial_guess_diagnostics(nmpc) -> None:
+    states = {
+        key: np.asarray(nmpc.nlp[0].x_init[key].init, dtype=float)
+        for key in nmpc.nlp[0].x_init.keys()
+    }
+    controls = {
+        key: np.asarray(nmpc.nlp[0].u_init[key].init, dtype=float)
+        for key in nmpc.nlp[0].u_init.keys()
+    }
+
+    if "q" in states and "qdot" in states:
+        dt = nmpc.cycle_duration / nmpc.cycle_len
+        q = states["q"]
+        qdot = states["qdot"]
+        qdot_from_q = np.diff(q, axis=1) / dt
+        q_kinematic_defect = qdot_from_q - qdot[:, :-1]
+        per_dof = np.max(np.abs(q_kinematic_defect), axis=1)
+        print(
+            "initial_guess_q_kinematic_defect_max: "
+            f"{_format_array(np.max(np.abs(q_kinematic_defect)))}"
+        )
+        print("initial_guess_q_kinematic_defect_per_dof: " f"{_format_array(per_dof)}")
+
+    state_violations = {}
+    for key, values in states.items():
+        lower, upper = _trajectory_bounds_for_guess(
+            nmpc.nlp[0].x_bounds[key], values.shape[1]
+        )
+        violation = np.maximum(lower - values, 0.0) + np.maximum(values - upper, 0.0)
+        max_violation = float(np.max(violation)) if violation.size else 0.0
+        if max_violation > 1e-9:
+            state_violations[key] = max_violation
+
+    control_violations = {}
+    for key, values in controls.items():
+        bounds = nmpc.nlp[0].u_bounds[key]
+        lower = bounds.min[:, [0]]
+        upper = bounds.max[:, [0]]
+        violation = np.maximum(lower - values, 0.0) + np.maximum(values - upper, 0.0)
+        max_violation = float(np.max(violation)) if violation.size else 0.0
+        if max_violation > 1e-12:
+            control_violations[key] = max_violation
+
+    print(
+        "initial_guess_state_bound_violations: "
+        f"{state_violations if state_violations else 'None'}"
+    )
+    print(
+        "initial_guess_control_bound_violations: "
+        f"{control_violations if control_violations else 'None'}"
+    )
+
+
+def project_qdot_initial_guess_from_q(nmpc) -> None:
+    if "q" not in nmpc.nlp[0].x_init.keys() or "qdot" not in nmpc.nlp[0].x_init.keys():
+        return
+
+    dt = nmpc.cycle_duration / nmpc.cycle_len
+    q = np.asarray(nmpc.nlp[0].x_init["q"].init, dtype=float)
+    qdot = np.empty_like(q)
+    qdot[:, :-1] = np.diff(q, axis=1) / dt
+    qdot[:, -1] = qdot[:, -2]
+
+    lower, upper = _trajectory_bounds_for_guess(
+        nmpc.nlp[0].x_bounds["qdot"], qdot.shape[1]
+    )
+    nmpc.nlp[0].x_init["qdot"].init[:, :] = np.minimum(np.maximum(qdot, lower), upper)
+    nmpc._sync_acados_state_bounds()
 
 
 def _window_accounting(
@@ -2130,9 +2350,10 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
     nmpc = prepare_nmpc(model, mhe_info, cycling_info, nmpc_simulation_conditions)
     nmpc.n_cycles_simultaneous = args.cycles_per_window
     if args.solver == "acados":
+        patch_bioptim_acados_control_bounds()
         nmpc.first_node_state_slack = {
-            "q": [0.0, 0.0, 0.02],
-            "qdot": [0.0, 0.0, 0.5],
+            "q": [0.0, 0.0, args.acados_wheel_q_slack],
+            "qdot": [0.0, 0.0, args.acados_wheel_qdot_slack],
             "Cn_": 5e-3,
             "Cn_sum_": 5e-3,
             "F_": 1e-2,
@@ -2143,6 +2364,7 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
         nmpc.bound_first_node_all_states = False
         nmpc.bound_first_node_wheel_qdot = False
         nmpc.advance_wheel_q_bounds = True
+        nmpc.wheel_q_path_margin = args.acados_wheel_q_path_margin
         nmpc.use_signed_wheel_shift = True
         nmpc.transfer_debug = echo
 
@@ -2239,9 +2461,23 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
             print(f"acados_fixed_step_length: {args.acados_fixed_step_length}")
             print(f"acados_nlp_qp_tol_strategy: {args.acados_nlp_qp_tol_strategy}")
             print(f"acados_qp_iter_max: {args.acados_qp_iter_max}")
+            print(
+                "acados_qpscaling_scale_objective: "
+                f"{args.acados_qpscaling_scale_objective}"
+            )
+            print(
+                "acados_qpscaling_scale_constraints: "
+                f"{args.acados_qpscaling_scale_constraints}"
+            )
             print(f"acados_ext_qp_res: {args.acados_ext_qp_res}")
             print(f"acados_diagnostics: {args.acados_diagnostics}")
             print(f"acados_print_level: {args.acados_print_level}")
+            print("bioptim_acados_control_bound_patch: True")
+            print(f"acados_qp_solver: {args.acados_qp_solver}")
+            print(f"acados_integrator_type: {args.acados_integrator_type}")
+            print(f"acados_wheel_q_slack: {args.acados_wheel_q_slack}")
+            print(f"acados_wheel_qdot_slack: {args.acados_wheel_qdot_slack}")
+            print(f"acados_wheel_q_path_margin: {args.acados_wheel_q_path_margin}")
         if args.solver == "ipopt" or (
             periodic_cn_sum_approximation and not args.disable_standard_ipopt_warmup
         ):
@@ -2297,6 +2533,14 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
                     f"{', '.join(target_keys) if target_keys else 'None'}"
                 )
 
+    if args.solver == "acados" and args.acados_project_qdot_from_q:
+        project_qdot_initial_guess_from_q(nmpc)
+        if echo:
+            print("acados_project_qdot_from_q: True")
+
+    if args.solver == "acados" and args.acados_diagnostics:
+        print_initial_guess_diagnostics(nmpc)
+
     def update_functions(_nmpc, cycle_idx, _sol):
         print(f"window {cycle_idx}")
         if echo and _sol is not None:
@@ -2314,6 +2558,8 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
             generated_code_path=generated_code_path,
             max_iterations=args.max_acados_iterations,
             convergence_tolerance=args.acados_tolerance,
+            qp_solver=args.acados_qp_solver,
+            integrator_type=args.acados_integrator_type,
             collocation_type=args.acados_collocation_type,
             sim_method_num_stages=args.acados_sim_stages,
             sim_method_num_steps=(
@@ -2339,6 +2585,8 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
             fixed_step_length=args.acados_fixed_step_length,
             nlp_qp_tol_strategy=args.acados_nlp_qp_tol_strategy,
             qp_iter_max=args.acados_qp_iter_max,
+            qpscaling_scale_objective=args.acados_qpscaling_scale_objective,
+            qpscaling_scale_constraints=args.acados_qpscaling_scale_constraints,
             ext_qp_res=args.acados_ext_qp_res,
             print_level=args.acados_print_level,
         )
@@ -2405,6 +2653,15 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
 def main(cli_args: list[str] | None = None):
     parser = build_argument_parser()
     args = parser.parse_args(cli_args)
+    if (
+        args.acados_nlp_qp_tol_strategy == "ADAPTIVE_QPSCALING"
+        and args.acados_qpscaling_scale_objective == "NO_OBJECTIVE_SCALING"
+        and args.acados_qpscaling_scale_constraints == "NO_CONSTRAINT_SCALING"
+    ):
+        parser.error(
+            "--acados-nlp-qp-tol-strategy ADAPTIVE_QPSCALING requires at least one "
+            "QP scaling option to be enabled."
+        )
     ensure_acados_environment()
     solve_case(args, echo=True)
 
