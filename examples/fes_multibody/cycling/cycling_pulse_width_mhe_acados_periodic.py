@@ -357,6 +357,23 @@ def build_argument_parser() -> argparse.ArgumentParser:
         help="Skip the one-window IPOPT warmup with the standard Ding formulation before periodic MHE.",
     )
     parser.add_argument(
+        "--disable-periodic-fes-warmup-projection",
+        action="store_true",
+        help="Do not project periodic Ding FES initial guesses with a local rollout before ACADOS.",
+    )
+    parser.add_argument(
+        "--periodic-fes-warmup-projection-weight",
+        type=float,
+        default=1.0,
+        help="Blend weight between the original warmup FES states and the periodic Ding rollout.",
+    )
+    parser.add_argument(
+        "--periodic-fes-warmup-projection-mode",
+        choices=("calcium", "all"),
+        default="all",
+        help="Project only the periodic calcium states or all Ding fatigue states.",
+    )
+    parser.add_argument(
         "--disable-historical-ipopt-initial-guess",
         action="store_true",
         help="Do not reuse the historical IPOPT initial guess file from result/initial_guess when it exists.",
@@ -1168,6 +1185,215 @@ def estimate_periodic_cn_sum_from_cn(
     return cn_values + tauc * cn_dot
 
 
+def _to_numpy_vector(values) -> np.ndarray:
+    return np.asarray(values, dtype=float).reshape((-1,))
+
+
+def _ding_state_keys(muscle_name: str) -> tuple[str, str, str, str, str, str]:
+    return (
+        f"Cn_{muscle_name}",
+        f"Cn_sum_{muscle_name}",
+        f"F_{muscle_name}",
+        f"A_{muscle_name}",
+        f"Tau1_{muscle_name}",
+        f"Km_{muscle_name}",
+    )
+
+
+def _state_trajectory_bounds(
+    periodic_nmpc, key: str, n_nodes: int
+) -> tuple[np.ndarray, np.ndarray]:
+    bounds = periodic_nmpc.nlp[0].x_bounds[key]
+    lower = np.empty(n_nodes)
+    upper = np.empty(n_nodes)
+    for node in range(n_nodes):
+        column = 0 if node == 0 else 2 if node == n_nodes - 1 else 1
+        lower[node] = bounds.min[0, column]
+        upper[node] = bounds.max[0, column]
+    return lower, upper
+
+
+def _clip_state_trajectory_to_bounds(
+    periodic_nmpc, key: str, values: np.ndarray
+) -> np.ndarray:
+    lower, upper = _state_trajectory_bounds(periodic_nmpc, key, values.size)
+    return np.minimum(np.maximum(values, lower), upper)
+
+
+def _periodic_ding_rhs(
+    muscle_model, state: np.ndarray, pulse_width: float
+) -> np.ndarray:
+    return _to_numpy_vector(
+        muscle_model.system_dynamics(
+            cn=state[0],
+            cn_sum=state[1],
+            f=state[2],
+            a=state[3],
+            tau1=state[4],
+            km=state[5],
+            pulse_width=pulse_width,
+        )
+    )
+
+
+def _periodic_calcium_rhs(muscle_model, state: np.ndarray) -> np.ndarray:
+    cn = state[0]
+    cn_sum = state[1]
+    return np.array(
+        [
+            float(muscle_model.cn_dot_fun(cn, cn_sum)),
+            float(muscle_model.cn_sum_dot_fun(cn_sum)),
+        ]
+    )
+
+
+def _rk4_periodic_ding_step(
+    muscle_model, state: np.ndarray, pulse_width: float, dt: float
+) -> np.ndarray:
+    k1 = _periodic_ding_rhs(muscle_model, state, pulse_width)
+    k2 = _periodic_ding_rhs(muscle_model, state + 0.5 * dt * k1, pulse_width)
+    k3 = _periodic_ding_rhs(muscle_model, state + 0.5 * dt * k2, pulse_width)
+    k4 = _periodic_ding_rhs(muscle_model, state + dt * k3, pulse_width)
+    return state + dt * (k1 + 2 * k2 + 2 * k3 + k4) / 6
+
+
+def _rk4_periodic_calcium_step(
+    muscle_model, state: np.ndarray, dt: float
+) -> np.ndarray:
+    k1 = _periodic_calcium_rhs(muscle_model, state)
+    k2 = _periodic_calcium_rhs(muscle_model, state + 0.5 * dt * k1)
+    k3 = _periodic_calcium_rhs(muscle_model, state + 0.5 * dt * k2)
+    k4 = _periodic_calcium_rhs(muscle_model, state + dt * k3)
+    return state + dt * (k1 + 2 * k2 + 2 * k3 + k4) / 6
+
+
+def _periodic_fes_rollout_defects(periodic_nmpc) -> dict[str, float]:
+    dt = periodic_nmpc.cycle_duration / periodic_nmpc.cycle_len
+    defects = {}
+    for muscle_model in periodic_nmpc.nlp[0].model.muscles_dynamics_model:
+        muscle_name = muscle_model.muscle_name
+        state_keys = _ding_state_keys(muscle_name)
+        control_key = f"last_pulse_width_{muscle_name}"
+        if any(key not in periodic_nmpc.nlp[0].x_init.keys() for key in state_keys):
+            continue
+        if control_key not in periodic_nmpc.nlp[0].u_init.keys():
+            continue
+
+        states = np.vstack(
+            [periodic_nmpc.nlp[0].x_init[key].init[0, :] for key in state_keys]
+        )
+        controls = periodic_nmpc.nlp[0].u_init[control_key].init[0, :]
+        max_defect = 0.0
+        for node, pulse_width in enumerate(controls):
+            expected = _rk4_periodic_ding_step(
+                muscle_model, states[:, node], pulse_width, dt
+            )
+            max_defect = max(
+                max_defect, float(np.max(np.abs(states[:, node + 1] - expected)))
+            )
+        defects[muscle_name] = max_defect
+    return defects
+
+
+def _projection_state_keys(muscle_name: str, projection_mode: str) -> tuple[str, ...]:
+    state_keys = _ding_state_keys(muscle_name)
+    if projection_mode == "calcium":
+        return state_keys[:2]
+    if projection_mode == "all":
+        return state_keys
+    raise ValueError(
+        "--periodic-fes-warmup-projection-mode must be 'calcium' or 'all'."
+    )
+
+
+def _project_periodic_states(
+    muscle_model,
+    original_states: np.ndarray,
+    controls: np.ndarray,
+    dt: float,
+    projection_mode: str,
+) -> np.ndarray:
+    projected_states = np.empty_like(original_states)
+    projected_states[:, 0] = original_states[:, 0]
+    for node in range(controls.size):
+        if projection_mode == "calcium":
+            projected_states[:, node + 1] = _rk4_periodic_calcium_step(
+                muscle_model, projected_states[:, node], dt
+            )
+        else:
+            projected_states[:, node + 1] = _rk4_periodic_ding_step(
+                muscle_model, projected_states[:, node], controls[node], dt
+            )
+    return projected_states
+
+
+def project_periodic_fes_initial_guess(
+    periodic_nmpc,
+    projection_weight: float = 1.0,
+    projection_mode: str = "all",
+) -> dict[str, float]:
+    if projection_weight < 0.0 or projection_weight > 1.0:
+        raise ValueError(
+            "--periodic-fes-warmup-projection-weight must be between 0 and 1."
+        )
+
+    dt = periodic_nmpc.cycle_duration / periodic_nmpc.cycle_len
+    defects_before = _periodic_fes_rollout_defects(periodic_nmpc)
+    projected_muscles = 0
+    clipped_values = 0
+    max_bound_violation = 0.0
+
+    for muscle_model in periodic_nmpc.nlp[0].model.muscles_dynamics_model:
+        muscle_name = muscle_model.muscle_name
+        state_keys = _projection_state_keys(muscle_name, projection_mode)
+        control_key = f"last_pulse_width_{muscle_name}"
+        if any(key not in periodic_nmpc.nlp[0].x_init.keys() for key in state_keys):
+            continue
+        if control_key not in periodic_nmpc.nlp[0].u_init.keys():
+            continue
+
+        original_states = np.vstack(
+            [periodic_nmpc.nlp[0].x_init[key].init[0, :] for key in state_keys]
+        )
+        controls = periodic_nmpc.nlp[0].u_init[control_key].init[0, :]
+        projected_states = _project_periodic_states(
+            muscle_model, original_states, controls, dt, projection_mode
+        )
+
+        blended_states = (
+            projection_weight * projected_states
+            + (1.0 - projection_weight) * original_states
+        )
+        for state_idx, key in enumerate(state_keys):
+            values = blended_states[state_idx, :]
+            lower, upper = _state_trajectory_bounds(periodic_nmpc, key, values.size)
+            lower_violation = np.maximum(lower - values, 0.0)
+            upper_violation = np.maximum(values - upper, 0.0)
+            violations = lower_violation + upper_violation
+            clipped_values += int(np.count_nonzero(violations))
+            max_bound_violation = max(max_bound_violation, float(np.max(violations)))
+            periodic_nmpc.nlp[0].x_init[key].init[0, :] = np.minimum(
+                np.maximum(values, lower), upper
+            )
+        projected_muscles += 1
+
+    defects_after = _periodic_fes_rollout_defects(periodic_nmpc)
+    periodic_nmpc._correct_init_guess_to_fit_bounds(corrected_input="states")
+    periodic_nmpc._sync_acados_state_bounds()
+
+    max_before = max(defects_before.values(), default=0.0)
+    max_after = max(defects_after.values(), default=0.0)
+    return {
+        "projected_muscles": projected_muscles,
+        "projection_weight": projection_weight,
+        "projection_mode": projection_mode,
+        "max_defect_before": max_before,
+        "max_defect_after": max_after,
+        "clipped_values": clipped_values,
+        "max_bound_violation": max_bound_violation,
+    }
+
+
 class _WarmupSolutionAdapter:
     def __init__(self, states: dict[str, np.ndarray], controls: dict[str, np.ndarray]):
         self._states = states
@@ -1228,7 +1454,14 @@ def _adapt_warmup_solution_to_periodic_nodes(
     return _WarmupSolutionAdapter(adapted_states, adapted_controls)
 
 
-def apply_standard_warmup_to_periodic_nmpc(periodic_nmpc, warmup_solution):
+def apply_standard_warmup_to_periodic_nmpc(
+    periodic_nmpc,
+    warmup_solution,
+    project_fes_warmup: bool = True,
+    projection_weight: float = 1.0,
+    projection_mode: str = "all",
+    echo: bool = False,
+):
     adapted_solution = _adapt_warmup_solution_to_periodic_nodes(
         periodic_nmpc, warmup_solution
     )
@@ -1269,6 +1502,24 @@ def apply_standard_warmup_to_periodic_nmpc(periodic_nmpc, warmup_solution):
             )
             periodic_nmpc.nlp[0].x_bounds[key].min[0, 0] = center - slack
             periodic_nmpc.nlp[0].x_bounds[key].max[0, 0] = center + slack
+
+    if project_fes_warmup:
+        projection_summary = project_periodic_fes_initial_guess(
+            periodic_nmpc,
+            projection_weight=projection_weight,
+            projection_mode=projection_mode,
+        )
+        if echo:
+            print(
+                "periodic_fes_warmup_projection: "
+                f"projected_muscles={projection_summary['projected_muscles']} "
+                f"mode={projection_summary['projection_mode']} "
+                f"weight={projection_summary['projection_weight']:.3g} "
+                f"max_defect_before={projection_summary['max_defect_before']:.6g} "
+                f"max_defect_after={projection_summary['max_defect_after']:.6g} "
+                f"clipped_values={projection_summary['clipped_values']} "
+                f"max_bound_violation={projection_summary['max_bound_violation']:.6g}"
+            )
 
     return adapted_solution
 
@@ -1498,6 +1749,18 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
         print(f"state_scaling: {args.state_scaling}")
         print(f"pulse_width_scaling: {args.pulse_width_scaling}")
         if args.solver == "acados":
+            print(
+                "periodic_fes_warmup_projection: "
+                f"{not args.disable_periodic_fes_warmup_projection}"
+            )
+            print(
+                "periodic_fes_warmup_projection_weight: "
+                f"{args.periodic_fes_warmup_projection_weight}"
+            )
+            print(
+                "periodic_fes_warmup_projection_mode: "
+                f"{args.periodic_fes_warmup_projection_mode}"
+            )
             print(f"acados_collocation_type: {args.acados_collocation_type}")
             print(f"acados_sim_stages: {args.acados_sim_stages}")
             print(
@@ -1554,7 +1817,12 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
             args, mhe_info, cycling_info, warmup_simulation_conditions, model_path
         )
         adapted_warmup_solution = apply_standard_warmup_to_periodic_nmpc(
-            nmpc, warmup_solution
+            nmpc,
+            warmup_solution,
+            project_fes_warmup=not args.disable_periodic_fes_warmup_projection,
+            projection_weight=args.periodic_fes_warmup_projection_weight,
+            projection_mode=args.periodic_fes_warmup_projection_mode,
+            echo=echo,
         )
         if (
             args.solver == "acados"
