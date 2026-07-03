@@ -146,6 +146,9 @@ def _solver_config(
     control_regularization_target_source: str,
     wheel_qdot_regularization_weight: float,
     wheel_qdot_regularization_target: float,
+    state_scaling: str,
+    pulse_width_scaling: float,
+    acados_tolerance: float | None,
 ) -> argparse.Namespace:
     if solver_name == "ipopt":
         return _namespace_from_cli(
@@ -175,6 +178,9 @@ def _solver_config(
             control_regularization_target_source=control_regularization_target_source,
             wheel_qdot_regularization_weight=wheel_qdot_regularization_weight,
             wheel_qdot_regularization_target=wheel_qdot_regularization_target,
+            state_scaling=state_scaling,
+            pulse_width_scaling=pulse_width_scaling,
+            acados_tolerance=acados_tolerance,
         )
 
     if solver_name == "acados":
@@ -205,6 +211,9 @@ def _solver_config(
             control_regularization_target_source=control_regularization_target_source,
             wheel_qdot_regularization_weight=wheel_qdot_regularization_weight,
             wheel_qdot_regularization_target=wheel_qdot_regularization_target,
+            state_scaling=state_scaling,
+            pulse_width_scaling=pulse_width_scaling,
+            acados_tolerance=acados_tolerance,
         )
 
     raise ValueError(f"Unsupported solver_name '{solver_name}'")
@@ -334,6 +343,11 @@ def main(
     wheel_qdot_regularization_weight: float = 0.0,
     acados_wheel_qdot_regularization_weight: float | None = None,
     wheel_qdot_regularization_target: float = -float(2 * np.pi),
+    state_scaling: str = "none",
+    acados_state_scaling: str | None = None,
+    pulse_width_scaling: float = 1 / 400,
+    acados_pulse_width_scaling: float | None = None,
+    acados_tolerance: float | None = None,
     print_traces: bool = False,
 ):
     os.chdir(EXAMPLE_DIR)
@@ -357,6 +371,9 @@ def main(
         control_regularization_target_source=control_regularization_target_source,
         wheel_qdot_regularization_weight=wheel_qdot_regularization_weight,
         wheel_qdot_regularization_target=wheel_qdot_regularization_target,
+        state_scaling=state_scaling,
+        pulse_width_scaling=pulse_width_scaling,
+        acados_tolerance=acados_tolerance,
     )
     acados_args = _solver_config(
         "acados",
@@ -387,6 +404,15 @@ def main(
             else wheel_qdot_regularization_weight
         ),
         wheel_qdot_regularization_target=wheel_qdot_regularization_target,
+        state_scaling=(
+            acados_state_scaling if acados_state_scaling is not None else state_scaling
+        ),
+        pulse_width_scaling=(
+            acados_pulse_width_scaling
+            if acados_pulse_width_scaling is not None
+            else pulse_width_scaling
+        ),
+        acados_tolerance=acados_tolerance,
     )
 
     print("Running IPOPT reference configuration...")
@@ -438,6 +464,15 @@ def build_cli() -> argparse.ArgumentParser:
     parser.add_argument(
         "--wheel-qdot-regularization-target", type=float, default=-float(2 * np.pi)
     )
+    parser.add_argument(
+        "--state-scaling", choices=("none", "fes", "full"), default="none"
+    )
+    parser.add_argument(
+        "--acados-state-scaling", choices=("none", "fes", "full"), default=None
+    )
+    parser.add_argument("--pulse-width-scaling", type=float, default=1 / 400)
+    parser.add_argument("--acados-pulse-width-scaling", type=float, default=None)
+    parser.add_argument("--acados-tolerance", type=float, default=None)
     parser.add_argument("--print-traces", action="store_true")
     return parser
 
@@ -464,5 +499,10 @@ if __name__ == "__main__":
         wheel_qdot_regularization_weight=args.wheel_qdot_regularization_weight,
         acados_wheel_qdot_regularization_weight=args.acados_wheel_qdot_regularization_weight,
         wheel_qdot_regularization_target=args.wheel_qdot_regularization_target,
+        state_scaling=args.state_scaling,
+        acados_state_scaling=args.acados_state_scaling,
+        pulse_width_scaling=args.pulse_width_scaling,
+        acados_pulse_width_scaling=args.acados_pulse_width_scaling,
+        acados_tolerance=args.acados_tolerance,
         print_traces=args.print_traces,
     )

@@ -54,7 +54,7 @@ class MyCyclicNMPC(FesNmpcMsk):
         super().__init__(**kwargs)
         self.nodes_per_cycle = self.cycle_len * (
             self.nlp[0].dynamics_type.ode_solver.polynomial_degree + 1
-            if isinstance(self.nlp[0].dynamics_type.ode_solver, OdeSolver.COLLOCATION)
+            if self.nlp[0].dynamics_type.ode_solver.is_direct_collocation
             else 1
         )
         self.pedal_turn_in_one_cycle = (
@@ -546,6 +546,8 @@ def prepare_nmpc(
     wheel_qdot_regularization_target = simulation_conditions.get(
         "wheel_qdot_regularization_target", -float(2 * np.pi)
     )
+    state_scaling = simulation_conditions.get("state_scaling", "none")
+    pulse_width_scaling = simulation_conditions.get("pulse_width_scaling", 1 / 400)
     # --- Pickle file info --- #
     initial_guess_path = simulation_conditions["init_guess_file_path"]
 
@@ -590,11 +592,14 @@ def prepare_nmpc(
     )
 
     # --- Set states scaling --- #
-    # x_scaling = set_x_scaling(bio_model=model)  # Less efficient
+    x_scaling = set_x_scaling(model, mode=state_scaling)
 
     # --- Set controls --- #
     u_bounds, u_init, u_scaling = set_u_bounds_and_init(
-        model, window_n_shooting, init_file_path=initial_guess_path
+        model,
+        window_n_shooting,
+        init_file_path=initial_guess_path,
+        pulse_width_scaling=pulse_width_scaling,
     )
 
     # --- Set constraints --- #
@@ -640,7 +645,7 @@ def prepare_nmpc(
         constraints=constraints,
         x_bounds=x_bounds,
         x_init=x_init,
-        # x_scaling=x_scaling,
+        x_scaling=x_scaling,
         u_bounds=u_bounds,
         u_init=u_init,
         u_scaling=u_scaling,
@@ -694,7 +699,7 @@ def set_q_qdot_init(
         # biorbd_model_path = "../../msk_models/Seth/Modified_UL_Seth_2D_Cycling_for_IK.bioMod"
         n_shooting = (
             n_shooting * (ode_solver.polynomial_degree + 1)
-            if isinstance(ode_solver, OdeSolver.COLLOCATION)
+            if ode_solver.is_direct_collocation
             else n_shooting
         )
         # --- Run inverse kinematics --- #
@@ -708,14 +713,16 @@ def set_q_qdot_init(
             cycling_number=turn_number,
         )
         # --- Set q and qdot initial guesses values obtained by inverse kinematics --- #
-        if isinstance(ode_solver, OdeSolver.COLLOCATION):
+        if ode_solver.is_direct_collocation:
             x_init.add("q", q_guess, interpolation=InterpolationType.ALL_POINTS)
             x_init.add("qdot", qdot_guess, interpolation=InterpolationType.ALL_POINTS)
-        elif isinstance(ode_solver, OdeSolver.RK1 | OdeSolver.RK2 | OdeSolver.RK4):
+        elif ode_solver.is_direct_shooting:
             x_init.add("q", q_guess, interpolation=InterpolationType.EACH_FRAME)
             x_init.add("qdot", qdot_guess, interpolation=InterpolationType.EACH_FRAME)
         else:
-            raise RuntimeError("ode_solver must be COLLOCATION or RK4")
+            raise RuntimeError(
+                "ode_solver must be direct collocation or direct shooting"
+            )
 
     return x_init
 
@@ -729,7 +736,7 @@ def set_x_bounds(
 ) -> tuple[BoundsList, InitialGuessList]:
     # --- Set interpolation type according to ode_solver type --- #
     interpolation_type = InterpolationType.EACH_FRAME
-    if isinstance(ode_solver, OdeSolver.COLLOCATION):
+    if ode_solver.is_direct_collocation:
         n_shooting = n_shooting * (ode_solver.polynomial_degree + 1)
         interpolation_type = InterpolationType.ALL_POINTS
 
@@ -817,19 +824,42 @@ def set_x_bounds(
     return x_bounds, x_init
 
 
-def set_x_scaling(bio_model) -> VariableScalingList:
+def set_x_scaling(bio_model, mode: str = "none") -> VariableScalingList | None:
+    if mode == "none":
+        return None
+    if mode not in ("fes", "full"):
+        raise ValueError("state_scaling must be one of: none, fes, full")
+
     x_scaling = VariableScalingList()
-    model_list = bio_model.muscles_dynamics_model
-    prefix_key_list = ["Cn_", "A_", "Tau1_", "Km_"]
-    scaling_value_list = [1 / 100, 1000, 1 / 100, 1 / 10]
-    for i in range(len(model_list)):
-        for j in range(len(prefix_key_list)):
-            key = prefix_key_list[j] + model_list[i].muscle_name
-            x_scaling.add(key=key, scaling=[scaling_value_list[j]])
+
+    if mode == "full":
+        x_scaling.add(key="q", scaling=[2.0, 2.0, 2 * np.pi])
+        x_scaling.add(key="qdot", scaling=[10.0, 14.0, 2 * np.pi])
+
+    for model in bio_model.muscles_dynamics_model:
+        muscle_name = model.muscle_name
+        state_scales = {
+            "Cn": 10.0,
+            "Cn_sum": 200.0,
+            "F": max(float(model.fmax), 1.0),
+            "A": max(float(model.a_scale), 1.0),
+            "Tau1": 1.0,
+            "Km": 1.0,
+        }
+        for state_name in model.name_dof:
+            key = f"{state_name}_{muscle_name}"
+            if state_name in state_scales:
+                x_scaling.add(key=key, scaling=[state_scales[state_name]])
+
     return x_scaling
 
 
-def set_u_bounds_and_init(bio_model, n_shooting, init_file_path):
+def set_u_bounds_and_init(
+    bio_model, n_shooting, init_file_path, pulse_width_scaling: float = 1 / 400
+):
+    if pulse_width_scaling <= 0:
+        raise ValueError("pulse_width_scaling must be strictly positive")
+
     u_bounds, u_init = OcpFesMsk.set_u_bounds_fes(bio_model)
     u_init = InitialGuessList()  # Controls initial guess
     models = bio_model.muscles_dynamics_model
@@ -852,7 +882,7 @@ def set_u_bounds_and_init(bio_model, n_shooting, init_file_path):
     u_scaling = VariableScalingList()
     for model in bio_model.muscles_dynamics_model:
         key = "last_pulse_width_" + str(model.muscle_name)
-        u_scaling.add(key=key, scaling=[1 / 400])
+        u_scaling.add(key=key, scaling=[pulse_width_scaling])
 
     return (
         u_bounds,
@@ -1134,14 +1164,18 @@ def create_simulation_list(
             parts.append(f"{int(w_control*100)}_control")
         weight_suffix = "_".join(parts)
 
-        if isinstance(solver_type, OdeSolver.COLLOCATION):
+        if isinstance(solver_type, OdeSolver.IRK):
+            solver_suffix = f"irk_{solver_type.polynomial_degree}_{solver_type.method}"
+        elif isinstance(solver_type, OdeSolver.COLLOCATION):
             solver_suffix = (
                 f"collocation_{solver_type.polynomial_degree}_{solver_type.method}"
             )
+        elif isinstance(solver_type, OdeSolver.RK8):
+            solver_suffix = f"rk8_{solver_type.n_integration_steps}"
         elif isinstance(solver_type, OdeSolver.RK4):
             solver_suffix = f"rk4_{solver_type.n_integration_steps}"
         else:
-            raise RuntimeError("ode_solver must be COLLOCATION or RK4")
+            raise RuntimeError("ode_solver must be COLLOCATION, IRK, RK8, or RK4")
 
         full_suffix = f"{weight_suffix}_{solver_suffix}_with_init"
         pkl = str(
@@ -1260,8 +1294,11 @@ def run_initial_guess(
         OdeSolver.RK1: "rk1",
         OdeSolver.RK2: "rk2",
         OdeSolver.RK4: "rk4",
+        OdeSolver.RK8: "rk8",
     }.get(type(ode_solver))
-    if isinstance(ode_solver, OdeSolver.COLLOCATION):
+    if isinstance(ode_solver, OdeSolver.IRK):
+        solver_suffix = f"irk_{ode_solver.polynomial_degree}_{ode_solver.method}"
+    elif isinstance(ode_solver, OdeSolver.COLLOCATION):
         solver_suffix = (
             f"collocation_{ode_solver.polynomial_degree}_{ode_solver.method}"
         )

@@ -45,30 +45,49 @@ class FesNmpcMsk(FesNmpc):
             muscle_model = self.nlp[0].model.muscles_dynamics_model[0]
             truncation_term = muscle_model.sum_stim_truncation
             solution_stimulation_time = muscle_model.stim_time[-truncation_term:]
-            previous_stim_time = [x - self.phase_time[0] for x in solution_stimulation_time]
+            previous_stim_time = [
+                x - self.phase_time[0] for x in solution_stimulation_time
+            ]
             previous_stim = {"time": previous_stim_time}
-            new_model = self.build_new_model(model=self.nlp[0].model, previous_stim_time=previous_stim)
+            new_model = self.build_new_model(
+                model=self.nlp[0].model, previous_stim_time=previous_stim
+            )
             if self.first_run:
-                numerical_data_timeseries, _ = new_model.muscles_dynamics_model[0].get_numerical_data_time_series(
-                    self.n_shooting, self.phase_time[0]
-                )
-                if numerical_data_timeseries and "stim_time" in numerical_data_timeseries:
+                numerical_data_timeseries, _ = new_model.muscles_dynamics_model[
+                    0
+                ].get_numerical_data_time_series(self.n_shooting, self.phase_time[0])
+                if (
+                    numerical_data_timeseries
+                    and "stim_time" in numerical_data_timeseries
+                ):
                     if self.nlp[0].numerical_data_timeseries is None:
                         self.nlp[0].numerical_data_timeseries = {}
-                    self.nlp[0].numerical_data_timeseries["stim_time"] = numerical_data_timeseries["stim_time"]
+                    self.nlp[0].numerical_data_timeseries["stim_time"] = (
+                        numerical_data_timeseries["stim_time"]
+                    )
                 self.first_run = False
 
             self.nlp[0].model = new_model
             self.all_models.append(new_model)
 
-    def _initialize_solution(self, dt: float, states: list, controls: list, parameters: list):
+    def _initialize_solution(
+        self, dt: float, states: list, controls: list, parameters: list
+    ):
         combine_model = False if isinstance(self.nlp[0].model, BiorbdModel) else True
-        combined_model = self.create_model_from_list(self.all_models) if combine_model else self.nlp[0].model
+        combined_model = (
+            self.create_model_from_list(self.all_models)
+            if combine_model
+            else self.nlp[0].model
+        )
         x_init = InitialGuessList()
         for key in self.nlp[0].states.keys():
             x_init.add(
                 key,
-                np.concatenate([state[key][:, :-1] for state in states] + [states[-1][key][:, -1:]], axis=1),
+                np.concatenate(
+                    [state[key][:, :-1] for state in states]
+                    + [states[-1][key][:, -1:]],
+                    axis=1,
+                ),
                 interpolation=self.nlp[0].x_init.type,
                 phase=0,
             )
@@ -80,14 +99,24 @@ class FesNmpcMsk(FesNmpc):
 
         p_init = InitialGuessList()
         if combine_model:
-            stimulation_per_cycle = int(len(self.nlp[0].model.stim_time) / self.n_cycles)
+            stimulation_per_cycle = int(
+                len(self.nlp[0].model.stim_time) / self.n_cycles
+            )
             for key in self.nlp[0].parameters.keys():
                 combined_parameters = (
-                    [[parameters[i][key][0]] * stimulation_per_cycle for i in range(len(parameters))]
+                    [
+                        [parameters[i][key][0]] * stimulation_per_cycle
+                        for i in range(len(parameters))
+                    ]
                     if self.bimapped_param
-                    else [list(parameter[key][:stimulation_per_cycle]) for parameter in parameters]
+                    else [
+                        list(parameter[key][:stimulation_per_cycle])
+                        for parameter in parameters
+                    ]
                 )
-                combined_parameters = [val for sublist in combined_parameters for val in sublist]
+                combined_parameters = [
+                    val for sublist in combined_parameters for val in sublist
+                ]
                 p_init[key] = combined_parameters
 
             parameters = ParameterList(use_sx=self.cx == SX)
@@ -115,9 +144,17 @@ class FesNmpcMsk(FesNmpc):
             parameter_init=p_init,
         )
         a_init = InitialGuessList()
-        return Solution.from_initial_guess(solution_ocp, [np.array([dt]), x_init, u_init, p_init, a_init])
+        return Solution.from_initial_guess(
+            solution_ocp, [np.array([dt]), x_init, u_init, p_init, a_init]
+        )
 
-    def _initialize_one_cycle(self, dt: float, states: np.ndarray, controls: np.ndarray, parameters: np.ndarray):
+    def _initialize_one_cycle(
+        self,
+        dt: float,
+        states: np.ndarray,
+        controls: np.ndarray,
+        parameters: np.ndarray,
+    ):
         """return a solution for a single window kept of the MHE"""
         x_init = InitialGuessList()
         for key in self.nlp[0].states.keys():
@@ -132,10 +169,14 @@ class FesNmpcMsk(FesNmpc):
         u_init_for_solution = InitialGuessList()
         for key in self.nlp[0].controls.keys():
             controls_tp = controls[key]
-            u_init_for_solution.add(key, controls_tp, interpolation=InterpolationType.EACH_FRAME, phase=0)
+            u_init_for_solution.add(
+                key, controls_tp, interpolation=InterpolationType.EACH_FRAME, phase=0
+            )
             if self.nlp[0].control_type == ControlType.CONSTANT:
                 controls_tp = controls_tp[:, :-1]
-            u_init.add(key, controls_tp, interpolation=InterpolationType.EACH_FRAME, phase=0)
+            u_init.add(
+                key, controls_tp, interpolation=InterpolationType.EACH_FRAME, phase=0
+            )
 
         model_serialized = self.nlp[0].model.serialize()
         model_class = model_serialized[0]
@@ -174,7 +215,9 @@ class FesNmpcMsk(FesNmpc):
             parameter_bounds=self.parameter_bounds,
         )
         a_init = InitialGuessList()
-        return Solution.from_initial_guess(solution_ocp, [np.array([dt]), x_init, u_init_for_solution, p_init, a_init])
+        return Solution.from_initial_guess(
+            solution_ocp, [np.array([dt]), x_init, u_init_for_solution, p_init, a_init]
+        )
 
     def create_model_from_list(self, models: list):
         if isinstance(models[0], BiorbdModel):
@@ -183,7 +226,12 @@ class FesNmpcMsk(FesNmpc):
         stimulation_per_cycle = int(len(self.nlp[0].model.stim_time) / self.n_cycles)
         stim_time = []
         for i in range(len(models)):
-            stim_time.append(list(np.array(models[0].stim_time[:stimulation_per_cycle]) + (i * self.cycle_duration)))
+            stim_time.append(
+                list(
+                    np.array(models[0].stim_time[:stimulation_per_cycle])
+                    + (i * self.cycle_duration)
+                )
+            )
         stim_time = [val for sublist in stim_time for val in sublist]
 
         combined_model = FesMskModel(
@@ -192,9 +240,15 @@ class FesNmpcMsk(FesNmpc):
             muscles_model=self.nlp[0].model.muscles_dynamics_model,
             stim_time=stim_time,
             previous_stim={},
-            activate_force_length_relationship=self.nlp[0].model.activate_force_length_relationship,
-            activate_force_velocity_relationship=self.nlp[0].model.activate_force_velocity_relationship,
-            activate_passive_force_relationship=self.nlp[0].model.activate_passive_force_relationship,
+            activate_force_length_relationship=self.nlp[
+                0
+            ].model.activate_force_length_relationship,
+            activate_force_velocity_relationship=self.nlp[
+                0
+            ].model.activate_force_velocity_relationship,
+            activate_passive_force_relationship=self.nlp[
+                0
+            ].model.activate_passive_force_relationship,
             activate_residual_torque=self.nlp[0].model.activate_residual_torque,
             parameters=self.nlp[0].model.parameters,
             external_force_set=self.nlp[0].model.external_force_set,
@@ -244,7 +298,12 @@ class FesNmpcMsk(FesNmpc):
                 ) from exc
             raise
 
-        if sol is None or not isinstance(sol, (list, tuple)) or not sol or sol[0] is None:
+        if (
+            sol is None
+            or not isinstance(sol, (list, tuple))
+            or not sol
+            or sol[0] is None
+        ):
             raise RuntimeError(
                 "The receding-horizon solve returned no solution. "
                 "The solver likely stopped before producing a feasible window."
@@ -256,24 +315,35 @@ class FesNmpcMsk(FesNmpc):
 
         numerical_time_series = {}
         if external_force is not None:
-            external_force_set = ExternalForceSetTimeSeries(nb_frames=total_nmpc_shooting_len)
+            external_force_set = ExternalForceSetTimeSeries(
+                nb_frames=total_nmpc_shooting_len
+            )
             external_force_array = np.array(external_force["torque"])
-            reshape_values_array = np.tile(external_force_array[:, np.newaxis], (1, total_nmpc_shooting_len))
+            reshape_values_array = np.tile(
+                external_force_array[:, np.newaxis], (1, total_nmpc_shooting_len)
+            )
             external_force_set.add_torque(
                 segment=external_force["Segment_application"],
                 values=reshape_values_array,
                 force_name="resistance_torque",
             )
-            numerical_time_series = {"external_forces": external_force_set.to_numerical_time_series()}
+            numerical_time_series = {
+                "external_forces": external_force_set.to_numerical_time_series()
+            }
 
         if isinstance(model, FesMskModel):
             all_stim_time = self.get_stim_time_from_all_models()
             self.nlp[0].model.muscles_dynamics_model[0].stim_time = all_stim_time
-            numerical_data_time_series, stim_idx_at_node_list = model.muscles_dynamics_model[
-                0
-            ].get_numerical_data_time_series(total_nmpc_shooting_len, total_nmpc_duration)
+            (
+                numerical_data_time_series,
+                stim_idx_at_node_list,
+            ) = model.muscles_dynamics_model[0].get_numerical_data_time_series(
+                total_nmpc_shooting_len, total_nmpc_duration
+            )
             numerical_time_series.update(numerical_data_time_series)
 
-        sol[0].ocp.nlp[0].numerical_data_timeseries = numerical_time_series if numerical_time_series else None
+        sol[0].ocp.nlp[0].numerical_data_timeseries = (
+            numerical_time_series if numerical_time_series else None
+        )
 
         return sol

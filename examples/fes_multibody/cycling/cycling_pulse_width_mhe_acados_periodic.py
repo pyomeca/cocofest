@@ -89,7 +89,7 @@ def build_argument_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--ode-solver",
         type=str,
-        choices=("rk4", "collocation"),
+        choices=("rk4", "rk8", "irk", "collocation"),
         default="rk4",
         help="Integration scheme used to transcribe the window dynamics.",
     )
@@ -161,6 +161,19 @@ def build_argument_parser() -> argparse.ArgumentParser:
         help="Target wheel angular velocity, in rad/s, for qdot regularization.",
     )
     parser.add_argument(
+        "--state-scaling",
+        type=str,
+        choices=("none", "fes", "full"),
+        default="none",
+        help="Scale optimization states: none, FES-only, or FES plus q/qdot.",
+    )
+    parser.add_argument(
+        "--pulse-width-scaling",
+        type=float,
+        default=1 / 400,
+        help="Scaling divisor, in seconds, for pulse-width controls.",
+    )
+    parser.add_argument(
         "--constant-crank-torque",
         type=float,
         default=-0.2,
@@ -171,6 +184,50 @@ def build_argument_parser() -> argparse.ArgumentParser:
         type=int,
         default=100,
         help="Maximum number of ACADOS SQP iterations per window.",
+    )
+    parser.add_argument(
+        "--acados-tolerance",
+        type=float,
+        default=None,
+        help="Optional ACADOS NLP convergence tolerance applied to stationarity, constraints and complementarity.",
+    )
+    parser.add_argument(
+        "--acados-collocation-type",
+        type=str,
+        choices=("GAUSS_LEGENDRE", "GAUSS_RADAU_IIA", "EXPLICIT_RUNGE_KUTTA"),
+        default="GAUSS_LEGENDRE",
+        help="Collocation tableau used by the ACADOS integrator.",
+    )
+    parser.add_argument(
+        "--acados-sim-stages",
+        type=int,
+        default=4,
+        help="Number of ACADOS integration stages per integration step.",
+    )
+    parser.add_argument(
+        "--acados-sim-steps",
+        type=int,
+        default=None,
+        help="Number of ACADOS integration substeps per shooting interval. Defaults to max(3, --rk-steps).",
+    )
+    parser.add_argument(
+        "--acados-newton-iter",
+        type=int,
+        default=5,
+        help="Number of Newton iterations used by the ACADOS implicit integrator.",
+    )
+    parser.add_argument(
+        "--acados-newton-tol",
+        type=float,
+        default=None,
+        help="Optional Newton tolerance for the ACADOS implicit integrator.",
+    )
+    parser.add_argument(
+        "--acados-jac-reuse",
+        type=int,
+        choices=(0, 1),
+        default=0,
+        help="Reuse the ACADOS implicit integrator Jacobian across Newton iterations.",
     )
     parser.add_argument(
         "--max-ipopt-iterations",
@@ -239,15 +296,25 @@ def build_ode_solver(args: argparse.Namespace):
         return OdeSolver.COLLOCATION(
             polynomial_degree=args.collocation_degree, method=args.collocation_method
         )
+    if args.ode_solver == "irk":
+        return OdeSolver.IRK(
+            polynomial_degree=args.collocation_degree, method=args.collocation_method
+        )
+    if args.ode_solver == "rk8":
+        return OdeSolver.RK8(n_integration_steps=args.rk_steps)
     return OdeSolver.RK4(n_integration_steps=args.rk_steps)
 
 
 def _ode_solver_suffix(ode_solver) -> str:
+    if isinstance(ode_solver, OdeSolver.IRK):
+        return f"irk_{ode_solver.polynomial_degree}_{ode_solver.method}"
     if isinstance(ode_solver, OdeSolver.COLLOCATION):
         return f"collocation_{ode_solver.polynomial_degree}_{ode_solver.method}"
+    if isinstance(ode_solver, OdeSolver.RK8):
+        return f"rk8_{ode_solver.n_integration_steps}"
     if isinstance(ode_solver, OdeSolver.RK4):
         return f"rk4_{ode_solver.n_integration_steps}"
-    raise RuntimeError("ode_solver must be COLLOCATION or RK4")
+    raise RuntimeError("ode_solver must be COLLOCATION, IRK, RK8, or RK4")
 
 
 def _historical_initial_guess_path(cycles_per_window: int, ode_solver) -> Path | None:
@@ -335,6 +402,8 @@ def _warmup_cache_signature(
         "objective_shape": args.objective_shape,
         "constant_crank_torque": args.constant_crank_torque,
         "torque_application": args.torque_application,
+        "state_scaling": args.state_scaling,
+        "pulse_width_scaling": args.pulse_width_scaling,
         "ipopt_linear_solver": args.ipopt_linear_solver,
         "simulation_conditions": simulation_conditions,
         "cycling_info_keys": sorted(cycling_info.keys()),
@@ -409,7 +478,16 @@ def _codegen_signature(args: argparse.Namespace) -> str:
         "control_regularization_target_source": args.control_regularization_target_source,
         "wheel_qdot_regularization_weight": args.wheel_qdot_regularization_weight,
         "wheel_qdot_regularization_target": args.wheel_qdot_regularization_target,
+        "state_scaling": args.state_scaling,
+        "pulse_width_scaling": args.pulse_width_scaling,
         "max_acados_iterations": args.max_acados_iterations,
+        "acados_tolerance": args.acados_tolerance,
+        "acados_collocation_type": args.acados_collocation_type,
+        "acados_sim_stages": args.acados_sim_stages,
+        "acados_sim_steps": args.acados_sim_steps,
+        "acados_newton_iter": args.acados_newton_iter,
+        "acados_newton_tol": args.acados_newton_tol,
+        "acados_jac_reuse": args.acados_jac_reuse,
         "sources": [
             _source_stamp(Path(__file__).resolve()),
             _source_stamp(
@@ -443,7 +521,13 @@ def configure_acados_solver(
     model_name: str,
     generated_code_path: str,
     max_iterations: int,
+    convergence_tolerance: float | None,
+    collocation_type: str,
+    sim_method_num_stages: int,
     sim_method_num_steps: int,
+    sim_method_newton_iter: int,
+    sim_method_newton_tol: float | None,
+    sim_method_jac_reuse: int,
     print_level: int = 0,
 ) -> Solver.ACADOS:
     solver = Solver.ACADOS()
@@ -459,11 +543,17 @@ def configure_acados_solver(
     solver.set_integrator_type("IRK")
     solver.set_nlp_solver_type("SQP")
     solver.set_hessian_approx("GAUSS_NEWTON")
-    solver.set_sim_method_num_stages(4)
+    solver.set_sim_method_num_stages(sim_method_num_stages)
     solver.set_sim_method_num_steps(sim_method_num_steps)
-    solver.set_sim_method_newton_iter(5)
+    solver.set_sim_method_newton_iter(sim_method_newton_iter)
     solver.set_maximum_iterations(max_iterations)
+    if convergence_tolerance is not None:
+        solver.set_convergence_tolerance(convergence_tolerance)
     solver.set_print_level(print_level)
+    solver.set_option_unsafe(collocation_type, "collocation_type")
+    solver.set_option_unsafe(sim_method_jac_reuse, "sim_method_jac_reuse")
+    if sim_method_newton_tol is not None:
+        solver.set_option_unsafe(float(sim_method_newton_tol), "sim_method_newton_tol")
     # Favor numerical robustness over raw speed for this periodic MHE.
     solver.set_option_unsafe("MERIT_BACKTRACKING", "globalization")
     solver.set_option_unsafe(1, "globalization_line_search_use_sufficient_descent")
@@ -1040,6 +1130,8 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
         "control_regularization_target": args.control_regularization_target,
         "wheel_qdot_regularization_weight": args.wheel_qdot_regularization_weight,
         "wheel_qdot_regularization_target": args.wheel_qdot_regularization_target,
+        "state_scaling": args.state_scaling,
+        "pulse_width_scaling": args.pulse_width_scaling,
         "init_guess_file_path": (
             str(historical_init_guess_path)
             if historical_init_guess_path is not None
@@ -1078,7 +1170,7 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
         print(f"resistive_torque_nm: {args.constant_crank_torque}")
         print(f"single_shot: {args.single_shot}")
         print(f"ode_solver: {args.ode_solver}")
-        if args.ode_solver == "rk4":
+        if args.ode_solver in ("rk4", "rk8"):
             print(f"rk_steps: {args.rk_steps}")
         else:
             print(f"collocation_degree: {args.collocation_degree}")
@@ -1097,6 +1189,19 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
         print(
             f"wheel_qdot_regularization_target: {args.wheel_qdot_regularization_target}"
         )
+        print(f"state_scaling: {args.state_scaling}")
+        print(f"pulse_width_scaling: {args.pulse_width_scaling}")
+        if args.solver == "acados":
+            print(f"acados_collocation_type: {args.acados_collocation_type}")
+            print(f"acados_sim_stages: {args.acados_sim_stages}")
+            print(
+                "acados_sim_steps: "
+                f"{args.acados_sim_steps if args.acados_sim_steps is not None else max(3, args.rk_steps)}"
+            )
+            print(f"acados_newton_iter: {args.acados_newton_iter}")
+            print(f"acados_newton_tol: {args.acados_newton_tol}")
+            print(f"acados_jac_reuse: {args.acados_jac_reuse}")
+            print(f"acados_tolerance: {args.acados_tolerance}")
         if args.solver == "ipopt" or (
             periodic_cn_sum_approximation and not args.disable_standard_ipopt_warmup
         ):
@@ -1153,7 +1258,17 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
             model_name=model_name,
             generated_code_path=generated_code_path,
             max_iterations=args.max_acados_iterations,
-            sim_method_num_steps=max(3, args.rk_steps),
+            convergence_tolerance=args.acados_tolerance,
+            collocation_type=args.acados_collocation_type,
+            sim_method_num_stages=args.acados_sim_stages,
+            sim_method_num_steps=(
+                args.acados_sim_steps
+                if args.acados_sim_steps is not None
+                else max(3, args.rk_steps)
+            ),
+            sim_method_newton_iter=args.acados_newton_iter,
+            sim_method_newton_tol=args.acados_newton_tol,
+            sim_method_jac_reuse=args.acados_jac_reuse,
         )
     else:
         solver = configure_ipopt_solver(
