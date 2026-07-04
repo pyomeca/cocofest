@@ -193,7 +193,18 @@ def _solver_config(
     acados_nlp_solver_type: str,
     acados_search_direction_mode: str,
     acados_globalization: str,
+    acados_fixed_step_length: float,
     acados_nlp_qp_tol_strategy: str,
+    acados_qpscaling_scale_objective: str,
+    acados_qpscaling_scale_constraints: str,
+    acados_ext_qp_res: bool,
+    acados_project_qdot_from_q: bool,
+    disable_periodic_fes_warmup_projection: bool,
+    periodic_fes_warmup_projection_weight: float,
+    periodic_fes_warmup_projection_mode: str,
+    periodic_fes_warmup_projection_strategy: str,
+    periodic_fes_warmup_projection_substeps: int,
+    periodic_fes_warmup_projection_defect_weight: float,
     acados_diagnostics: bool,
     periodic_ipopt_refinement: bool,
     periodic_ipopt_refinement_iterations: int,
@@ -237,7 +248,24 @@ def _solver_config(
             acados_nlp_solver_type=acados_nlp_solver_type,
             acados_search_direction_mode=acados_search_direction_mode,
             acados_globalization=acados_globalization,
+            acados_fixed_step_length=acados_fixed_step_length,
             acados_nlp_qp_tol_strategy=acados_nlp_qp_tol_strategy,
+            acados_qpscaling_scale_objective=acados_qpscaling_scale_objective,
+            acados_qpscaling_scale_constraints=acados_qpscaling_scale_constraints,
+            acados_ext_qp_res=False,
+            acados_project_qdot_from_q=False,
+            disable_periodic_fes_warmup_projection=True,
+            periodic_fes_warmup_projection_weight=periodic_fes_warmup_projection_weight,
+            periodic_fes_warmup_projection_mode=periodic_fes_warmup_projection_mode,
+            periodic_fes_warmup_projection_strategy=(
+                periodic_fes_warmup_projection_strategy
+            ),
+            periodic_fes_warmup_projection_substeps=(
+                periodic_fes_warmup_projection_substeps
+            ),
+            periodic_fes_warmup_projection_defect_weight=(
+                periodic_fes_warmup_projection_defect_weight
+            ),
             acados_diagnostics=False,
             periodic_ipopt_refinement=False,
             periodic_ipopt_refinement_iterations=periodic_ipopt_refinement_iterations,
@@ -282,7 +310,26 @@ def _solver_config(
             acados_nlp_solver_type=acados_nlp_solver_type,
             acados_search_direction_mode=acados_search_direction_mode,
             acados_globalization=acados_globalization,
+            acados_fixed_step_length=acados_fixed_step_length,
             acados_nlp_qp_tol_strategy=acados_nlp_qp_tol_strategy,
+            acados_qpscaling_scale_objective=acados_qpscaling_scale_objective,
+            acados_qpscaling_scale_constraints=acados_qpscaling_scale_constraints,
+            acados_ext_qp_res=acados_ext_qp_res,
+            acados_project_qdot_from_q=acados_project_qdot_from_q,
+            disable_periodic_fes_warmup_projection=(
+                disable_periodic_fes_warmup_projection
+            ),
+            periodic_fes_warmup_projection_weight=periodic_fes_warmup_projection_weight,
+            periodic_fes_warmup_projection_mode=periodic_fes_warmup_projection_mode,
+            periodic_fes_warmup_projection_strategy=(
+                periodic_fes_warmup_projection_strategy
+            ),
+            periodic_fes_warmup_projection_substeps=(
+                periodic_fes_warmup_projection_substeps
+            ),
+            periodic_fes_warmup_projection_defect_weight=(
+                periodic_fes_warmup_projection_defect_weight
+            ),
             acados_diagnostics=acados_diagnostics,
             periodic_ipopt_refinement=periodic_ipopt_refinement,
             periodic_ipopt_refinement_iterations=periodic_ipopt_refinement_iterations,
@@ -449,7 +496,18 @@ def main(
     acados_nlp_solver_type: str = "SQP",
     acados_search_direction_mode: str = "NOMINAL_QP",
     acados_globalization: str = "MERIT_BACKTRACKING",
+    acados_fixed_step_length: float = 1.0,
     acados_nlp_qp_tol_strategy: str = "ADAPTIVE_QPSCALING",
+    acados_qpscaling_scale_objective: str = "OBJECTIVE_GERSHGORIN",
+    acados_qpscaling_scale_constraints: str = "INF_NORM",
+    acados_ext_qp_res: bool = False,
+    acados_project_qdot_from_q: bool = False,
+    disable_periodic_fes_warmup_projection: bool = False,
+    periodic_fes_warmup_projection_weight: float = 1.0,
+    periodic_fes_warmup_projection_mode: str = "all",
+    periodic_fes_warmup_projection_strategy: str = "sequential",
+    periodic_fes_warmup_projection_substeps: int = 10,
+    periodic_fes_warmup_projection_defect_weight: float = 100.0,
     acados_diagnostics: bool = False,
     periodic_ipopt_refinement: bool = False,
     periodic_ipopt_refinement_iterations: int = 300,
@@ -487,7 +545,20 @@ def main(
         acados_nlp_solver_type=acados_nlp_solver_type,
         acados_search_direction_mode=acados_search_direction_mode,
         acados_globalization=acados_globalization,
+        acados_fixed_step_length=acados_fixed_step_length,
         acados_nlp_qp_tol_strategy=acados_nlp_qp_tol_strategy,
+        acados_qpscaling_scale_objective=acados_qpscaling_scale_objective,
+        acados_qpscaling_scale_constraints=acados_qpscaling_scale_constraints,
+        acados_ext_qp_res=False,
+        acados_project_qdot_from_q=False,
+        disable_periodic_fes_warmup_projection=True,
+        periodic_fes_warmup_projection_weight=periodic_fes_warmup_projection_weight,
+        periodic_fes_warmup_projection_mode=periodic_fes_warmup_projection_mode,
+        periodic_fes_warmup_projection_strategy=periodic_fes_warmup_projection_strategy,
+        periodic_fes_warmup_projection_substeps=periodic_fes_warmup_projection_substeps,
+        periodic_fes_warmup_projection_defect_weight=(
+            periodic_fes_warmup_projection_defect_weight
+        ),
         acados_diagnostics=acados_diagnostics,
         periodic_ipopt_refinement=False,
         periodic_ipopt_refinement_iterations=periodic_ipopt_refinement_iterations,
@@ -538,7 +609,20 @@ def main(
         acados_nlp_solver_type=acados_nlp_solver_type,
         acados_search_direction_mode=acados_search_direction_mode,
         acados_globalization=acados_globalization,
+        acados_fixed_step_length=acados_fixed_step_length,
         acados_nlp_qp_tol_strategy=acados_nlp_qp_tol_strategy,
+        acados_qpscaling_scale_objective=acados_qpscaling_scale_objective,
+        acados_qpscaling_scale_constraints=acados_qpscaling_scale_constraints,
+        acados_ext_qp_res=acados_ext_qp_res,
+        acados_project_qdot_from_q=acados_project_qdot_from_q,
+        disable_periodic_fes_warmup_projection=disable_periodic_fes_warmup_projection,
+        periodic_fes_warmup_projection_weight=periodic_fes_warmup_projection_weight,
+        periodic_fes_warmup_projection_mode=periodic_fes_warmup_projection_mode,
+        periodic_fes_warmup_projection_strategy=periodic_fes_warmup_projection_strategy,
+        periodic_fes_warmup_projection_substeps=periodic_fes_warmup_projection_substeps,
+        periodic_fes_warmup_projection_defect_weight=(
+            periodic_fes_warmup_projection_defect_weight
+        ),
         acados_diagnostics=acados_diagnostics,
         periodic_ipopt_refinement=periodic_ipopt_refinement,
         periodic_ipopt_refinement_iterations=periodic_ipopt_refinement_iterations,
@@ -637,12 +721,45 @@ def build_cli() -> argparse.ArgumentParser:
         choices=("FIXED_STEP", "MERIT_BACKTRACKING", "FUNNEL_L1PEN_LINESEARCH"),
         default="MERIT_BACKTRACKING",
     )
+    parser.add_argument("--acados-fixed-step-length", type=float, default=1.0)
     parser.add_argument(
         "--acados-nlp-qp-tol-strategy",
         choices=("FIXED_QP_TOL", "ADAPTIVE_CURRENT_RES_JOINT", "ADAPTIVE_QPSCALING"),
         default="ADAPTIVE_QPSCALING",
     )
+    parser.add_argument(
+        "--acados-qpscaling-scale-objective",
+        choices=("NO_OBJECTIVE_SCALING", "OBJECTIVE_GERSHGORIN"),
+        default="OBJECTIVE_GERSHGORIN",
+    )
+    parser.add_argument(
+        "--acados-qpscaling-scale-constraints",
+        choices=("NO_CONSTRAINT_SCALING", "INF_NORM"),
+        default="INF_NORM",
+    )
+    parser.add_argument("--acados-ext-qp-res", action="store_true")
+    parser.add_argument("--acados-project-qdot-from-q", action="store_true")
     parser.add_argument("--acados-diagnostics", action="store_true")
+    parser.add_argument("--disable-periodic-fes-warmup-projection", action="store_true")
+    parser.add_argument(
+        "--periodic-fes-warmup-projection-weight", type=float, default=1.0
+    )
+    parser.add_argument(
+        "--periodic-fes-warmup-projection-mode",
+        choices=("calcium", "all", "all_except_force"),
+        default="all",
+    )
+    parser.add_argument(
+        "--periodic-fes-warmup-projection-strategy",
+        choices=("rollout", "sequential", "least_squares"),
+        default="sequential",
+    )
+    parser.add_argument(
+        "--periodic-fes-warmup-projection-substeps", type=int, default=10
+    )
+    parser.add_argument(
+        "--periodic-fes-warmup-projection-defect-weight", type=float, default=100.0
+    )
     parser.add_argument(
         "--periodic-ipopt-refinement",
         action="store_true",
@@ -700,7 +817,28 @@ if __name__ == "__main__":
         acados_nlp_solver_type=args.acados_nlp_solver_type,
         acados_search_direction_mode=args.acados_search_direction_mode,
         acados_globalization=args.acados_globalization,
+        acados_fixed_step_length=args.acados_fixed_step_length,
         acados_nlp_qp_tol_strategy=args.acados_nlp_qp_tol_strategy,
+        acados_qpscaling_scale_objective=args.acados_qpscaling_scale_objective,
+        acados_qpscaling_scale_constraints=args.acados_qpscaling_scale_constraints,
+        acados_ext_qp_res=args.acados_ext_qp_res,
+        acados_project_qdot_from_q=args.acados_project_qdot_from_q,
+        disable_periodic_fes_warmup_projection=(
+            args.disable_periodic_fes_warmup_projection
+        ),
+        periodic_fes_warmup_projection_weight=(
+            args.periodic_fes_warmup_projection_weight
+        ),
+        periodic_fes_warmup_projection_mode=args.periodic_fes_warmup_projection_mode,
+        periodic_fes_warmup_projection_strategy=(
+            args.periodic_fes_warmup_projection_strategy
+        ),
+        periodic_fes_warmup_projection_substeps=(
+            args.periodic_fes_warmup_projection_substeps
+        ),
+        periodic_fes_warmup_projection_defect_weight=(
+            args.periodic_fes_warmup_projection_defect_weight
+        ),
         acados_diagnostics=args.acados_diagnostics,
         periodic_ipopt_refinement=args.periodic_ipopt_refinement,
         periodic_ipopt_refinement_iterations=args.periodic_ipopt_refinement_iterations,
