@@ -18,7 +18,11 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from cycling_pulse_width_mhe_acados_periodic import build_argument_parser, solve_case
+from cycling_pulse_width_mhe_acados_periodic import (
+    ACADOS_STATUS_NAMES,
+    build_argument_parser,
+    solve_case,
+)
 
 EXAMPLE_DIR = Path(__file__).resolve().parent
 
@@ -45,6 +49,30 @@ def _format_control_metric(value) -> str:
     if value is None:
         return "None"
     return f"{float(value):.6g}"
+
+
+def _status_label(status) -> str:
+    if status is None:
+        return "None"
+    return ACADOS_STATUS_NAMES.get(status, str(status))
+
+
+def _solver_status_label(solver_name: str, status) -> str:
+    if solver_name == "ACADOS":
+        return _status_label(status)
+    return "None" if status is None else str(status)
+
+
+def _format_array(values) -> str:
+    if values is None:
+        return "None"
+    if isinstance(values, dict):
+        return f"error={values.get('error')}"
+    return np.array2string(
+        np.asarray(values, dtype=float),
+        precision=3,
+        suppress_small=False,
+    )
 
 
 def _resample_trace(trace: np.ndarray, target_len: int) -> np.ndarray:
@@ -149,6 +177,9 @@ def _solver_config(
     state_scaling: str,
     pulse_width_scaling: float,
     acados_tolerance: float | None,
+    acados_diagnostics: bool,
+    periodic_ipopt_refinement: bool,
+    periodic_ipopt_refinement_iterations: int,
 ) -> argparse.Namespace:
     if solver_name == "ipopt":
         return _namespace_from_cli(
@@ -181,6 +212,9 @@ def _solver_config(
             state_scaling=state_scaling,
             pulse_width_scaling=pulse_width_scaling,
             acados_tolerance=acados_tolerance,
+            acados_diagnostics=False,
+            periodic_ipopt_refinement=False,
+            periodic_ipopt_refinement_iterations=periodic_ipopt_refinement_iterations,
         )
 
     if solver_name == "acados":
@@ -214,6 +248,9 @@ def _solver_config(
             state_scaling=state_scaling,
             pulse_width_scaling=pulse_width_scaling,
             acados_tolerance=acados_tolerance,
+            acados_diagnostics=acados_diagnostics,
+            periodic_ipopt_refinement=periodic_ipopt_refinement,
+            periodic_ipopt_refinement_iterations=periodic_ipopt_refinement_iterations,
         )
 
     raise ValueError(f"Unsupported solver_name '{solver_name}'")
@@ -223,7 +260,7 @@ def print_comparison(
     ipopt_result: dict, acados_result: dict, print_traces: bool = False
 ) -> None:
     print(
-        "solver | success | solver_success | physical_success | status | objective | solver_time_s | wall_time_s | final_wheel_angle | "
+        "solver | success | solver_success | physical_success | status | status_label | objective | solver_time_s | wall_time_s | final_wheel_angle | "
         "requested_cycles | attempted_windows | successful_windows | exported_cycles | covered_cycles"
     )
     for label, result in (("IPOPT", ipopt_result), ("ACADOS", acados_result)):
@@ -233,6 +270,7 @@ def print_comparison(
             f"{_format_metric(result.get('solver_success'))} | "
             f"{_format_metric(result.get('physical_success'))} | "
             f"{_format_metric(result['status'])} | "
+            f"{_solver_status_label(label, result['status'])} | "
             f"{_format_metric(result['objective'])} | "
             f"{_format_metric(result['solver_time_s'])} | "
             f"{_format_metric(result['wall_time_s'])} | "
@@ -256,6 +294,21 @@ def print_comparison(
             f"max_step={_format_metric(diagnostics.get('max_step'))} "
             f"window_statuses={result.get('window_statuses')}"
         )
+        if label == "ACADOS" and result.get("window_statuses"):
+            labels = [_status_label(status) for status in result["window_statuses"]]
+            print(f"{label} window_status_labels: {labels}")
+
+        acados_diagnostics = result.get("acados_diagnostics") or []
+        if acados_diagnostics:
+            for idx, item in enumerate(acados_diagnostics):
+                print(
+                    f"{label} acados window[{idx}] | "
+                    f"status={item.get('status')} ({item.get('status_label')}) | "
+                    f"residuals={_format_array(item.get('residuals'))} | "
+                    f"sqp_iter={_format_array(item.get('sqp_iter'))} | "
+                    f"qp_iter={_format_array(item.get('qp_iter'))} | "
+                    f"qp_stat={_format_array(item.get('qp_stat'))}"
+                )
 
     if not (ipopt_result.get("success") and acados_result.get("success")):
         print(
@@ -311,6 +364,10 @@ def print_comparison(
     acados_solver_time = acados_result["solver_time_s"]
     ipopt_wall_time = ipopt_result["wall_time_s"]
     acados_wall_time = acados_result["wall_time_s"]
+    if not (ipopt_result.get("success") and acados_result.get("success")):
+        print(
+            "timing ratio warning: at least one solver failed; ratios compare elapsed diagnostic attempts, not successful solves."
+        )
     if ipopt_solver_time and acados_solver_time:
         print(
             f"solver-time ratio IPOPT/ACADOS: {ipopt_solver_time / acados_solver_time:.3f}x "
@@ -348,6 +405,9 @@ def main(
     pulse_width_scaling: float = 1 / 400,
     acados_pulse_width_scaling: float | None = None,
     acados_tolerance: float | None = None,
+    acados_diagnostics: bool = False,
+    periodic_ipopt_refinement: bool = False,
+    periodic_ipopt_refinement_iterations: int = 300,
     print_traces: bool = False,
 ):
     os.chdir(EXAMPLE_DIR)
@@ -374,6 +434,9 @@ def main(
         state_scaling=state_scaling,
         pulse_width_scaling=pulse_width_scaling,
         acados_tolerance=acados_tolerance,
+        acados_diagnostics=acados_diagnostics,
+        periodic_ipopt_refinement=False,
+        periodic_ipopt_refinement_iterations=periodic_ipopt_refinement_iterations,
     )
     acados_args = _solver_config(
         "acados",
@@ -413,6 +476,9 @@ def main(
             else pulse_width_scaling
         ),
         acados_tolerance=acados_tolerance,
+        acados_diagnostics=acados_diagnostics,
+        periodic_ipopt_refinement=periodic_ipopt_refinement,
+        periodic_ipopt_refinement_iterations=periodic_ipopt_refinement_iterations,
     )
 
     print("Running IPOPT reference configuration...")
@@ -473,6 +539,18 @@ def build_cli() -> argparse.ArgumentParser:
     parser.add_argument("--pulse-width-scaling", type=float, default=1 / 400)
     parser.add_argument("--acados-pulse-width-scaling", type=float, default=None)
     parser.add_argument("--acados-tolerance", type=float, default=None)
+    parser.add_argument("--acados-diagnostics", action="store_true")
+    parser.add_argument(
+        "--periodic-ipopt-refinement",
+        action="store_true",
+        help="Run the optional periodic IPOPT refinement before the ACADOS comparison solve.",
+    )
+    parser.add_argument(
+        "--periodic-ipopt-refinement-iterations",
+        type=int,
+        default=300,
+        help="Maximum IPOPT iterations for the periodic ACADOS warmstart refinement.",
+    )
     parser.add_argument("--print-traces", action="store_true")
     return parser
 
@@ -504,5 +582,8 @@ if __name__ == "__main__":
         pulse_width_scaling=args.pulse_width_scaling,
         acados_pulse_width_scaling=args.acados_pulse_width_scaling,
         acados_tolerance=args.acados_tolerance,
+        acados_diagnostics=args.acados_diagnostics,
+        periodic_ipopt_refinement=args.periodic_ipopt_refinement,
+        periodic_ipopt_refinement_iterations=args.periodic_ipopt_refinement_iterations,
         print_traces=args.print_traces,
     )
