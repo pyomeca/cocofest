@@ -75,6 +75,15 @@ def _format_array(values) -> str:
     )
 
 
+def _effective_status(result: dict):
+    if result.get("status") is not None:
+        return result["status"]
+    for status in result.get("window_statuses") or []:
+        if status != 0:
+            return status
+    return result.get("status")
+
+
 def _resample_trace(trace: np.ndarray, target_len: int) -> np.ndarray:
     trace = np.asarray(trace, dtype=float).squeeze()
     if trace.size == target_len:
@@ -177,6 +186,14 @@ def _solver_config(
     state_scaling: str,
     pulse_width_scaling: float,
     acados_tolerance: float | None,
+    acados_qp_iter_max: int,
+    acados_levenberg_marquardt: float,
+    acados_regularize_method: str,
+    acados_hessian_approx: str,
+    acados_nlp_solver_type: str,
+    acados_search_direction_mode: str,
+    acados_globalization: str,
+    acados_nlp_qp_tol_strategy: str,
     acados_diagnostics: bool,
     periodic_ipopt_refinement: bool,
     periodic_ipopt_refinement_iterations: int,
@@ -213,6 +230,14 @@ def _solver_config(
             state_scaling=state_scaling,
             pulse_width_scaling=pulse_width_scaling,
             acados_tolerance=acados_tolerance,
+            acados_qp_iter_max=acados_qp_iter_max,
+            acados_levenberg_marquardt=acados_levenberg_marquardt,
+            acados_regularize_method=acados_regularize_method,
+            acados_hessian_approx=acados_hessian_approx,
+            acados_nlp_solver_type=acados_nlp_solver_type,
+            acados_search_direction_mode=acados_search_direction_mode,
+            acados_globalization=acados_globalization,
+            acados_nlp_qp_tol_strategy=acados_nlp_qp_tol_strategy,
             acados_diagnostics=False,
             periodic_ipopt_refinement=False,
             periodic_ipopt_refinement_iterations=periodic_ipopt_refinement_iterations,
@@ -250,6 +275,14 @@ def _solver_config(
             state_scaling=state_scaling,
             pulse_width_scaling=pulse_width_scaling,
             acados_tolerance=acados_tolerance,
+            acados_qp_iter_max=acados_qp_iter_max,
+            acados_levenberg_marquardt=acados_levenberg_marquardt,
+            acados_regularize_method=acados_regularize_method,
+            acados_hessian_approx=acados_hessian_approx,
+            acados_nlp_solver_type=acados_nlp_solver_type,
+            acados_search_direction_mode=acados_search_direction_mode,
+            acados_globalization=acados_globalization,
+            acados_nlp_qp_tol_strategy=acados_nlp_qp_tol_strategy,
             acados_diagnostics=acados_diagnostics,
             periodic_ipopt_refinement=periodic_ipopt_refinement,
             periodic_ipopt_refinement_iterations=periodic_ipopt_refinement_iterations,
@@ -267,13 +300,14 @@ def print_comparison(
         "requested_cycles | attempted_windows | successful_windows | exported_cycles | covered_cycles"
     )
     for label, result in (("IPOPT", ipopt_result), ("ACADOS", acados_result)):
+        status = _effective_status(result)
         print(
             f"{label} | "
             f"{_format_metric(result.get('success'))} | "
             f"{_format_metric(result.get('solver_success'))} | "
             f"{_format_metric(result.get('physical_success'))} | "
-            f"{_format_metric(result['status'])} | "
-            f"{_solver_status_label(label, result['status'])} | "
+            f"{_format_metric(status)} | "
+            f"{_solver_status_label(label, status)} | "
             f"{_format_metric(result['objective'])} | "
             f"{_format_metric(result['solver_time_s'])} | "
             f"{_format_metric(result['wall_time_s'])} | "
@@ -408,6 +442,14 @@ def main(
     pulse_width_scaling: float = 1 / 400,
     acados_pulse_width_scaling: float | None = None,
     acados_tolerance: float | None = None,
+    acados_qp_iter_max: int = 50,
+    acados_levenberg_marquardt: float = 0.0,
+    acados_regularize_method: str = "GERSHGORIN_LEVENBERG_MARQUARDT",
+    acados_hessian_approx: str = "GAUSS_NEWTON",
+    acados_nlp_solver_type: str = "SQP",
+    acados_search_direction_mode: str = "NOMINAL_QP",
+    acados_globalization: str = "MERIT_BACKTRACKING",
+    acados_nlp_qp_tol_strategy: str = "ADAPTIVE_QPSCALING",
     acados_diagnostics: bool = False,
     periodic_ipopt_refinement: bool = False,
     periodic_ipopt_refinement_iterations: int = 300,
@@ -438,6 +480,14 @@ def main(
         state_scaling=state_scaling,
         pulse_width_scaling=pulse_width_scaling,
         acados_tolerance=acados_tolerance,
+        acados_qp_iter_max=acados_qp_iter_max,
+        acados_levenberg_marquardt=acados_levenberg_marquardt,
+        acados_regularize_method=acados_regularize_method,
+        acados_hessian_approx=acados_hessian_approx,
+        acados_nlp_solver_type=acados_nlp_solver_type,
+        acados_search_direction_mode=acados_search_direction_mode,
+        acados_globalization=acados_globalization,
+        acados_nlp_qp_tol_strategy=acados_nlp_qp_tol_strategy,
         acados_diagnostics=acados_diagnostics,
         periodic_ipopt_refinement=False,
         periodic_ipopt_refinement_iterations=periodic_ipopt_refinement_iterations,
@@ -481,6 +531,14 @@ def main(
             else pulse_width_scaling
         ),
         acados_tolerance=acados_tolerance,
+        acados_qp_iter_max=acados_qp_iter_max,
+        acados_levenberg_marquardt=acados_levenberg_marquardt,
+        acados_regularize_method=acados_regularize_method,
+        acados_hessian_approx=acados_hessian_approx,
+        acados_nlp_solver_type=acados_nlp_solver_type,
+        acados_search_direction_mode=acados_search_direction_mode,
+        acados_globalization=acados_globalization,
+        acados_nlp_qp_tol_strategy=acados_nlp_qp_tol_strategy,
         acados_diagnostics=acados_diagnostics,
         periodic_ipopt_refinement=periodic_ipopt_refinement,
         periodic_ipopt_refinement_iterations=periodic_ipopt_refinement_iterations,
@@ -545,6 +603,45 @@ def build_cli() -> argparse.ArgumentParser:
     parser.add_argument("--pulse-width-scaling", type=float, default=1 / 400)
     parser.add_argument("--acados-pulse-width-scaling", type=float, default=None)
     parser.add_argument("--acados-tolerance", type=float, default=None)
+    parser.add_argument("--acados-qp-iter-max", type=int, default=50)
+    parser.add_argument("--acados-levenberg-marquardt", type=float, default=0.0)
+    parser.add_argument(
+        "--acados-regularize-method",
+        choices=(
+            "NO_REGULARIZE",
+            "MIRROR",
+            "PROJECT",
+            "PROJECT_REDUC_HESS",
+            "CONVEXIFY",
+            "GERSHGORIN_LEVENBERG_MARQUARDT",
+        ),
+        default="GERSHGORIN_LEVENBERG_MARQUARDT",
+    )
+    parser.add_argument(
+        "--acados-hessian-approx",
+        choices=("GAUSS_NEWTON", "EXACT"),
+        default="GAUSS_NEWTON",
+    )
+    parser.add_argument(
+        "--acados-nlp-solver-type",
+        choices=("SQP", "SQP_WITH_FEASIBLE_QP"),
+        default="SQP",
+    )
+    parser.add_argument(
+        "--acados-search-direction-mode",
+        choices=("NOMINAL_QP", "BYRD_OMOJOKUN", "FEASIBILITY_QP"),
+        default="NOMINAL_QP",
+    )
+    parser.add_argument(
+        "--acados-globalization",
+        choices=("FIXED_STEP", "MERIT_BACKTRACKING", "FUNNEL_L1PEN_LINESEARCH"),
+        default="MERIT_BACKTRACKING",
+    )
+    parser.add_argument(
+        "--acados-nlp-qp-tol-strategy",
+        choices=("FIXED_QP_TOL", "ADAPTIVE_CURRENT_RES_JOINT", "ADAPTIVE_QPSCALING"),
+        default="ADAPTIVE_QPSCALING",
+    )
     parser.add_argument("--acados-diagnostics", action="store_true")
     parser.add_argument(
         "--periodic-ipopt-refinement",
@@ -596,6 +693,14 @@ if __name__ == "__main__":
         pulse_width_scaling=args.pulse_width_scaling,
         acados_pulse_width_scaling=args.acados_pulse_width_scaling,
         acados_tolerance=args.acados_tolerance,
+        acados_qp_iter_max=args.acados_qp_iter_max,
+        acados_levenberg_marquardt=args.acados_levenberg_marquardt,
+        acados_regularize_method=args.acados_regularize_method,
+        acados_hessian_approx=args.acados_hessian_approx,
+        acados_nlp_solver_type=args.acados_nlp_solver_type,
+        acados_search_direction_mode=args.acados_search_direction_mode,
+        acados_globalization=args.acados_globalization,
+        acados_nlp_qp_tol_strategy=args.acados_nlp_qp_tol_strategy,
         acados_diagnostics=args.acados_diagnostics,
         periodic_ipopt_refinement=args.periodic_ipopt_refinement,
         periodic_ipopt_refinement_iterations=args.periodic_ipopt_refinement_iterations,
