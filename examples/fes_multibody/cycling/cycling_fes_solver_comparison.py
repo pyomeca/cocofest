@@ -254,6 +254,7 @@ def _solver_config(
     periodic_ipopt_refinement: bool,
     periodic_ipopt_refinement_iterations: int,
     periodic_ipopt_refinement_use_sx: bool,
+    warmup_state_comparison_limit: int,
 ) -> argparse.Namespace:
     if solver_name == "ipopt":
         return _namespace_from_cli(
@@ -315,6 +316,7 @@ def _solver_config(
             periodic_ipopt_refinement=False,
             periodic_ipopt_refinement_iterations=periodic_ipopt_refinement_iterations,
             periodic_ipopt_refinement_use_sx=False,
+            warmup_state_comparison_limit=warmup_state_comparison_limit,
         )
 
     if solver_name == "acados":
@@ -379,6 +381,7 @@ def _solver_config(
             periodic_ipopt_refinement=periodic_ipopt_refinement,
             periodic_ipopt_refinement_iterations=periodic_ipopt_refinement_iterations,
             periodic_ipopt_refinement_use_sx=periodic_ipopt_refinement_use_sx,
+            warmup_state_comparison_limit=warmup_state_comparison_limit,
         )
 
     raise ValueError(f"Unsupported solver_name '{solver_name}'")
@@ -585,6 +588,7 @@ def main(
     periodic_ipopt_refinement: bool = False,
     periodic_ipopt_refinement_iterations: int = 300,
     periodic_ipopt_refinement_use_sx: bool = False,
+    warmup_state_comparison_limit: int = 12,
     state_comparison_limit: int = 12,
     print_traces: bool = False,
 ):
@@ -637,6 +641,7 @@ def main(
         periodic_ipopt_refinement=False,
         periodic_ipopt_refinement_iterations=periodic_ipopt_refinement_iterations,
         periodic_ipopt_refinement_use_sx=False,
+        warmup_state_comparison_limit=warmup_state_comparison_limit,
     )
     acados_args = _solver_config(
         "acados",
@@ -701,6 +706,7 @@ def main(
         periodic_ipopt_refinement=periodic_ipopt_refinement,
         periodic_ipopt_refinement_iterations=periodic_ipopt_refinement_iterations,
         periodic_ipopt_refinement_use_sx=periodic_ipopt_refinement_use_sx,
+        warmup_state_comparison_limit=warmup_state_comparison_limit,
     )
 
     print("Running IPOPT reference configuration...")
@@ -859,6 +865,7 @@ def build_cli() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument("--state-comparison-limit", type=int, default=12)
+    parser.add_argument("--warmup-state-comparison-limit", type=int, default=12)
     parser.add_argument("--print-traces", action="store_true")
     return parser
 
@@ -923,6 +930,7 @@ if __name__ == "__main__":
         periodic_ipopt_refinement=args.periodic_ipopt_refinement,
         periodic_ipopt_refinement_iterations=args.periodic_ipopt_refinement_iterations,
         periodic_ipopt_refinement_use_sx=args.periodic_ipopt_refinement_use_sx,
+        warmup_state_comparison_limit=args.warmup_state_comparison_limit,
         state_comparison_limit=args.state_comparison_limit,
         print_traces=args.print_traces,
     )

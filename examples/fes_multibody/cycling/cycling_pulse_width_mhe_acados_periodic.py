@@ -461,6 +461,12 @@ def build_argument_parser() -> argparse.ArgumentParser:
         help="Project the ACADOS qdot initial guess from finite differences of q before solving.",
     )
     parser.add_argument(
+        "--warmup-state-comparison-limit",
+        type=int,
+        default=12,
+        help="Number of warmup-vs-initial-guess state rows to print when ACADOS diagnostics are enabled.",
+    )
+    parser.add_argument(
         "--max-ipopt-iterations",
         type=int,
         default=2000,
@@ -2405,6 +2411,157 @@ def _adapt_warmup_solution_to_periodic_nodes(
     return _WarmupSolutionAdapter(adapted_states, adapted_controls)
 
 
+def _warmup_state_is_directly_comparable(key: str) -> bool:
+    return key in ("q", "qdot") or key.startswith(("F_", "A_", "Tau1_", "Km_"))
+
+
+def _resample_trace(values: np.ndarray, target_len: int) -> np.ndarray:
+    values = np.asarray(values, dtype=float).reshape(-1)
+    if values.size == target_len:
+        return values
+    current_grid = np.linspace(0.0, 1.0, values.size)
+    target_grid = np.linspace(0.0, 1.0, target_len)
+    return np.interp(target_grid, current_grid, values)
+
+
+def _expected_receding_state_initial_guess(
+    periodic_nmpc, states: dict, key: str, row: int
+) -> np.ndarray:
+    state_values = np.asarray(states[key], dtype=float)
+    if state_values.ndim == 1:
+        state_values = state_values[np.newaxis, :]
+    values = state_values[row, :]
+    nodes_per_cycle = periodic_nmpc.nodes_per_cycle
+
+    if key == "q" and row == state_values.shape[0] - 1:
+        if not getattr(periodic_nmpc, "use_signed_wheel_shift", False):
+            shifted_n_plus_one_cycles = (
+                values[nodes_per_cycle:-1] + periodic_nmpc.pedal_turn_in_one_cycle
+            )
+            last_cycle = values[-nodes_per_cycle - 1 :]
+            if shifted_n_plus_one_cycles.size == 0:
+                return last_cycle
+            return np.concatenate((shifted_n_plus_one_cycles, last_cycle))
+
+        wheel_cycle_shift = periodic_nmpc._wheel_cycle_shift(states)
+        n_plus_one_cycles = values[nodes_per_cycle:-1]
+        shifted_last_cycle = values[-nodes_per_cycle - 1 :] + wheel_cycle_shift
+        if n_plus_one_cycles.size == 0:
+            return shifted_last_cycle
+        return np.concatenate((n_plus_one_cycles, shifted_last_cycle))
+
+    if key in ("q", "qdot") or key.startswith(("Cn_", "Cn_sum_", "F_")):
+        n_plus_one_cycles = values[nodes_per_cycle:-1]
+        last_cycle = values[-nodes_per_cycle - 1 :]
+        if n_plus_one_cycles.size == 0:
+            return last_cycle
+        return np.concatenate((n_plus_one_cycles, last_cycle))
+
+    if key.startswith(("A_", "Tau1_", "Km_")):
+        n_plus_one_cycles = values[nodes_per_cycle:-1]
+        last_cycle = values[-nodes_per_cycle - 1 :]
+        if n_plus_one_cycles.size == 0:
+            return last_cycle
+        delta = n_plus_one_cycles[-1] - last_cycle[0]
+        shifted_last_cycle = last_cycle + delta
+        return np.concatenate((n_plus_one_cycles, shifted_last_cycle))
+
+    return values
+
+
+def _warmup_state_comparisons(reference_solution, periodic_nmpc) -> list[dict]:
+    reference_states = reference_solution.decision_states(to_merge=SolutionMerge.NODES)
+    comparisons = []
+
+    for key in sorted(
+        set(reference_states).intersection(periodic_nmpc.nlp[0].x_init.keys())
+    ):
+        if not _warmup_state_is_directly_comparable(key):
+            continue
+
+        reference_values = np.asarray(reference_states[key], dtype=float)
+        candidate_values = np.asarray(
+            periodic_nmpc.nlp[0].x_init[key].init, dtype=float
+        )
+        if reference_values.ndim == 1:
+            reference_values = reference_values[np.newaxis, :]
+        if candidate_values.ndim == 1:
+            candidate_values = candidate_values[np.newaxis, :]
+
+        for row in range(min(reference_values.shape[0], candidate_values.shape[0])):
+            expected = _expected_receding_state_initial_guess(
+                periodic_nmpc, reference_states, key, row
+            )
+            candidate = candidate_values[row, :]
+            common_len = max(expected.size, candidate.size)
+            expected_common = _resample_trace(expected, common_len)
+            candidate_common = _resample_trace(candidate, common_len)
+            diff = candidate_common - expected_common
+            comparisons.append(
+                {
+                    "key": key if reference_values.shape[0] == 1 else f"{key}[{row}]",
+                    "common_len": common_len,
+                    "rmse": float(np.sqrt(np.mean(diff**2))),
+                    "mae": float(np.mean(np.abs(diff))),
+                    "max_abs_error": float(np.max(np.abs(diff))),
+                    "final_error": float(diff[-1]),
+                    "expected_mean": float(np.mean(expected_common)),
+                    "initial_guess_mean": float(np.mean(candidate_common)),
+                    "expected_range": (
+                        float(np.min(expected_common)),
+                        float(np.max(expected_common)),
+                    ),
+                    "initial_guess_range": (
+                        float(np.min(candidate_common)),
+                        float(np.max(candidate_common)),
+                    ),
+                }
+            )
+
+    return sorted(comparisons, key=lambda item: item["rmse"], reverse=True)
+
+
+def print_warmup_state_comparison(
+    label: str, reference_solution, periodic_nmpc, limit: int
+) -> list[dict]:
+    comparisons = _warmup_state_comparisons(reference_solution, periodic_nmpc)
+    if limit <= 0:
+        return comparisons
+
+    print(
+        f"warmup_state_comparison_note[{label}]: "
+        "Cn/Cn_sum are omitted because the standard and periodic calcium states are not directly equivalent."
+    )
+    if not comparisons:
+        print(
+            f"warmup_state_comparison_warning[{label}]: no comparable state keys were found."
+        )
+        return comparisons
+
+    print(
+        f"warmup_state_comparison[{label}] | key | common_len | rmse | mae | max_abs_error | "
+        "final_error | warmup_mean | initial_guess_mean | warmup_range | initial_guess_range"
+    )
+    for metric in comparisons[:limit]:
+        warmup_min, warmup_max = metric["expected_range"]
+        init_min, init_max = metric["initial_guess_range"]
+        print(
+            f"warmup_state_comparison[{label}] | "
+            f"{metric['key']} | "
+            f"{metric['common_len']} | "
+            f"{metric['rmse']:.6g} | "
+            f"{metric['mae']:.6g} | "
+            f"{metric['max_abs_error']:.6g} | "
+            f"{metric['final_error']:.6g} | "
+            f"{metric['expected_mean']:.6g} | "
+            f"{metric['initial_guess_mean']:.6g} | "
+            f"[{warmup_min:.6g}, {warmup_max:.6g}] | "
+            f"[{init_min:.6g}, {init_max:.6g}]"
+        )
+
+    return comparisons
+
+
 def apply_standard_warmup_to_periodic_nmpc(
     periodic_nmpc,
     warmup_solution,
@@ -2789,6 +2946,7 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
     use_external_forces = args.torque_application == "external_forces"
     ode_solver = build_ode_solver(args)
     historical_init_guess_path = None
+    adapted_warmup_solution = None
     if args.solver == "ipopt" and not args.disable_historical_ipopt_initial_guess:
         historical_init_guess_path = _historical_initial_guess_path(
             args.cycles_per_window, ode_solver
@@ -2981,6 +3139,10 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
             )
             print(f"acados_ext_qp_res: {args.acados_ext_qp_res}")
             print(f"acados_diagnostics: {args.acados_diagnostics}")
+            print(
+                "warmup_state_comparison_limit: "
+                f"{args.warmup_state_comparison_limit}"
+            )
             print(f"acados_print_level: {args.acados_print_level}")
             print("bioptim_acados_control_bound_patch: True")
             print(f"acados_qp_solver: {args.acados_qp_solver}")
@@ -3050,6 +3212,13 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
                     "warmup_control_regularization_targets: "
                     f"{', '.join(target_keys) if target_keys else 'None'}"
                 )
+        if args.solver == "acados" and args.acados_diagnostics:
+            print_warmup_state_comparison(
+                "after_standard_projection",
+                adapted_warmup_solution,
+                nmpc,
+                args.warmup_state_comparison_limit,
+            )
 
     if (
         args.solver == "acados"
@@ -3079,6 +3248,13 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
             linear_solver=args.ipopt_linear_solver,
             echo=echo,
         )
+        if echo and args.acados_diagnostics and adapted_warmup_solution is not None:
+            print_warmup_state_comparison(
+                "after_periodic_ipopt_refinement",
+                adapted_warmup_solution,
+                nmpc,
+                args.warmup_state_comparison_limit,
+            )
 
     if args.solver == "acados" and args.acados_project_qdot_from_q:
         project_qdot_initial_guess_from_q(nmpc)
