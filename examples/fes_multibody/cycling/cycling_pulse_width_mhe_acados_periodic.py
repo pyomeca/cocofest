@@ -514,6 +514,14 @@ def build_argument_parser() -> argparse.ArgumentParser:
         help="Maximum IPOPT iterations for the periodic warmstart refinement.",
     )
     parser.add_argument(
+        "--periodic-ipopt-refinement-use-sx",
+        action="store_true",
+        help=(
+            "Build the auxiliary periodic IPOPT refinement with SX graphs. "
+            "By default it uses MX to reduce memory pressure."
+        ),
+    )
+    parser.add_argument(
         "--periodic-fes-warmup-projection-weight",
         type=float,
         default=1.0,
@@ -2554,9 +2562,10 @@ def build_periodic_ipopt_refinement_nmpc(
         stim_time,
         periodic_cn_sum_approximation=True,
     )
+    refinement_mhe_info = dict(mhe_info)
     refinement_nmpc = prepare_nmpc(
         refinement_model,
-        dict(mhe_info),
+        refinement_mhe_info,
         dict(cycling_info),
         dict(simulation_conditions),
     )
@@ -2893,6 +2902,10 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
                 "periodic_ipopt_refinement_iterations: "
                 f"{args.periodic_ipopt_refinement_iterations}"
             )
+            print(
+                "periodic_ipopt_refinement_use_sx: "
+                f"{args.periodic_ipopt_refinement_use_sx}"
+            )
             print(f"acados_collocation_type: {args.acados_collocation_type}")
             print(f"acados_sim_stages: {args.acados_sim_stages}")
             print(
@@ -3016,7 +3029,10 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
             source_nmpc=nmpc,
             model_path=model_path,
             stim_time=stim_time,
-            mhe_info=mhe_info,
+            mhe_info={
+                **mhe_info,
+                "use_sx": args.periodic_ipopt_refinement_use_sx,
+            },
             cycling_info=cycling_info,
             simulation_conditions=nmpc_simulation_conditions,
         )

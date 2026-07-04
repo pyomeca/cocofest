@@ -180,6 +180,7 @@ def _solver_config(
     acados_diagnostics: bool,
     periodic_ipopt_refinement: bool,
     periodic_ipopt_refinement_iterations: int,
+    periodic_ipopt_refinement_use_sx: bool,
 ) -> argparse.Namespace:
     if solver_name == "ipopt":
         return _namespace_from_cli(
@@ -215,6 +216,7 @@ def _solver_config(
             acados_diagnostics=False,
             periodic_ipopt_refinement=False,
             periodic_ipopt_refinement_iterations=periodic_ipopt_refinement_iterations,
+            periodic_ipopt_refinement_use_sx=False,
         )
 
     if solver_name == "acados":
@@ -251,6 +253,7 @@ def _solver_config(
             acados_diagnostics=acados_diagnostics,
             periodic_ipopt_refinement=periodic_ipopt_refinement,
             periodic_ipopt_refinement_iterations=periodic_ipopt_refinement_iterations,
+            periodic_ipopt_refinement_use_sx=periodic_ipopt_refinement_use_sx,
         )
 
     raise ValueError(f"Unsupported solver_name '{solver_name}'")
@@ -408,6 +411,7 @@ def main(
     acados_diagnostics: bool = False,
     periodic_ipopt_refinement: bool = False,
     periodic_ipopt_refinement_iterations: int = 300,
+    periodic_ipopt_refinement_use_sx: bool = False,
     print_traces: bool = False,
 ):
     os.chdir(EXAMPLE_DIR)
@@ -437,6 +441,7 @@ def main(
         acados_diagnostics=acados_diagnostics,
         periodic_ipopt_refinement=False,
         periodic_ipopt_refinement_iterations=periodic_ipopt_refinement_iterations,
+        periodic_ipopt_refinement_use_sx=False,
     )
     acados_args = _solver_config(
         "acados",
@@ -479,6 +484,7 @@ def main(
         acados_diagnostics=acados_diagnostics,
         periodic_ipopt_refinement=periodic_ipopt_refinement,
         periodic_ipopt_refinement_iterations=periodic_ipopt_refinement_iterations,
+        periodic_ipopt_refinement_use_sx=periodic_ipopt_refinement_use_sx,
     )
 
     print("Running IPOPT reference configuration...")
@@ -551,6 +557,14 @@ def build_cli() -> argparse.ArgumentParser:
         default=300,
         help="Maximum IPOPT iterations for the periodic ACADOS warmstart refinement.",
     )
+    parser.add_argument(
+        "--periodic-ipopt-refinement-use-sx",
+        action="store_true",
+        help=(
+            "Build the auxiliary periodic IPOPT refinement with SX graphs. "
+            "By default it uses MX to reduce memory pressure."
+        ),
+    )
     parser.add_argument("--print-traces", action="store_true")
     return parser
 
@@ -585,5 +599,6 @@ if __name__ == "__main__":
         acados_diagnostics=args.acados_diagnostics,
         periodic_ipopt_refinement=args.periodic_ipopt_refinement,
         periodic_ipopt_refinement_iterations=args.periodic_ipopt_refinement_iterations,
+        periodic_ipopt_refinement_use_sx=args.periodic_ipopt_refinement_use_sx,
         print_traces=args.print_traces,
     )
