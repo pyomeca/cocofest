@@ -166,6 +166,51 @@ def _control_comparisons(ipopt_result: dict, acados_result: dict) -> list[dict]:
     return comparisons
 
 
+def _state_comparisons(ipopt_result: dict, acados_result: dict) -> list[dict]:
+    ipopt_states = ipopt_result.get("state_traces", {})
+    acados_states = acados_result.get("state_traces", {})
+    common_keys = sorted(set(ipopt_states).intersection(acados_states))
+    comparisons = []
+
+    for key in common_keys:
+        ipopt_values = np.asarray(ipopt_states[key], dtype=float)
+        acados_values = np.asarray(acados_states[key], dtype=float)
+        if ipopt_values.ndim == 1:
+            ipopt_values = ipopt_values[np.newaxis, :]
+        if acados_values.ndim == 1:
+            acados_values = acados_values[np.newaxis, :]
+        if ipopt_values.size == 0 or acados_values.size == 0:
+            continue
+
+        for row in range(min(ipopt_values.shape[0], acados_values.shape[0])):
+            common_len = max(ipopt_values.shape[1], acados_values.shape[1])
+            ipopt_common = _resample_trace(ipopt_values[row, :], common_len)
+            acados_common = _resample_trace(acados_values[row, :], common_len)
+            diff = acados_common - ipopt_common
+            comparisons.append(
+                {
+                    "key": key if ipopt_values.shape[0] == 1 else f"{key}[{row}]",
+                    "common_len": common_len,
+                    "rmse": float(np.sqrt(np.mean(diff**2))),
+                    "mae": float(np.mean(np.abs(diff))),
+                    "max_abs_error": float(np.max(np.abs(diff))),
+                    "final_error": float(diff[-1]),
+                    "ipopt_mean": float(np.mean(ipopt_common)),
+                    "acados_mean": float(np.mean(acados_common)),
+                    "ipopt_range": (
+                        float(np.min(ipopt_common)),
+                        float(np.max(ipopt_common)),
+                    ),
+                    "acados_range": (
+                        float(np.min(acados_common)),
+                        float(np.max(acados_common)),
+                    ),
+                }
+            )
+
+    return sorted(comparisons, key=lambda item: item["rmse"], reverse=True)
+
+
 def _solver_config(
     solver_name: str,
     objective: str,
@@ -340,7 +385,10 @@ def _solver_config(
 
 
 def print_comparison(
-    ipopt_result: dict, acados_result: dict, print_traces: bool = False
+    ipopt_result: dict,
+    acados_result: dict,
+    print_traces: bool = False,
+    state_comparison_limit: int = 12,
 ) -> None:
     print(
         "solver | success | solver_success | physical_success | status | status_label | objective | solver_time_s | wall_time_s | final_wheel_angle | "
@@ -444,6 +492,31 @@ def print_comparison(
     else:
         print("control comparison warning: no common control keys were found.")
 
+    state_metrics = _state_comparisons(ipopt_result, acados_result)
+    if state_metrics and state_comparison_limit:
+        print(
+            "state comparison | key | common_len | rmse | mae | max_abs_error | final_error | "
+            "ipopt_mean | acados_mean | ipopt_range | acados_range"
+        )
+        for metric in state_metrics[:state_comparison_limit]:
+            ipopt_min, ipopt_max = metric["ipopt_range"]
+            acados_min, acados_max = metric["acados_range"]
+            print(
+                "state comparison | "
+                f"{metric['key']} | "
+                f"{metric['common_len']} | "
+                f"{_format_control_metric(metric['rmse'])} | "
+                f"{_format_control_metric(metric['mae'])} | "
+                f"{_format_control_metric(metric['max_abs_error'])} | "
+                f"{_format_control_metric(metric['final_error'])} | "
+                f"{_format_control_metric(metric['ipopt_mean'])} | "
+                f"{_format_control_metric(metric['acados_mean'])} | "
+                f"[{_format_control_metric(ipopt_min)}, {_format_control_metric(ipopt_max)}] | "
+                f"[{_format_control_metric(acados_min)}, {_format_control_metric(acados_max)}]"
+            )
+    elif not state_metrics:
+        print("state comparison warning: no common state keys were found.")
+
     ipopt_solver_time = ipopt_result["solver_time_s"]
     acados_solver_time = acados_result["solver_time_s"]
     ipopt_wall_time = ipopt_result["wall_time_s"]
@@ -512,6 +585,7 @@ def main(
     periodic_ipopt_refinement: bool = False,
     periodic_ipopt_refinement_iterations: int = 300,
     periodic_ipopt_refinement_use_sx: bool = False,
+    state_comparison_limit: int = 12,
     print_traces: bool = False,
 ):
     os.chdir(EXAMPLE_DIR)
@@ -635,7 +709,12 @@ def main(
     print("Running ACADOS-compatible configuration...")
     acados_result = solve_case(acados_args, echo=True)
     print()
-    print_comparison(ipopt_result, acados_result, print_traces=print_traces)
+    print_comparison(
+        ipopt_result,
+        acados_result,
+        print_traces=print_traces,
+        state_comparison_limit=state_comparison_limit,
+    )
     return {"ipopt": ipopt_result, "acados": acados_result}
 
 
@@ -779,6 +858,7 @@ def build_cli() -> argparse.ArgumentParser:
             "By default it uses MX to reduce memory pressure."
         ),
     )
+    parser.add_argument("--state-comparison-limit", type=int, default=12)
     parser.add_argument("--print-traces", action="store_true")
     return parser
 
@@ -843,5 +923,6 @@ if __name__ == "__main__":
         periodic_ipopt_refinement=args.periodic_ipopt_refinement,
         periodic_ipopt_refinement_iterations=args.periodic_ipopt_refinement_iterations,
         periodic_ipopt_refinement_use_sx=args.periodic_ipopt_refinement_use_sx,
+        state_comparison_limit=args.state_comparison_limit,
         print_traces=args.print_traces,
     )

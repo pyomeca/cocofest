@@ -1005,6 +1005,33 @@ def _control_traces_from_exported_cycles(
     return control_traces
 
 
+def _state_traces_from_exported_cycles(
+    merged_solution, exported_cycle_solutions: list
+) -> dict[str, np.ndarray]:
+    if not exported_cycle_solutions:
+        states = merged_solution.decision_states(to_merge=SolutionMerge.NODES)
+        return {key: np.asarray(values) for key, values in states.items()}
+
+    state_traces = {}
+    reference_states = exported_cycle_solutions[0].decision_states(
+        to_merge=SolutionMerge.NODES
+    )
+    for key in reference_states.keys():
+        cycle_values = []
+        for cycle_solution in exported_cycle_solutions:
+            states = cycle_solution.decision_states(to_merge=SolutionMerge.NODES)
+            values = np.asarray(states[key])
+            if values.ndim == 1:
+                values = values[np.newaxis, :]
+            cycle_values.append(values)
+        state_traces[key] = np.concatenate(
+            [values[:, :-1] for values in cycle_values[:-1]] + [cycle_values[-1]],
+            axis=1,
+        )
+
+    return state_traces
+
+
 def _status_is_success(status) -> bool:
     return status == 0
 
@@ -1392,6 +1419,9 @@ def build_window_summary(sol, requested_windows: int, cycles_per_window: int) ->
     control_traces = _control_traces_from_exported_cycles(
         merged_solution, exported_cycle_solutions
     )
+    state_traces = _state_traces_from_exported_cycles(
+        merged_solution, exported_cycle_solutions
+    )
     objective = (
         float(np.nansum(merged_solution.cost))
         if getattr(merged_solution, "cost", None) is not None
@@ -1426,6 +1456,7 @@ def build_window_summary(sol, requested_windows: int, cycles_per_window: int) ->
         "window_count": accounting["attempted_windows"],
         "final_wheel_angle": float(wheel_trace[-1]),
         "wheel_angle_trace": wheel_trace,
+        "state_traces": state_traces,
         "control_traces": control_traces,
         "solution": merged_solution,
         "window_solutions": source_window_solutions,
@@ -1447,6 +1478,10 @@ def summarize_single_shot(sol) -> None:
 
 def build_single_shot_summary(sol) -> dict:
     wheel_trace = sol.decision_states(to_merge=SolutionMerge.NODES)["q"][2, :]
+    state_traces = {
+        key: np.asarray(values)
+        for key, values in sol.decision_states(to_merge=SolutionMerge.NODES).items()
+    }
     control_traces = {
         key: np.asarray(values)
         for key, values in sol.decision_controls(to_merge=SolutionMerge.NODES).items()
@@ -1465,6 +1500,7 @@ def build_single_shot_summary(sol) -> dict:
         "wall_time_s": sol.real_time_to_optimize,
         "final_wheel_angle": float(wheel_trace[-1]),
         "wheel_angle_trace": wheel_trace,
+        "state_traces": state_traces,
         "control_traces": control_traces,
         "solution": sol,
         "window_solutions": [],
