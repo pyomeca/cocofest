@@ -553,11 +553,21 @@ def build_argument_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--periodic-fes-warmup-projection-mode",
-        choices=("calcium", "all", "all_except_force"),
+        choices=("calcium", "all", "all_except_force", "all_force_blend"),
         default="all",
         help=(
             "Project only the periodic calcium states, all Ding fatigue states, "
-            "or all states except F to preserve the multibody force trajectory."
+            "all states except F to preserve the multibody force trajectory, "
+            "or all states with a separate blend weight for F."
+        ),
+    )
+    parser.add_argument(
+        "--periodic-fes-warmup-force-projection-weight",
+        type=float,
+        default=0.25,
+        help=(
+            "Blend weight used only for F states when "
+            "--periodic-fes-warmup-projection-mode=all_force_blend."
         ),
     )
     parser.add_argument(
@@ -2024,10 +2034,11 @@ def _projection_state_keys(muscle_name: str, projection_mode: str) -> tuple[str,
     state_keys = _ding_state_keys(muscle_name)
     if projection_mode == "calcium":
         return state_keys[:2]
-    if projection_mode in ("all", "all_except_force"):
+    if projection_mode in ("all", "all_except_force", "all_force_blend"):
         return state_keys
     raise ValueError(
-        "--periodic-fes-warmup-projection-mode must be 'calcium', 'all' or 'all_except_force'."
+        "--periodic-fes-warmup-projection-mode must be 'calcium', 'all', "
+        "'all_except_force' or 'all_force_blend'."
     )
 
 
@@ -2332,10 +2343,15 @@ def project_periodic_fes_initial_guess(
     projection_defect_weight: float = 100.0,
     projection_trust_radius: float | None = None,
     projection_max_iterations: int = 200,
+    force_projection_weight: float = 0.25,
 ) -> dict[str, float]:
     if projection_weight < 0.0 or projection_weight > 1.0:
         raise ValueError(
             "--periodic-fes-warmup-projection-weight must be between 0 and 1."
+        )
+    if force_projection_weight < 0.0 or force_projection_weight > 1.0:
+        raise ValueError(
+            "--periodic-fes-warmup-force-projection-weight must be between 0 and 1."
         )
     if projection_strategy not in ("rollout", "sequential", "least_squares"):
         raise ValueError(
@@ -2428,7 +2444,14 @@ def project_periodic_fes_initial_guess(
         for state_idx, key in enumerate(state_keys):
             if key not in write_state_keys:
                 continue
-            values = blended_states[state_idx, :]
+            if projection_mode == "all_force_blend" and key.startswith("F_"):
+                state_projection_weight = force_projection_weight
+                values = (
+                    state_projection_weight * projected_states[state_idx, :]
+                    + (1.0 - state_projection_weight) * original_states[state_idx, :]
+                )
+            else:
+                values = blended_states[state_idx, :]
             lower, upper = _state_trajectory_bounds(periodic_nmpc, key, values.size)
             lower_violation = np.maximum(lower - values, 0.0)
             upper_violation = np.maximum(values - upper, 0.0)
@@ -2454,6 +2477,7 @@ def project_periodic_fes_initial_guess(
         "projection_mode": projection_mode,
         "projection_strategy": projection_strategy,
         "projection_substeps": projection_substeps,
+        "force_projection_weight": force_projection_weight,
         "projection_proximity_weight": projection_proximity_weight,
         "projection_defect_weight": projection_defect_weight,
         "projection_trust_radius": (
@@ -2745,6 +2769,7 @@ def apply_standard_warmup_to_periodic_nmpc(
     projection_defect_weight: float = 100.0,
     projection_trust_radius: float | None = None,
     projection_max_iterations: int = 200,
+    force_projection_weight: float = 0.25,
     echo: bool = False,
 ):
     if fatigue_warmstart_mode not in ("continuous", "cyclical"):
@@ -2823,6 +2848,7 @@ def apply_standard_warmup_to_periodic_nmpc(
             projection_defect_weight=projection_defect_weight,
             projection_trust_radius=projection_trust_radius,
             projection_max_iterations=projection_max_iterations,
+            force_projection_weight=force_projection_weight,
         )
         if echo:
             print(
@@ -2831,6 +2857,7 @@ def apply_standard_warmup_to_periodic_nmpc(
                 f"mode={projection_summary['projection_mode']} "
                 f"strategy={projection_summary['projection_strategy']} "
                 f"weight={projection_summary['projection_weight']:.3g} "
+                f"force_weight={projection_summary['force_projection_weight']:.3g} "
                 f"substeps={projection_summary['projection_substeps']} "
                 f"max_defect_before={projection_summary['max_defect_before']:.6g} "
                 f"max_defect_after={projection_summary['max_defect_after']:.6g} "
@@ -3335,6 +3362,10 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
                 f"{args.periodic_fes_warmup_projection_weight}"
             )
             print(
+                "periodic_fes_warmup_force_projection_weight: "
+                f"{args.periodic_fes_warmup_force_projection_weight}"
+            )
+            print(
                 "periodic_fes_warmup_projection_mode: "
                 f"{args.periodic_fes_warmup_projection_mode}"
             )
@@ -3469,6 +3500,7 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
             projection_max_iterations=(
                 args.periodic_fes_warmup_projection_max_iterations
             ),
+            force_projection_weight=args.periodic_fes_warmup_force_projection_weight,
             echo=echo,
         )
         if (

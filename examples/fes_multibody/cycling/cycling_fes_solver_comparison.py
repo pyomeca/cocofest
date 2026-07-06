@@ -268,7 +268,11 @@ def _solver_config(
     periodic_fes_warmup_projection_mode: str,
     periodic_fes_warmup_projection_strategy: str,
     periodic_fes_warmup_projection_substeps: int,
+    periodic_fes_warmup_projection_proximity_weight: float,
     periodic_fes_warmup_projection_defect_weight: float,
+    periodic_fes_warmup_projection_trust_radius: float | None,
+    periodic_fes_warmup_projection_max_iterations: int,
+    periodic_fes_warmup_force_projection_weight: float,
     acados_diagnostics: bool,
     periodic_ipopt_refinement: bool,
     periodic_ipopt_refinement_iterations: int,
@@ -330,8 +334,20 @@ def _solver_config(
             periodic_fes_warmup_projection_substeps=(
                 periodic_fes_warmup_projection_substeps
             ),
+            periodic_fes_warmup_projection_proximity_weight=(
+                periodic_fes_warmup_projection_proximity_weight
+            ),
             periodic_fes_warmup_projection_defect_weight=(
                 periodic_fes_warmup_projection_defect_weight
+            ),
+            periodic_fes_warmup_projection_trust_radius=(
+                periodic_fes_warmup_projection_trust_radius
+            ),
+            periodic_fes_warmup_projection_max_iterations=(
+                periodic_fes_warmup_projection_max_iterations
+            ),
+            periodic_fes_warmup_force_projection_weight=(
+                periodic_fes_warmup_force_projection_weight
             ),
             acados_diagnostics=False,
             periodic_ipopt_refinement=False,
@@ -397,8 +413,20 @@ def _solver_config(
             periodic_fes_warmup_projection_substeps=(
                 periodic_fes_warmup_projection_substeps
             ),
+            periodic_fes_warmup_projection_proximity_weight=(
+                periodic_fes_warmup_projection_proximity_weight
+            ),
             periodic_fes_warmup_projection_defect_weight=(
                 periodic_fes_warmup_projection_defect_weight
+            ),
+            periodic_fes_warmup_projection_trust_radius=(
+                periodic_fes_warmup_projection_trust_radius
+            ),
+            periodic_fes_warmup_projection_max_iterations=(
+                periodic_fes_warmup_projection_max_iterations
+            ),
+            periodic_fes_warmup_force_projection_weight=(
+                periodic_fes_warmup_force_projection_weight
             ),
             acados_diagnostics=acados_diagnostics,
             periodic_ipopt_refinement=periodic_ipopt_refinement,
@@ -635,7 +663,11 @@ def main(
     periodic_fes_warmup_projection_mode: str = "all",
     periodic_fes_warmup_projection_strategy: str = "sequential",
     periodic_fes_warmup_projection_substeps: int = 10,
+    periodic_fes_warmup_projection_proximity_weight: float = 1.0,
     periodic_fes_warmup_projection_defect_weight: float = 100.0,
+    periodic_fes_warmup_projection_trust_radius: float | None = None,
+    periodic_fes_warmup_projection_max_iterations: int = 200,
+    periodic_fes_warmup_force_projection_weight: float = 0.25,
     acados_diagnostics: bool = False,
     periodic_ipopt_refinement: bool = False,
     periodic_ipopt_refinement_iterations: int = 300,
@@ -688,8 +720,20 @@ def main(
         periodic_fes_warmup_projection_mode=periodic_fes_warmup_projection_mode,
         periodic_fes_warmup_projection_strategy=periodic_fes_warmup_projection_strategy,
         periodic_fes_warmup_projection_substeps=periodic_fes_warmup_projection_substeps,
+        periodic_fes_warmup_projection_proximity_weight=(
+            periodic_fes_warmup_projection_proximity_weight
+        ),
         periodic_fes_warmup_projection_defect_weight=(
             periodic_fes_warmup_projection_defect_weight
+        ),
+        periodic_fes_warmup_projection_trust_radius=(
+            periodic_fes_warmup_projection_trust_radius
+        ),
+        periodic_fes_warmup_projection_max_iterations=(
+            periodic_fes_warmup_projection_max_iterations
+        ),
+        periodic_fes_warmup_force_projection_weight=(
+            periodic_fes_warmup_force_projection_weight
         ),
         acados_diagnostics=acados_diagnostics,
         periodic_ipopt_refinement=False,
@@ -755,8 +799,20 @@ def main(
         periodic_fes_warmup_projection_mode=periodic_fes_warmup_projection_mode,
         periodic_fes_warmup_projection_strategy=periodic_fes_warmup_projection_strategy,
         periodic_fes_warmup_projection_substeps=periodic_fes_warmup_projection_substeps,
+        periodic_fes_warmup_projection_proximity_weight=(
+            periodic_fes_warmup_projection_proximity_weight
+        ),
         periodic_fes_warmup_projection_defect_weight=(
             periodic_fes_warmup_projection_defect_weight
+        ),
+        periodic_fes_warmup_projection_trust_radius=(
+            periodic_fes_warmup_projection_trust_radius
+        ),
+        periodic_fes_warmup_projection_max_iterations=(
+            periodic_fes_warmup_projection_max_iterations
+        ),
+        periodic_fes_warmup_force_projection_weight=(
+            periodic_fes_warmup_force_projection_weight
         ),
         acados_diagnostics=acados_diagnostics,
         periodic_ipopt_refinement=periodic_ipopt_refinement,
@@ -893,7 +949,7 @@ def build_cli() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--periodic-fes-warmup-projection-mode",
-        choices=("calcium", "all", "all_except_force"),
+        choices=("calcium", "all", "all_except_force", "all_force_blend"),
         default="all",
     )
     parser.add_argument(
@@ -905,7 +961,21 @@ def build_cli() -> argparse.ArgumentParser:
         "--periodic-fes-warmup-projection-substeps", type=int, default=10
     )
     parser.add_argument(
+        "--periodic-fes-warmup-projection-proximity-weight",
+        type=float,
+        default=1.0,
+    )
+    parser.add_argument(
         "--periodic-fes-warmup-projection-defect-weight", type=float, default=100.0
+    )
+    parser.add_argument(
+        "--periodic-fes-warmup-projection-trust-radius", type=float, default=None
+    )
+    parser.add_argument(
+        "--periodic-fes-warmup-projection-max-iterations", type=int, default=200
+    )
+    parser.add_argument(
+        "--periodic-fes-warmup-force-projection-weight", type=float, default=0.25
     )
     parser.add_argument(
         "--periodic-ipopt-refinement",
@@ -987,8 +1057,20 @@ if __name__ == "__main__":
         periodic_fes_warmup_projection_substeps=(
             args.periodic_fes_warmup_projection_substeps
         ),
+        periodic_fes_warmup_projection_proximity_weight=(
+            args.periodic_fes_warmup_projection_proximity_weight
+        ),
         periodic_fes_warmup_projection_defect_weight=(
             args.periodic_fes_warmup_projection_defect_weight
+        ),
+        periodic_fes_warmup_projection_trust_radius=(
+            args.periodic_fes_warmup_projection_trust_radius
+        ),
+        periodic_fes_warmup_projection_max_iterations=(
+            args.periodic_fes_warmup_projection_max_iterations
+        ),
+        periodic_fes_warmup_force_projection_weight=(
+            args.periodic_fes_warmup_force_projection_weight
         ),
         acados_diagnostics=args.acados_diagnostics,
         periodic_ipopt_refinement=args.periodic_ipopt_refinement,
