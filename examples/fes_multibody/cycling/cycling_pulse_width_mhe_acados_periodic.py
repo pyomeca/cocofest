@@ -1201,6 +1201,12 @@ def _format_named_values(values: dict[str, float]) -> str:
     return " ".join(f"{key}={value:.6g}" for key, value in values.items())
 
 
+def _format_compact_named_values(values: dict[str, float]) -> str:
+    if not values:
+        return "None"
+    return ",".join(f"{key}:{value:.6g}" for key, value in values.items())
+
+
 def print_acados_diagnostics(label: str, diagnostics: dict) -> None:
     print(
         f"{label} acados_status={diagnostics.get('status')} "
@@ -1331,6 +1337,26 @@ def print_initial_guess_diagnostics(nmpc) -> None:
             print(
                 "initial_guess_full_rk4_defect_qdot_by_dof: "
                 f"{_format_named_values(full_defects['qdot_by_dof'])}"
+            )
+        for item in full_defects.get("worst_qdot_nodes", []):
+            q_values = ""
+            if "q_current" in item:
+                q_values = (
+                    f" q_current={item['q_current']:.6g}"
+                    f" q_next={item['q_next']:.6g}"
+                    f" q_predicted_next={item['q_predicted_next']:.6g}"
+                )
+            print(
+                "initial_guess_full_rk4_worst_qdot_node: "
+                f"dof={item['dof']} node={item['node']} time={item['time']:.6g} "
+                f"defect={item['defect']:.6g} "
+                f"qdot_current={item['state_current']:.6g} "
+                f"qdot_next={item['state_next']:.6g} "
+                f"qdot_predicted_next={item['predicted_next']:.6g} "
+                f"qddot_rhs={item['rhs']:.6g}"
+                f"{q_values} "
+                f"forces={_format_compact_named_values(item['forces'])} "
+                f"pulse_widths={_format_compact_named_values(item['controls'])}"
             )
 
 
@@ -1908,12 +1934,80 @@ def _full_dynamics_rollout_defect_details(
             values[name] = float(np.max(np.abs(defects[state_idx, :])))
         return values
 
+    def worst_qdot_nodes() -> list[dict]:
+        if "qdot" not in nlp.states.keys():
+            return []
+
+        qdot_indexes = np.asarray(nlp.states["qdot"].index).reshape((-1,)).tolist()
+        q_indexes = (
+            np.asarray(nlp.states["q"].index).reshape((-1,)).tolist()
+            if "q" in nlp.states.keys()
+            else []
+        )
+        force_indexes = {
+            key.replace("F_", ""): int(
+                np.asarray(nlp.states[key].index).reshape((-1,))[0]
+            )
+            for key in nlp.states.keys()
+            if key.startswith("F_")
+        }
+        control_indexes = {
+            key.replace("last_pulse_width_", ""): int(
+                np.asarray(nlp.controls[key].index).reshape((-1,))[0]
+            )
+            for key in nlp.controls.keys()
+            if key.startswith("last_pulse_width_")
+        }
+
+        rows = []
+        for dof_idx, state_idx in enumerate(qdot_indexes):
+            node = int(np.argmax(np.abs(defects[state_idx, :])))
+            rhs = _full_dynamics_rhs(
+                nlp,
+                node * dt,
+                dt,
+                states[:, node],
+                controls[:, node],
+            )
+            dof_name = (
+                str(dof_names[dof_idx])
+                if dof_idx < len(dof_names)
+                else f"dof_{dof_idx}"
+            )
+            row = {
+                "dof": dof_name,
+                "node": node,
+                "time": float(node * dt),
+                "defect": float(defects[state_idx, node]),
+                "state_next": float(states[state_idx, node + 1]),
+                "predicted_next": float(predicted[state_idx, node + 1]),
+                "state_current": float(states[state_idx, node]),
+                "rhs": float(rhs[state_idx]),
+                "forces": {
+                    muscle_name: float(states[index, node])
+                    for muscle_name, index in force_indexes.items()
+                },
+                "controls": {
+                    muscle_name: float(controls[index, node])
+                    for muscle_name, index in control_indexes.items()
+                },
+            }
+            if dof_idx < len(q_indexes):
+                q_idx = q_indexes[dof_idx]
+                row["q_current"] = float(states[q_idx, node])
+                row["q_next"] = float(states[q_idx, node + 1])
+                row["q_predicted_next"] = float(predicted[q_idx, node + 1])
+            rows.append(row)
+
+        return sorted(rows, key=lambda item: abs(item["defect"]), reverse=True)
+
     return {
         "absolute_by_block": absolute_by_block,
         "scaled_by_block": scaled_by_block,
         "top_keys": top_keys,
         "q_by_dof": defects_by_dof("q"),
         "qdot_by_dof": defects_by_dof("qdot"),
+        "worst_qdot_nodes": worst_qdot_nodes(),
     }
 
 
