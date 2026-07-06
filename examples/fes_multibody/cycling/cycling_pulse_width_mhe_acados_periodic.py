@@ -1038,6 +1038,13 @@ def _state_traces_from_exported_cycles(
     return state_traces
 
 
+def _initial_guess_traces(container) -> dict[str, np.ndarray]:
+    return {
+        key: np.array(container[key].init, dtype=float, copy=True)
+        for key in container.keys()
+    }
+
+
 def _status_is_success(status) -> bool:
     return status == 0
 
@@ -3264,6 +3271,12 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
     if args.solver == "acados" and args.acados_diagnostics:
         print_initial_guess_diagnostics(nmpc)
 
+    initial_guess_state_traces = None
+    initial_guess_control_traces = None
+    if args.solver == "acados":
+        initial_guess_state_traces = _initial_guess_traces(nmpc.nlp[0].x_init)
+        initial_guess_control_traces = _initial_guess_traces(nmpc.nlp[0].u_init)
+
     def update_functions(_nmpc, cycle_idx, _sol):
         print(f"window {cycle_idx}")
         if echo and _sol is not None:
@@ -3331,6 +3344,9 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
         summary = build_single_shot_summary(sol)
         if args.solver == "acados" and args.acados_diagnostics:
             summary["acados_diagnostics"] = collect_acados_diagnostics(sol)
+        if initial_guess_state_traces is not None:
+            summary["initial_guess_state_traces"] = initial_guess_state_traces
+            summary["initial_guess_control_traces"] = initial_guess_control_traces
         summary["args"] = args
         return summary
 
@@ -3369,6 +3385,9 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
             collect_acados_diagnostics(window_solution)
             for window_solution in source_window_solutions
         ]
+    if initial_guess_state_traces is not None:
+        summary["initial_guess_state_traces"] = initial_guess_state_traces
+        summary["initial_guess_control_traces"] = initial_guess_control_traces
     summary["args"] = args
     return summary
 

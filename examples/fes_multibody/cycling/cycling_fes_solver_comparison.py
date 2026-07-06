@@ -169,46 +169,63 @@ def _control_comparisons(ipopt_result: dict, acados_result: dict) -> list[dict]:
 def _state_comparisons(ipopt_result: dict, acados_result: dict) -> list[dict]:
     ipopt_states = ipopt_result.get("state_traces", {})
     acados_states = acados_result.get("state_traces", {})
-    common_keys = sorted(set(ipopt_states).intersection(acados_states))
+    return _state_trace_comparisons(ipopt_states, acados_states, "ipopt", "acados")
+
+
+def _state_trace_comparisons(
+    reference_states: dict,
+    compared_states: dict,
+    reference_prefix: str,
+    compared_prefix: str,
+) -> list[dict]:
+    common_keys = sorted(set(reference_states).intersection(compared_states))
     comparisons = []
 
     for key in common_keys:
-        ipopt_values = np.asarray(ipopt_states[key], dtype=float)
-        acados_values = np.asarray(acados_states[key], dtype=float)
-        if ipopt_values.ndim == 1:
-            ipopt_values = ipopt_values[np.newaxis, :]
-        if acados_values.ndim == 1:
-            acados_values = acados_values[np.newaxis, :]
-        if ipopt_values.size == 0 or acados_values.size == 0:
+        reference_values = np.asarray(reference_states[key], dtype=float)
+        compared_values = np.asarray(compared_states[key], dtype=float)
+        if reference_values.ndim == 1:
+            reference_values = reference_values[np.newaxis, :]
+        if compared_values.ndim == 1:
+            compared_values = compared_values[np.newaxis, :]
+        if reference_values.size == 0 or compared_values.size == 0:
             continue
 
-        for row in range(min(ipopt_values.shape[0], acados_values.shape[0])):
-            common_len = max(ipopt_values.shape[1], acados_values.shape[1])
-            ipopt_common = _resample_trace(ipopt_values[row, :], common_len)
-            acados_common = _resample_trace(acados_values[row, :], common_len)
-            diff = acados_common - ipopt_common
+        for row in range(min(reference_values.shape[0], compared_values.shape[0])):
+            common_len = max(reference_values.shape[1], compared_values.shape[1])
+            reference_common = _resample_trace(reference_values[row, :], common_len)
+            compared_common = _resample_trace(compared_values[row, :], common_len)
+            diff = compared_common - reference_common
             comparisons.append(
                 {
-                    "key": key if ipopt_values.shape[0] == 1 else f"{key}[{row}]",
+                    "key": (key if reference_values.shape[0] == 1 else f"{key}[{row}]"),
                     "common_len": common_len,
                     "rmse": float(np.sqrt(np.mean(diff**2))),
                     "mae": float(np.mean(np.abs(diff))),
                     "max_abs_error": float(np.max(np.abs(diff))),
                     "final_error": float(diff[-1]),
-                    "ipopt_mean": float(np.mean(ipopt_common)),
-                    "acados_mean": float(np.mean(acados_common)),
-                    "ipopt_range": (
-                        float(np.min(ipopt_common)),
-                        float(np.max(ipopt_common)),
+                    f"{reference_prefix}_mean": float(np.mean(reference_common)),
+                    f"{compared_prefix}_mean": float(np.mean(compared_common)),
+                    f"{reference_prefix}_range": (
+                        float(np.min(reference_common)),
+                        float(np.max(reference_common)),
                     ),
-                    "acados_range": (
-                        float(np.min(acados_common)),
-                        float(np.max(acados_common)),
+                    f"{compared_prefix}_range": (
+                        float(np.min(compared_common)),
+                        float(np.max(compared_common)),
                     ),
                 }
             )
 
     return sorted(comparisons, key=lambda item: item["rmse"], reverse=True)
+
+
+def _initial_guess_state_comparisons(acados_result: dict) -> list[dict]:
+    initial_guess_states = acados_result.get("initial_guess_state_traces", {})
+    solution_states = acados_result.get("state_traces", {})
+    return _state_trace_comparisons(
+        initial_guess_states, solution_states, "initial_guess", "solution"
+    )
 
 
 def _solver_config(
@@ -519,6 +536,33 @@ def print_comparison(
             )
     elif not state_metrics:
         print("state comparison warning: no common state keys were found.")
+
+    initial_guess_state_metrics = _initial_guess_state_comparisons(acados_result)
+    if initial_guess_state_metrics and state_comparison_limit:
+        print(
+            "acados initial guess vs solution | key | common_len | rmse | mae | max_abs_error | "
+            "final_error | initial_guess_mean | solution_mean | initial_guess_range | solution_range"
+        )
+        for metric in initial_guess_state_metrics[:state_comparison_limit]:
+            initial_min, initial_max = metric["initial_guess_range"]
+            solution_min, solution_max = metric["solution_range"]
+            print(
+                "acados initial guess vs solution | "
+                f"{metric['key']} | "
+                f"{metric['common_len']} | "
+                f"{_format_control_metric(metric['rmse'])} | "
+                f"{_format_control_metric(metric['mae'])} | "
+                f"{_format_control_metric(metric['max_abs_error'])} | "
+                f"{_format_control_metric(metric['final_error'])} | "
+                f"{_format_control_metric(metric['initial_guess_mean'])} | "
+                f"{_format_control_metric(metric['solution_mean'])} | "
+                f"[{_format_control_metric(initial_min)}, {_format_control_metric(initial_max)}] | "
+                f"[{_format_control_metric(solution_min)}, {_format_control_metric(solution_max)}]"
+            )
+    elif acados_result.get("initial_guess_state_traces") is not None:
+        print(
+            "acados initial guess vs solution warning: no common state keys were found."
+        )
 
     ipopt_solver_time = ipopt_result["solver_time_s"]
     acados_solver_time = acados_result["solver_time_s"]
