@@ -69,6 +69,7 @@ class MyCyclicNMPC(FesNmpcMsk):
         self.advance_wheel_q_bounds = False
         self.wheel_q_path_margin = 2.0
         self.use_signed_wheel_shift = False
+        self.continuous_state_initial_guess_mode = "continuous"
 
     def _state_slack_for(self, key: str, index: int) -> float:
         if key in self.first_node_state_slack:
@@ -224,7 +225,10 @@ class MyCyclicNMPC(FesNmpcMsk):
                     else:
                         self.set_init_cyclical(states, key, i)
                 elif key in continuous_keys:
-                    self.set_init_continuous(states, key, i)
+                    if self.continuous_state_initial_guess_mode == "cyclical":
+                        self.set_init_cyclical(states, key, i)
+                    else:
+                        self.set_init_continuous(states, key, i)
         self._correct_init_guess_to_fit_bounds(
             corrected_input="states"
         )  # This function is called to move init guess within the bounds if not in bounds

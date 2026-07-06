@@ -276,6 +276,15 @@ def build_argument_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--acados-fatigue-warmstart-mode",
+        choices=("continuous", "cyclical"),
+        default="continuous",
+        help=(
+            "How A_, Tau1_ and Km_ fatigue states are shifted from the standard IPOPT warmup "
+            "to the ACADOS initial guess."
+        ),
+    )
+    parser.add_argument(
         "--constant-crank-torque",
         type=float,
         default=-0.2,
@@ -2673,10 +2682,61 @@ def print_warmup_state_comparison(
     return comparisons
 
 
+def _cyclical_state_warmstart_values(
+    values: np.ndarray, nodes_per_cycle: int
+) -> np.ndarray:
+    n_plus_one_cycles = values[nodes_per_cycle:-1]
+    last_cycle = values[-nodes_per_cycle - 1 :]
+    if n_plus_one_cycles.size == 0:
+        return last_cycle
+    return np.concatenate((n_plus_one_cycles, last_cycle))
+
+
+def apply_fatigue_warmstart_mode(
+    periodic_nmpc,
+    adapted_solution,
+    fatigue_warmstart_mode: str,
+) -> dict[str, float]:
+    if fatigue_warmstart_mode != "cyclical":
+        return {}
+
+    states = adapted_solution.decision_states(to_merge=SolutionMerge.NODES)
+    max_delta_by_key = {}
+    for key in periodic_nmpc.nlp[0].x_init.keys():
+        if not key.startswith(("A_", "Tau1_", "Km_")) or key not in states:
+            continue
+
+        state_values = np.asarray(states[key], dtype=float)
+        if state_values.ndim == 1:
+            state_values = state_values[np.newaxis, :]
+        for row in range(state_values.shape[0]):
+            target = periodic_nmpc.nlp[0].x_init[key].init[row, :]
+            values = _cyclical_state_warmstart_values(
+                state_values[row, :], periodic_nmpc.nodes_per_cycle
+            )
+            if values.shape != target.shape:
+                raise ValueError(
+                    f"Cannot apply cyclical fatigue warmstart for {key}: "
+                    f"expected {target.shape}, got {values.shape}."
+                )
+            max_delta_by_key[key] = max(
+                max_delta_by_key.get(key, 0.0),
+                float(np.max(np.abs(target - values))),
+            )
+            periodic_nmpc.nlp[0].x_init[key].init[row, :] = values
+
+    if max_delta_by_key:
+        periodic_nmpc._correct_init_guess_to_fit_bounds(corrected_input="states")
+        periodic_nmpc._sync_acados_state_bounds()
+
+    return max_delta_by_key
+
+
 def apply_standard_warmup_to_periodic_nmpc(
     periodic_nmpc,
     warmup_solution,
     project_fes_warmup: bool = True,
+    fatigue_warmstart_mode: str = "continuous",
     projection_weight: float = 1.0,
     projection_mode: str = "all",
     projection_strategy: str = "sequential",
@@ -2687,11 +2747,35 @@ def apply_standard_warmup_to_periodic_nmpc(
     projection_max_iterations: int = 200,
     echo: bool = False,
 ):
+    if fatigue_warmstart_mode not in ("continuous", "cyclical"):
+        raise ValueError(
+            "--acados-fatigue-warmstart-mode must be 'continuous' or 'cyclical'."
+        )
+
     adapted_solution = _adapt_warmup_solution_to_periodic_nodes(
         periodic_nmpc, warmup_solution
     )
     periodic_nmpc.advance_window_bounds_states(adapted_solution)
-    periodic_nmpc.advance_window_initial_guess_states(adapted_solution)
+    previous_fatigue_warmstart_mode = getattr(
+        periodic_nmpc, "continuous_state_initial_guess_mode", "continuous"
+    )
+    periodic_nmpc.continuous_state_initial_guess_mode = fatigue_warmstart_mode
+    try:
+        periodic_nmpc.advance_window_initial_guess_states(adapted_solution)
+    finally:
+        periodic_nmpc.continuous_state_initial_guess_mode = (
+            previous_fatigue_warmstart_mode
+        )
+    fatigue_warmstart_summary = apply_fatigue_warmstart_mode(
+        periodic_nmpc, adapted_solution, fatigue_warmstart_mode
+    )
+    if echo and fatigue_warmstart_summary:
+        print(
+            "acados_fatigue_warmstart: "
+            f"mode={fatigue_warmstart_mode} "
+            f"max_delta={max(fatigue_warmstart_summary.values()):.6g} "
+            f"keys={len(fatigue_warmstart_summary)}"
+        )
     periodic_nmpc.advance_window_initial_guess_controls(adapted_solution)
 
     warmup_states = adapted_solution.decision_states(to_merge=SolutionMerge.NODES)
@@ -3004,6 +3088,24 @@ def apply_pulse_width_control_trust_region(
     return summary
 
 
+def relax_acados_first_node_fes_bounds(periodic_nmpc) -> list[str]:
+    relaxed_keys = []
+    for key in periodic_nmpc.nlp[0].x_bounds.keys():
+        if key in ("q", "qdot"):
+            continue
+
+        bounds = periodic_nmpc.nlp[0].x_bounds[key]
+        if bounds.min.shape[1] < 2 or bounds.max.shape[1] < 2:
+            continue
+
+        bounds.min[:, 0] = bounds.min[:, 1]
+        bounds.max[:, 0] = bounds.max[:, 1]
+        relaxed_keys.append(key)
+
+    periodic_nmpc._sync_acados_state_bounds()
+    return relaxed_keys
+
+
 def run_standard_ipopt_warmup(
     args: argparse.Namespace,
     mhe_info: dict,
@@ -3181,6 +3283,12 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
         nmpc.wheel_q_path_margin = args.acados_wheel_q_path_margin
         nmpc.use_signed_wheel_shift = True
         nmpc.transfer_debug = echo
+        relaxed_fes_bounds = relax_acados_first_node_fes_bounds(nmpc)
+        if echo:
+            print(
+                "acados_relaxed_first_node_fes_bounds: "
+                f"keys={len(relaxed_fes_bounds)}"
+            )
 
     if echo:
         print(f"model_formulation: {args.model_formulation}")
@@ -3213,6 +3321,10 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
             print(
                 "acados_pulse_width_trust_radius: "
                 f"{args.acados_pulse_width_trust_radius}"
+            )
+            print(
+                "acados_fatigue_warmstart_mode: "
+                f"{args.acados_fatigue_warmstart_mode}"
             )
             print(
                 "periodic_fes_warmup_projection: "
@@ -3344,6 +3456,7 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
             nmpc,
             warmup_solution,
             project_fes_warmup=not args.disable_periodic_fes_warmup_projection,
+            fatigue_warmstart_mode=args.acados_fatigue_warmstart_mode,
             projection_weight=args.periodic_fes_warmup_projection_weight,
             projection_mode=args.periodic_fes_warmup_projection_mode,
             projection_strategy=args.periodic_fes_warmup_projection_strategy,
