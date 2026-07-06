@@ -267,6 +267,15 @@ def build_argument_parser() -> argparse.ArgumentParser:
         help="Scaling divisor, in seconds, for pulse-width controls.",
     )
     parser.add_argument(
+        "--acados-pulse-width-trust-radius",
+        type=float,
+        default=None,
+        help=(
+            "Optional pulse-width control trust-region radius, in seconds, around the current "
+            "ACADOS initial guess range."
+        ),
+    )
+    parser.add_argument(
         "--constant-crank-torque",
         type=float,
         default=-0.2,
@@ -800,6 +809,7 @@ def _codegen_signature(args: argparse.Namespace) -> str:
         "wheel_qdot_regularization_target": args.wheel_qdot_regularization_target,
         "state_scaling": args.state_scaling,
         "pulse_width_scaling": args.pulse_width_scaling,
+        "acados_pulse_width_trust_radius": args.acados_pulse_width_trust_radius,
         "max_acados_iterations": args.max_acados_iterations,
         "acados_tolerance": args.acados_tolerance,
         "acados_qp_solver": args.acados_qp_solver,
@@ -2861,6 +2871,45 @@ def apply_warmup_control_regularization_targets(
     return updated_keys
 
 
+def apply_pulse_width_control_trust_region(
+    periodic_nmpc, radius: float
+) -> dict[str, dict[str, float]]:
+    if radius < 0:
+        raise ValueError("--acados-pulse-width-trust-radius must be non-negative.")
+
+    summary = {}
+    for key in periodic_nmpc.nlp[0].u_init.keys():
+        if not key.startswith("last_pulse_width_"):
+            continue
+
+        center = np.asarray(periodic_nmpc.nlp[0].u_init[key].init, dtype=float)
+        bounds = periodic_nmpc.nlp[0].u_bounds[key]
+        original_lower = float(np.min(np.asarray(bounds.min, dtype=float)))
+        original_upper = float(np.max(np.asarray(bounds.max, dtype=float)))
+        center_min = float(np.min(center))
+        center_max = float(np.max(center))
+        lower = max(original_lower, center_min - radius)
+        upper = min(original_upper, center_max + radius)
+        if lower > upper:
+            raise RuntimeError(
+                f"Pulse-width trust region is empty for {key}: lower={lower}, upper={upper}."
+            )
+
+        bounds.min[:, :] = lower
+        bounds.max[:, :] = upper
+        periodic_nmpc.nlp[0].u_init[key].init[:, :] = np.minimum(
+            np.maximum(center, lower), upper
+        )
+        summary[key] = {
+            "center_min": center_min,
+            "center_max": center_max,
+            "lower": lower,
+            "upper": upper,
+        }
+
+    return summary
+
+
 def run_standard_ipopt_warmup(
     args: argparse.Namespace,
     mhe_info: dict,
@@ -2934,6 +2983,11 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
         raise ValueError("--cycles-per-window must be >= 1")
     if args.stimulations_per_cycle < 1:
         raise ValueError("--stimulations-per-cycle must be >= 1")
+    if (
+        args.acados_pulse_width_trust_radius is not None
+        and args.acados_pulse_width_trust_radius < 0
+    ):
+        raise ValueError("--acados-pulse-width-trust-radius must be non-negative.")
 
     periodic_ipopt_refinement_enabled = (
         args.periodic_ipopt_refinement and not args.disable_periodic_ipopt_refinement
@@ -3062,6 +3116,10 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
         print(f"state_scaling: {args.state_scaling}")
         print(f"pulse_width_scaling: {args.pulse_width_scaling}")
         if args.solver == "acados":
+            print(
+                "acados_pulse_width_trust_radius: "
+                f"{args.acados_pulse_width_trust_radius}"
+            )
             print(
                 "periodic_fes_warmup_projection: "
                 f"{not args.disable_periodic_fes_warmup_projection}"
@@ -3267,6 +3325,18 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
         project_qdot_initial_guess_from_q(nmpc)
         if echo:
             print("acados_project_qdot_from_q: True")
+
+    if args.solver == "acados" and args.acados_pulse_width_trust_radius is not None:
+        trust_summary = apply_pulse_width_control_trust_region(
+            nmpc, args.acados_pulse_width_trust_radius
+        )
+        if echo:
+            for key, item in trust_summary.items():
+                print(
+                    "acados_pulse_width_trust_region: "
+                    f"{key} center=[{item['center_min']:.6g}, {item['center_max']:.6g}] "
+                    f"bounds=[{item['lower']:.6g}, {item['upper']:.6g}]"
+                )
 
     if args.solver == "acados" and args.acados_diagnostics:
         print_initial_guess_diagnostics(nmpc)

@@ -247,6 +247,7 @@ def _solver_config(
     wheel_qdot_regularization_target: float,
     state_scaling: str,
     pulse_width_scaling: float,
+    acados_pulse_width_trust_radius: float | None,
     acados_tolerance: float | None,
     acados_qp_iter_max: int,
     acados_levenberg_marquardt: float,
@@ -303,6 +304,7 @@ def _solver_config(
             wheel_qdot_regularization_target=wheel_qdot_regularization_target,
             state_scaling=state_scaling,
             pulse_width_scaling=pulse_width_scaling,
+            acados_pulse_width_trust_radius=None,
             acados_tolerance=acados_tolerance,
             acados_qp_iter_max=acados_qp_iter_max,
             acados_levenberg_marquardt=acados_levenberg_marquardt,
@@ -366,6 +368,7 @@ def _solver_config(
             wheel_qdot_regularization_target=wheel_qdot_regularization_target,
             state_scaling=state_scaling,
             pulse_width_scaling=pulse_width_scaling,
+            acados_pulse_width_trust_radius=acados_pulse_width_trust_radius,
             acados_tolerance=acados_tolerance,
             acados_qp_iter_max=acados_qp_iter_max,
             acados_levenberg_marquardt=acados_levenberg_marquardt,
@@ -608,6 +611,7 @@ def main(
     acados_state_scaling: str | None = None,
     pulse_width_scaling: float = 1 / 400,
     acados_pulse_width_scaling: float | None = None,
+    acados_pulse_width_trust_radius: float | None = None,
     acados_tolerance: float | None = None,
     acados_qp_iter_max: int = 50,
     acados_levenberg_marquardt: float = 0.0,
@@ -659,6 +663,7 @@ def main(
         wheel_qdot_regularization_target=wheel_qdot_regularization_target,
         state_scaling=state_scaling,
         pulse_width_scaling=pulse_width_scaling,
+        acados_pulse_width_trust_radius=None,
         acados_tolerance=acados_tolerance,
         acados_qp_iter_max=acados_qp_iter_max,
         acados_levenberg_marquardt=acados_levenberg_marquardt,
@@ -724,6 +729,7 @@ def main(
             if acados_pulse_width_scaling is not None
             else pulse_width_scaling
         ),
+        acados_pulse_width_trust_radius=acados_pulse_width_trust_radius,
         acados_tolerance=acados_tolerance,
         acados_qp_iter_max=acados_qp_iter_max,
         acados_levenberg_marquardt=acados_levenberg_marquardt,
@@ -815,6 +821,7 @@ def build_cli() -> argparse.ArgumentParser:
     )
     parser.add_argument("--pulse-width-scaling", type=float, default=1 / 400)
     parser.add_argument("--acados-pulse-width-scaling", type=float, default=None)
+    parser.add_argument("--acados-pulse-width-trust-radius", type=float, default=None)
     parser.add_argument("--acados-tolerance", type=float, default=None)
     parser.add_argument("--acados-qp-iter-max", type=int, default=50)
     parser.add_argument("--acados-levenberg-marquardt", type=float, default=0.0)
@@ -940,6 +947,7 @@ if __name__ == "__main__":
         acados_state_scaling=args.acados_state_scaling,
         pulse_width_scaling=args.pulse_width_scaling,
         acados_pulse_width_scaling=args.acados_pulse_width_scaling,
+        acados_pulse_width_trust_radius=args.acados_pulse_width_trust_radius,
         acados_tolerance=args.acados_tolerance,
         acados_qp_iter_max=args.acados_qp_iter_max,
         acados_levenberg_marquardt=args.acados_levenberg_marquardt,
