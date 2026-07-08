@@ -26,6 +26,35 @@ from cycling_pulse_width_mhe_acados_periodic import (
 
 EXAMPLE_DIR = Path(__file__).resolve().parent
 
+IPOPT_PROFILE_DEFAULTS = {
+    "historical": {
+        "model_formulation": "standard",
+        "torque_application": "external_forces",
+        "ode_solver": "collocation",
+        "rk_steps": 1,
+        "collocation_degree": 3,
+        "collocation_method": "radau",
+        "use_sx": False,
+        "enforce_start_constraints": True,
+        "disable_standard_ipopt_warmup": False,
+        "disable_periodic_fes_warmup_projection": True,
+        "fatigue_warmstart_mode": "continuous",
+    },
+    "acados_like": {
+        "model_formulation": "periodic",
+        "torque_application": "constant",
+        "ode_solver": "rk4",
+        "rk_steps": 5,
+        "collocation_degree": 3,
+        "collocation_method": "radau",
+        "use_sx": True,
+        "enforce_start_constraints": False,
+        "disable_standard_ipopt_warmup": False,
+        "disable_periodic_fes_warmup_projection": None,
+        "fatigue_warmstart_mode": None,
+    },
+}
+
 
 def _namespace_from_cli(**overrides) -> argparse.Namespace:
     parser = build_argument_parser()
@@ -228,6 +257,14 @@ def _initial_guess_state_comparisons(acados_result: dict) -> list[dict]:
     )
 
 
+def _normalize_ipopt_profile(profile: str) -> str:
+    return profile.replace("-", "_")
+
+
+def _pick(value, fallback):
+    return fallback if value is None else value
+
+
 def _solver_config(
     solver_name: str,
     objective: str,
@@ -281,13 +318,43 @@ def _solver_config(
     periodic_ipopt_refinement_iterations: int,
     periodic_ipopt_refinement_use_sx: bool,
     warmup_state_comparison_limit: int,
+    ipopt_profile: str = "historical",
+    ipopt_model_formulation: str | None = None,
+    ipopt_torque_application: str | None = None,
+    ipopt_ode_solver: str | None = None,
+    ipopt_rk_steps: int | None = None,
+    ipopt_collocation_degree: int | None = None,
+    ipopt_collocation_method: str | None = None,
+    ipopt_use_sx: bool | None = None,
+    ipopt_enforce_start_constraints: bool | None = None,
+    ipopt_disable_standard_warmup: bool | None = None,
+    ipopt_disable_periodic_fes_warmup_projection: bool | None = None,
+    ipopt_fatigue_warmstart_mode: str | None = None,
+    ipopt_disable_historical_initial_guess: bool = False,
 ) -> argparse.Namespace:
     if solver_name == "ipopt":
+        normalized_profile = _normalize_ipopt_profile(ipopt_profile)
+        if normalized_profile not in IPOPT_PROFILE_DEFAULTS:
+            raise ValueError("--ipopt-profile must be 'historical' or 'acados_like'.")
+
+        defaults = IPOPT_PROFILE_DEFAULTS[normalized_profile]
+        disable_projection_default = defaults["disable_periodic_fes_warmup_projection"]
+        if disable_projection_default is None:
+            disable_projection_default = disable_periodic_fes_warmup_projection
+
+        fatigue_warmstart_default = defaults["fatigue_warmstart_mode"]
+        if fatigue_warmstart_default is None:
+            fatigue_warmstart_default = acados_fatigue_warmstart_mode
+
         return _namespace_from_cli(
             solver="ipopt",
             single_shot=False,
-            model_formulation="standard",
-            torque_application="external_forces",
+            model_formulation=_pick(
+                ipopt_model_formulation, defaults["model_formulation"]
+            ),
+            torque_application=_pick(
+                ipopt_torque_application, defaults["torque_application"]
+            ),
             cycles_per_window=cycles_per_window,
             stimulations_per_cycle=stimulations_per_cycle,
             objective=objective,
@@ -296,13 +363,23 @@ def _solver_config(
             max_ipopt_iterations=ipopt_max_iter,
             ipopt_linear_solver=ipopt_linear_solver,
             n_windows=n_windows,
-            ode_solver="collocation",
-            collocation_degree=3,
-            collocation_method="radau",
-            rk_steps=1,
-            use_sx=False,
-            enforce_start_constraints=True,
-            disable_standard_ipopt_warmup=False,
+            ode_solver=_pick(ipopt_ode_solver, defaults["ode_solver"]),
+            collocation_degree=_pick(
+                ipopt_collocation_degree, defaults["collocation_degree"]
+            ),
+            collocation_method=_pick(
+                ipopt_collocation_method, defaults["collocation_method"]
+            ),
+            rk_steps=_pick(ipopt_rk_steps, defaults["rk_steps"]),
+            use_sx=_pick(ipopt_use_sx, defaults["use_sx"]),
+            enforce_start_constraints=_pick(
+                ipopt_enforce_start_constraints,
+                defaults["enforce_start_constraints"],
+            ),
+            disable_standard_ipopt_warmup=_pick(
+                ipopt_disable_standard_warmup,
+                defaults["disable_standard_ipopt_warmup"],
+            ),
             max_consecutive_failing=1,
             codegen_tag=codegen_tag,
             control_regularization_weight=control_regularization_weight,
@@ -314,7 +391,9 @@ def _solver_config(
             pulse_width_scaling=pulse_width_scaling,
             acados_pulse_width_trust_radius=None,
             acados_fes_state_trust_radius=None,
-            acados_fatigue_warmstart_mode="continuous",
+            acados_fatigue_warmstart_mode=_pick(
+                ipopt_fatigue_warmstart_mode, fatigue_warmstart_default
+            ),
             acados_tolerance=acados_tolerance,
             acados_qp_iter_max=acados_qp_iter_max,
             acados_levenberg_marquardt=acados_levenberg_marquardt,
@@ -329,7 +408,10 @@ def _solver_config(
             acados_qpscaling_scale_constraints=acados_qpscaling_scale_constraints,
             acados_ext_qp_res=False,
             acados_project_qdot_from_q=False,
-            disable_periodic_fes_warmup_projection=True,
+            disable_periodic_fes_warmup_projection=_pick(
+                ipopt_disable_periodic_fes_warmup_projection,
+                disable_projection_default,
+            ),
             periodic_fes_warmup_projection_weight=periodic_fes_warmup_projection_weight,
             periodic_fes_warmup_projection_mode=periodic_fes_warmup_projection_mode,
             periodic_fes_warmup_projection_strategy=(
@@ -364,6 +446,9 @@ def _solver_config(
             periodic_ipopt_refinement_iterations=periodic_ipopt_refinement_iterations,
             periodic_ipopt_refinement_use_sx=False,
             warmup_state_comparison_limit=warmup_state_comparison_limit,
+            disable_historical_ipopt_initial_guess=(
+                ipopt_disable_historical_initial_guess
+            ),
         )
 
     if solver_name == "acados":
@@ -695,6 +780,19 @@ def main(
     warmup_state_comparison_limit: int = 12,
     state_comparison_limit: int = 12,
     print_traces: bool = False,
+    ipopt_profile: str = "historical",
+    ipopt_model_formulation: str | None = None,
+    ipopt_torque_application: str | None = None,
+    ipopt_ode_solver: str | None = None,
+    ipopt_rk_steps: int | None = None,
+    ipopt_collocation_degree: int | None = None,
+    ipopt_collocation_method: str | None = None,
+    ipopt_use_sx: bool | None = None,
+    ipopt_enforce_start_constraints: bool | None = None,
+    ipopt_disable_standard_warmup: bool | None = None,
+    ipopt_disable_periodic_fes_warmup_projection: bool | None = None,
+    ipopt_fatigue_warmstart_mode: str | None = None,
+    ipopt_disable_historical_initial_guess: bool = False,
 ):
     os.chdir(EXAMPLE_DIR)
     if acados_dir:
@@ -767,6 +865,21 @@ def main(
         periodic_ipopt_refinement_iterations=periodic_ipopt_refinement_iterations,
         periodic_ipopt_refinement_use_sx=False,
         warmup_state_comparison_limit=warmup_state_comparison_limit,
+        ipopt_profile=ipopt_profile,
+        ipopt_model_formulation=ipopt_model_formulation,
+        ipopt_torque_application=ipopt_torque_application,
+        ipopt_ode_solver=ipopt_ode_solver,
+        ipopt_rk_steps=ipopt_rk_steps,
+        ipopt_collocation_degree=ipopt_collocation_degree,
+        ipopt_collocation_method=ipopt_collocation_method,
+        ipopt_use_sx=ipopt_use_sx,
+        ipopt_enforce_start_constraints=ipopt_enforce_start_constraints,
+        ipopt_disable_standard_warmup=ipopt_disable_standard_warmup,
+        ipopt_disable_periodic_fes_warmup_projection=(
+            ipopt_disable_periodic_fes_warmup_projection
+        ),
+        ipopt_fatigue_warmstart_mode=ipopt_fatigue_warmstart_mode,
+        ipopt_disable_historical_initial_guess=(ipopt_disable_historical_initial_guess),
     )
     acados_args = _solver_config(
         "acados",
@@ -855,7 +968,13 @@ def main(
         warmup_state_comparison_limit=warmup_state_comparison_limit,
     )
 
-    print("Running IPOPT reference configuration...")
+    normalized_ipopt_profile = _normalize_ipopt_profile(ipopt_profile)
+    ipopt_label = (
+        "historical reference"
+        if normalized_ipopt_profile == "historical"
+        else "ACADOS-like diagnostic"
+    )
+    print(f"Running IPOPT configuration ({ipopt_label})...")
     ipopt_result = solve_case(ipopt_args, echo=True)
     print()
     print("Running ACADOS-compatible configuration...")
@@ -884,6 +1003,118 @@ def build_cli() -> argparse.ArgumentParser:
     parser.add_argument("--codegen-tag", default="fes_compare")
     parser.add_argument("--ipopt-max-iter", type=int, default=2000)
     parser.add_argument("--ipopt-linear-solver", default="ma57")
+    parser.add_argument(
+        "--ipopt-profile",
+        choices=("historical", "acados_like", "acados-like"),
+        default="historical",
+        help=(
+            "Base IPOPT configuration. 'historical' keeps the robust reference "
+            "problem; 'acados_like' switches IPOPT to the periodic, constant-torque, "
+            "RK setup used to diagnose ACADOS."
+        ),
+    )
+    parser.add_argument(
+        "--ipopt-model-formulation",
+        choices=("standard", "periodic"),
+        default=None,
+        help="Override the IPOPT model formulation selected by --ipopt-profile.",
+    )
+    parser.add_argument(
+        "--ipopt-torque-application",
+        choices=("constant", "external_forces"),
+        default=None,
+        help="Override how the IPOPT-side crank torque is applied.",
+    )
+    parser.add_argument(
+        "--ipopt-ode-solver",
+        choices=("rk4", "rk8", "irk", "collocation"),
+        default=None,
+        help="Override the IPOPT transcription/integration scheme.",
+    )
+    parser.add_argument(
+        "--ipopt-rk-steps",
+        type=int,
+        default=None,
+        help="Override IPOPT RK integration steps per shooting interval.",
+    )
+    parser.add_argument(
+        "--ipopt-collocation-degree",
+        type=int,
+        default=None,
+        help="Override IPOPT collocation/IRK polynomial degree.",
+    )
+    parser.add_argument(
+        "--ipopt-collocation-method",
+        default=None,
+        help="Override IPOPT collocation/IRK method.",
+    )
+    ipopt_sx_group = parser.add_mutually_exclusive_group()
+    ipopt_sx_group.add_argument(
+        "--ipopt-use-sx",
+        dest="ipopt_use_sx",
+        action="store_true",
+        default=None,
+        help="Build the IPOPT-side diagnostic problem with CasADi SX graphs.",
+    )
+    ipopt_sx_group.add_argument(
+        "--ipopt-no-use-sx",
+        dest="ipopt_use_sx",
+        action="store_false",
+        help="Build the IPOPT-side diagnostic problem with CasADi MX graphs.",
+    )
+    ipopt_start_group = parser.add_mutually_exclusive_group()
+    ipopt_start_group.add_argument(
+        "--ipopt-enforce-start-constraints",
+        dest="ipopt_enforce_start_constraints",
+        action="store_true",
+        default=None,
+        help="Enable historical start constraints in the IPOPT-side problem.",
+    )
+    ipopt_start_group.add_argument(
+        "--ipopt-disable-start-constraints",
+        dest="ipopt_enforce_start_constraints",
+        action="store_false",
+        help="Disable historical start constraints in the IPOPT-side problem.",
+    )
+    ipopt_warmup_group = parser.add_mutually_exclusive_group()
+    ipopt_warmup_group.add_argument(
+        "--ipopt-enable-standard-warmup",
+        dest="ipopt_disable_standard_warmup",
+        action="store_false",
+        default=None,
+        help="Enable the standard IPOPT warmup before a periodic IPOPT diagnostic solve.",
+    )
+    ipopt_warmup_group.add_argument(
+        "--ipopt-disable-standard-warmup",
+        dest="ipopt_disable_standard_warmup",
+        action="store_true",
+        help="Disable the standard IPOPT warmup before a periodic IPOPT diagnostic solve.",
+    )
+    ipopt_projection_group = parser.add_mutually_exclusive_group()
+    ipopt_projection_group.add_argument(
+        "--ipopt-enable-periodic-fes-warmup-projection",
+        dest="ipopt_disable_periodic_fes_warmup_projection",
+        action="store_false",
+        default=None,
+        help="Apply the periodic FES warmup projection to the IPOPT-side diagnostic problem.",
+    )
+    ipopt_projection_group.add_argument(
+        "--ipopt-disable-periodic-fes-warmup-projection",
+        dest="ipopt_disable_periodic_fes_warmup_projection",
+        action="store_true",
+        help="Skip the periodic FES warmup projection for the IPOPT-side diagnostic problem.",
+    )
+    parser.add_argument(
+        "--ipopt-fatigue-warmstart-mode",
+        choices=("continuous", "cyclical"),
+        default=None,
+        help="Override fatigue-state warmstart shifting for periodic IPOPT diagnostics.",
+    )
+    parser.add_argument(
+        "--ipopt-disable-historical-initial-guess",
+        action="store_true",
+        help="Do not load the historical initial guess file for the direct IPOPT-side solve.",
+    )
     parser.add_argument("--acados-max-iter", type=int, default=100)
     parser.add_argument("--control-regularization-weight", type=float, default=0.0)
     parser.add_argument(
@@ -1133,4 +1364,21 @@ if __name__ == "__main__":
         warmup_state_comparison_limit=args.warmup_state_comparison_limit,
         state_comparison_limit=args.state_comparison_limit,
         print_traces=args.print_traces,
+        ipopt_profile=args.ipopt_profile,
+        ipopt_model_formulation=args.ipopt_model_formulation,
+        ipopt_torque_application=args.ipopt_torque_application,
+        ipopt_ode_solver=args.ipopt_ode_solver,
+        ipopt_rk_steps=args.ipopt_rk_steps,
+        ipopt_collocation_degree=args.ipopt_collocation_degree,
+        ipopt_collocation_method=args.ipopt_collocation_method,
+        ipopt_use_sx=args.ipopt_use_sx,
+        ipopt_enforce_start_constraints=args.ipopt_enforce_start_constraints,
+        ipopt_disable_standard_warmup=args.ipopt_disable_standard_warmup,
+        ipopt_disable_periodic_fes_warmup_projection=(
+            args.ipopt_disable_periodic_fes_warmup_projection
+        ),
+        ipopt_fatigue_warmstart_mode=args.ipopt_fatigue_warmstart_mode,
+        ipopt_disable_historical_initial_guess=(
+            args.ipopt_disable_historical_initial_guess
+        ),
     )
