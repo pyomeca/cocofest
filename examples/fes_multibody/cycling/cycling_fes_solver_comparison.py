@@ -248,6 +248,7 @@ def _solver_config(
     state_scaling: str,
     pulse_width_scaling: float,
     acados_pulse_width_trust_radius: float | None,
+    acados_fes_state_trust_radius: float | None,
     acados_fatigue_warmstart_mode: str,
     acados_tolerance: float | None,
     acados_qp_iter_max: int,
@@ -273,6 +274,8 @@ def _solver_config(
     periodic_fes_warmup_projection_trust_radius: float | None,
     periodic_fes_warmup_projection_max_iterations: int,
     periodic_fes_warmup_force_projection_weight: float,
+    periodic_fes_warmup_force_qdot_defect_limit: float,
+    periodic_fes_warmup_force_adaptive_steps: int,
     acados_diagnostics: bool,
     periodic_ipopt_refinement: bool,
     periodic_ipopt_refinement_iterations: int,
@@ -310,6 +313,7 @@ def _solver_config(
             state_scaling=state_scaling,
             pulse_width_scaling=pulse_width_scaling,
             acados_pulse_width_trust_radius=None,
+            acados_fes_state_trust_radius=None,
             acados_fatigue_warmstart_mode="continuous",
             acados_tolerance=acados_tolerance,
             acados_qp_iter_max=acados_qp_iter_max,
@@ -349,6 +353,12 @@ def _solver_config(
             periodic_fes_warmup_force_projection_weight=(
                 periodic_fes_warmup_force_projection_weight
             ),
+            periodic_fes_warmup_force_qdot_defect_limit=(
+                periodic_fes_warmup_force_qdot_defect_limit
+            ),
+            periodic_fes_warmup_force_adaptive_steps=(
+                periodic_fes_warmup_force_adaptive_steps
+            ),
             acados_diagnostics=False,
             periodic_ipopt_refinement=False,
             periodic_ipopt_refinement_iterations=periodic_ipopt_refinement_iterations,
@@ -387,6 +397,7 @@ def _solver_config(
             state_scaling=state_scaling,
             pulse_width_scaling=pulse_width_scaling,
             acados_pulse_width_trust_radius=acados_pulse_width_trust_radius,
+            acados_fes_state_trust_radius=acados_fes_state_trust_radius,
             acados_fatigue_warmstart_mode=acados_fatigue_warmstart_mode,
             acados_tolerance=acados_tolerance,
             acados_qp_iter_max=acados_qp_iter_max,
@@ -427,6 +438,12 @@ def _solver_config(
             ),
             periodic_fes_warmup_force_projection_weight=(
                 periodic_fes_warmup_force_projection_weight
+            ),
+            periodic_fes_warmup_force_qdot_defect_limit=(
+                periodic_fes_warmup_force_qdot_defect_limit
+            ),
+            periodic_fes_warmup_force_adaptive_steps=(
+                periodic_fes_warmup_force_adaptive_steps
             ),
             acados_diagnostics=acados_diagnostics,
             periodic_ipopt_refinement=periodic_ipopt_refinement,
@@ -643,6 +660,7 @@ def main(
     pulse_width_scaling: float = 1 / 400,
     acados_pulse_width_scaling: float | None = None,
     acados_pulse_width_trust_radius: float | None = None,
+    acados_fes_state_trust_radius: float | None = None,
     acados_fatigue_warmstart_mode: str = "continuous",
     acados_tolerance: float | None = None,
     acados_qp_iter_max: int = 50,
@@ -668,6 +686,8 @@ def main(
     periodic_fes_warmup_projection_trust_radius: float | None = None,
     periodic_fes_warmup_projection_max_iterations: int = 200,
     periodic_fes_warmup_force_projection_weight: float = 0.25,
+    periodic_fes_warmup_force_qdot_defect_limit: float = 3.0,
+    periodic_fes_warmup_force_adaptive_steps: int = 10,
     acados_diagnostics: bool = False,
     periodic_ipopt_refinement: bool = False,
     periodic_ipopt_refinement_iterations: int = 300,
@@ -700,6 +720,7 @@ def main(
         state_scaling=state_scaling,
         pulse_width_scaling=pulse_width_scaling,
         acados_pulse_width_trust_radius=None,
+        acados_fes_state_trust_radius=None,
         acados_fatigue_warmstart_mode="continuous",
         acados_tolerance=acados_tolerance,
         acados_qp_iter_max=acados_qp_iter_max,
@@ -734,6 +755,12 @@ def main(
         ),
         periodic_fes_warmup_force_projection_weight=(
             periodic_fes_warmup_force_projection_weight
+        ),
+        periodic_fes_warmup_force_qdot_defect_limit=(
+            periodic_fes_warmup_force_qdot_defect_limit
+        ),
+        periodic_fes_warmup_force_adaptive_steps=(
+            periodic_fes_warmup_force_adaptive_steps
         ),
         acados_diagnostics=acados_diagnostics,
         periodic_ipopt_refinement=False,
@@ -779,6 +806,7 @@ def main(
             else pulse_width_scaling
         ),
         acados_pulse_width_trust_radius=acados_pulse_width_trust_radius,
+        acados_fes_state_trust_radius=acados_fes_state_trust_radius,
         acados_fatigue_warmstart_mode=acados_fatigue_warmstart_mode,
         acados_tolerance=acados_tolerance,
         acados_qp_iter_max=acados_qp_iter_max,
@@ -813,6 +841,12 @@ def main(
         ),
         periodic_fes_warmup_force_projection_weight=(
             periodic_fes_warmup_force_projection_weight
+        ),
+        periodic_fes_warmup_force_qdot_defect_limit=(
+            periodic_fes_warmup_force_qdot_defect_limit
+        ),
+        periodic_fes_warmup_force_adaptive_steps=(
+            periodic_fes_warmup_force_adaptive_steps
         ),
         acados_diagnostics=acados_diagnostics,
         periodic_ipopt_refinement=periodic_ipopt_refinement,
@@ -884,6 +918,7 @@ def build_cli() -> argparse.ArgumentParser:
     parser.add_argument("--pulse-width-scaling", type=float, default=1 / 400)
     parser.add_argument("--acados-pulse-width-scaling", type=float, default=None)
     parser.add_argument("--acados-pulse-width-trust-radius", type=float, default=None)
+    parser.add_argument("--acados-fes-state-trust-radius", type=float, default=None)
     parser.add_argument(
         "--acados-fatigue-warmstart-mode",
         choices=("continuous", "cyclical"),
@@ -949,7 +984,13 @@ def build_cli() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--periodic-fes-warmup-projection-mode",
-        choices=("calcium", "all", "all_except_force", "all_force_blend"),
+        choices=(
+            "calcium",
+            "all",
+            "all_except_force",
+            "all_force_blend",
+            "all_force_adaptive_blend",
+        ),
         default="all",
     )
     parser.add_argument(
@@ -976,6 +1017,12 @@ def build_cli() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--periodic-fes-warmup-force-projection-weight", type=float, default=0.25
+    )
+    parser.add_argument(
+        "--periodic-fes-warmup-force-qdot-defect-limit", type=float, default=3.0
+    )
+    parser.add_argument(
+        "--periodic-fes-warmup-force-adaptive-steps", type=int, default=10
     )
     parser.add_argument(
         "--periodic-ipopt-refinement",
@@ -1029,6 +1076,7 @@ if __name__ == "__main__":
         pulse_width_scaling=args.pulse_width_scaling,
         acados_pulse_width_scaling=args.acados_pulse_width_scaling,
         acados_pulse_width_trust_radius=args.acados_pulse_width_trust_radius,
+        acados_fes_state_trust_radius=args.acados_fes_state_trust_radius,
         acados_fatigue_warmstart_mode=args.acados_fatigue_warmstart_mode,
         acados_tolerance=args.acados_tolerance,
         acados_qp_iter_max=args.acados_qp_iter_max,
@@ -1071,6 +1119,12 @@ if __name__ == "__main__":
         ),
         periodic_fes_warmup_force_projection_weight=(
             args.periodic_fes_warmup_force_projection_weight
+        ),
+        periodic_fes_warmup_force_qdot_defect_limit=(
+            args.periodic_fes_warmup_force_qdot_defect_limit
+        ),
+        periodic_fes_warmup_force_adaptive_steps=(
+            args.periodic_fes_warmup_force_adaptive_steps
         ),
         acados_diagnostics=args.acados_diagnostics,
         periodic_ipopt_refinement=args.periodic_ipopt_refinement,

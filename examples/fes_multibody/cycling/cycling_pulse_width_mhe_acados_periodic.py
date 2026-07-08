@@ -276,6 +276,15 @@ def build_argument_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--acados-fes-state-trust-radius",
+        type=float,
+        default=None,
+        help=(
+            "Optional normalized trust-region radius around the current ACADOS FES state "
+            "initial guess range. Applies to Cn, Cn_sum, F, A, Tau1 and Km states."
+        ),
+    )
+    parser.add_argument(
         "--acados-fatigue-warmstart-mode",
         choices=("continuous", "cyclical"),
         default="continuous",
@@ -553,12 +562,19 @@ def build_argument_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--periodic-fes-warmup-projection-mode",
-        choices=("calcium", "all", "all_except_force", "all_force_blend"),
+        choices=(
+            "calcium",
+            "all",
+            "all_except_force",
+            "all_force_blend",
+            "all_force_adaptive_blend",
+        ),
         default="all",
         help=(
             "Project only the periodic calcium states, all Ding fatigue states, "
             "all states except F to preserve the multibody force trajectory, "
-            "or all states with a separate blend weight for F."
+            "all states with a separate blend weight for F, or all states with "
+            "an automatically reduced F blend weight constrained by a qdot defect limit."
         ),
     )
     parser.add_argument(
@@ -567,8 +583,24 @@ def build_argument_parser() -> argparse.ArgumentParser:
         default=0.25,
         help=(
             "Blend weight used only for F states when "
-            "--periodic-fes-warmup-projection-mode=all_force_blend."
+            "--periodic-fes-warmup-projection-mode is all_force_blend or "
+            "all_force_adaptive_blend."
         ),
+    )
+    parser.add_argument(
+        "--periodic-fes-warmup-force-qdot-defect-limit",
+        type=float,
+        default=3.0,
+        help=(
+            "Maximum full-dynamics qdot defect allowed while selecting the F blend weight "
+            "when --periodic-fes-warmup-projection-mode=all_force_adaptive_blend."
+        ),
+    )
+    parser.add_argument(
+        "--periodic-fes-warmup-force-adaptive-steps",
+        type=int,
+        default=10,
+        help="Number of candidate F blend weights tested in all_force_adaptive_blend mode.",
     )
     parser.add_argument(
         "--periodic-fes-warmup-projection-strategy",
@@ -2034,11 +2066,16 @@ def _projection_state_keys(muscle_name: str, projection_mode: str) -> tuple[str,
     state_keys = _ding_state_keys(muscle_name)
     if projection_mode == "calcium":
         return state_keys[:2]
-    if projection_mode in ("all", "all_except_force", "all_force_blend"):
+    if projection_mode in (
+        "all",
+        "all_except_force",
+        "all_force_blend",
+        "all_force_adaptive_blend",
+    ):
         return state_keys
     raise ValueError(
         "--periodic-fes-warmup-projection-mode must be 'calcium', 'all', "
-        "'all_except_force' or 'all_force_blend'."
+        "'all_except_force', 'all_force_blend' or 'all_force_adaptive_blend'."
     )
 
 
@@ -2050,6 +2087,71 @@ def _projection_write_state_keys(
         force_key = f"F_{muscle_name}"
         return tuple(key for key in state_keys if key != force_key)
     return state_keys
+
+
+def _qdot_defect_max_from_full_dynamics(nmpc) -> float:
+    defects = _full_dynamics_rollout_defect_details(nmpc)
+    qdot_defects = defects.get("qdot_by_dof", {}) if defects else {}
+    if not qdot_defects:
+        return float("nan")
+    return float(max(abs(value) for value in qdot_defects.values()))
+
+
+def _apply_force_projection_candidates(
+    periodic_nmpc,
+    force_candidates: dict[str, tuple[np.ndarray, np.ndarray]],
+    weight: float,
+) -> None:
+    for key, (original_values, projected_values) in force_candidates.items():
+        values = weight * projected_values + (1.0 - weight) * original_values
+        lower, upper = _state_trajectory_bounds(periodic_nmpc, key, values.size)
+        periodic_nmpc.nlp[0].x_init[key].init[0, :] = np.minimum(
+            np.maximum(values, lower), upper
+        )
+
+
+def _select_force_projection_weight_by_qdot_defect(
+    periodic_nmpc,
+    force_candidates: dict[str, tuple[np.ndarray, np.ndarray]],
+    max_weight: float,
+    qdot_defect_limit: float,
+    n_steps: int,
+) -> dict[str, float]:
+    if max_weight < 0.0 or max_weight > 1.0:
+        raise ValueError(
+            "--periodic-fes-warmup-force-projection-weight must be between 0 and 1."
+        )
+    if qdot_defect_limit < 0.0:
+        raise ValueError(
+            "--periodic-fes-warmup-force-qdot-defect-limit must be non-negative."
+        )
+    if n_steps <= 0:
+        raise ValueError(
+            "--periodic-fes-warmup-force-adaptive-steps must be strictly positive."
+        )
+
+    best_weight = 0.0
+    best_qdot_defect = float("nan")
+    tested_weights = np.linspace(0.0, max_weight, n_steps + 1)
+    for candidate_weight in tested_weights:
+        _apply_force_projection_candidates(
+            periodic_nmpc, force_candidates, float(candidate_weight)
+        )
+        candidate_qdot_defect = _qdot_defect_max_from_full_dynamics(periodic_nmpc)
+        if np.isfinite(candidate_qdot_defect):
+            if candidate_qdot_defect <= qdot_defect_limit:
+                best_weight = float(candidate_weight)
+                best_qdot_defect = float(candidate_qdot_defect)
+            elif candidate_weight == 0.0:
+                best_qdot_defect = float(candidate_qdot_defect)
+
+    _apply_force_projection_candidates(periodic_nmpc, force_candidates, best_weight)
+    return {
+        "selected_weight": best_weight,
+        "qdot_defect": best_qdot_defect,
+        "qdot_defect_limit": qdot_defect_limit,
+        "candidate_count": float(tested_weights.size),
+    }
 
 
 def _project_periodic_states(
@@ -2344,6 +2446,8 @@ def project_periodic_fes_initial_guess(
     projection_trust_radius: float | None = None,
     projection_max_iterations: int = 200,
     force_projection_weight: float = 0.25,
+    force_qdot_defect_limit: float = 3.0,
+    force_adaptive_steps: int = 10,
 ) -> dict[str, float]:
     if projection_weight < 0.0 or projection_weight > 1.0:
         raise ValueError(
@@ -2369,6 +2473,8 @@ def project_periodic_fes_initial_guess(
     ls_total_nfev = 0
     ls_max_cost = 0.0
     ls_max_optimality = 0.0
+    force_adaptive_summary = {}
+    force_candidates = {}
 
     for muscle_model in periodic_nmpc.nlp[0].model.muscles_dynamics_model:
         muscle_name = muscle_model.muscle_name
@@ -2444,7 +2550,13 @@ def project_periodic_fes_initial_guess(
         for state_idx, key in enumerate(state_keys):
             if key not in write_state_keys:
                 continue
-            if projection_mode == "all_force_blend" and key.startswith("F_"):
+            if projection_mode == "all_force_adaptive_blend" and key.startswith("F_"):
+                force_candidates[key] = (
+                    original_states[state_idx, :].copy(),
+                    projected_states[state_idx, :].copy(),
+                )
+                values = original_states[state_idx, :]
+            elif projection_mode == "all_force_blend" and key.startswith("F_"):
                 state_projection_weight = force_projection_weight
                 values = (
                     state_projection_weight * projected_states[state_idx, :]
@@ -2463,6 +2575,17 @@ def project_periodic_fes_initial_guess(
             )
         projected_muscles += 1
 
+    actual_force_projection_weight = force_projection_weight
+    if force_candidates:
+        force_adaptive_summary = _select_force_projection_weight_by_qdot_defect(
+            periodic_nmpc,
+            force_candidates,
+            max_weight=force_projection_weight,
+            qdot_defect_limit=force_qdot_defect_limit,
+            n_steps=force_adaptive_steps,
+        )
+        actual_force_projection_weight = force_adaptive_summary["selected_weight"]
+
     defects_after = _periodic_fes_rollout_defects(
         periodic_nmpc, projection_substeps=projection_substeps
     )
@@ -2477,7 +2600,15 @@ def project_periodic_fes_initial_guess(
         "projection_mode": projection_mode,
         "projection_strategy": projection_strategy,
         "projection_substeps": projection_substeps,
-        "force_projection_weight": force_projection_weight,
+        "force_projection_weight": actual_force_projection_weight,
+        "force_projection_weight_upper": force_projection_weight,
+        "force_qdot_defect_limit": force_qdot_defect_limit,
+        "force_qdot_defect_after": force_adaptive_summary.get(
+            "qdot_defect", float("nan")
+        ),
+        "force_adaptive_candidate_count": force_adaptive_summary.get(
+            "candidate_count", 0.0
+        ),
         "projection_proximity_weight": projection_proximity_weight,
         "projection_defect_weight": projection_defect_weight,
         "projection_trust_radius": (
@@ -2770,6 +2901,8 @@ def apply_standard_warmup_to_periodic_nmpc(
     projection_trust_radius: float | None = None,
     projection_max_iterations: int = 200,
     force_projection_weight: float = 0.25,
+    force_qdot_defect_limit: float = 3.0,
+    force_adaptive_steps: int = 10,
     echo: bool = False,
 ):
     if fatigue_warmstart_mode not in ("continuous", "cyclical"):
@@ -2849,6 +2982,8 @@ def apply_standard_warmup_to_periodic_nmpc(
             projection_trust_radius=projection_trust_radius,
             projection_max_iterations=projection_max_iterations,
             force_projection_weight=force_projection_weight,
+            force_qdot_defect_limit=force_qdot_defect_limit,
+            force_adaptive_steps=force_adaptive_steps,
         )
         if echo:
             print(
@@ -2858,12 +2993,20 @@ def apply_standard_warmup_to_periodic_nmpc(
                 f"strategy={projection_summary['projection_strategy']} "
                 f"weight={projection_summary['projection_weight']:.3g} "
                 f"force_weight={projection_summary['force_projection_weight']:.3g} "
+                f"force_weight_upper={projection_summary['force_projection_weight_upper']:.3g} "
                 f"substeps={projection_summary['projection_substeps']} "
                 f"max_defect_before={projection_summary['max_defect_before']:.6g} "
                 f"max_defect_after={projection_summary['max_defect_after']:.6g} "
                 f"clipped_values={projection_summary['clipped_values']} "
                 f"max_bound_violation={projection_summary['max_bound_violation']:.6g}"
             )
+            if projection_summary["projection_mode"] == "all_force_adaptive_blend":
+                print(
+                    "periodic_fes_warmup_force_adaptive: "
+                    f"qdot_defect={projection_summary['force_qdot_defect_after']:.6g} "
+                    f"qdot_defect_limit={projection_summary['force_qdot_defect_limit']:.6g} "
+                    f"candidate_count={int(projection_summary['force_adaptive_candidate_count'])}"
+                )
             if projection_summary["projection_strategy"] == "least_squares":
                 print(
                     "periodic_fes_warmup_projection_ls: "
@@ -3115,6 +3258,49 @@ def apply_pulse_width_control_trust_region(
     return summary
 
 
+def apply_fes_state_trust_region(
+    periodic_nmpc, normalized_radius: float
+) -> dict[str, dict[str, float]]:
+    if normalized_radius < 0:
+        raise ValueError("--acados-fes-state-trust-radius must be non-negative.")
+
+    summary = {}
+    for key in periodic_nmpc.nlp[0].x_init.keys():
+        if not key.startswith(("Cn_", "Cn_sum_", "F_", "A_", "Tau1_", "Km_")):
+            continue
+
+        center = np.asarray(periodic_nmpc.nlp[0].x_init[key].init, dtype=float)
+        bounds = periodic_nmpc.nlp[0].x_bounds[key]
+        original_lower = float(np.min(np.asarray(bounds.min, dtype=float)))
+        original_upper = float(np.max(np.asarray(bounds.max, dtype=float)))
+        center_min = float(np.min(center))
+        center_max = float(np.max(center))
+        scale = max(float(np.max(np.abs(center))), 1.0)
+        absolute_radius = normalized_radius * scale
+        lower = max(original_lower, center_min - absolute_radius)
+        upper = min(original_upper, center_max + absolute_radius)
+        if lower > upper:
+            raise RuntimeError(
+                f"FES state trust region is empty for {key}: lower={lower}, upper={upper}."
+            )
+
+        bounds.min[:, :] = lower
+        bounds.max[:, :] = upper
+        periodic_nmpc.nlp[0].x_init[key].init[:, :] = np.minimum(
+            np.maximum(center, lower), upper
+        )
+        summary[key] = {
+            "center_min": center_min,
+            "center_max": center_max,
+            "lower": lower,
+            "upper": upper,
+            "scale": scale,
+        }
+
+    periodic_nmpc._sync_acados_state_bounds()
+    return summary
+
+
 def relax_acados_first_node_fes_bounds(periodic_nmpc) -> list[str]:
     relaxed_keys = []
     for key in periodic_nmpc.nlp[0].x_bounds.keys():
@@ -3350,6 +3536,10 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
                 f"{args.acados_pulse_width_trust_radius}"
             )
             print(
+                "acados_fes_state_trust_radius: "
+                f"{args.acados_fes_state_trust_radius}"
+            )
+            print(
                 "acados_fatigue_warmstart_mode: "
                 f"{args.acados_fatigue_warmstart_mode}"
             )
@@ -3364,6 +3554,14 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
             print(
                 "periodic_fes_warmup_force_projection_weight: "
                 f"{args.periodic_fes_warmup_force_projection_weight}"
+            )
+            print(
+                "periodic_fes_warmup_force_qdot_defect_limit: "
+                f"{args.periodic_fes_warmup_force_qdot_defect_limit}"
+            )
+            print(
+                "periodic_fes_warmup_force_adaptive_steps: "
+                f"{args.periodic_fes_warmup_force_adaptive_steps}"
             )
             print(
                 "periodic_fes_warmup_projection_mode: "
@@ -3501,6 +3699,8 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
                 args.periodic_fes_warmup_projection_max_iterations
             ),
             force_projection_weight=args.periodic_fes_warmup_force_projection_weight,
+            force_qdot_defect_limit=(args.periodic_fes_warmup_force_qdot_defect_limit),
+            force_adaptive_steps=args.periodic_fes_warmup_force_adaptive_steps,
             echo=echo,
         )
         if (
@@ -3564,6 +3764,20 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
         project_qdot_initial_guess_from_q(nmpc)
         if echo:
             print("acados_project_qdot_from_q: True")
+
+    if args.solver == "acados" and args.acados_fes_state_trust_radius is not None:
+        trust_summary = apply_fes_state_trust_region(
+            nmpc, args.acados_fes_state_trust_radius
+        )
+        if echo:
+            print(f"acados_fes_state_trust_region: keys={len(trust_summary)}")
+            for key, item in list(trust_summary.items())[:8]:
+                print(
+                    "acados_fes_state_trust_region: "
+                    f"{key} center=[{item['center_min']:.6g}, {item['center_max']:.6g}] "
+                    f"bounds=[{item['lower']:.6g}, {item['upper']:.6g}] "
+                    f"scale={item['scale']:.6g}"
+                )
 
     if args.solver == "acados" and args.acados_pulse_width_trust_radius is not None:
         trust_summary = apply_pulse_width_control_trust_region(
