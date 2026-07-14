@@ -1,5 +1,5 @@
 """
-This example will perform an optimal control program moving time horizon for an abduction/adduction motion driven by FES.
+This example will perform an optimal control program for an abduction/adduction motion driven by muscles.
 """
 
 import pickle
