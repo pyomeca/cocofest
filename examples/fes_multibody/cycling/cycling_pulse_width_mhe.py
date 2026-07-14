@@ -462,7 +462,9 @@ def set_q_qdot_init(
         x_init.add("qdot", qdot_guess, interpolation=InterpolationType.ALL_POINTS)
     else:
         # --- Chose the biorbd model to init the inverse kinematics --- #
-        biorbd_model_path = "../../msk_models/Wu/Modified_Wu_Shoulder_Model_Cycling_for_IK.bioMod"
+        biorbd_model_path = str(
+            Path(__file__).resolve().parent.parent.parent / "msk_models" / "Wu" / "Modified_Wu_Shoulder_Model_Cycling_for_IK.bioMod"
+        )
         n_shooting = (
             n_shooting * (ode_solver.polynomial_degree + 1)
             if isinstance(ode_solver, OdeSolver.COLLOCATION)
@@ -1124,14 +1126,14 @@ if __name__ == "__main__":
     main(
         stimulation_frequency=30,
         n_total_cycle=10000,
-        n_cycles_simultaneous=[2, 3, 4, 5],
+        n_cycles_simultaneous=[2],  # [2, 3, 4, 5],
         resistive_torque=-0.20,  # (N.m)
         cost_fun_dict={
             "optimized_function": [
                 # --- UNWEIGHTED --- #
                 # --- Pulse width --- #
                 # ["minimize_average_activation"],
-                # ["minimize_root_mean_square_activation"],
+                ["minimize_root_mean_square_activation"],
                 # ["minimize_cubic_average_activation"],
                 # ["minimize_peak_activation"],
                 # --- Force --- #
@@ -1162,13 +1164,13 @@ if __name__ == "__main__":
                 # ["minimize_root_mean_square_fatigue_bayesian"],
                 # --- WEIGHTED --- # (Only RMS)
                 # --- Pulse width --- #
-                ["minimize_root_mean_square_activation_weight"],
+                # ["minimize_root_mean_square_activation_weight"],
                 # --- Force --- #
-                ["minimize_root_mean_square_force_weight"],
+                # ["minimize_root_mean_square_force_weight"],
                 # --- Stress --- #
-                ["minimize_root_mean_square_muscle_stress_weight"],
+                # ["minimize_root_mean_square_muscle_stress_weight"],
                 # --- Fatigue --- #
-                ["minimize_root_mean_square_fatigue_weight"],
+                # ["minimize_root_mean_square_fatigue_weight"],
             ]
         },
         init_guess=False,  # Compute initial guess

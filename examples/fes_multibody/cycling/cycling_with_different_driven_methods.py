@@ -511,7 +511,7 @@ def main(
     Main function to configure and solve the optimal control problem.
     """
     # --- Configuration --- #
-    dynamics_type = "fes_driven"  # Available options: "torque_driven", "muscle_driven", "fes_driven"
+    dynamics_type = "muscle_driven"  # Available options: "torque_driven", "muscle_driven", "fes_driven"
     # --- Supplementary available configurations --- #
     # dynamics_type = "torque_driven"
     # dynamics_type = "muscle_driven"
@@ -579,7 +579,7 @@ def main(
         use_sx=False,
         ode_solver=OdeSolver.COLLOCATION(polynomial_degree=3, method="radau"),
         # ode_solver=OdeSolver.RK4(n_integration_steps=5)
-        torque=-0.3,
+        torque=-0.2,
         initial_guess_model_path=initial_guess_model_path,
     )
 

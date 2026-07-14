@@ -36,7 +36,7 @@ from bioptim import (
     CostType,
 )
 
-from cycling_pulse_width_mhe import (
+from cycling.cycling_pulse_width_mhe import (
     set_fes_model,
     set_external_forces,
     set_dynamics,
@@ -45,20 +45,19 @@ from cycling_pulse_width_mhe import (
     updating_model,
     set_u_bounds_and_init,
 )
-from cost_functions import CustomCostFunctions
+from cycling.cost_functions import CustomCostFunctions
 
 
 # -----------------------------------------------------------------------------
 # Global settings
 # -----------------------------------------------------------------------------
-
 TARGET_RPM = 60
 PHASE_TIME = 60 / TARGET_RPM  # 1 second per revolution at 60 rpm
 N_SHOOTING = 30  # 30 Hz for a 1-second cycle
 N_THREADS = 48
 
-MODEL_PATH = "../../../msk_models/Wu/Modified_Wu_Shoulder_Model_Cycling.bioMod"
-RESULT_FILE_NAME = "standard_and_fes_ocp_cycles.pkl"
+MODEL_PATH = "../../msk_models/Wu/Modified_Wu_Shoulder_Model_Cycling.bioMod"
+RESULT_FILE_NAME = "temp/standard_and_fes_ocp_cycles.pkl"
 
 MUSCLES = ("Delt_ant", "Delt_post", "Biceps", "Triceps")
 STATE_VARS = ("A", "F", "Km", "Tau1")
@@ -66,13 +65,11 @@ CONTROL_VARS = ("last_pulse_width",)
 
 
 # -----------------------------------------------------------------------------
-# Small utilities
+# Utilities
 # -----------------------------------------------------------------------------
-
 def target_crank_velocity(turn_number: int, phase_time: float) -> float:
     """Return the target crank angular velocity in rad/s."""
     return -2 * np.pi * turn_number / phase_time
-
 
 def compute_net_work(time: np.ndarray, torque: np.ndarray) -> float:
     """
@@ -118,15 +115,13 @@ def compute_net_work(time: np.ndarray, torque: np.ndarray) -> float:
         f"Got len(time)={time.size}, len(torque)={torque.size}."
     )
 
-
 def compute_constant_torque_work(time: np.ndarray, constant_torque: float) -> float:
     """Compute net work for a constant torque over the provided time vector."""
     time = np.asarray(time, dtype=float).squeeze()
     torque = np.full(time.shape, constant_torque, dtype=float)
     return compute_net_work(time=time, torque=torque)
 
-
-def prepare_solver(max_iter: int = 10000):
+def prepare_solver(max_iter: int = 10):
     """Prepare the IPOPT solver."""
     solver = Solver.IPOPT(
         show_online_optim=False,
@@ -143,7 +138,6 @@ def prepare_solver(max_iter: int = 10000):
 # -----------------------------------------------------------------------------
 # Pulse-width settings for the clinical condition
 # -----------------------------------------------------------------------------
-
 def is_angle_in_range(angle_vector: np.ndarray, start: float, end: float) -> np.ndarray:
     """
     Return a Boolean vector indicating whether each angle is inside a stimulation range.
@@ -155,7 +149,6 @@ def is_angle_in_range(angle_vector: np.ndarray, start: float, end: float) -> np.
         return (angle_vector >= start) & (angle_vector <= end)
 
     return (angle_vector >= start) | (angle_vector <= end)
-
 
 def set_pw_dictionary(muscle_models, n_shooting: int, active_pw: float = 0.0003):
     """Create the fixed pulse-width dictionary for the standard clinical stimulation pattern."""
@@ -186,7 +179,6 @@ def set_pw_dictionary(muscle_models, n_shooting: int, active_pw: float = 0.0003)
         )
 
     return pulse_width_dictionary
-
 
 def set_standard_u_bounds_and_init(bio_model, n_shooting: int):
     """Set fixed clinical pulse-width controls and optimized residual crank torque."""
@@ -238,7 +230,6 @@ def set_standard_u_bounds_and_init(bio_model, n_shooting: int):
 # -----------------------------------------------------------------------------
 # Shared OCP preparation helpers
 # -----------------------------------------------------------------------------
-
 def prepare_common_dynamics(model, n_shooting: int, phase_time: float, ode_solver, external_force):
     """Prepare external force time series and FES numerical data time series."""
     numerical_time_series, external_force_set = set_external_forces(
@@ -261,7 +252,6 @@ def prepare_common_dynamics(model, n_shooting: int, phase_time: float, ode_solve
 
     return dynamics, external_force_set
 
-
 def prepare_empty_parameters(use_sx: bool):
     """Prepare empty parameter containers."""
     return (
@@ -270,7 +260,6 @@ def prepare_empty_parameters(use_sx: bool):
         InitialGuessList(),
         ParameterObjectiveList(),
     )
-
 
 def prepare_wheel_center_constraints(model):
     """Constrain the wheel center to remain fixed at the beginning of the cycle."""
@@ -292,7 +281,6 @@ def prepare_wheel_center_constraints(model):
 
     return constraints
 
-
 def prepare_standard_objective(turn_number: int, phase_time: float):
     """Objective for the standard condition: match the target crank velocity."""
     objective_functions = ObjectiveList()
@@ -309,7 +297,6 @@ def prepare_standard_objective(turn_number: int, phase_time: float):
 
     return objective_functions
 
-
 def prepare_fes_objective():
     """Objective for the FES feasibility OCP."""
     objective_functions = ObjectiveList()
@@ -323,7 +310,6 @@ def prepare_fes_objective():
     )
 
     return objective_functions
-
 
 def build_ocp(
     model,
@@ -368,7 +354,6 @@ def build_ocp(
 # -----------------------------------------------------------------------------
 # OCP preparation functions
 # -----------------------------------------------------------------------------
-
 def prepare_standard_fes_cycling(optim_info, cycling_info, model, previous_problem=None, previous_sol=None):
     """Prepare the standard clinical FES cycling problem."""
     phase_time = optim_info["phase_time"]
@@ -459,7 +444,6 @@ def prepare_standard_fes_cycling(optim_info, cycling_info, model, previous_probl
         use_sx=use_sx,
     )
 
-
 def prepare_ocp_fes_cycling(optim_info, cycling_info, model, previous_problem=None, previous_sol=None):
     """Prepare the FES feasibility OCP."""
     phase_time = optim_info["phase_time"]
@@ -504,9 +488,8 @@ def prepare_ocp_fes_cycling(optim_info, cycling_info, model, previous_problem=No
     if previous_sol is not None:
         prev_state_result = previous_sol.decision_states(to_merge=SolutionMerge.NODES)
 
-        # WARNING: kept intentionally unchanged.
+        # Kept intentionally unchanged.
         # The feasibility test uses the first value of the previous solution window.
-        # Do not replace prev_state_result[key][0][0] by prev_state_result[key][:, -1] here.
         for muscle in MUSCLES:
             for state_var in ("A", "Km", "Tau1"):
                 key = f"{state_var}_{muscle}"
@@ -563,11 +546,9 @@ def prepare_ocp_fes_cycling(optim_info, cycling_info, model, previous_problem=No
         use_sx=use_sx,
     )
 
-
 # -----------------------------------------------------------------------------
 # Solution extraction and saving
 # -----------------------------------------------------------------------------
-
 def solution_to_dict(solution, muscles=MUSCLES):
     """Extract the relevant states and controls from a Bioptim solution."""
     time = solution.stepwise_time(to_merge=[SolutionMerge.NODES]).T[0]
@@ -595,7 +576,6 @@ def solution_to_dict(solution, muscles=MUSCLES):
 
     return out
 
-
 def safe_solution_to_dict(solution):
     """
     Try to extract a solution dictionary.
@@ -610,14 +590,12 @@ def safe_solution_to_dict(solution):
     except Exception as error:
         return {"extraction_error": repr(error)}
 
-
 def solution_status(solution):
     """Return the solver status if available."""
     if solution is None:
         return None
 
     return int(solution.status)
-
 
 def compute_cycle_work(solution_dict, cycling_info):
     """
@@ -652,7 +630,6 @@ def compute_cycle_work(solution_dict, cycling_info):
 
     return work
 
-
 def make_cycle_record(cycle_index, standard_sol, fes_ocp_sol, cycling_info):
     """Create one common record containing standard and FES-OCP information for one cycle."""
     standard_data = safe_solution_to_dict(standard_sol)
@@ -674,7 +651,6 @@ def make_cycle_record(cycle_index, standard_sol, fes_ocp_sol, cycling_info):
         },
     }
 
-
 def save_common_results(
     file_name,
     cycle_records,
@@ -686,32 +662,6 @@ def save_common_results(
 ):
     """
     Save all standard and FES-OCP information in one common pickle file.
-
-    The saved structure is:
-
-    results = {
-        "metadata": {...},
-        "cycle_to_failure": int,
-        "failure_reason": str,
-        "cycles": [
-            {
-                "cycle_index": int,
-                "standard": {
-                    "status": int,
-                    "converged": bool,
-                    "data": {...},
-                    "work": {...},
-                },
-                "fes_ocp": {
-                    "status": int,
-                    "converged": bool,
-                    "data": {...},
-                    "work": {...},
-                },
-            },
-            ...
-        ],
-    }
     """
     results = {
         "metadata": {
@@ -735,7 +685,6 @@ def save_common_results(
 
     print(f"Results saved in {file_name}")
 
-
 def load_common_results(file_name=RESULT_FILE_NAME):
     """Load the common result file."""
     with open(file_name, "rb") as file:
@@ -745,7 +694,6 @@ def load_common_results(file_name=RESULT_FILE_NAME):
 # -----------------------------------------------------------------------------
 # Main simulation
 # -----------------------------------------------------------------------------
-
 def main():
     optim_info = {
         "phase_time": PHASE_TIME,

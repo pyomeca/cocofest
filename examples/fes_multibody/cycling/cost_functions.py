@@ -2,8 +2,8 @@ from casadi import MX, vertcat, sum1, mmax
 from bioptim import PenaltyController
 from cocofest.models.ding2007.ding2007 import DingModelPulseWidthFrequency
 
-BAYESIAN_WEIGHT = vertcat([191790, 31609, 117259, 1])
-PHYSIOLOGICAL_WEIGHT = vertcat([191790, 31609, 117259, 1])
+BAYESIAN_WEIGHT = vertcat([10000, 1560, 4665, 0.0001])  # example values from minimize_root_mean_square_fatigue bayesian weight optimization
+PHYSIOLOGICAL_WEIGHT = vertcat([1, 0.0943160798625659, 0.389268746606572, 0])  # example values from physiological weight calculation
 
 
 class CustomCostFunctions:
@@ -45,28 +45,28 @@ class CustomCostFunctions:
                 "index": "5",
                 "description": "Minimize the average muscle force",
                 "power": "1",
-                "state": r"F^{m}",
+                "state": r"f^{m}",
             },
             "minimize_root_mean_square_force": {
                 "function": self.minimize_root_mean_square_force,
                 "index": "6",
                 "description": "Minimize the root mean square of muscle force",
                 "power": "2",
-                "state": r"F^{m}",
+                "state": r"f^{m}",
             },
             "minimize_cubic_average_force": {
                 "function": self.minimize_cubic_average_force,
                 "index": "7",
                 "description": "Minimize the cubic average of muscle force",
                 "power": "3",
-                "state": r"F^{m}",
+                "state": r"f^{m}",
             },
             "minimize_peak_force": {
                 "function": self.minimize_peak_force,
                 "index": "8",
                 "description": "Minimize the peak muscle force",
                 "power": r"\infty",
-                "state": r"F^{m}",
+                "state": r"f^{m}",
             },
             # --- Stress --- #
             "minimize_average_muscle_stress": {
@@ -103,28 +103,28 @@ class CustomCostFunctions:
                 "index": "13",
                 "description": "Minimize the average muscle fatigue",
                 "power": "1",
-                "state": "A",
+                "state": "a'",
             },
             "minimize_root_mean_square_fatigue": {
                 "function": self.minimize_root_mean_square_fatigue,
                 "index": "14",
                 "description": "Minimize the root mean square of muscle fatigue",
                 "power": "2",
-                "state": "A",
+                "state": "a'",
             },
             "minimize_cubic_average_fatigue": {
                 "function": self.minimize_cubic_average_fatigue,
                 "index": "15",
                 "description": "Minimize the cubic average of muscle fatigue",
                 "power": "3",
-                "state": "A",
+                "state": "a'",
             },
             "minimize_peak_fatigue": {
                 "function": self.minimize_peak_fatigue,
                 "index": "16",
                 "description": "Minimize the peak muscle fatigue",
                 "power": r"\infty",
-                "state": "A",
+                "state": "a'",
             },
             # --- Power --- #
             "minimize_root_mean_square_muscle_power": {
@@ -133,7 +133,7 @@ class CustomCostFunctions:
                 "latex": r"\phi_{17} = \left(\frac{1}{M}\sum_{m=1}^{M} (f^{m} v^{m})^{2}\right)^{\tfrac{1}{2}}",
                 "description": "Minimize the root mean square of muscle power",
                 "power": "2",
-                "state": "W",
+                "state": "w",
             },
             # --- BAYESIAN --- #
             # --- Pulse width --- #
@@ -150,7 +150,7 @@ class CustomCostFunctions:
                 "index": "6_bayesian",
                 "description": "Minimize the root mean square of muscle force with bayesian weight",
                 "power": "2",
-                "state": r"F^{m}",
+                "state": r"f^{m}",
             },
             # --- Stress --- #
             "minimize_root_mean_square_muscle_stress_bayesian": {
@@ -166,7 +166,7 @@ class CustomCostFunctions:
                 "index": "14_bayesian",
                 "description": "Minimize the root mean square of muscle fatigue with bayesian weight",
                 "power": "2",
-                "state": "A",
+                "state": "a'",
             },
             # --- Power --- #
             "minimize_root_mean_square_muscle_power_bayesian": {
@@ -175,7 +175,7 @@ class CustomCostFunctions:
                 "latex": r"\phi_{17} = \left(\frac{1}{M}\sum_{m=1}^{M} (f^{m} v^{m})^{2}\right)^{\tfrac{1}{2}}",
                 "description": "Minimize the root mean square of muscle power with bayesian weight",
                 "power": "2",
-                "state": "W",
+                "state": "w",
             },
             # --- WEIGHTED --- #
             # --- Pulse width --- #
@@ -192,7 +192,7 @@ class CustomCostFunctions:
                 "index": "6_weight",
                 "description": "Minimize the root mean square of muscle force with weight",
                 "power": "2",
-                "state": r"F^{m}",
+                "state": r"f^{m}",
             },
             # --- Stress --- #
             "minimize_root_mean_square_muscle_stress_weight": {
@@ -208,7 +208,7 @@ class CustomCostFunctions:
                 "index": "14_weight",
                 "description": "Minimize the root mean square of muscle fatigue with weight",
                 "power": "2",
-                "state": "A",
+                "state": "a'",
             },
             # --- Power --- #
             "minimize_root_mean_square_muscle_power_weight": {
@@ -217,7 +217,7 @@ class CustomCostFunctions:
                 "latex": r"\phi_{17} = \left(\frac{1}{M}\sum_{m=1}^{M} (f^{m} v^{m})^{2}\right)^{\tfrac{1}{2}}",
                 "description": "Minimize the root mean square of muscle power with weight",
                 "power": "2",
-                "state": "W",
+                "state": "w",
             },
             # --- HELPER --- #
             "minimize_peak": {
@@ -709,11 +709,10 @@ class CustomCostFunctions:
         """
         eps = 1e-8
         muscle_name_list = controller.model.bio_model.muscle_names
-        weight = vertcat([10000, 1560, 4665, 0.0001])
         if isinstance(controller.model.muscles_dynamics_model[0], DingModelPulseWidthFrequency):
             stim_charge = vertcat(
                 *[
-                    weight[x]
+                    BAYESIAN_WEIGHT[x]
                     * (
                         (
                             controller.controls["last_pulse_width_" + muscle_name_list[x]].cx
@@ -752,9 +751,8 @@ class CustomCostFunctions:
         """
         eps = 1e-8
         muscle_name_list = controller.model.bio_model.muscle_names
-        weight = vertcat([10000, 1560, 4665, 0.0001])
         muscle_force = vertcat(
-            *[weight[x] * controller.states["F_" + muscle_name_list[x]].cx ** 2 for x in range(len(muscle_name_list))]
+            *[BAYESIAN_WEIGHT[x] * controller.states["F_" + muscle_name_list[x]].cx ** 2 for x in range(len(muscle_name_list))]
         )
         rms_force = (sum1(muscle_force) / len(muscle_name_list) + eps) ** 0.5
         return rms_force
@@ -776,10 +774,9 @@ class CustomCostFunctions:
         """
         eps = 1e-8
         muscle_name_list = controller.model.bio_model.muscle_names
-        weight = vertcat([10000, 1560, 4665, 0.0001])
         muscle_stress = vertcat(
             *[
-                weight[x]
+                BAYESIAN_WEIGHT[x]
                 * (controller.states["F_" + muscle_name_list[x]].cx / controller.model.muscles_dynamics_model[x].pcsa)
                 ** 2
                 for x in range(len(muscle_name_list))
@@ -805,10 +802,9 @@ class CustomCostFunctions:
         """
         eps = 1e-8
         muscle_name_list = controller.model.bio_model.muscle_names
-        weight = vertcat([10000, 1560, 4665, 0.0001])
         muscle_fatigue = vertcat(
             *[
-                weight[x]
+                BAYESIAN_WEIGHT[x]
                 * (
                     controller.model.muscles_dynamics_model[x].a_scale
                     - controller.states["A_" + muscle_name_list[x]].cx
@@ -837,13 +833,12 @@ class CustomCostFunctions:
         """
         eps = 1e-8
         muscle_name_list = controller.model.bio_model.muscle_names
-        weight = vertcat([10000, 1560, 4665, 0.0001])
         muscle_velocity = controller.model.muscle_velocity()(
             controller.states["q"].cx, controller.states["qdot"].cx, controller.parameters.cx
         )
         muscle_power = vertcat(
             *[
-                weight[x] * (controller.states["F_" + muscle_name_list[x]].cx * muscle_velocity[x]) ** 2
+                BAYESIAN_WEIGHT[x] * (controller.states["F_" + muscle_name_list[x]].cx * muscle_velocity[x]) ** 2
                 for x in range(len(muscle_name_list))
             ]
         )

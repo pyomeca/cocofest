@@ -475,12 +475,10 @@ def bayes_optimize_weights(
             return
         _last_saved_len = len(bo_log)
 
-        # 1) pickle – write to .tmp then replace
         with open(pkl_tmp, "wb") as f:
             pickle.dump(bo_log, f, protocol=pickle.HIGHEST_PROTOCOL)
         pkl_tmp.replace(pkl_path)
 
-        # 2) numeric arrays – write to .tmp.npz then replace
         if bo_log:
             idx = np.array(sorted(bo_log.keys()), dtype=int)
             metrics = np.array([float(bo_log[i]["metric"]) for i in idx], dtype=float)
@@ -514,14 +512,12 @@ def bayes_optimize_weights(
     # --- BO objective --- #
     @use_named_args(space)
     def objective(**kwargs):
-        # Build free vector in stable order
         x_free = [kwargs[k] for k in free_param_names] if free_param_names else []
         weights = _compose_full_weights(x_free)
 
         key = tuple(round(float(v), 8) for v in weights)
         if key in _cache:
             loss = _cache[key]
-            # still log duplicate proposal for a complete history
             i = _next_index()
             entry = {name: float(w) for name, w in zip(muscle_names, weights)}
             entry["metric"] = float(-loss) if np.isfinite(loss) else float("nan")
@@ -581,7 +577,6 @@ def bayes_optimize_weights(
             row = bo_log[i]
             if not np.isfinite(row.get("metric", np.nan)):
                 continue
-            # order matters and includes only free muscles
             x_free_prev = [float(row[name]) for name in free_names]
             x0_list.append(x_free_prev)
             y0_list.append(-float(row["metric"]))
@@ -589,7 +584,7 @@ def bayes_optimize_weights(
             x0, y0 = x0_list, y0_list
             print(f"[BO] Seeding skopt with {len(x0)} prior evals.")
 
-    # --- Run BO (or skip if nothing to do) --- #
+    # --- Run BO --- #
     res = None
     if remaining_calls > 0:
         print(
@@ -731,7 +726,7 @@ def main_bayes():
         model_path=model_path,
         stimulation_frequency=30,
         n_cycles_simultaneous_for_bo=n_cycle_simultaneous,
-        n_calls=100,  # Desired evaluations
+        n_calls=100,  # Number of desired evaluations
         n_initial_points=6,
         random_state=42,
         weight_bounds_log=(1e-5, 1e4),
