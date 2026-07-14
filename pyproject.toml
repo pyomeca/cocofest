@@ -1,0 +1,62 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "cocofest"
+description = "An Open-Source Python Package for Functional Electrical Stimulation (FES) Optimization in Optimal Control"
+dynamic = ["version"]
+readme = "README.md"
+requires-python = ">=3.10"
+license = { file = "LICENSE" }
+authors = [
+    { name = "Kev1Co", email = "kevinco@umontreal.ca" }
+]
+keywords = ["FES", "functional electrical stimulation", "bioptim", "optimal control", "biomechanics", "rehabilitation"]
+
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+]
+
+dependencies = []
+
+[project.optional-dependencies]
+conda_only = [
+    "bioptim==3.4.0",
+    "bioviz",
+    "python-graphviz",
+    "pyqtgraph",
+    "pyorerun",
+    "rerun-sdk==0.21.0",
+    "scikit-optimize",
+]
+dev = [
+    "pytest",
+    "pytest-cov",
+    "black",
+]
+
+[project.urls]
+Homepage = "https://github.com/pyomeca/cocofest"
+
+# ------------------------------
+# Packaging configuration
+# ------------------------------
+
+[tool.setuptools]
+include-package-data = true
+
+[tool.setuptools.dynamic]
+version = { attr = "cocofest.misc.__version__.__version__" }
+
+# Auto-discover all packages inside the repo root
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["cocofest*"]
+
+# ------------------------------
+# Data files (for *.bioMod files bundled inside the package)
+# ------------------------------
+[tool.setuptools.package-data]
+cocofest = ["models/msk_model/*.bioMod"]

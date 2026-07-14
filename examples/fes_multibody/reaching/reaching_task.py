@@ -7,6 +7,7 @@ The files will contain the time, states, controls and parameters of the ocp.
 
 import numpy as np
 
+import cocofest._matplotlib_compat  # Temporary fix, see cocofest/_matplotlib_compat.py
 import bioptim
 from bioptim import (
     Axis,

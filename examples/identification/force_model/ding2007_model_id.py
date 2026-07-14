@@ -6,6 +6,7 @@ Finally, we use the data to identify the model parameters.
 
 import numpy as np
 
+import cocofest._matplotlib_compat  # Temporary fix, see cocofest/_matplotlib_compat.py
 from bioptim import OdeSolver, OptimalControlProgram, ObjectiveFcn, Node, ControlType, ObjectiveList
 
 from cocofest import (

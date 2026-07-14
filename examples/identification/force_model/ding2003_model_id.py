@@ -8,6 +8,7 @@ need to remove it from the key_parameter_to_identify.
 import matplotlib.pyplot as plt
 import numpy as np
 
+import cocofest._matplotlib_compat  # Temporary fix, see cocofest/_matplotlib_compat.py
 from bioptim import (
     OdeSolver,
     OptimalControlProgram,

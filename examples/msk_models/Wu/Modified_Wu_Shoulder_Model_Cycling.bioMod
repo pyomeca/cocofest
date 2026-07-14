@@ -41,7 +41,7 @@ gravity	0 0 -9.8000000000000007
             1.0    0.0    0.0    0
             0.0    1.0    0.0    0
             0.0    0.0    1.0    0
-            0    0    0    1
+            0.0    0.0    0.0    1
     endsegment
     // Segment
     segment clavicle_sternoclavicular_r1
@@ -123,7 +123,7 @@ gravity	0 0 -9.8000000000000007
             1.0    0.0    0.0    0
             0.0    1.0    0.0    0
             0.0    0.0    1.0    0
-            0    0    0    1
+            0.0    0.0    0.0    1
     endsegment
 // Rotation transform was initially an orthogonal basis
     // Segment
@@ -132,9 +132,9 @@ gravity	0 0 -9.8000000000000007
         RTinMatrix    1
         RT
             0.0    0.0    -1.0    0
-            0.0    1.0    0.0    0
-            1.0    0.0    0.0    0
-            0    0    0    1
+            0.0    1.0    0.0     0
+            1.0    0.0    0.0     0
+            0.0    0.0    0.0     1
         //rotations xyz
         ranges -6 6
         -6 6
@@ -149,8 +149,8 @@ gravity	0 0 -9.8000000000000007
         RT
             0.0    0.0    1.0    0
             0.0    1.0    0.0    0
-            -1.0    -0.0    -0.0    0
-            0    0    0    1
+            -1.0   -0.0   -0.0   0
+            0.0    0.0    0.0    1
     endsegment
 
     //True segment where are applied inertial values.
@@ -184,7 +184,7 @@ gravity	0 0 -9.8000000000000007
             1.0    0.0    0.0    0
             0.0    1.0    0.0    0
             0.0    0.0    1.0    0
-            0    0    0    1
+            0.0    0.0    0.0    1
     endsegment
     // Segment
     segment humerus_shoulder_plane
@@ -250,7 +250,6 @@ gravity	0 0 -9.8000000000000007
         rotations z
         ranges		-1.570796326795	1.570796326795
         meshfile Geometry/arm_r_humerus.vtp
-
     endsegment
 
 // Information about ulna segment
@@ -359,9 +358,7 @@ gravity	0 0 -9.8000000000000007
     endmarker
 
 
-    // Markers
-// MUSCLE DEFINIION
-
+    // Muscles
 // humerus > clavicle
 musclegroup humerus_to_clavicle
     OriginParent        clavicle
@@ -388,38 +385,6 @@ endmusclegroup
             musclegroup    humerus_to_clavicle
             position    0.0065313002029060031 -0.0094779193120770842 0.13982975906663883
         endviapoint
-
-// humerus > scapula
-//musclegroup humerus_to_scapula
-    //OriginParent        humerus
-    //InsertionParent        scapula
-//endmusclegroup
-
-    // Muscle definition for DELT2 med
-    //muscle    DELT2
-        //type   degroote
-        //statetype   degroote
-        //musclegroup    humerus_to_scapula
-        //OriginPosition    0.0045591099999999999 -0.103949 0.0077551599999999997
-        //InsertionPosition    -0.027529399999999999 -0.0032022000000000001 0.0014263399999999999
-        //optimalLength    0.1318
-        //maximalForce    1098.4000000000001
-        //tendonSlackLength    0.046699999999999998
-        //pennationAngle    0.26179938779900003
-    //endmuscle
-
-        //viapoint    default
-            //parent    humerus
-            //muscle    DELT2
-            //musclegroup    humerus_to_scapula
-            //position    0.0056957415548521658 -0.052561409965601387 0.023553919935946514
-        //endviapoint
-        //viapoint    DELT2-P3
-            //parent    scapula
-            //muscle    DELT2
-            //musclegroup    humerus_to_scapula
-            //position    -0.0079390994991954296 -0.00050516980262226593 0.024323946091160252
-        //endviapoint
 
 // scapula > humerus
 musclegroup scapula_to_humerus
@@ -520,48 +485,6 @@ endmusclegroup
             position    0.023584999999999998 -0.29429899999999998 -0.0112797
         endviapoint
 
-    //muscle    bic_s
-        //type   degroote
-        //statetype   degroote
-        //musclegroup    scapula_to_radius
-        //OriginPosition    0.0143708 -0.0445517 -0.0297503
-        //InsertionPosition    -0.0022477899999999999 -0.042146200000000002 -0.0022477899999999999
-        //optimalLength    0.17999999999999999
-        //maximalForce    435.56
-        //tendonSlackLength    0.19497
-        //pennationAngle    0
-    //endmuscle
-
-        //viapoint    bic_s-P2
-            //parent    humerus
-            //muscle    bic_s
-            //musclegroup    scapula_to_radius
-            //position    0.012156699999999999 -0.082452899999999996 -0.0119826
-        //endviapoint
-        //viapoint    bic_s-P3
-            //parent    humerus
-            //muscle    bic_s
-            //musclegroup    scapula_to_radius
-            //position    0.018534399999999999 -0.13196099999999999 -0.011743200000000001
-        //endviapoint
-        //viapoint    bic_s-P4
-            //parent    humerus
-            //muscle    bic_s
-            //musclegroup    scapula_to_radius
-            //position    0.0248144 -0.19089400000000001 -0.0068565700000000002
-        //endviapoint
-        //viapoint    bic_s-P5
-            //parent    humerus
-            //muscle    bic_s
-            //musclegroup    scapula_to_radius
-            //position    0.0184577 -0.29224800000000001 -0.0061525800000000004
-        //endviapoint
-
-// humerus > thorax
-musclegroup humerus_to_thorax
-    OriginParent        humerus
-    InsertionParent        thorax
-endmusclegroup
 
 // scapula > ulna
 musclegroup scapula_to_ulna
@@ -593,54 +516,3 @@ endmusclegroup
             musclegroup    scapula_to_ulna
             position    -0.018969799999999998 -0.29120699999999999 -0.0131472
         endviapoint
-
-// humerus > ulna
-musclegroup humerus_to_ulna
-    OriginParent        humerus
-    InsertionParent        ulna
-endmusclegroup
-
-    //muscle    tric_lat
-        //type   degroote
-        //statetype   degroote
-        //musclegroup    humerus_to_ulna
-        //OriginPosition    -0.0065191900000000002 -0.137632 0.00465811
-        //InsertionPosition    -0.0220302 0.0105221 -0.00078463600000000001
-        //optimalLength    0.086300000000000002
-        //maximalForce    624.29999999999995
-        //tendonSlackLength    0.1017
-        //pennationAngle    0.17000000000000001
-    //endmuscle
-
-        //viapoint    tric_lat-P2
-            //parent    humerus
-            //muscle    tric_lat
-            //musclegroup    humerus_to_ulna
-            //position    -0.026578067725514146 -0.26743797534140834 -0.011438500405773379
-        //endviapoint
-
-    //muscle    tric_med
-        //type   degroote
-        //statetype   degroote
-        //musclegroup    humerus_to_ulna
-        //OriginPosition    -0.0091203099999999995 -0.14904800000000001 -0.0098603800000000002
-        //InsertionPosition    -0.022026869065905907 -0.0061277948921212196 -0.00078463601452789138
-        //optimalLength    0.086099999999999996
-        //maximalForce    624.29999999999995
-        //tendonSlackLength    0.094100000000000003
-        //pennationAngle    0.157
-    //endmuscle
-
-        //viapoint    tric_med-P2
-            //parent    humerus
-            //muscle    tric_med
-            //musclegroup    humerus_to_ulna
-            //position    -0.0346529 -0.246369 -0.0132452
-        //endviapoint
-        //viapoint    tric_med-P3
-            //parent    humerus
-            //muscle    tric_med
-            //musclegroup    humerus_to_ulna
-            //position    -0.029846592126185036 -0.27348564976605827 -0.01314719974599732
-        //endviapoint
-//

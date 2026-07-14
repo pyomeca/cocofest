@@ -6,6 +6,7 @@ Intensity can be optimized from sensitivity threshold to 600us. No residual torq
 
 import numpy as np
 
+import cocofest._matplotlib_compat  # Temporary fix, see cocofest/_matplotlib_compat.py
 from bioptim import (
     Node,
     ObjectiveFcn,

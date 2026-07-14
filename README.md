@@ -84,12 +84,31 @@ and robust solver like [Ipopt](https://github.com/coin-or/Ipopt).
   Installation
 </h1>
 
-Currently, no anaconda installation is available. The installation must be done from the sources. <br>
-**Cloning** the repository is the first step to be able to use the package.
+> \[!IMPORTANT]
+>
+> `Cocofest` is currently **not available on Anaconda/PyPI**. The installation must be done from the sources,
+> so **cloning the repository is the required first step** before running any command below:
+> ```bash
+> git clone https://github.com/pyomeca/cocofest.git
+> cd cocofest
+> ```
 
-### Dependencies
-`Cocofest` relies on several libraries. 
-So carefully follow these steps to get everything installed to use `Cocofest`.
+### ⚡ Quick installation
+The repository contains an [`environment.yml`](environment.yml) file with all of `Cocofest`'s dependencies and a
+[`pyproject.toml`](pyproject.toml) file for the package itself. The setup requires the following 3 commands from the
+repository root:
+```bash
+conda env create -f environment.yml
+conda activate cocofest
+pip install -e .
+```
+`conda env create` reads `environment.yml` and creates an environment named `cocofest` with every
+dependency in one go, and `pip install -e .` registers `Cocofest` as a regular importable package, so
+`import cocofest` works from anywhere (not just from inside the `examples` folder), without any relative-pathing
+issue.
+
+### Manual installation
+If you would rather pick your own environment name or dependency versions, follow these steps instead.
 </br>
 First, create a new conda environment
 ```bash
@@ -103,10 +122,26 @@ conda activate YOUR_ENV_NAME
 
 After, install the dependencies
 ```bash
-conda install numpy matplotlib pytest casadi biorbd pyorerun bioptim==3.4.0 -c conda-forge
+conda install numpy matplotlib casadi biorbd pyorerun scikit-optimize bioptim==3.4.0 -c conda-forge
+```
+
+Finally, from the root of the cloned repository, install `Cocofest` itself in editable mode
+```bash
+pip install -e .
 ```
 
 You are now ready to use `Cocofest`!
+
+> \[!NOTE]
+> `pytest` is not part of `environment.yml`. If you want to run the tests or contribute to `Cocofest`, install the
+> dev tools with `pip install -e ".[dev]"` or `conda install -c conda-forge pytest black codecov`.
+
+### ▶️ Running an example in Cocofest
+Every script in the [`examples`](examples) folder is directly runnable. For instance, the pulse width optimization
+script under `getting_started` can be run with:
+```bash
+python examples/getting_started/optimization/pulse_width_optimization.py
+```
 
 <p align="center"> 
   <img src="https://i.imgur.com/zXE9tC6.png" alt="">

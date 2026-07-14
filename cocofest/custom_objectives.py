@@ -4,8 +4,10 @@ This custom objective class regroups all the custom objectives that are used in 
 
 from casadi import MX, vertcat
 from bioptim import PenaltyController
+from .models.fes_model import FesModel
 from .models.ding2007.ding2007 import DingModelPulseWidthFrequency
 from .models.dynamical_model import FesMskModel
+from .models.hmed2018.hmed2018 import DingModelPulseIntensityFrequency
 
 
 class CustomObjective:
@@ -92,3 +94,88 @@ class CustomObjective:
             stim_charge = controller.controls.cx
 
         return stim_charge
+
+    @staticmethod
+    def minimize_muscle_fatigue_normalized(controller: PenaltyController, fes_model: FesModel, power: int = 1) -> MX:
+        """
+        Minimize the normalized muscle fatigue.
+
+        Parameters
+        ----------
+        controller: PenaltyController
+            The penalty node elements
+        fes_model: FesModel
+            The fes model to use
+        power: int
+            The power to use for the cost function
+
+        Returns
+        -------
+        The force scaling factor normalized by the rested capacity
+        """
+        muscle_name = fes_model.muscle_name
+        muscle_fatigue = 1 - (controller.states["A_" + muscle_name].cx / fes_model.a_scale)
+        return muscle_fatigue**power
+
+    @staticmethod
+    def minimize_muscle_force_production_normalized(
+        controller: PenaltyController, fes_model: FesModel, power: int = 1
+    ) -> MX:
+        """
+        Minimize the normalized muscle force production.
+
+        Parameters
+        ----------
+        controller: PenaltyController
+            The penalty node elements
+        fes_model: FesModel
+            The fes model to use
+        power: int
+            The power to use for the cost function
+
+        Returns
+        -------
+        The force normalized by the maximal isometric force
+        """
+        muscle_name = fes_model.muscle_name
+        muscle_force = controller.states["F_" + muscle_name].cx / fes_model.fmax
+        return muscle_force**power
+
+    @staticmethod
+    def minimize_stimulation_charge_normalized(
+        controller: PenaltyController, fes_model: FesModel, power: int = 1
+    ) -> MX:
+        """
+        Minimize the normalized stimulation charge.
+
+        Parameters
+        ----------
+        controller: PenaltyController
+            The penalty node elements
+        fes_model: FesModel
+            The fes model to use
+        power: int
+            The power to use for the cost function
+
+        Returns
+        -------
+        The stimulation control normalized by its maximal value
+        """
+        muscle_name = fes_model.muscle_name
+        if isinstance(fes_model, DingModelPulseWidthFrequency):
+            stim_charge = (
+                controller.controls["last_pulse_width_" + muscle_name].cx
+                / controller.ocp.nlp[0].u_bounds["last_pulse_width_" + muscle_name].max[0][0]
+            )
+        elif isinstance(fes_model, DingModelPulseIntensityFrequency):
+            stim_charge = (
+                controller.controls["pulse_intensity_" + muscle_name].cx
+                / controller.ocp.nlp[0].u_bounds["pulse_intensity_" + muscle_name].max[0][0]
+            )
+        else:
+            raise ValueError(
+                "For now, only the DingModelPulseWidthFrequency and DingModelPulseIntensityFrequency are"
+                " supported for this cost function."
+            )
+
+        return stim_charge**power

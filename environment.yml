@@ -1,4 +1,4 @@
-# create a dev conda environment with: `make create_env` or `conda env create -f environment.yml`
+# create a dev conda environment with: `conda env create -f environment.yml` (see README.md "Installation")
 name: cocofest
 channels:
 - conda-forge
@@ -9,3 +9,4 @@ dependencies:
 - pyqtgraph
 - pyorerun
 - rerun-sdk=0.21.0
+- scikit-optimize

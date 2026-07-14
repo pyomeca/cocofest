@@ -6,6 +6,7 @@ muscle driven / FES driven dynamics and includes a resistive torque at the handl
 from sys import platform
 import numpy as np
 
+import cocofest._matplotlib_compat  # Temporary fix, see cocofest/_matplotlib_compat.py
 from bioptim import (
     Axis,
     BiorbdModel,
@@ -17,6 +18,7 @@ from bioptim import (
     ExternalForceSetTimeSeries,
     InitialGuessList,
     InterpolationType,
+    MusclesBiorbdModel,
     Node,
     ObjectiveFcn,
     ObjectiveList,
@@ -25,6 +27,7 @@ from bioptim import (
     ParameterList,
     PhaseDynamics,
     Solver,
+    TorqueBiorbdModel,
     VariableScalingList,
     DynamicsOptionsList,
     DynamicsOptions,
@@ -98,7 +101,7 @@ def update_model(
             with_contact=model.with_contact,
         )
     else:
-        model = BiorbdModel(model.path, external_force_set=external_force_set)
+        model = model.__class__(model.path, external_force_set=external_force_set)
 
     return model
 
@@ -522,7 +525,7 @@ def main(
     Main function to configure and solve the optimal control problem.
     """
     # --- Configuration --- #
-    dynamics_type = "fes_driven"  # Available options: "torque_driven", "muscle_driven", "fes_driven"
+    dynamics_type = "muscle_driven"  # Available options: "torque_driven", "muscle_driven", "fes_driven"
     # --- Supplementary available configurations --- #
     # dynamics_type = "torque_driven"
     # dynamics_type = "muscle_driven"
@@ -536,8 +539,11 @@ def main(
     pedal_config = {"x_center": 0.35, "y_center": 0.0, "radius": 0.1}
 
     # --- Load the appropriate model --- #
-    if dynamics_type in ["torque_driven", "muscle_driven"]:
-        model = BiorbdModel(model_path)
+    if dynamics_type == "torque_driven":
+        model = TorqueBiorbdModel(model_path)
+        n_shooting = 100 * final_time
+    elif dynamics_type == "muscle_driven":
+        model = MusclesBiorbdModel(model_path)
         n_shooting = 100 * final_time
     elif dynamics_type == "fes_driven":
         # Set FES model (set to Ding et al. 2007 + fatigue, for now)
@@ -590,8 +596,8 @@ def main(
         dynamics_type=dynamics_type,
         use_sx=False,
         ode_solver=OdeSolver.COLLOCATION(polynomial_degree=3, method="radau"),
-        # ode_solver=OdeSolver.RK4(n_integration_steps=5),
-        torque=-0.3,
+        # ode_solver=OdeSolver.RK4(n_integration_steps=5)
+        torque=-0.2,
         initial_guess_model_path=initial_guess_model_path,
     )
 
