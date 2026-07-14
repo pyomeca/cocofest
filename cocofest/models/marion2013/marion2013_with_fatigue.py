@@ -2,10 +2,6 @@ from typing import Callable
 from casadi import MX, vertcat
 import numpy as np
 
-from bioptim import (
-    DynamicsEvaluation,
-    NonLinearProgram,
-)
 from .marion2013 import Marion2013ModelFrequency
 
 
@@ -59,8 +55,8 @@ class Marion2013ModelFrequencyWithFatigue(Marion2013ModelFrequency):
         self.beta_a = BETA_A_DEFAULT
 
     @property
-    def name_dof(self, with_muscle_name: bool = False) -> list[str]:
-        muscle_name = "_" + self.muscle_name if self.muscle_name and with_muscle_name else ""
+    def name_dofs(self, with_muscle_name: bool = False) -> list[str]:
+        muscle_name = "_" + self.muscle_name if self.muscle_name is not None else ""
         return [
             "Cn" + muscle_name,
             "F" + muscle_name,
@@ -163,47 +159,40 @@ class Marion2013ModelFrequencyWithFatigue(Marion2013ModelFrequency):
 
     def system_dynamics(
         self,
-        cn: MX,
-        f: MX,
-        theta: MX,
-        dtheta_dt: MX,
-        a: MX,
-        tau1: MX,
-        km: MX,
-        t: MX = None,
-        t_stim_prev: MX = None,
-        Fload: MX = 0.0,
+        time: MX,
+        states: MX,
+        controls: MX,
+        numerical_timeseries: MX,
     ) -> MX:
         """
         The system dynamics including fatigue effects.
 
         Parameters
         ----------
-        cn: MX
-            The normalized Ca2+-troponin complex concentration
-        f: MX
-            The instantaneous force near ankle
-        theta: MX
-            The knee flexion angle
-        dtheta_dt: MX
-            The angular velocity
-        a: MX
-            The current a value at 90° affected by fatigue
-        km: MX
-            The current Km value affected by fatigue
-        tau1: MX
-            The current tau1 value affected by fatigue
-        t: MX
-            The current time at which the dynamics is evaluated (ms)
-        t_stim_prev: MX
-            The time of the previous stimulation (ms)
-        Fload: MX
-            External load force (N)
+        time: MX
+            The system's current node time
+        states: MX
+            The state of the system CN, F, theta, dtheta, A, Tau1, Km
+        controls: MX
+            The controls of the system, Fload
+        numerical_timeseries: MX
+            The numerical timeseries of the system
 
         Returns
         -------
         The value of the derivative of each state dx/dt at the current time t
         """
+        t = time
+        cn = states[0]
+        f = states[1]
+        theta = states[2]
+        dtheta_dt = states[3]
+        a = states[4]
+        tau1 = states[5]
+        km = states[6]
+        Fload = controls[0] if controls.shape[0] > 0 else 0.0
+        t_stim_prev = numerical_timeseries
+
         # Get CN dynamics from Ding model
         cn_dot = self.calculate_cn_dot(cn, t, t_stim_prev)
 
@@ -235,59 +224,3 @@ class Marion2013ModelFrequencyWithFatigue(Marion2013ModelFrequency):
         tau1_dot = self.tau1_dot_fun(tau1, f, dtheta_dt)
 
         return vertcat(cn_dot, f_dot, dtheta_dt, d2theta_dt2, a_dot, tau1_dot, km_dot)
-
-    @staticmethod
-    def dynamics(
-        time: MX,
-        states: MX,
-        controls: MX,
-        parameters: MX,
-        algebraic_states: MX,
-        numerical_timeseries: MX,
-        nlp: NonLinearProgram,
-        fes_model=None,
-    ) -> DynamicsEvaluation:
-        """
-        Functional electrical stimulation dynamic with fatigue
-
-        Parameters
-        ----------
-        time: MX
-            The system's current node time
-        states: MX
-            The state of the system including fatigue states
-        controls: MX
-            The controls of the system
-        parameters: MX
-            The parameters acting on the system
-        algebraic_states: MX
-            The stochastic variables of the system
-        numerical_timeseries: MX
-            The numerical timeseries of the system
-        nlp: NonLinearProgram
-            A reference to the phase
-        fes_model: Marion2013ModelFrequencyWithFatigue
-            The current phase fes model
-
-        Returns
-        -------
-        The derivative of the states in the tuple[MX] format
-        """
-        model = fes_model if fes_model else nlp.model
-        dxdt_fun = model.system_dynamics
-
-        return DynamicsEvaluation(
-            dxdt=dxdt_fun(
-                cn=states[0],
-                f=states[1],
-                theta=states[2],
-                dtheta_dt=states[3],
-                a=states[4],
-                tau1=states[5],
-                km=states[6],
-                t=time,
-                t_stim_prev=numerical_timeseries,
-                Fload=controls[0] if controls.shape[0] > 0 else 0.0,
-            ),
-            defects=None,
-        )

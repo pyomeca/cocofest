@@ -95,50 +95,6 @@ FES with musculoskeletal models, supports customizable cost functions and parame
 goal of bringing this technology to patient care, we believe this package will contribute to the open-science effort.
 `Cocofest` is expected to accelerate the increase of technology readiness level by strengthening knowledge foundation.
 
-
-\newpage
-# Functionality and Features
-
-`Cocofest` already integrates six FES muscle dynamics from the literature (Table 1).
-
-*Table 1: FES models in Cocofest*
-
-
-| **Name**                     | **Purpose**                             | **States**                                                                             | **Controls**               |
-|------------------------------|-----------------------------------------|----------------------------------------------------------------------------------------|----------------------------|
-| **@veltink1992nonlinear**    | Joint angle control                     | Activation                                                                             | Pulse intensity            |
-| **@riener1996biomechanical** | Predict fatigue                         | Fatigue                                                                                | None*                      |
-| **@ding2003mathematical**    | Isometric force control with fatigue    | Calcium, force, force scaling factor, cross-bridges sensitivity, time to force decline | Frequency                  |
-| **@ding2007mathematical**    | Isometric force control                 | Calcium, force                                                                         | Frequency, pulse width     |
-| **@marion2009predicting**    | Force control with fatigue for a motion | Calcium, force                                                                         | Frequency                  |
-| **@marion2013predicting**    | Force control with fatigue for a motion | Calcium, force, force scaling factor, cross-bridges sensitivity, time to force decline | Frequency, pulse width     |
-| **@hmed2018approach**        | Isometric force control                 | Calcium, force                                                                         | Frequency, pulse intensity |
-\vspace{-1.5\baselineskip}
-\noindent{\footnotesize\emph{\textsuperscript{*} Only the muscle fatigue prediction was implemented. The model is used in combination with Veltink et al. (1992).}}\par
-
-`Cocofest` relies on Biorbd, a musculoskeletal physics engine [@michaud2021biorbd], and Bioptim, an open-source
-optimization framework for biomechanical problems [@michaud2022bioptim]. Specifically, Bioptim enables easy OCP
-customization including cost functions, bounds, constraints, transcription methods (e.g., direct collocation),
-integration methods, and solving methods (e.g., full- and receding-horizon OCPs).
-
-In conventional Hill-type muscle model, muscle force ($F_m$) is the product of $a$ the muscle activation, $F_{max}$ the
-maximal isometric muscle force, $f_l$ the force-length, $f_v$ the force-velocity and $f_{pas}$ the passive force-length
-relationship: $F_m(t) = a(t)\, F_{\max}\, f_l(\tilde{l}_m)\, f_v(\tilde{v}_m) + f_{pas}(\tilde{l}_m)$.
-`Cocofest` replaces $a(t)$ × $F_{max}$ by the force obtained using FES models (e.g., Ding, Marion, Hmed). This approach
-allows motions driven-FES simulations, meanwhile benefiting from musculoskeletal model properties (e.g., muscle
-insertion, weight, inertial).
-
-An identification feature is available to personalize FES models based on experimental data. Model’s parameters (e.g.,
-rested force scaling factor, cross-bridges sensitivity, and time to force decline in [@ding2003mathematical] model) are
-personalized by minimizing the difference between the simulated and the experimental forces.
-
-Additionally, a feature for solving initial value problems was implemented to enable model comparison. The FES nonlinear
-dynamics is integrated forward in time to simulate the model’s behavior from given initial state and controls (i.e., 
-series of pulse trains). `Cocofest` also incorporates the recent numerical truncation method to speed up convergence
-[@coelho2025numerical]. This method limits the number of past stimulations considered in the dynamics to reduce the
-dependency on time-varying states.
-
-
 \newpage
 ## An optimization example: Pulse width optimization to match a force profile using the @ding2007mathematical model
 

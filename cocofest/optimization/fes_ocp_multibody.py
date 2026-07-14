@@ -3,12 +3,10 @@ import numpy as np
 from bioptim import (
     BoundsList,
     ConstraintList,
-    DynamicsList,
     ExternalForceSetTimeSeries,
     InitialGuessList,
     InterpolationType,
     ParameterList,
-    PhaseDynamics,
     VariableScaling,
 )
 
@@ -37,22 +35,6 @@ class OcpFesMsk(OcpFes):
         numerical_time_series = {"external_forces": external_force_set.to_numerical_time_series()}
 
         return numerical_time_series, external_force_set
-
-    @staticmethod
-    def declare_dynamics(bio_models, numerical_time_series, ode_solver, contact_type):
-        dynamics = DynamicsList()
-        dynamics.add(
-            bio_models.declare_model_variables,
-            dynamic_function=bio_models.muscle_dynamic,
-            expand_dynamics=True,
-            expand_continuity=False,
-            phase=0,
-            phase_dynamics=PhaseDynamics.SHARED_DURING_THE_PHASE,
-            numerical_data_timeseries=numerical_time_series,
-            contact_type=contact_type,
-            ode_solver=ode_solver,
-        )
-        return dynamics
 
     @staticmethod
     def build_parameters(
@@ -127,7 +109,7 @@ class OcpFesMsk(OcpFes):
         x_init = InitialGuessList()
         for model in bio_models.muscles_dynamics_model:
             muscle_name = model.muscle_name
-            variable_bound_list = [model.name_dof[i] + "_" + muscle_name for i in range(len(model.name_dof))]
+            variable_bound_list = model.name_dofs
 
             starting_bounds, min_bounds, max_bounds = (
                 model.standard_rest_values(),
@@ -286,6 +268,7 @@ class OcpFesMsk(OcpFes):
             previous_stim=model.muscles_dynamics_model[0].previous_stim,
             activate_force_length_relationship=model.activate_force_length_relationship,
             activate_force_velocity_relationship=model.activate_force_velocity_relationship,
+            activate_passive_force_relationship=model.activate_passive_force_relationship,
             activate_residual_torque=model.activate_residual_torque,
             parameters=parameters,
             external_force_set=external_force_set,

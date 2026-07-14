@@ -3,10 +3,6 @@ from typing import Callable
 import numpy as np
 from casadi import MX, vertcat
 
-from bioptim import (
-    DynamicsEvaluation,
-    NonLinearProgram,
-)
 from .marion2009_modified import Marion2009ModelPulseWidthFrequency
 
 
@@ -58,8 +54,8 @@ class Marion2009ModelPulseWidthFrequencyWithFatigue(Marion2009ModelPulseWidthFre
         self.alpha_km = ALPHA_KM_DEFAULT
 
     @property
-    def name_dof(self, with_muscle_name: bool = False) -> list[str]:
-        muscle_name = "_" + self.muscle_name if self.muscle_name and with_muscle_name else ""
+    def name_dofs(self, with_muscle_name: bool = False) -> list[str]:
+        muscle_name = "_" + self.muscle_name if self.muscle_name is not None else ""
         return [
             "Cn" + muscle_name,
             "F" + muscle_name,
@@ -107,44 +103,39 @@ class Marion2009ModelPulseWidthFrequencyWithFatigue(Marion2009ModelPulseWidthFre
 
     def system_dynamics(
         self,
-        cn: MX,
-        f: MX,
-        a: MX = None,
-        tau1: MX = None,
-        km: MX = None,
-        t: MX = None,
-        t_stim_prev: list[float] | list[MX] = None,
-        pulse_width: MX = None,
-        theta: MX = None,
+        time: MX,
+        states: MX,
+        controls: MX,
+        numerical_timeseries: MX,
     ) -> MX:
         """
         The system dynamics incorporating both angle dependency and fatigue states.
 
         Parameters
         ----------
-        cn: MX
-            The value of the ca_troponin_complex (unitless)
-        f: MX
-            The value of the force (N)
-        a: MX
-            The value of the scaling factor (unitless)
-        tau1: MX
-            The value of the time_state_force_no_cross_bridge (ms)
-        km: MX
-            The value of the cross_bridges (unitless)
-        t: MX
-            The current time at which the dynamics is evaluated (s)
-        t_stim_prev: list[float] | list[MX]
-            The time list of the previous stimulations (s)
-        pulse_width: MX
-            The pulsation duration of the current stimulation (s)
-        theta: MX
-            The current knee angle in degrees
+        time: MX
+            The system's current node time
+        states: MX
+            The state of the system CN, F
+        controls: MX
+            The controls of the system, pulse_width, theta
+        numerical_timeseries: MX
+            The numerical timeseries of the system
 
         Returns
         -------
         The value of the derivative of each state dx/dt at the current time t
         """
+        t = time
+        cn = states[0]
+        f = states[1]
+        a = states[2]
+        tau1 = states[3]
+        km = states[4]
+        pulse_width = controls[0]
+        theta = controls[1] if controls.shape[0] > 1 else 90
+        t_stim_prev = numerical_timeseries
+
         cn_dot = self.calculate_cn_dot(cn, t, t_stim_prev)
 
         # Calculate base a_scale with pulse width dependency
@@ -213,58 +204,3 @@ class Marion2009ModelPulseWidthFrequencyWithFatigue(Marion2009ModelPulseWidthFre
         The value of the derivative cross_bridges (unitless)
         """
         return -(km - self.km_rest) / self.tau_fat + self.alpha_km * f
-
-    @staticmethod
-    def dynamics(
-        time: MX,
-        states: MX,
-        controls: MX,
-        parameters: MX,
-        algebraic_states: MX,
-        numerical_timeseries: MX,
-        nlp: NonLinearProgram,
-        fes_model=None,
-    ) -> DynamicsEvaluation:
-        """
-        Functional electrical stimulation dynamic including angle dependency and fatigue
-
-        Parameters
-        ----------
-        time: MX
-            The system's current node time
-        states: MX
-            The state of the system CN, F, A, Tau1, Km
-        controls: MX
-            The controls of the system: pulse_width, theta
-        parameters: MX
-            The parameters acting on the system, final time of each phase
-        algebraic_states: MX
-            The stochastic variables of the system, none
-        numerical_timeseries: MX
-            The numerical timeseries of the system
-        nlp: NonLinearProgram
-            A reference to the phase
-        fes_model: Marion2009ModelPulseWidthFrequencyWithFatigue
-            The current phase fes model
-
-        Returns
-        -------
-        The derivative of the states in the tuple[MX] format
-        """
-        model = fes_model if fes_model else nlp.model
-        dxdt_fun = model.system_dynamics
-
-        return DynamicsEvaluation(
-            dxdt=dxdt_fun(
-                cn=states[0],
-                f=states[1],
-                a=states[2],
-                tau1=states[3],
-                km=states[4],
-                t=time,
-                t_stim_prev=numerical_timeseries,
-                pulse_width=controls[0],
-                theta=controls[1] if controls.shape[0] > 1 else 90,
-            ),
-            defects=None,
-        )

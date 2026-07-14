@@ -9,4 +9,4 @@ git submodule update --recursive --init
 cd bioptim
 
 # Installing bioptim
-python setup.py install
+pip install .

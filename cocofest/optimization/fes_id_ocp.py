@@ -37,7 +37,7 @@ class OcpFesId(OcpFes):
 
         # Sets the bound for all the phases
         x_bounds = BoundsList()
-        variable_bound_list = model.name_dof
+        variable_bound_list = model.name_dofs
         starting_bounds, min_bounds, max_bounds = (
             model.standard_rest_values(),
             model.standard_rest_values(),

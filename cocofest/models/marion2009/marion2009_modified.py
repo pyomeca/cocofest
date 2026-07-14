@@ -2,10 +2,6 @@ from typing import Callable
 
 from casadi import MX, vertcat
 
-from bioptim import (
-    DynamicsEvaluation,
-    NonLinearProgram,
-)
 from cocofest.models.ding2007.ding2007 import DingModelPulseWidthFrequency
 
 
@@ -108,35 +104,36 @@ class Marion2009ModelPulseWidthFrequency(DingModelPulseWidthFrequency):
 
     def system_dynamics(
         self,
-        cn: MX,
-        f: MX,
-        t: MX = None,
-        t_stim_prev: list[float] | list[MX] = None,
-        pulse_width: MX = None,
-        theta: MX = None,
+        time: MX,
+        states: MX,
+        controls: MX,
+        numerical_timeseries: MX,
     ) -> MX:
         """
         The system dynamics incorporating angle dependency.
 
         Parameters
         ----------
-        cn: MX
-            The value of the ca_troponin_complex (unitless)
-        f: MX
-            The value of the force (N)
-        t: MX
-            The current time at which the dynamics is evaluated (s)
-        t_stim_prev: list[float] | list[MX]
-            The time list of the previous stimulations (s)
-        pulse_width: MX
-            The pulsation duration of the current stimulation (s)
-        theta: MX
-            The current knee angle in degrees
+        time: MX
+            The system's current node time
+        states: MX
+            The state of the system CN, F
+        controls: MX
+            The controls of the system, pulse_width, theta
+        numerical_timeseries: MX
+            The numerical timeseries of the system
 
         Returns
         -------
         The value of the derivative of each state dx/dt at the current time t
         """
+        t = time
+        cn = states[0]
+        f = states[1]
+        pulse_width = controls[0]
+        theta = controls[1] if controls.shape[0] > 1 else 90
+        t_stim_prev = numerical_timeseries
+
         cn_dot = self.calculate_cn_dot(cn, t, t_stim_prev)
 
         # Calculate base a_scale with pulse width dependency
@@ -155,64 +152,3 @@ class Marion2009ModelPulseWidthFrequency(DingModelPulseWidthFrequency):
         )
 
         return vertcat(cn_dot, f_dot)
-
-    @staticmethod
-    def dynamics(
-        time: MX,
-        states: MX,
-        controls: MX,
-        parameters: MX,
-        algebraic_states: MX,
-        numerical_timeseries: MX,
-        nlp: NonLinearProgram,
-        fes_model=None,
-        force_length_relationship: MX | float = 1,
-        force_velocity_relationship: MX | float = 1,
-        passive_force_relationship: MX | float = 0,
-    ) -> DynamicsEvaluation:
-        """
-        Functional electrical stimulation dynamic including angle dependency
-
-        Parameters
-        ----------
-        time: MX
-            The system's current node time
-        states: MX
-            The state of the system CN, F
-        controls: MX
-            The controls of the system: pulse_width, theta
-        parameters: MX
-            The parameters acting on the system, final time of each phase
-        algebraic_states: MX
-            The stochastic variables of the system, none
-        numerical_timeseries: MX
-            The numerical timeseries of the system
-        nlp: NonLinearProgram
-            A reference to the phase
-        fes_model: Marion2009ModelPulseWidthFrequency
-            The current phase fes model
-        force_length_relationship: MX | float
-            The force length relationship value (unitless), not considered for this model
-        force_velocity_relationship: MX | float
-            The force velocity relationship value (unitless), not considered for this model
-        passive_force_relationship: MX | float
-            The passive force coefficient of the muscle (unitless), not considered for this model
-
-        Returns
-        -------
-        The derivative of the states in the tuple[MX] format
-        """
-        model = fes_model if fes_model else nlp.model
-        dxdt_fun = model.system_dynamics
-
-        return DynamicsEvaluation(
-            dxdt=dxdt_fun(
-                cn=states[0],
-                f=states[1],
-                t=time,
-                t_stim_prev=numerical_timeseries,
-                pulse_width=controls[0],
-                theta=controls[1] if controls.shape[0] > 1 else 90,
-            ),
-            defects=None,
-        )

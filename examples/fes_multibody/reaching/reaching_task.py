@@ -52,6 +52,7 @@ def initialize_model(final_time, model_path):
         activate_force_velocity_relationship=True,
         activate_passive_force_relationship=True,
         activate_residual_torque=False,
+        with_contact=False,
     )
     return model
 
@@ -66,12 +67,9 @@ def prepare_ocp(
     numerical_data_time_series, stim_idx_at_node_list = muscle_model.get_numerical_data_time_series(
         n_shooting, final_time
     )
-
-    dynamics = OcpFesMsk.declare_dynamics(
-        model,
+    dynamics_options = OcpFesMsk.declare_dynamics_options(
         numerical_time_series=numerical_data_time_series,
         ode_solver=OdeSolver.COLLOCATION(polynomial_degree=3, method="radau"),
-        contact_type=[],
     )
 
     # --- Initialize default FES bounds and initial guess --- #
@@ -124,7 +122,7 @@ def prepare_ocp(
 
     return OptimalControlProgram(
         bio_model=[model],
-        dynamics=dynamics,
+        dynamics=dynamics_options,
         n_shooting=n_shooting,
         phase_time=final_time,
         objective_functions=objective_functions,
@@ -152,11 +150,3 @@ def main(plot=True, model_path="../../msk_models/Arm26/arm26_with_reaching_targe
 
 if __name__ == "__main__":
     main()
-
-# [1] Dahmane, R., Djordjevič, S., Šimunič, B., & Valenčič, V. (2005).
-# Spatial fiber type distribution in normal human muscle: histochemical and tensiomyographical evaluation.
-# Journal of biomechanics, 38(12), 2451-2459.
-
-# [2] Klein, C. S., Allman, B. L., Marsh, G. D., & Rice, C. L. (2002).
-# Muscle size, strength, and bone geometry in the upper limbs of young and old men.
-# The Journals of Gerontology Series A: Biological Sciences and Medical Sciences, 57(7), M455-M459.

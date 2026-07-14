@@ -1,7 +1,7 @@
 <div align="center"><a name="readme"></a>
 
 <p align="center"> 
-  <img src="https://cdna.artstation.com/p/assets/images/images/091/422/672/large/max_mv-04-04.jpg?1756758714" alt="">
+  <img src="https://i.imgur.com/Gsj0JtN.jpeg" alt="">
 </p>
 
 # Cocofest
@@ -45,7 +45,7 @@ Supports predictive musculoskeletal simulation driven by FES, moving time horizo
 
 
 <p align="center"> 
-  <img src="https://cdnb.artstation.com/p/assets/images/images/091/565/727/large/max_mv-04.jpg?1757152714" alt="">
+  <img src="" alt="">
 </p>
 
 <a id="about"></a>
@@ -74,12 +74,12 @@ and robust solver like [Ipopt](https://github.com/coin-or/Ipopt).
 > the repository to show your support and help us grow the community!
 
 <p align="center"> 
-  <img src="https://cdnb.artstation.com/p/assets/images/images/091/565/727/large/max_mv-04.jpg?1757152714" alt="">
+  <img src="https://i.imgur.com/zXE9tC6.png" alt="">
 </p>
 
 <a id="installation"></a>
 <h1 align="center">
-  <img src="https://cdnb.artstation.com/p/assets/images/images/091/554/681/large/max_mv-02.jpg?1757104575" width="100" alt=""
+  <img src="https://i.imgur.com/BEyEL43.png" width="100" alt=""
        style="vertical-align: middle; margin-right: .5rem;" />
   Installation
 </h1>
@@ -103,24 +103,18 @@ conda activate YOUR_ENV_NAME
 
 After, install the dependencies
 ```bash
-conda install numpy matplotlib pytest casadi biorbd pyorerun -c conda-forge
-```
-
-Finally, install the bioptim setup.py file located in your cocofest/external/bioptim folder
-```bash
-cd <path_up_to_cocofest_file>/external/bioptim
-python setup.py install
+conda install numpy matplotlib pytest casadi biorbd pyorerun bioptim==3.4.0 -c conda-forge
 ```
 
 You are now ready to use `Cocofest`!
 
 <p align="center"> 
-  <img src="https://cdnb.artstation.com/p/assets/images/images/091/565/727/large/max_mv-04.jpg?1757152714" alt="">
+  <img src="https://i.imgur.com/zXE9tC6.png" alt="">
 </p>
 
 <a id="features"></a>
 <h1 align="center">
-  <img src="https://cdna.artstation.com/p/assets/images/images/091/554/680/large/max_mv-01.jpg?1757104570" width="100" alt=""
+  <img src="https://i.imgur.com/OFVqYpy.png" width="100" alt=""
        style="vertical-align: middle; margin-right: .5rem;" />
   Features
 </h1>
@@ -154,7 +148,7 @@ isometric muscle force, $f_l$ the force-length, $f_v$ the force-velocity and $f_
 ```math
 F_m(t) = a(t)\, F_{\max}\, f_l(\tilde{l}_m)\, f_v(\tilde{v}_m) + f_{pas}(\tilde{l}_m)
 ```
-<br>
+
 `Cocofest` replaces $a(t)$ × $F_{max}$ by the force obtained using [FES models](#available-fes-models).
 This approach allows motions driven-FES simulations, meanwhile benefiting from musculoskeletal model properties (e.g., muscle insertion, weight, inertial).
 
@@ -297,12 +291,12 @@ model = ModelMaker.create_model("ding2007", stim_time=stim_time, sum_stim_trunca
 
 
 <p align="center"> 
-  <img src="https://cdnb.artstation.com/p/assets/images/images/091/565/727/large/max_mv-04.jpg?1757152714" alt="">
+  <img src="https://i.imgur.com/zXE9tC6.png" alt="">
 </p>
 
 <a id="other"></a>
 <h1 align="center">
-  <img src="https://cdna.artstation.com/p/assets/images/images/091/554/682/large/max_mv-03.jpg?1757104580" width="100" alt=""
+  <img src="https://i.imgur.com/ksk1C7F.png" width="100" alt=""
        style="vertical-align: middle; margin-right: .5rem;" />
   Other
 </h1>
@@ -373,5 +367,5 @@ Meanwhile, if you use `Cocofest`, please cite the following zenodo link: [10.528
 <a href="https://www.instagram.com/maxmvpainting/"><img src="https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcQrO9f_QqjajojjcNJo8FDUdROLwLx-SQ7uVw&s" title="MaxMV" width="65"></a>
 
 <p align="center"> 
-  <img src="https://cdnb.artstation.com/p/assets/images/images/091/565/727/large/max_mv-04.jpg?1757152714" alt="">
+  <img src="https://i.imgur.com/zXE9tC6.png" alt="">
 </p>
