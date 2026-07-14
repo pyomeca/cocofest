@@ -137,7 +137,7 @@ class FES_plot:
 
     def build_several_y_axis(self, axis, time, values, labels: list = None):
         n = values.shape[0]
-        cmap = plt.get_cmap("tab20", n)
+        cmap = plt.colormaps["tab20"].resampled(n)
         colors = [cmap(i) for i in range(n)]
         axes_list = [axis] + [axis.twinx() for _ in range(values.shape[0] - 1)]
 
@@ -160,7 +160,7 @@ class FES_plot:
         self, axis, time, values, labels: list = None, stim_time=None, stim_values=None, axes_title=None
     ):
         n = len(labels)
-        cmap = plt.get_cmap("tab20b", n)
+        cmap = plt.colormaps["tab20b"].resampled(n)
         colors = [cmap(i) for i in range(n)]
         axes_list = [axis, axis.twinx()]
         axes_colors = ["red", "green"]
