@@ -115,10 +115,12 @@ class CustomObjective:
         """
         muscle_name = fes_model.muscle_name
         muscle_fatigue = 1 - (controller.states["A_" + muscle_name].cx / fes_model.a_scale)
-        return muscle_fatigue ** power
+        return muscle_fatigue**power
 
     @staticmethod
-    def minimize_muscle_force_production_normalized(controller: PenaltyController, fes_model: FesModel, power: int = 1) -> MX:
+    def minimize_muscle_force_production_normalized(
+        controller: PenaltyController, fes_model: FesModel, power: int = 1
+    ) -> MX:
         """
         Minimize the normalized muscle force production.
 
@@ -137,10 +139,12 @@ class CustomObjective:
         """
         muscle_name = fes_model.muscle_name
         muscle_force = controller.states["F_" + muscle_name].cx / fes_model.fmax
-        return muscle_force ** power
+        return muscle_force**power
 
     @staticmethod
-    def minimize_stimulation_charge_normalized(controller: PenaltyController, fes_model: FesModel, power: int = 1) -> MX:
+    def minimize_stimulation_charge_normalized(
+        controller: PenaltyController, fes_model: FesModel, power: int = 1
+    ) -> MX:
         """
         Minimize the normalized stimulation charge.
 
@@ -169,7 +173,9 @@ class CustomObjective:
                 / controller.ocp.nlp[0].u_bounds["pulse_intensity_" + muscle_name].max[0][0]
             )
         else:
-            raise ValueError("For now, only the DingModelPulseWidthFrequency and DingModelPulseIntensityFrequency are"
-                             " supported for this cost function.")
+            raise ValueError(
+                "For now, only the DingModelPulseWidthFrequency and DingModelPulseIntensityFrequency are"
+                " supported for this cost function."
+            )
 
-        return stim_charge ** power
+        return stim_charge**power

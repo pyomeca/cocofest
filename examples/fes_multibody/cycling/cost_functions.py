@@ -2,8 +2,12 @@ from casadi import MX, vertcat, sum1, mmax
 from bioptim import PenaltyController
 from cocofest.models.ding2007.ding2007 import DingModelPulseWidthFrequency
 
-BAYESIAN_WEIGHT = vertcat([10000, 1560, 4665, 0.0001])  # example values from minimize_root_mean_square_fatigue bayesian weight optimization
-PHYSIOLOGICAL_WEIGHT = vertcat([1, 0.0943160798625659, 0.389268746606572, 0])  # example values from physiological weight calculation
+BAYESIAN_WEIGHT = vertcat(
+    [10000, 1560, 4665, 0.0001]
+)  # example values from minimize_root_mean_square_fatigue bayesian weight optimization
+PHYSIOLOGICAL_WEIGHT = vertcat(
+    [1, 0.0943160798625659, 0.389268746606572, 0]
+)  # example values from physiological weight calculation
 
 
 class CustomCostFunctions:
@@ -752,7 +756,10 @@ class CustomCostFunctions:
         eps = 1e-8
         muscle_name_list = controller.model.muscle_names
         muscle_force = vertcat(
-            *[BAYESIAN_WEIGHT[x] * controller.states["F_" + muscle_name_list[x]].cx ** 2 for x in range(len(muscle_name_list))]
+            *[
+                BAYESIAN_WEIGHT[x] * controller.states["F_" + muscle_name_list[x]].cx ** 2
+                for x in range(len(muscle_name_list))
+            ]
         )
         rms_force = (sum1(muscle_force) / len(muscle_name_list) + eps) ** 0.5
         return rms_force

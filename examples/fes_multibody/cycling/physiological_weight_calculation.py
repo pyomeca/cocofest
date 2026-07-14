@@ -8,7 +8,6 @@ import numpy as np
 import biorbd
 from cocofest.dynamics.inverse_kinematics_and_dynamics import inverse_kinematics_cycling
 
-
 ROOT = Path(__file__).resolve().parent
 
 MODEL_PATH = ROOT / "../../msk_models/Wu/Modified_Wu_Shoulder_Model_Cycling.bioMod"
@@ -74,10 +73,7 @@ def normalize_positive(signal, new_min=0.0, new_max=1.0):
         return {key: float(new_min) for key in signal}
 
     return {
-        key: float(
-            new_min
-            + (value - min_val) * (new_max - new_min) / (max_val - min_val)
-        )
+        key: float(new_min + (value - min_val) * (new_max - new_min) / (max_val - min_val))
         for key, value in signal.items()
     }
 
@@ -85,6 +81,7 @@ def normalize_positive(signal, new_min=0.0, new_max=1.0):
 # ============================================================
 # Geometry and torque helpers
 # ============================================================
+
 
 def marker_dict(model, q):
     markers = model.markers(q)
@@ -108,9 +105,7 @@ def hand_jacobian_fd(model, q, eps=1e-7):
         dq = np.zeros(nq)
         dq[joint_index] = eps
 
-        jacobian[:, joint_index] = (
-            hand_position(model, q + dq) - hand_position(model, q - dq)
-        ) / (2 * eps)
+        jacobian[:, joint_index] = (hand_position(model, q + dq) - hand_position(model, q - dq)) / (2 * eps)
 
     return jacobian
 
@@ -171,6 +166,7 @@ def get_q_trajectory():
 # Equation n°1: torque profile
 # ============================================================
 
+
 def compute_torque_profiles():
     model = biorbd.Model(str(MODEL_PATH))
 
@@ -215,9 +211,7 @@ def compute_torque_profiles():
                 joint_torque,
             )
 
-            torque_profiles[muscle_index, sample_index] = radius * float(
-                np.dot(force_xy, tangent)
-            )
+            torque_profiles[muscle_index, sample_index] = radius * float(np.dot(force_xy, tangent))
 
     return theta, torque_profiles
 
@@ -225,6 +219,7 @@ def compute_torque_profiles():
 # ============================================================
 # Fatigue model
 # ============================================================
+
 
 def fatigue_discrete_map(
     a_value,
@@ -283,6 +278,7 @@ def simulate_fatigue_ratios(
 # Mechanical contribution helpers
 # ============================================================
 
+
 def build_pre_risk_mask(
     theta_deg: np.ndarray,
     risk_mask: np.ndarray,
@@ -297,10 +293,7 @@ def build_pre_risk_mask(
     for onset_angle in theta_deg[onset_mask]:
         angular_distance_to_onset = np.mod(onset_angle - theta_deg, 360.0)
 
-        pre_risk_mask |= (
-            (angular_distance_to_onset > 0.0)
-            & (angular_distance_to_onset <= pre_risk_width_deg)
-        )
+        pre_risk_mask |= (angular_distance_to_onset > 0.0) & (angular_distance_to_onset <= pre_risk_width_deg)
 
     pre_risk_mask &= ~risk_mask
 
@@ -356,6 +349,7 @@ def feasibility_metrics(
 # Simplified weight calculation
 # ============================================================
 
+
 def weight_calculation(config: dict) -> dict:
     theta, torque_profiles = compute_torque_profiles()
 
@@ -376,11 +370,9 @@ def weight_calculation(config: dict) -> dict:
             rho=config["rho"],
         )
 
-        fatigability[muscle_name] = (
-            fatigue_dynamics[muscle_name][0]
-            - fatigue_dynamics[muscle_name][-1]
-        ) / config["target_cycles"]
-
+        fatigability[muscle_name] = (fatigue_dynamics[muscle_name][0] - fatigue_dynamics[muscle_name][-1]) / config[
+            "target_cycles"
+        ]
 
     # Mechanical contribution
     support_in_pre_risk = {}
@@ -391,10 +383,7 @@ def weight_calculation(config: dict) -> dict:
 
     for cycle_index in range(config["target_cycles"]):
         ratios = np.array(
-            [
-                fatigue_dynamics[muscle_name][cycle_index]
-                for muscle_name in MUSCLE_LIST
-            ],
+            [fatigue_dynamics[muscle_name][cycle_index] for muscle_name in MUSCLE_LIST],
             dtype=float,
         )
 
@@ -406,34 +395,20 @@ def weight_calculation(config: dict) -> dict:
         )
 
         for muscle_name in MUSCLE_LIST:
-            support_in_pre_risk_list[muscle_name].append(
-                metrics[muscle_name]["support_in_pre_risk_area"]
-            )
+            support_in_pre_risk_list[muscle_name].append(metrics[muscle_name]["support_in_pre_risk_area"])
 
-            unique_support_list[muscle_name].append(
-                metrics[muscle_name]["unique_support_area"]
-            )
+            unique_support_list[muscle_name].append(metrics[muscle_name]["unique_support_area"])
 
     for muscle_name in MUSCLE_LIST:
-        support_in_pre_risk[muscle_name] = float(
-            np.mean(support_in_pre_risk_list[muscle_name])
-        )
+        support_in_pre_risk[muscle_name] = float(np.mean(support_in_pre_risk_list[muscle_name]))
 
-        unique_support[muscle_name] = float(
-            np.mean(unique_support_list[muscle_name])
-        )
+        unique_support[muscle_name] = float(np.mean(unique_support_list[muscle_name]))
 
-        mechanical_contribution[muscle_name] = (
-            support_in_pre_risk[muscle_name]
-            + unique_support[muscle_name]
-        )
+        mechanical_contribution[muscle_name] = support_in_pre_risk[muscle_name] + unique_support[muscle_name]
 
     # Final weights
     raw_weights = {
-        muscle_name: float(
-            mechanical_contribution[muscle_name]
-            * fatigability[muscle_name] ** 2
-        )
+        muscle_name: float(mechanical_contribution[muscle_name] * fatigability[muscle_name] ** 2)
         for muscle_name in MUSCLE_LIST
     }
 
@@ -458,9 +433,11 @@ def weight_calculation(config: dict) -> dict:
         "normalized_weights": normalized_weights,
     }
 
+
 # ============================================================
 # Runner
 # ============================================================
+
 
 def main():
     config = {
@@ -479,10 +456,7 @@ def main():
     print("\nDerived candidate fixed weights:")
 
     for muscle_name in MUSCLE_LIST:
-        print(
-            f"  {muscle_name}: "
-            f"{summary['normalized_weights'][muscle_name]:.3f}"
-        )
+        print(f"  {muscle_name}: " f"{summary['normalized_weights'][muscle_name]:.3f}")
 
 
 if __name__ == "__main__":

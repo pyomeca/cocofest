@@ -48,7 +48,6 @@ from cycling.cycling_pulse_width_mhe import (
 )
 from cycling.cost_functions import CustomCostFunctions
 
-
 # -----------------------------------------------------------------------------
 # Global settings
 # -----------------------------------------------------------------------------
@@ -71,6 +70,7 @@ CONTROL_VARS = ("last_pulse_width",)
 def target_crank_velocity(turn_number: int, phase_time: float) -> float:
     """Return the target crank angular velocity in rad/s."""
     return -2 * np.pi * turn_number / phase_time
+
 
 def compute_net_work(time: np.ndarray, torque: np.ndarray) -> float:
     """
@@ -112,15 +112,16 @@ def compute_net_work(time: np.ndarray, torque: np.ndarray) -> float:
         return float(np.sum(torque * omega * dt))
 
     raise ValueError(
-        f"Cannot match time and torque automatically. "
-        f"Got len(time)={time.size}, len(torque)={torque.size}."
+        f"Cannot match time and torque automatically. " f"Got len(time)={time.size}, len(torque)={torque.size}."
     )
+
 
 def compute_constant_torque_work(time: np.ndarray, constant_torque: float) -> float:
     """Compute net work for a constant torque over the provided time vector."""
     time = np.asarray(time, dtype=float).squeeze()
     torque = np.full(time.shape, constant_torque, dtype=float)
     return compute_net_work(time=time, torque=torque)
+
 
 def prepare_solver(max_iter: int = 10):
     """Prepare the IPOPT solver."""
@@ -151,6 +152,7 @@ def is_angle_in_range(angle_vector: np.ndarray, start: float, end: float) -> np.
 
     return (angle_vector >= start) | (angle_vector <= end)
 
+
 def set_pw_dictionary(muscle_models, n_shooting: int, active_pw: float = 0.0003):
     """Create the fixed pulse-width dictionary for the standard clinical stimulation pattern."""
     angle_vector = np.linspace(0, 360, n_shooting, endpoint=False)
@@ -180,6 +182,7 @@ def set_pw_dictionary(muscle_models, n_shooting: int, active_pw: float = 0.0003)
         )
 
     return pulse_width_dictionary
+
 
 def set_standard_u_bounds_and_init(bio_model, n_shooting: int):
     """Set fixed clinical pulse-width controls and optimized residual crank torque."""
@@ -252,6 +255,7 @@ def prepare_common_dynamics(model, n_shooting: int, phase_time: float, ode_solve
 
     return dynamics, external_force_set
 
+
 def prepare_empty_parameters(use_sx: bool):
     """Prepare empty parameter containers."""
     return (
@@ -260,6 +264,7 @@ def prepare_empty_parameters(use_sx: bool):
         InitialGuessList(),
         ParameterObjectiveList(),
     )
+
 
 def prepare_wheel_center_constraints(model):
     """Constrain the wheel center to remain fixed at the beginning of the cycle."""
@@ -281,6 +286,7 @@ def prepare_wheel_center_constraints(model):
 
     return constraints
 
+
 def prepare_standard_objective(turn_number: int, phase_time: float):
     """Objective for the standard condition: match the target crank velocity."""
     objective_functions = ObjectiveList()
@@ -297,6 +303,7 @@ def prepare_standard_objective(turn_number: int, phase_time: float):
 
     return objective_functions
 
+
 def prepare_fes_objective():
     """Objective for the FES feasibility OCP."""
     objective_functions = ObjectiveList()
@@ -310,6 +317,7 @@ def prepare_fes_objective():
     )
 
     return objective_functions
+
 
 def build_ocp(
     model,
@@ -444,6 +452,7 @@ def prepare_standard_fes_cycling(optim_info, cycling_info, model, previous_probl
         use_sx=use_sx,
     )
 
+
 def prepare_ocp_fes_cycling(optim_info, cycling_info, model, previous_problem=None, previous_sol=None):
     """Prepare the FES feasibility OCP."""
     phase_time = optim_info["phase_time"]
@@ -546,6 +555,7 @@ def prepare_ocp_fes_cycling(optim_info, cycling_info, model, previous_problem=No
         use_sx=use_sx,
     )
 
+
 # -----------------------------------------------------------------------------
 # Solution extraction and saving
 # -----------------------------------------------------------------------------
@@ -576,6 +586,7 @@ def solution_to_dict(solution, muscles=MUSCLES):
 
     return out
 
+
 def safe_solution_to_dict(solution):
     """
     Try to extract a solution dictionary.
@@ -590,12 +601,14 @@ def safe_solution_to_dict(solution):
     except Exception as error:
         return {"extraction_error": repr(error)}
 
+
 def solution_status(solution):
     """Return the solver status if available."""
     if solution is None:
         return None
 
     return int(solution.status)
+
 
 def compute_cycle_work(solution_dict, cycling_info):
     """
@@ -630,6 +643,7 @@ def compute_cycle_work(solution_dict, cycling_info):
 
     return work
 
+
 def make_cycle_record(cycle_index, standard_sol, fes_ocp_sol, cycling_info):
     """Create one common record containing standard and FES-OCP information for one cycle."""
     standard_data = safe_solution_to_dict(standard_sol)
@@ -650,6 +664,7 @@ def make_cycle_record(cycle_index, standard_sol, fes_ocp_sol, cycling_info):
             "work": compute_cycle_work(fes_ocp_data, cycling_info),
         },
     }
+
 
 def save_common_results(
     file_name,
@@ -684,6 +699,7 @@ def save_common_results(
         pickle.dump(results, file)
 
     print(f"Results saved in {file_name}")
+
 
 def load_common_results(file_name=RESULT_FILE_NAME):
     """Load the common result file."""

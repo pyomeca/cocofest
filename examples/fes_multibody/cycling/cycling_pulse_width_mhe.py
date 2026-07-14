@@ -465,7 +465,10 @@ def set_q_qdot_init(
     else:
         # --- Chose the biorbd model to init the inverse kinematics --- #
         biorbd_model_path = str(
-            Path(__file__).resolve().parent.parent.parent / "msk_models" / "Wu" / "Modified_Wu_Shoulder_Model_Cycling_for_IK.bioMod"
+            Path(__file__).resolve().parent.parent.parent
+            / "msk_models"
+            / "Wu"
+            / "Modified_Wu_Shoulder_Model_Cycling_for_IK.bioMod"
         )
         n_shooting = (
             n_shooting * (ode_solver.polynomial_degree + 1)

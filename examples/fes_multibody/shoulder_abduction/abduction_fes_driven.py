@@ -26,7 +26,7 @@ from bioptim import (
     Node,
     ObjectiveFcn,
     PenaltyController,
-    VariableScaling
+    VariableScaling,
 )
 from cocofest import (
     DingModelPulseWidthFrequencyWithFatigue,
@@ -37,8 +37,11 @@ from cocofest import (
 
 def minimize_stress(controller: PenaltyController, muscle_index) -> MX:
     muscle_name = controller.model.muscles_dynamics_model[muscle_index].muscle_name
-    muscle_stress = controller.states["F_" + muscle_name].cx / controller.model.muscles_dynamics_model[muscle_index].pcsa
+    muscle_stress = (
+        controller.states["F_" + muscle_name].cx / controller.model.muscles_dynamics_model[muscle_index].pcsa
+    )
     return muscle_stress
+
 
 # --------------------#
 #    OCP functions    #
@@ -84,17 +87,15 @@ def prepare_ocp(
         n_shooting=n_shooting,
         abduction_range=abd_range_config,
         ode_solver=ode_solver,
-        q = q,
-        qdot = qdot,
+        q=q,
+        qdot=qdot,
     )
 
     # --- Set controls --- #
     u_bounds, u_init, u_scaling = set_u_bounds_and_init(model, n_shooting, with_tau)
 
     # --- Set objective --- #
-    objective_functions = set_objective_functions(
-        cost_key=optim_key
-    )
+    objective_functions = set_objective_functions(cost_key=optim_key)
 
     # --- Set parameters (for minmax cost_function) --- #
     parameters = ParameterList(use_sx=False)
@@ -102,7 +103,7 @@ def prepare_ocp(
     parameters_init = InitialGuessList()
     parameters_objectives = ParameterObjectiveList()
 
-     # --- Set constraints --- #
+    # --- Set constraints --- #
     constraints = ConstraintList()
 
     # --- Update model for resistive torque --- #
@@ -141,12 +142,12 @@ def set_external_forces(n_shooting, external_force_dict, force_name):
 
 
 def set_dynamics(numerical_time_series, ode_solver):
-    return OcpFesMsk.declare_dynamics_options(
-        numerical_time_series=numerical_time_series, ode_solver=ode_solver
-    )
+    return OcpFesMsk.declare_dynamics_options(numerical_time_series=numerical_time_series, ode_solver=ode_solver)
 
 
-def set_x_bounds(model, n_shooting: int, abduction_range: dict, ode_solver, q, qdot) -> tuple[BoundsList, InitialGuessList]:
+def set_x_bounds(
+    model, n_shooting: int, abduction_range: dict, ode_solver, q, qdot
+) -> tuple[BoundsList, InitialGuessList]:
     n_shooting = n_shooting * (ode_solver.polynomial_degree + 1)
     interpolation_type = InterpolationType.ALL_POINTS
 
@@ -175,15 +176,18 @@ def set_x_bounds(model, n_shooting: int, abduction_range: dict, ode_solver, q, q
     humerus_q_min -= slack
     humerus_q_max += slack
 
-    humerus_q_min = np.linspace(abduction_range["min"] - slack/2, abduction_range["max"], n_shooting + 1)
+    humerus_q_min = np.linspace(abduction_range["min"] - slack / 2, abduction_range["max"], n_shooting + 1)
 
     humerus_q_min[0] = abduction_range["min"]
     humerus_q_max[0] = abduction_range["min"]
     humerus_q_min[-1] = abduction_range["max"]
 
     x_bounds.add(
-        key="q", min_bound=np.array([humerus_q_min]), max_bound=np.array([humerus_q_max]), phase=0,
-        interpolation=InterpolationType.ALL_POINTS
+        key="q",
+        min_bound=np.array([humerus_q_min]),
+        max_bound=np.array([humerus_q_max]),
+        phase=0,
+        interpolation=InterpolationType.ALL_POINTS,
     )
 
     # --- Setting qdot bounds --- #
@@ -225,7 +229,7 @@ def set_u_bounds_and_init(bio_model, n_shooting, with_tau):
         )
 
         # --- Set pulse width initial guess --- #
-        initial_guess = np.array([[(0.0006 + model.pd0)/2] * n_shooting])
+        initial_guess = np.array([[(0.0006 + model.pd0) / 2] * n_shooting])
         u_init.add(
             key=key,
             initial_guess=initial_guess,
@@ -245,8 +249,11 @@ def set_u_bounds_and_init(bio_model, n_shooting, with_tau):
         control_tau_init = np.array([tau_init] * (n_shooting))
 
         u_bounds.add(
-            key="tau", min_bound=np.array([control_tau_min]), max_bound=np.array([control_tau_max]), phase=0,
-            interpolation=InterpolationType.ALL_POINTS
+            key="tau",
+            min_bound=np.array([control_tau_min]),
+            max_bound=np.array([control_tau_max]),
+            phase=0,
+            interpolation=InterpolationType.ALL_POINTS,
         )
         u_init.add(
             key="tau", initial_guess=np.array([control_tau_init]), phase=0, interpolation=InterpolationType.ALL_POINTS
@@ -260,7 +267,7 @@ def set_u_bounds_and_init(bio_model, n_shooting, with_tau):
     )
 
 
-def set_objective_functions(cost_key:str):
+def set_objective_functions(cost_key: str):
     objective_functions = ObjectiveList()
     if cost_key == "pw":
         objective_functions.add(
@@ -398,17 +405,19 @@ def set_constraints():
         limited_tau,
         phase=0,
         node=Node.ALL,
-       tau_help=1, # N.m.s
+        tau_help=1,  # N.m.s
     )
     return constraints
+
 
 def similar_tau_parm_control(controller: PenaltyController):
     tau_param = controller.parameters["residual_tau"].cx[controller.node_index]
     tau_control = controller.controls["tau"].cx
     return tau_control - tau_param
 
+
 def limited_tau(controller: PenaltyController, tau_help):
-    tau_tot = [controller.parameters["residual_tau"].cx[i] * 1/50 for i in range(150)]
+    tau_tot = [controller.parameters["residual_tau"].cx[i] * 1 / 50 for i in range(150)]
     return sum(tau_tot) - tau_help
 
 
@@ -459,14 +468,31 @@ def set_fes_model(model_path, stim_time, with_tau):
     # tau_fat = (tau_fat_RF * Fiber_prop_II_muscle / Fiber_prop_II_RF) * (a_scale_RF / a_scale_muscle)
 
     parameter_dict = {
-        "DeltoideusClavicle_A": {"Fmax": 60, "a_scale": 1148.6, "alpha_a": -1.4 * 10e-1, "tau_fat": 445.5, "pcsa": 2.54},
-        "DeltoideusScapula_M": {"Fmax": 264, "a_scale": 5055.7, "alpha_a": -3.2 * 10e-2, "tau_fat": 101.20, "pcsa": 11.18},
+        "DeltoideusClavicle_A": {
+            "Fmax": 60,
+            "a_scale": 1148.6,
+            "alpha_a": -1.4 * 10e-1,
+            "tau_fat": 445.5,
+            "pcsa": 2.54,
+        },
+        "DeltoideusScapula_M": {
+            "Fmax": 264,
+            "a_scale": 5055.7,
+            "alpha_a": -3.2 * 10e-2,
+            "tau_fat": 101.20,
+            "pcsa": 11.18,
+        },
         "DeltoideusScapula_P": {"Fmax": 65, "a_scale": 1234.5, "alpha_a": -1.1 * 10e-1, "tau_fat": 342.7, "pcsa": 2.73},
     }
 
-    [parameter_dict[muscle_name].update({"a_scale": parameter_dict[muscle_name]["a_scale"] * 2}) for muscle_name in parameter_dict.keys()]
-    [parameter_dict[muscle_name].update({"Fmax": parameter_dict[muscle_name]["Fmax"] * 2}) for muscle_name in
-     parameter_dict.keys()]
+    [
+        parameter_dict[muscle_name].update({"a_scale": parameter_dict[muscle_name]["a_scale"] * 2})
+        for muscle_name in parameter_dict.keys()
+    ]
+    [
+        parameter_dict[muscle_name].update({"Fmax": parameter_dict[muscle_name]["Fmax"] * 2})
+        for muscle_name in parameter_dict.keys()
+    ]
 
     for model in muscles_model:
         muscle_name = model.muscle_name
@@ -486,7 +512,9 @@ def set_fes_model(model_path, stim_time, with_tau):
         activate_force_length_relationship=True,
         activate_force_velocity_relationship=True,
         activate_passive_force_relationship=True,
-        activate_residual_torque=True if with_tau else False,  # For voluntary torque activation in the adduction phase where FES is not applied
+        activate_residual_torque=(
+            True if with_tau else False
+        ),  # For voluntary torque activation in the adduction phase where FES is not applied
         external_force_set=None,  # External forces will be added later (resistive_torque)
     )
     return fes_model
@@ -559,7 +587,7 @@ def run_optim(abduction_info, simulation_conditions, model_path, initial_guess_p
         abduction_info=abduction_info,
         simulation_conditions=simulation_conditions,
         initial_guess_data=initial_guess_data,
-        with_tau=with_tau
+        with_tau=with_tau,
     )
     ocp.add_plot_penalty()
 
@@ -589,8 +617,11 @@ def run_optim(abduction_info, simulation_conditions, model_path, initial_guess_p
             plt.legend()
             plt.show()
 
-        control_keys = ["last_pulse_width_DeltoideusClavicle_A", "last_pulse_width_DeltoideusScapula_M",
-                        "last_pulse_width_DeltoideusScapula_P"]
+        control_keys = [
+            "last_pulse_width_DeltoideusClavicle_A",
+            "last_pulse_width_DeltoideusScapula_M",
+            "last_pulse_width_DeltoideusScapula_P",
+        ]
         for key in control_keys:
             control = sol.stepwise_controls(to_merge=[SolutionMerge.NODES])[key][0]
             bounds = sol.ocp.nlp[0].u_bounds[key]
@@ -613,9 +644,7 @@ def run_optim(abduction_info, simulation_conditions, model_path, initial_guess_p
         )
 
 
-def main(
-    stimulation_frequency, save, optim_key, initial_guess_path=None
-):
+def main(stimulation_frequency, save, optim_key, initial_guess_path=None):
     # --- Simulation configuration --- #
     save_sol = save
 
@@ -637,10 +666,14 @@ def main(
 
     # --- Build the simulation conditions --- #
     simulation_conditions = {
-            "stimulation": stimulation,
-            "pickle_file_path": "results/abduction_fes_driven_init_guess_" + str(stimulation_frequency) + "Hz_" + optim_key + "_90.pkl",
-            "optim_key": optim_key,
-        }
+        "stimulation": stimulation,
+        "pickle_file_path": "results/abduction_fes_driven_init_guess_"
+        + str(stimulation_frequency)
+        + "Hz_"
+        + optim_key
+        + "_90.pkl",
+        "optim_key": optim_key,
+    }
 
     # --- Run the optimization --- #
     run_optim(
@@ -656,16 +689,7 @@ if __name__ == "__main__":
     # --- Optimized conditions --- #
     keys = ["pw", "force", "stress", "fatigue"]
     for key in keys:
-        main(
-            stimulation_frequency=50,
-            save=True,
-            optim_key=key
-
-        )
+        main(stimulation_frequency=50, save=True, optim_key=key)
 
     # --- Rehab condition --- #
-    main(
-        stimulation_frequency=50,
-        save=True,
-        optim_key="rehab"
-    )
+    main(stimulation_frequency=50, save=True, optim_key="rehab")
