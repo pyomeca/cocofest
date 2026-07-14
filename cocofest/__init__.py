@@ -1,3 +1,4 @@
+from . import _matplotlib_compat  # Temporary fix
 from .custom_objectives import CustomObjective
 from .custom_constraints import CustomConstraint
 from .models.fes_model import FesModel

@@ -17,6 +17,7 @@ from bioptim import (
     ExternalForceSetTimeSeries,
     InitialGuessList,
     InterpolationType,
+    MusclesBiorbdModel,
     Node,
     ObjectiveFcn,
     ObjectiveList,
@@ -25,6 +26,7 @@ from bioptim import (
     ParameterList,
     PhaseDynamics,
     Solver,
+    TorqueBiorbdModel,
     VariableScalingList,
     DynamicsOptionsList,
     DynamicsOptions,
@@ -98,7 +100,7 @@ def update_model(
             with_contact=model.with_contact,
         )
     else:
-        model = BiorbdModel(model.path, external_force_set=external_force_set)
+        model = model.__class__(model.path, external_force_set=external_force_set)
 
     return model
 
@@ -536,8 +538,11 @@ def main(
     pedal_config = {"x_center": 0.35, "y_center": 0.0, "radius": 0.1}
 
     # --- Load the appropriate model --- #
-    if dynamics_type in ["torque_driven", "muscle_driven"]:
-        model = BiorbdModel(model_path)
+    if dynamics_type == "torque_driven":
+        model = TorqueBiorbdModel(model_path)
+        n_shooting = 100 * final_time
+    elif dynamics_type == "muscle_driven":
+        model = MusclesBiorbdModel(model_path)
         n_shooting = 100 * final_time
     elif dynamics_type == "fes_driven":
         # Set FES model (set to Ding et al. 2007 + fatigue, for now)
