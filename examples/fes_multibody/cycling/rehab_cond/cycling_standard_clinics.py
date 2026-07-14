@@ -57,7 +57,7 @@ PHASE_TIME = 60 / TARGET_RPM  # 1 second per revolution at 60 rpm
 N_SHOOTING = 30  # 30 Hz for a 1-second cycle
 N_THREADS = 48
 
-MODEL_PATH = "../../msk_models/Wu/Modified_Wu_Shoulder_Model_Cycling.bioMod"
+MODEL_PATH = "../../../msk_models/Wu/Modified_Wu_Shoulder_Model_Cycling.bioMod"
 RESULT_FILE_NAME = "standard_and_fes_ocp_cycles.pkl"
 
 MUSCLES = ("Delt_ant", "Delt_post", "Biceps", "Triceps")
