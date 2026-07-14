@@ -4,6 +4,7 @@ This ocp was build to match a force value of 200N at the end of the last node.
 """
 
 import numpy as np
+import cocofest._matplotlib_compat  # Temporary fix, see cocofest/_matplotlib_compat.py
 from bioptim import OdeSolver, ObjectiveList, ObjectiveFcn, OptimalControlProgram, ControlType, Node
 from cocofest import DingModelPulseIntensityFrequencyWithFatigue, OcpFes
 

@@ -4,6 +4,7 @@ This ocp was build to match a force value of 270N at the end of the last node.
 No optimization will be done on the stimulation, the frequency is fixed to 1Hz.
 """
 
+# import cocofest._matplotlib_compat  # Temporary fix, see cocofest/_matplotlib_compat.py
 from bioptim import (
     ObjectiveList,
     ObjectiveFcn,

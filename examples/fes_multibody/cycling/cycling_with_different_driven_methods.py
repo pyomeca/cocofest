@@ -6,6 +6,7 @@ muscle driven / FES driven dynamics and includes a resistive torque at the handl
 from sys import platform
 import numpy as np
 
+import cocofest._matplotlib_compat  # Temporary fix, see cocofest/_matplotlib_compat.py
 from bioptim import (
     Axis,
     BiorbdModel,

@@ -12,6 +12,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from numpy.ma.extras import average
 
+import cocofest._matplotlib_compat  # Temporary fix, see cocofest/_matplotlib_compat.py
 from bioptim import (
     Axis,
     BiorbdModel,
@@ -432,6 +433,16 @@ def set_external_forces(n_shooting, external_force_dict, force_name):
     return numerical_time_series, external_force_set
 
 
+def _existing_init_file_path(init_file_path):
+    """
+    Fall back to no initial guess when the given init_file_path does not exist.
+    """
+    if init_file_path and not Path(init_file_path).exists():
+        print(f"[warning] init_file_path '{init_file_path}' not found, running without an initial guess.")
+        return None
+    return init_file_path
+
+
 def set_dynamics_options(numerical_time_series, ode_solver):
     dynamics_options = OcpFesMsk.declare_dynamics_options(
         numerical_time_series=numerical_time_series, ode_solver=ode_solver
@@ -442,6 +453,7 @@ def set_dynamics_options(numerical_time_series, ode_solver):
 def set_q_qdot_init(
     n_shooting: int, pedal_config: dict, turn_number: int, ode_solver: OdeSolver, init_file_path: str
 ) -> InitialGuessList:
+    init_file_path = _existing_init_file_path(init_file_path)
     x_init = InitialGuessList()
     if init_file_path:
         with open(init_file_path, "rb") as file:
@@ -486,6 +498,7 @@ def set_q_qdot_init(
 def set_x_bounds(
     model, x_init: InitialGuessList, n_shooting: int, ode_solver: OdeSolver, init_file_path: str
 ) -> tuple[BoundsList, InitialGuessList]:
+    init_file_path = _existing_init_file_path(init_file_path)
     # --- Set interpolation type according to ode_solver type --- #
     interpolation_type = InterpolationType.EACH_FRAME
     if isinstance(ode_solver, OdeSolver.COLLOCATION):
@@ -553,6 +566,7 @@ def set_x_bounds(
 
 
 def set_u_bounds_and_init(bio_model, n_shooting, init_file_path):
+    init_file_path = _existing_init_file_path(init_file_path)
     u_bounds, u_init = OcpFesMsk.set_u_bounds_fes(bio_model)
     u_init = InitialGuessList()  # Controls initial guess
     models = bio_model.muscles_dynamics_model

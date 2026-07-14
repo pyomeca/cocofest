@@ -7,6 +7,7 @@ threshold and 130mA to satisfy the flexion and minimizing required elbow torque 
 
 import numpy as np
 
+import cocofest._matplotlib_compat  # Temporary fix, see cocofest/_matplotlib_compat.py
 from bioptim import (
     Solver,
     OdeSolver,

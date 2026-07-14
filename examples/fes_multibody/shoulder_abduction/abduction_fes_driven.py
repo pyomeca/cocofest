@@ -7,6 +7,7 @@ from sys import platform
 import numpy as np
 from casadi import MX
 
+import cocofest._matplotlib_compat  # Temporary fix, see cocofest/_matplotlib_compat.py
 from bioptim import (
     BiorbdModel,
     BoundsList,

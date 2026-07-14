@@ -15,6 +15,7 @@ from skopt.utils import use_named_args
 from skopt.callbacks import CheckpointSaver
 from casadi import MX, vertcat, sum1
 
+import cocofest._matplotlib_compat  # Temporary fix, see cocofest/_matplotlib_compat.py
 from bioptim import (
     ObjectiveList,
     ObjectiveFcn,

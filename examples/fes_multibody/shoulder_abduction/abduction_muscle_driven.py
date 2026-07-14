@@ -9,6 +9,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import biorbd
 
+import cocofest._matplotlib_compat  # Temporary fix, see cocofest/_matplotlib_compat.py
 from bioptim import (
     BoundsList,
     ConstraintList,

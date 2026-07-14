@@ -6,6 +6,7 @@ This ocp was build to match a force curve across all optimization.
 import matplotlib.pyplot as plt
 import numpy as np
 
+import cocofest._matplotlib_compat  # Temporary fix, see cocofest/_matplotlib_compat.py
 from bioptim import SolutionMerge, ObjectiveList, ObjectiveFcn, OptimalControlProgram, ControlType, OdeSolver, Node
 from cocofest import ModelMaker, OcpFes, FesModel
 

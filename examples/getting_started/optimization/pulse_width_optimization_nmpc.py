@@ -7,6 +7,7 @@ The nmpc cyclic problem stops once the last cycle is reached.
 
 import numpy as np
 
+import cocofest._matplotlib_compat  # Temporary fix, see cocofest/_matplotlib_compat.py
 from bioptim import (
     CostType,
     ConstraintFcn,

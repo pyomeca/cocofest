@@ -1,4 +1,5 @@
 import numpy as np
+import cocofest._matplotlib_compat  # Temporary fix, see cocofest/_matplotlib_compat.py
 from bioptim import OdeSolver, ObjectiveList, ObjectiveFcn, Node, OptimalControlProgram, ControlType
 
 from cocofest import (
