@@ -10,14 +10,14 @@ import numpy as np
 import biorbd
 
 from bioptim import (
-    BiorbdModel,
     BoundsList,
     ConstraintList,
-    DynamicsList,
-    DynamicsFcn,
+    DynamicsOptionsList,
+    DynamicsOptions,
     ExternalForceSetTimeSeries,
     InitialGuessList,
     InterpolationType,
+    MusclesBiorbdModel,
     ObjectiveFcn,
     ObjectiveList,
     OdeSolver,
@@ -35,7 +35,7 @@ from bioptim import (
 #    OCP functions    #
 # --------------------#
 def prepare_ocp(
-    model: BiorbdModel,
+    model: MusclesBiorbdModel,
     abduction_info: dict,
 ):
     # --- Initialize parameters from dictionaries --- #
@@ -46,15 +46,14 @@ def prepare_ocp(
     ode_solver = OdeSolver.COLLOCATION(polynomial_degree=3, method="radau")
 
     # --- Set dynamics --- #
-    dynamics = DynamicsList()
-    dynamics.add(
-        DynamicsFcn.MUSCLE_DRIVEN,
-        with_residual_torque=True,
-        expand_dynamics=True,
-        phase_dynamics=PhaseDynamics.SHARED_DURING_THE_PHASE,
-        numerical_data_timeseries=None,
-        phase=0,
-        ode_solver=ode_solver,
+    dynamics_options = DynamicsOptionsList()
+    dynamics_options.add(
+        DynamicsOptions(
+            expand_dynamics=True,
+            phase_dynamics=PhaseDynamics.SHARED_DURING_THE_PHASE,
+            numerical_data_timeseries=None,
+            ode_solver=ode_solver,
+        )
     )
 
     # --- Set states --- #
@@ -101,7 +100,7 @@ def prepare_ocp(
 
     return OptimalControlProgram(
         bio_model=[model],
-        dynamics=dynamics,
+        dynamics=dynamics_options,
         n_shooting=n_shooting,
         phase_time=final_time,
         objective_functions=objective_functions,
@@ -347,7 +346,7 @@ def plot_results(sol):
 def run_optim(abduction_info, model_path, save_sol):
 
     # --- Prepare the optimal control problem --- #
-    model = BiorbdModel(model_path)
+    model = MusclesBiorbdModel(model_path, with_residual_torque=True)
     ocp = prepare_ocp(
         model=model,
         abduction_info=abduction_info,

@@ -11,13 +11,11 @@ from bioptim import (
     BiorbdModel,
     BoundsList,
     ConstraintList,
-    DynamicsList,
     ExternalForceSetTimeSeries,
     InitialGuessList,
     InterpolationType,
     ObjectiveList,
     OdeSolver,
-    PhaseDynamics,
     ParameterObjectiveList,
     SolutionMerge,
     Solver,
@@ -52,9 +50,8 @@ def prepare_ocp(
     with_tau,
 ):
     # --- Data from initial guess --- #
-    q = initial_guess_data["q"]
-    qdot = initial_guess_data["qdot"]
-    force = initial_guess_data["muscles_force"]
+    q = initial_guess_data["q"] if initial_guess_data is not None else None
+    qdot = initial_guess_data["qdot"] if initial_guess_data is not None else None
 
     # --- Initialize parameters from dictionaries --- #
     # --- Abduction info --- #
@@ -78,7 +75,7 @@ def prepare_ocp(
     )
     numerical_time_series.update(numerical_data_time_series)
     # --- Dynamics --- #
-    dynamics = set_dynamics(model=model, numerical_time_series=numerical_time_series, ode_solver=ode_solver)
+    dynamics = set_dynamics(numerical_time_series=numerical_time_series, ode_solver=ode_solver)
 
     # --- Set states --- #
     x_bounds, x_init = set_x_bounds(
@@ -142,23 +139,21 @@ def set_external_forces(n_shooting, external_force_dict, force_name):
     return numerical_time_series, external_force_set
 
 
-def set_dynamics(model, numerical_time_series, ode_solver):
-    dynamics = DynamicsList()
-    dynamics.add(
-        dynamics_type=model.declare_model_variables,
-        dynamic_function=model.muscle_dynamic,
-        expand_dynamics=True,
-        phase_dynamics=PhaseDynamics.SHARED_DURING_THE_PHASE,
-        numerical_data_timeseries=numerical_time_series,
-        phase=0,
-        ode_solver=ode_solver,
+def set_dynamics(numerical_time_series, ode_solver):
+    return OcpFesMsk.declare_dynamics_options(
+        numerical_time_series=numerical_time_series, ode_solver=ode_solver
     )
-    return dynamics
 
 
 def set_x_bounds(model, n_shooting: int, abduction_range: dict, ode_solver, q, qdot) -> tuple[BoundsList, InitialGuessList]:
     n_shooting = n_shooting * (ode_solver.polynomial_degree + 1)
     interpolation_type = InterpolationType.ALL_POINTS
+
+    # --- Fall back to a simple linear guess when no initial guess file was provided --- #
+    if q is None:
+        q = np.array([np.linspace(abduction_range["min"], abduction_range["max"], n_shooting + 1)])
+    if qdot is None:
+        qdot = np.zeros((1, n_shooting + 1))
 
     # --- Initialize default FES bounds and initial guess --- #
     x_bounds, x_init_fes = OcpFesMsk.set_x_bounds_fes(model)
@@ -552,7 +547,11 @@ def run_optim(abduction_info, simulation_conditions, model_path, initial_guess_p
 
     model = set_fes_model(model_path, stim_time, with_tau)
 
-    initial_guess_data = np.load(initial_guess_path, allow_pickle=True)
+    if initial_guess_path is not None:
+        initial_guess_data = np.load(initial_guess_path, allow_pickle=True)
+    else:
+        initial_guess_data = None
+        print("No initial_guess_path provided: running the optimization without an initial guess.")
 
     ocp = prepare_ocp(
         model=model,
@@ -614,7 +613,7 @@ def run_optim(abduction_info, simulation_conditions, model_path, initial_guess_p
 
 
 def main(
-    stimulation_frequency, initial_guess_path, save, optim_key
+    stimulation_frequency, save, optim_key, initial_guess_path=None
 ):
     # --- Simulation configuration --- #
     save_sol = save
@@ -658,7 +657,6 @@ if __name__ == "__main__":
     for key in keys:
         main(
             stimulation_frequency=50,
-            initial_guess_path="results/abduction_motion_muscle_driven_solution_abd2.npz",
             save=True,
             optim_key=key
 
@@ -667,7 +665,6 @@ if __name__ == "__main__":
     # --- Rehab condition --- #
     main(
         stimulation_frequency=50,
-        initial_guess_path="results/abduction_motion_muscle_driven_solution_abd2.npz",
         save=True,
         optim_key="rehab"
     )

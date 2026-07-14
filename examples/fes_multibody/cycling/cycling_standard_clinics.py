@@ -39,7 +39,7 @@ from bioptim import (
 from cycling.cycling_pulse_width_mhe import (
     set_fes_model,
     set_external_forces,
-    set_dynamics,
+    set_dynamics_options,
     set_q_qdot_init,
     set_x_bounds,
     updating_model,
@@ -244,8 +244,7 @@ def prepare_common_dynamics(model, n_shooting: int, phase_time: float, ode_solve
     )
     numerical_time_series.update(numerical_data_time_series)
 
-    dynamics = set_dynamics(
-        model=model,
+    dynamics = set_dynamics_options(
         numerical_time_series=numerical_time_series,
         ode_solver=ode_solver,
     )

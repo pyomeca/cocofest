@@ -37,7 +37,7 @@ def minimize_root_mean_pw(controller: PenaltyController, muscle_weights: list) -
     Minimize the root-mean-square of pw.
     """
     eps = 1e-8
-    muscle_name_list = controller.model.bio_model.muscle_names
+    muscle_name_list = controller.model.muscle_names
     stim_charge = vertcat(
         *[
             muscle_weights[x]
@@ -64,7 +64,7 @@ def minimize_root_mean_square_force(controller: PenaltyController, muscle_weight
     Minimize the root-mean-square of muscle force production.
     """
     eps = 1e-8
-    muscle_name_list = controller.model.bio_model.muscle_names
+    muscle_name_list = controller.model.muscle_names
     muscle_force = vertcat(
         *[
             muscle_weights[x] * controller.states["F_" + muscle_name_list[x]].cx ** 2
@@ -80,7 +80,7 @@ def minimize_root_mean_square_muscle_stress(controller: PenaltyController, muscl
     Minimize the root-mean-square of muscle stress.
     """
     eps = 1e-8
-    muscle_name_list = controller.model.bio_model.muscle_names
+    muscle_name_list = controller.model.muscle_names
     muscle_stress = vertcat(
         *[
             muscle_weights[x]
@@ -97,7 +97,7 @@ def minimize_root_mean_square_fatigue(controller: PenaltyController, muscle_weig
     Minimize the root-mean-square of muscle fatigue.
     """
     eps = 1e-8
-    muscle_name_list = controller.model.bio_model.muscle_names
+    muscle_name_list = controller.model.muscle_names
     muscle_fatigue = vertcat(
         *[
             muscle_weights[x]
@@ -115,7 +115,7 @@ def minimize_root_mean_square_power(controller: PenaltyController, muscle_weight
     Minimize the root-mean-square of muscle power.
     """
     eps = 1e-8
-    muscle_name_list = controller.model.bio_model.muscle_names
+    muscle_name_list = controller.model.muscle_names
     muscle_velocity = controller.model.muscle_velocity()(
         controller.states["q"].cx, controller.states["qdot"].cx, controller.parameters.cx
     )
@@ -193,7 +193,7 @@ def prepare_nmpc_bo(
 
     # --- Dynamics & states --- #
     dynamics_options = base.set_dynamics_options(
-        numerical_time_series=numerical_time_series, ode_solver=OdeSolver.RK4(n_integration_steps=10)
+        numerical_time_series=numerical_time_series, ode_solver=ode_solver
     )
 
     x_init = base.set_q_qdot_init(
@@ -532,6 +532,7 @@ def bayes_optimize_weights(
         sim_cond = dict(sim_cond_template)
         sim_cond["cost_fun_weight"] = weights
 
+        sol = None
         try:
             print(f"[BO] Running MHE with weights: {weights} for muscles: {muscle_names}")
             metric, sol = run_optim_bo(
@@ -555,17 +556,20 @@ def bayes_optimize_weights(
         entry = {name: float(w) for name, w in zip(muscle_names, weights)}
         entry["metric"] = float(metric) if np.isfinite(metric) else float("nan")
 
-        solving_time_per_ocp = [sol[1][i].solver_time_to_optimize for i in range(len(sol[1]))]
-        total_solving_time = sum(solving_time_per_ocp)
-        iter_per_ocp = [sol[1][i].iterations + 1 for i in range(len(sol[1]))]
-        average_solving_time_per_iter_list = [solving_time_per_ocp[i] / (iter_per_ocp[i]) for i in range(len(sol[1]))]
-        total_average_solving_time_per_iter = average(average_solving_time_per_iter_list)
+        if sol is not None:
+            solving_time_per_ocp = [sol[1][i].solver_time_to_optimize for i in range(len(sol[1]))]
+            total_solving_time = sum(solving_time_per_ocp)
+            iter_per_ocp = [sol[1][i].iterations + 1 for i in range(len(sol[1]))]
+            average_solving_time_per_iter_list = [
+                solving_time_per_ocp[i] / (iter_per_ocp[i]) for i in range(len(sol[1]))
+            ]
+            total_average_solving_time_per_iter = average(average_solving_time_per_iter_list)
 
-        entry["solving_time_per_ocp"] = solving_time_per_ocp
-        entry["total_solving_time"] = total_solving_time
-        entry["iter_per_ocp"] = iter_per_ocp
-        entry["average_solving_time_per_iter_list"] = average_solving_time_per_iter_list
-        entry["average_solving_time_per_iter"] = total_average_solving_time_per_iter
+            entry["solving_time_per_ocp"] = solving_time_per_ocp
+            entry["total_solving_time"] = total_solving_time
+            entry["iter_per_ocp"] = iter_per_ocp
+            entry["average_solving_time_per_iter_list"] = average_solving_time_per_iter_list
+            entry["average_solving_time_per_iter"] = total_average_solving_time_per_iter
 
         bo_log[i] = entry
         _save_logs_snapshot()

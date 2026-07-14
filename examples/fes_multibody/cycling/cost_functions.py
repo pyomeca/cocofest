@@ -244,7 +244,7 @@ class CustomCostFunctions:
         -------
         The average of fes activation
         """
-        muscle_name_list = controller.model.bio_model.muscle_names
+        muscle_name_list = controller.model.muscle_names
         if isinstance(controller.model.muscles_dynamics_model[0], DingModelPulseWidthFrequency):
             stim_charge = vertcat(
                 *[
@@ -280,7 +280,7 @@ class CustomCostFunctions:
         The root-mean-square of fes activation
         """
         eps = 1e-8
-        muscle_name_list = controller.model.bio_model.muscle_names
+        muscle_name_list = controller.model.muscle_names
         if isinstance(controller.model.muscles_dynamics_model[0], DingModelPulseWidthFrequency):
             stim_charge = vertcat(
                 *[
@@ -320,7 +320,7 @@ class CustomCostFunctions:
         The cubic average of fes activation
         """
         eps = 1e-8
-        muscle_name_list = controller.model.bio_model.muscle_names
+        muscle_name_list = controller.model.muscle_names
         if isinstance(controller.model.muscles_dynamics_model[0], DingModelPulseWidthFrequency):
             stim_charge = vertcat(
                 *[
@@ -359,7 +359,7 @@ class CustomCostFunctions:
         -------
         The peak of fes activation
         """
-        muscle_name_list = controller.model.bio_model.muscle_names
+        muscle_name_list = controller.model.muscle_names
         stim_activation = vertcat(
             *[
                 (
@@ -391,7 +391,7 @@ class CustomCostFunctions:
         -------
         The average of produced force
         """
-        muscle_name_list = controller.model.bio_model.muscle_names
+        muscle_name_list = controller.model.muscle_names
         muscle_force = vertcat(
             *[controller.states["F_" + muscle_name_list[x]].cx for x in range(len(muscle_name_list))]
         )
@@ -412,7 +412,7 @@ class CustomCostFunctions:
         The root-mean-square of produced force
         """
         eps = 1e-8
-        muscle_name_list = controller.model.bio_model.muscle_names
+        muscle_name_list = controller.model.muscle_names
         muscle_force = vertcat(
             *[controller.states["F_" + muscle_name_list[x]].cx ** 2 for x in range(len(muscle_name_list))]
         )
@@ -434,7 +434,7 @@ class CustomCostFunctions:
         The cubic average of produced force
         """
         eps = 1e-8
-        muscle_name_list = controller.model.bio_model.muscle_names
+        muscle_name_list = controller.model.muscle_names
         muscle_force = vertcat(
             *[controller.states["F_" + muscle_name_list[x]].cx ** 3 for x in range(len(muscle_name_list))]
         )
@@ -455,7 +455,7 @@ class CustomCostFunctions:
         -------
         The peak of produced force
         """
-        muscle_name_list = controller.model.bio_model.muscle_names
+        muscle_name_list = controller.model.muscle_names
         muscle_force = vertcat(
             *[controller.states["F_" + muscle_name_list[x]].cx for x in range(len(muscle_name_list))]
         )
@@ -477,7 +477,7 @@ class CustomCostFunctions:
         -------
         The average of muscle stress
         """
-        muscle_name_list = controller.model.bio_model.muscle_names
+        muscle_name_list = controller.model.muscle_names
         muscle_stress = vertcat(
             *[
                 controller.states["F_" + muscle_name_list[x]].cx / controller.model.muscles_dynamics_model[x].pcsa
@@ -501,7 +501,7 @@ class CustomCostFunctions:
         The root-mean-square of muscle stress
         """
         eps = 1e-8
-        muscle_name_list = controller.model.bio_model.muscle_names
+        muscle_name_list = controller.model.muscle_names
         muscle_stress = vertcat(
             *[
                 (controller.states["F_" + muscle_name_list[x]].cx / controller.model.muscles_dynamics_model[x].pcsa)
@@ -527,7 +527,7 @@ class CustomCostFunctions:
         The cubic average of muscle stress
         """
         eps = 1e-8
-        muscle_name_list = controller.model.bio_model.muscle_names
+        muscle_name_list = controller.model.muscle_names
         muscle_stress = vertcat(
             *[
                 (controller.states["F_" + muscle_name_list[x]].cx / controller.model.muscles_dynamics_model[x].pcsa)
@@ -552,7 +552,7 @@ class CustomCostFunctions:
         -------
         The peak of muscle stress
         """
-        muscle_name_list = controller.model.bio_model.muscle_names
+        muscle_name_list = controller.model.muscle_names
         muscle_stress = vertcat(
             *[
                 controller.states["F_" + muscle_name_list[x]].cx / controller.model.muscles_dynamics_model[x].pcsa
@@ -577,7 +577,7 @@ class CustomCostFunctions:
         -------
         The average of muscle fatigue
         """
-        muscle_name_list = controller.model.bio_model.muscle_names
+        muscle_name_list = controller.model.muscle_names
         muscle_fatigue = vertcat(
             *[
                 controller.model.muscles_dynamics_model[x].a_scale - controller.states["A_" + muscle_name_list[x]].cx
@@ -601,7 +601,7 @@ class CustomCostFunctions:
         The root-mean-square of muscle fatigue
         """
         eps = 1e-8
-        muscle_name_list = controller.model.bio_model.muscle_names
+        muscle_name_list = controller.model.muscle_names
         muscle_fatigue = vertcat(
             *[
                 (controller.model.muscles_dynamics_model[x].a_scale - controller.states["A_" + muscle_name_list[x]].cx)
@@ -627,7 +627,7 @@ class CustomCostFunctions:
         The cubic average of muscle fatigue
         """
         eps = 1e-8
-        muscle_name_list = controller.model.bio_model.muscle_names
+        muscle_name_list = controller.model.muscle_names
         muscle_fatigue = vertcat(
             *[
                 (controller.model.muscles_dynamics_model[x].a_scale - controller.states["A_" + muscle_name_list[x]].cx)
@@ -652,7 +652,7 @@ class CustomCostFunctions:
         -------
         The peak of muscle fatigue
         """
-        muscle_name_list = controller.model.bio_model.muscle_names
+        muscle_name_list = controller.model.muscle_names
         muscle_fatigue = vertcat(
             *[
                 controller.model.muscles_dynamics_model[x].a_scale - controller.states["A_" + muscle_name_list[x]].cx
@@ -678,7 +678,7 @@ class CustomCostFunctions:
         The root-mean-square of muscle power
         """
         eps = 1e-8
-        muscle_name_list = controller.model.bio_model.muscle_names
+        muscle_name_list = controller.model.muscle_names
         muscle_velocity = controller.model.muscle_velocity()(
             controller.states["q"].cx, controller.states["qdot"].cx, controller.parameters.cx
         )
@@ -708,7 +708,7 @@ class CustomCostFunctions:
         The root-mean-square of fes activation
         """
         eps = 1e-8
-        muscle_name_list = controller.model.bio_model.muscle_names
+        muscle_name_list = controller.model.muscle_names
         if isinstance(controller.model.muscles_dynamics_model[0], DingModelPulseWidthFrequency):
             stim_charge = vertcat(
                 *[
@@ -750,7 +750,7 @@ class CustomCostFunctions:
         The root-mean-square of produced force
         """
         eps = 1e-8
-        muscle_name_list = controller.model.bio_model.muscle_names
+        muscle_name_list = controller.model.muscle_names
         muscle_force = vertcat(
             *[BAYESIAN_WEIGHT[x] * controller.states["F_" + muscle_name_list[x]].cx ** 2 for x in range(len(muscle_name_list))]
         )
@@ -773,7 +773,7 @@ class CustomCostFunctions:
         The root-mean-square of muscle stress
         """
         eps = 1e-8
-        muscle_name_list = controller.model.bio_model.muscle_names
+        muscle_name_list = controller.model.muscle_names
         muscle_stress = vertcat(
             *[
                 BAYESIAN_WEIGHT[x]
@@ -801,7 +801,7 @@ class CustomCostFunctions:
         The root-mean-square of muscle fatigue
         """
         eps = 1e-8
-        muscle_name_list = controller.model.bio_model.muscle_names
+        muscle_name_list = controller.model.muscle_names
         muscle_fatigue = vertcat(
             *[
                 BAYESIAN_WEIGHT[x]
@@ -832,7 +832,7 @@ class CustomCostFunctions:
         The root-mean-square of muscle power
         """
         eps = 1e-8
-        muscle_name_list = controller.model.bio_model.muscle_names
+        muscle_name_list = controller.model.muscle_names
         muscle_velocity = controller.model.muscle_velocity()(
             controller.states["q"].cx, controller.states["qdot"].cx, controller.parameters.cx
         )
@@ -862,7 +862,7 @@ class CustomCostFunctions:
         The root-mean-square of fes activation
         """
         eps = 1e-8
-        muscle_name_list = controller.model.bio_model.muscle_names
+        muscle_name_list = controller.model.muscle_names
         if isinstance(controller.model.muscles_dynamics_model[0], DingModelPulseWidthFrequency):
             stim_charge = vertcat(
                 *[
@@ -904,7 +904,7 @@ class CustomCostFunctions:
         The root-mean-square of produced force
         """
         eps = 1e-8
-        muscle_name_list = controller.model.bio_model.muscle_names
+        muscle_name_list = controller.model.muscle_names
         muscle_force = vertcat(
             *[
                 PHYSIOLOGICAL_WEIGHT[x] * controller.states["F_" + muscle_name_list[x]].cx ** 2
@@ -930,7 +930,7 @@ class CustomCostFunctions:
         The root-mean-square of muscle stress
         """
         eps = 1e-8
-        muscle_name_list = controller.model.bio_model.muscle_names
+        muscle_name_list = controller.model.muscle_names
         muscle_stress = vertcat(
             *[
                 PHYSIOLOGICAL_WEIGHT[x]
@@ -958,7 +958,7 @@ class CustomCostFunctions:
         The root-mean-square of muscle fatigue
         """
         eps = 1e-8
-        muscle_name_list = controller.model.bio_model.muscle_names
+        muscle_name_list = controller.model.muscle_names
         muscle_fatigue = vertcat(
             *[
                 PHYSIOLOGICAL_WEIGHT[x]
@@ -989,7 +989,7 @@ class CustomCostFunctions:
         The root-mean-square of muscle power
         """
         eps = 1e-8
-        muscle_name_list = controller.model.bio_model.muscle_names
+        muscle_name_list = controller.model.muscle_names
         muscle_velocity = controller.model.muscle_velocity()(
             controller.states["q"].cx, controller.states["qdot"].cx, controller.parameters.cx
         )
@@ -1021,7 +1021,7 @@ class CustomCostFunctions:
 
     @staticmethod
     def constraints_minmax(controller: PenaltyController, obj_fun_key: str, param_index: int) -> MX:
-        muscle_name_list = controller.model.bio_model.muscle_names
+        muscle_name_list = controller.model.muscle_names
 
         if obj_fun_key == ["minimize_peak_force"]:
             value = controller.states["F_" + muscle_name_list[param_index]].cx

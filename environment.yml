@@ -9,3 +9,4 @@ dependencies:
 - pyqtgraph
 - pyorerun
 - rerun-sdk=0.21.0
+- scikit-optimize
