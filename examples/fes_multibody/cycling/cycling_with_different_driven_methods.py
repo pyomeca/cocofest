@@ -3,11 +3,9 @@ This example will do an optimal control program of a 100 steps hand cycling moti
 muscle driven / FES driven dynamics and includes a resistive torque at the handle.
 """
 
-from pathlib import Path
 from sys import platform
 import numpy as np
 
-import cocofest._matplotlib_compat  # Temporary fix, see cocofest/_matplotlib_compat.py
 from bioptim import (
     Axis,
     BiorbdModel,
@@ -19,7 +17,6 @@ from bioptim import (
     ExternalForceSetTimeSeries,
     InitialGuessList,
     InterpolationType,
-    MusclesBiorbdModel,
     Node,
     ObjectiveFcn,
     ObjectiveList,
@@ -28,7 +25,6 @@ from bioptim import (
     ParameterList,
     PhaseDynamics,
     Solver,
-    TorqueBiorbdModel,
     VariableScalingList,
     DynamicsOptionsList,
     DynamicsOptions,
@@ -42,10 +38,6 @@ from cocofest import (
     OcpFesMsk,
     DingModelPulseWidthFrequency,
 )
-
-MSK_MODELS_DIR = Path(__file__).resolve().parent.parent.parent / "msk_models"
-DEFAULT_MODEL_PATH = str(MSK_MODELS_DIR / "Wu" / "Modified_Wu_Shoulder_Model_Cycling.bioMod")
-DEFAULT_IK_MODEL_PATH = str(MSK_MODELS_DIR / "Wu" / "Modified_Wu_Shoulder_Model_Cycling_for_IK.bioMod")
 
 
 def set_external_forces(n_shooting: int, torque: int | float) -> tuple[dict, ExternalForceSetTimeSeries]:
@@ -99,14 +91,14 @@ def update_model(
             previous_stim=model.muscles_dynamics_model[0].previous_stim,
             activate_force_length_relationship=model.activate_force_length_relationship,
             activate_force_velocity_relationship=model.activate_force_velocity_relationship,
-            activate_passive_force_relationship=model.activate_force_velocity_relationship,
+            activate_passive_force_relationship=model.activate_passive_force_relationship,
             activate_residual_torque=model.activate_residual_torque,
             parameters=parameters,
             external_force_set=external_force_set,
-            with_contact=model.with_contact,
+            contact_types=model.contact_types,
         )
     else:
-        model = model.__class__(model.path, external_force_set=external_force_set)
+        model = BiorbdModel(model.path, external_force_set=external_force_set)
 
     return model
 
@@ -523,32 +515,29 @@ def prepare_ocp(
 
 def main(
     plot=True,
-    model_path: str = DEFAULT_MODEL_PATH,
-    initial_guess_model_path: str = DEFAULT_IK_MODEL_PATH,
+    model_path: str = "../../msk_models/Wu/Modified_Wu_Shoulder_Model_Cycling.bioMod",
+    initial_guess_model_path: str = "../../msk_models/Wu/Modified_Wu_Shoulder_Model_Cycling_for_IK.bioMod",
 ):
     """
     Main function to configure and solve the optimal control problem.
     """
     # --- Configuration --- #
-    dynamics_type = "muscle_driven"  # Available options: "torque_driven", "muscle_driven", "fes_driven"
+    dynamics_type = "fes_driven"  # Available options: "torque_driven", "muscle_driven", "fes_driven"
     # --- Supplementary available configurations --- #
     # dynamics_type = "torque_driven"
     # dynamics_type = "muscle_driven"
-    # model_path = str(MSK_MODELS_DIR / "Seth" / "Modified_UL_Seth_2D_Cycling.bioMod")
-    # model_path = str(MSK_MODELS_DIR / "Wu" / "Modified_Wu_Shoulder_Model_Cycling.bioMod")
-    # IK_biorbd_model_path = str(MSK_MODELS_DIR / "Seth" / "Modified_UL_Seth_2D_Cycling_for_IK.bioMod")
-    # IK_biorbd_model_path = str(MSK_MODELS_DIR / "Wu" / "Modified_Wu_Shoulder_Model_Cycling_for_IK.bioMod")
+    # model_path = "../../msk_models/Seth/Modified_UL_Seth_2D_Cycling.bioMod"
+    # model_path = "../../msk_models/Wu/Modified_Wu_Shoulder_Model_Cycling.bioMod"
+    # IK_biorbd_model_path = "../../msk_models/Seth/Modified_UL_Seth_2D_Cycling_for_IK.bioMod"
+    # IK_biorbd_model_path = "../../msk_models/Wu/Modified_Wu_Shoulder_Model_Cycling_for_IK.bioMod"
 
     final_time = 2
     turn_number = 2
     pedal_config = {"x_center": 0.35, "y_center": 0.0, "radius": 0.1}
 
     # --- Load the appropriate model --- #
-    if dynamics_type == "torque_driven":
-        model = TorqueBiorbdModel(model_path)
-        n_shooting = 100 * final_time
-    elif dynamics_type == "muscle_driven":
-        model = MusclesBiorbdModel(model_path)
+    if dynamics_type in ["torque_driven", "muscle_driven"]:
+        model = BiorbdModel(model_path)
         n_shooting = 100 * final_time
     elif dynamics_type == "fes_driven":
         # Set FES model (set to Ding et al. 2007 + fatigue, for now)
@@ -601,8 +590,8 @@ def main(
         dynamics_type=dynamics_type,
         use_sx=False,
         ode_solver=OdeSolver.COLLOCATION(polynomial_degree=3, method="radau"),
-        # ode_solver=OdeSolver.RK4(n_integration_steps=5)
-        torque=-0.2,
+        # ode_solver=OdeSolver.RK4(n_integration_steps=5),
+        torque=-0.3,
         initial_guess_model_path=initial_guess_model_path,
     )
 

@@ -51,10 +51,7 @@ def prepare_mhe(
         total_cycle_len, total_cycle_duration
     )
 
-    # dynamics = OcpFes.declare_dynamics(model, numerical_data_time_series, ode_solver)
-    dynamics_options = OcpFes.declare_dynamics_options(
-        numerical_time_series=numerical_data_time_series, ode_solver=ode_solver
-    )
+    dynamics = OcpFes.declare_dynamics(model, numerical_data_time_series, ode_solver)
 
     x_bounds = OcpFes.set_x_bounds(model)
     x_init_fes = OcpFes.set_x_init(model)
@@ -98,7 +95,7 @@ def prepare_mhe(
 
     return FesMhe(
         bio_model=model,
-        dynamics=dynamics_options,
+        dynamics=dynamics,
         cycle_len=cycle_len,
         cycle_duration=cycle_duration,
         n_cycles_simultaneous=n_cycles_simultaneous,
@@ -142,8 +139,7 @@ def main(plot=True):
         minimize_force=True,
         minimize_fatigue=False,
         use_sx=False,
-        ode_solver=OdeSolver.RK4(n_integration_steps=10),
-        # ode_solver=OdeSolver.COLLOCATION(polynomial_degree=5, method="radau"),
+        ode_solver=OdeSolver.COLLOCATION(polynomial_degree=5, method="radau"),
     )
 
     def update_functions(_mhe: MultiCyclicNonlinearModelPredictiveControl, cycle_idx: int, _sol: Solution):

@@ -437,7 +437,7 @@ class StateConfigure:
         )
 
     @staticmethod
-    def configure_pulse_intensity(ocp, nlp, muscle_name: str = None, truncation: int = None):
+    def configure_pulse_intensity(ocp, nlp, muscle_name: str = None, truncation: int = 20):
         """
         Configure the pulse intensity control for the Ding model
 
@@ -448,8 +448,6 @@ class StateConfigure:
         nlp: NonLinearProgram
             A reference to the phase
         """
-        muscle_name = nlp.model.muscle_name if muscle_name is None else muscle_name
-        truncation = nlp.model.sum_stim_truncation if truncation is None else truncation
         muscle_name = "_" + muscle_name if muscle_name else ""
         name = "pulse_intensity" + muscle_name
         pulse_intensity = [str(i) for i in range(truncation)]
@@ -458,7 +456,7 @@ class StateConfigure:
         )
 
     @staticmethod
-    def configure_intensity(ocp, nlp):
+    def configure_intensity(ocp, nlp, muscle_name: str = None):
         """
         Configure the intensity control for the Veltink1992 model
 
@@ -469,7 +467,6 @@ class StateConfigure:
         nlp: NonLinearProgram
             A reference to the phase
         """
-        muscle_name = nlp.model.muscle_name
         muscle_name = "_" + muscle_name if muscle_name else ""
         name = "I" + muscle_name
         pulse_intensity = [name]
@@ -477,40 +474,30 @@ class StateConfigure:
             name, pulse_intensity, ocp, nlp, as_states=False, as_controls=True
         )
 
-    @staticmethod
-    def configure_all_muscle_states(ocp, nlp):
-        for state_key in nlp.model.name_dofs:
-            if state_key in StateConfigure().state_dictionary.keys():
-                StateConfigure().state_dictionary[state_key](
-                    ocp=ocp,
-                    nlp=nlp,
-                    as_states=True,
-                    as_controls=False,
-                    muscle_name=nlp.model.muscle_name,
-                )
-
-    @staticmethod
-    def configure_all_muscle_msk_states(ocp, nlp):
-        for muscle_dynamics_model in nlp.model.muscles_dynamics_model:
-            for state_key in muscle_dynamics_model.name_dofs:
-                separator = "_"
-                key = state_key.split(separator, 1)[0]
-                if key in StateConfigure().state_dictionary.keys():
-                    StateConfigure().state_dictionary[key](
-                        ocp=ocp,
-                        nlp=nlp,
-                        as_states=True,
-                        as_controls=False,
-                        muscle_name=muscle_dynamics_model.muscle_name,
-                    )
-
-    def configure_all_fes_model_states(self, ocp, nlp, fes_model):
-        for state_key in fes_model.name_dofs:
-            if state_key in self.state_dictionary.keys():
+    def configure_all_muscle_states(self, muscles_dynamics_model, ocp, nlp):
+        state_name_list = []
+        for muscle_dynamics_model in muscles_dynamics_model:
+            for state_key in self._configured_state_keys(muscle_dynamics_model.name_dof):
                 self.state_dictionary[state_key](
                     ocp=ocp,
                     nlp=nlp,
                     as_states=True,
                     as_controls=False,
-                    muscle_name=fes_model.muscle_name,
+                    muscle_name=muscle_dynamics_model.muscle_name,
                 )
+                state_name_list.append(f"{state_key}_{muscle_dynamics_model.muscle_name}")
+
+        return state_name_list
+
+    def configure_all_fes_model_states(self, ocp, nlp, fes_model):
+        for state_key in self._configured_state_keys(fes_model.name_dof):
+            self.state_dictionary[state_key](
+                ocp=ocp,
+                nlp=nlp,
+                as_states=True,
+                as_controls=False,
+                muscle_name=fes_model.muscle_name,
+            )
+
+    def _configured_state_keys(self, state_keys):
+        return [state_key for state_key in state_keys if state_key in self.state_dictionary]
