@@ -350,9 +350,10 @@ class FesMskModel(BiorbdModel, StateDynamicsWithContacts):
 
         defects = None
         if isinstance(nlp.dynamics_type.ode_solver, OdeSolver.COLLOCATION):
-            slope_q = DynamicsFunctions.get(nlp.states_dot["q"], nlp.states_dot.scaled.cx)
-            slope_qdot = DynamicsFunctions.get(nlp.states_dot["qdot"], nlp.states_dot.scaled.cx)
-            defects = vertcat(slope_q, slope_qdot) * nlp.dt - vertcat(dq, ddq) * nlp.dt
+            state_slopes = vertcat(
+                *[DynamicsFunctions.get(nlp.states_dot[key], nlp.states_dot.scaled.cx) for key in nlp.states_dot.keys()]
+            )
+            defects = state_slopes * nlp.dt - dxdt * nlp.dt
 
         return DynamicsEvaluation(dxdt=dxdt, defects=defects)
 
