@@ -100,11 +100,11 @@ is expected to accelerate the increase of technology readiness level by strength
 # State of the Field
 
 Several open-source toolkits support optimal control computations for musculoskeletal biomechanics, such as:
-`OpenSim Moco` [@dembia2020opensim], a C++ OpenSim extension that enables motion tracking and prediction using efficient
+- `OpenSim Moco` [@dembia2020opensim], a C++ OpenSim extension that enables motion tracking and prediction using efficient
 direct-collocation formulations coupled to nonlinear programming solvers. 
-`SCONE` [@geijtenbeek2019], a C++/C predictive-simulation environment for human and animal motion that optimizes
+- `SCONE` [@Geijtenbeek2019], a C++/C predictive-simulation environment for human and animal motion that optimizes
 neuromusculoskeletal controllers to achieve task-level objectives (e.g., stable walking at a target speed).
-`Bioptim` [@michaud2022bioptim], a Python optimal-control framework for biomechanics that supports both direct collocation
+- `Bioptim` [@michaud2022bioptim], a Python optimal-control framework for biomechanics that supports both direct collocation
 and multiple shooting, with flexible interfaces to nonlinear programming solvers.
 
 However, these toolkits are not tailored for FES. They control muscle activation as a piecewise linear/constant
