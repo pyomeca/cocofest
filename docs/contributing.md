@@ -50,7 +50,13 @@ When working on implementing new features, collaboration and communication are k
 Adding tests is essential to merge your code into the master branch.
 We strongly recommend writing tests early in the development process.
 The cocofest test suite runs automatically on GitHub with every commit, but testing locally is a good practice.
-To launch tests locally, run the tests folder in pytest (`pytest tests`).
+
+`pytest` is not part of `environment.yml`. Install the dev tools first with:
+```bash
+pip install -e ".[dev]"
+```
+
+Tests are split into two shards under [`tests/`](../tests): `shard1` holds the unit tests (models, dynamics, IVP, MHE, identification), while `shard2` holds `test_run_examples.py`, which runs every script listed in `EXAMPLE_MODULES` end-to-end. CI runs both shards in parallel; locally you can run everything with `pytest tests`, or a single shard with `pytest tests/shard1` / `pytest tests/shard2`.
 
 ## Commenting
 

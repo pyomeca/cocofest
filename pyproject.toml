@@ -35,6 +35,8 @@ dev = [
     "pytest",
     "pytest-cov",
     "black",
+    "codecov",
+    "packaging",
 ]
 
 [project.urls]

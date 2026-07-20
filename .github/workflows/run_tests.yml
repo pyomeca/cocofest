@@ -10,7 +10,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [windows-latest]
+        os: [windows-latest, ubuntu-latest]
         shard: [1, 2]
     name: Tests on ${{ matrix.os }}-shard ${{ matrix.shard }}
     runs-on: ${{ matrix.os }}
@@ -40,8 +40,8 @@ jobs:
           conda info
           conda list
 
-      - name: Install extra dependencies
-        run: conda install pip pytest-cov black pytest pytest-cov codecov packaging -cconda-forge
+      - name: Install cocofest with dev dependencies
+        run: pip install -e ".[dev]"
 
       - name: Run tests with code coverage
         run: pytest -v --color=yes --cov-report term-missing --cov=cocofest --cov-report=xml:coverage.xml tests/shard${{ matrix.shard }}
@@ -50,7 +50,7 @@ jobs:
         id: archive
         uses: actions/upload-artifact@v4
         with:
-          name: coverage${{ matrix.shard }}
+          name: coverage-${{ matrix.os }}-${{ matrix.shard }}
           path: |
             coverage.xml
             .coverage
@@ -59,7 +59,11 @@ jobs:
 
   merge-coverage:
     needs: build
-    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
     defaults:
       run:
         shell: bash -l {0}
@@ -68,6 +72,7 @@ jobs:
       - name: Set prefix windows
         run: |
           echo "PREFIX=${{ env.PREFIX_WINDOWS }}" >> $GITHUB_ENV
+        if: matrix.os == 'windows-latest'
 
       - name: Checkout code
         uses: actions/checkout@v3
@@ -88,15 +93,16 @@ jobs:
       - name: Install extra dependencies
         run: pip install coverage
 
-      - name: Download all workflow run artifacts
-        id: download
+      - name: Download coverage artifacts for this OS
         uses: actions/download-artifact@v4
+        with:
+          pattern: coverage-${{ matrix.os }}-*
 
       - name: Rename coverage files
         run: |
           for shard in {1,2}; do
-            mv coverage${shard}/coverage.xml coverage${shard}.xml
-            mv coverage${shard}/.coverage* .coverage${shard}
+            mv coverage-${{ matrix.os }}-${shard}/coverage.xml coverage${shard}.xml
+            mv coverage-${{ matrix.os }}-${shard}/.coverage* .coverage${shard}
           done
 
       - name: Show current dir content
