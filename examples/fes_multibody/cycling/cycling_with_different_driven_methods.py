@@ -3,6 +3,7 @@ This example will do an optimal control program of a 100 steps hand cycling moti
 muscle driven / FES driven dynamics and includes a resistive torque at the handle.
 """
 
+from pathlib import Path
 from sys import platform
 import numpy as np
 
@@ -41,6 +42,10 @@ from cocofest import (
     OcpFesMsk,
     DingModelPulseWidthFrequency,
 )
+
+MSK_MODELS_DIR = Path(__file__).resolve().parent.parent.parent / "msk_models"
+DEFAULT_MODEL_PATH = str(MSK_MODELS_DIR / "Wu" / "Modified_Wu_Shoulder_Model_Cycling.bioMod")
+DEFAULT_IK_MODEL_PATH = str(MSK_MODELS_DIR / "Wu" / "Modified_Wu_Shoulder_Model_Cycling_for_IK.bioMod")
 
 
 def set_external_forces(n_shooting: int, torque: int | float) -> tuple[dict, ExternalForceSetTimeSeries]:
@@ -518,8 +523,8 @@ def prepare_ocp(
 
 def main(
     plot=True,
-    model_path: str = "../../msk_models/Wu/Modified_Wu_Shoulder_Model_Cycling.bioMod",
-    initial_guess_model_path: str = "../../msk_models/Wu/Modified_Wu_Shoulder_Model_Cycling_for_IK.bioMod",
+    model_path: str = DEFAULT_MODEL_PATH,
+    initial_guess_model_path: str = DEFAULT_IK_MODEL_PATH,
 ):
     """
     Main function to configure and solve the optimal control problem.
@@ -529,10 +534,10 @@ def main(
     # --- Supplementary available configurations --- #
     # dynamics_type = "torque_driven"
     # dynamics_type = "muscle_driven"
-    # model_path = "../../msk_models/Seth/Modified_UL_Seth_2D_Cycling.bioMod"
-    # model_path = "../../msk_models/Wu/Modified_Wu_Shoulder_Model_Cycling.bioMod"
-    # IK_biorbd_model_path = "../../msk_models/Seth/Modified_UL_Seth_2D_Cycling_for_IK.bioMod"
-    # IK_biorbd_model_path = "../../msk_models/Wu/Modified_Wu_Shoulder_Model_Cycling_for_IK.bioMod"
+    # model_path = str(MSK_MODELS_DIR / "Seth" / "Modified_UL_Seth_2D_Cycling.bioMod")
+    # model_path = str(MSK_MODELS_DIR / "Wu" / "Modified_Wu_Shoulder_Model_Cycling.bioMod")
+    # IK_biorbd_model_path = str(MSK_MODELS_DIR / "Seth" / "Modified_UL_Seth_2D_Cycling_for_IK.bioMod")
+    # IK_biorbd_model_path = str(MSK_MODELS_DIR / "Wu" / "Modified_Wu_Shoulder_Model_Cycling_for_IK.bioMod")
 
     final_time = 2
     turn_number = 2

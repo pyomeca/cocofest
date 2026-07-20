@@ -4,6 +4,8 @@ The stimulation frequency will be set to 10Hz and pulse width will be optimized 
 Intensity can be optimized from sensitivity threshold to 600us. No residual torque is allowed.
 """
 
+from pathlib import Path
+
 import numpy as np
 
 import cocofest._matplotlib_compat  # Temporary fix, see cocofest/_matplotlib_compat.py
@@ -26,6 +28,10 @@ from cocofest import (
     DingModelPulseIntensityFrequencyWithFatigue,
     ModelMaker,
     CustomObjective,
+)
+
+DEFAULT_MODEL_PATH = str(
+    Path(__file__).resolve().parent.parent.parent / "msk_models" / "Arm26" / "arm26_biceps_triceps.bioMod"
 )
 
 
@@ -114,7 +120,7 @@ def prepare_ocp(
     )
 
 
-def main(plot=True, model_path="../../msk_models/Arm26/arm26_biceps_triceps.bioMod"):
+def main(plot=True, model_path=DEFAULT_MODEL_PATH):
     # --- Define the fes model --- #
     fes_model_type = "ding2007_with_fatigue"
     stim_time = list(np.linspace(0, 1, 11))[:-1]

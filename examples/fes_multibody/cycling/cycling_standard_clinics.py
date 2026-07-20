@@ -12,6 +12,7 @@ This is kept unchanged because the goal is to test whether the clinical conditio
 one window forward.
 """
 
+from pathlib import Path
 from sys import platform
 import pickle
 import numpy as np
@@ -56,7 +57,9 @@ PHASE_TIME = 60 / TARGET_RPM  # 1 second per revolution at 60 rpm
 N_SHOOTING = 30  # 30 Hz for a 1-second cycle
 N_THREADS = 48
 
-MODEL_PATH = "../../msk_models/Wu/Modified_Wu_Shoulder_Model_Cycling.bioMod"
+MODEL_PATH = str(
+    Path(__file__).resolve().parent.parent.parent / "msk_models" / "Wu" / "Modified_Wu_Shoulder_Model_Cycling.bioMod"
+)
 RESULT_FILE_NAME = "temp/standard_and_fes_ocp_cycles.pkl"
 
 MUSCLES = ("Delt_ant", "Delt_post", "Biceps", "Triceps")

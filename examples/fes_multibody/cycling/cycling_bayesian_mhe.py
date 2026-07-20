@@ -704,7 +704,12 @@ def bayes_optimize_weights(
 
 def main_bayes():
     # --- Model choice --- #
-    model_path = "../../msk_models/Wu/Modified_Wu_Shoulder_Model_Cycling.bioMod"
+    model_path = str(
+        Path(__file__).resolve().parent.parent.parent
+        / "msk_models"
+        / "Wu"
+        / "Modified_Wu_Shoulder_Model_Cycling.bioMod"
+    )
 
     # --- MHE parameters --- #
     ode_solver = OdeSolver.COLLOCATION(polynomial_degree=3, method="radau")
