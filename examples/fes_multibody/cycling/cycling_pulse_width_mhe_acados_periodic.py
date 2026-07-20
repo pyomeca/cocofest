@@ -39,23 +39,38 @@ ACADOS_STATUS_NAMES = {
 }
 
 
-def patch_bioptim_acados_control_bounds() -> None:
+def patch_bioptim_acados_interface() -> None:
     """
-    Patch the Bioptim 3.4 ACADOS interface control bounds for this example.
+    Patch the Bioptim 3.4 ACADOS interface for this example.
 
     The installed Bioptim interface currently exports control bounds as
     ``lbu=max`` and ``ubu=min`` during code generation, then later updates the
     solver with unscaled control bounds. The ACADOS variables are scaled, so both
-    steps make the pulse-width QP infeasible. This local patch keeps the example
-    self-contained until the upstream interface is fixed.
+    steps make the pulse-width QP infeasible. The interface also passes
+    ``numerical_data_timeseries`` to the exported dynamics without declaring it
+    as an ACADOS model parameter, which leaves stage-varying inputs as free
+    CasADi symbols. This local patch keeps the example self-contained until the
+    upstream interface is fixed.
     """
     from bioptim.interfaces.acados_interface import AcadosInterface
 
-    if getattr(AcadosInterface, "_cocofest_control_bounds_patch", False):
+    if getattr(AcadosInterface, "_cocofest_interface_patch", False):
         return
 
+    from bioptim.interfaces.interface_utils import get_numerical_timeseries
+
+    original_export_model = AcadosInterface._AcadosInterface__acados_export_model
     original_set_constraints = AcadosInterface._AcadosInterface__set_constraints
     original_update_solver = AcadosInterface._AcadosInterface__update_solver
+
+    def patched_export_model(self, ocp):
+        original_export_model(self, ocp)
+        numerical_timeseries = ocp.nlp[0].numerical_timeseries.cx_start
+        if numerical_timeseries.shape[0] == 0:
+            return
+
+        self.acados_model.p = numerical_timeseries
+        self.acados_ocp.parameter_values = np.zeros(numerical_timeseries.shape[0])
 
     def scaled_control_bounds(interface) -> tuple[np.ndarray, np.ndarray]:
         lower = np.empty(interface.acados_ocp.dims.nu)
@@ -88,6 +103,15 @@ def patch_bioptim_acados_control_bounds() -> None:
         if self.ocp_solver is None:
             return
 
+        if self.ocp.nlp[0].numerical_timeseries.shape:
+            terminal_node = self.acados_ocp.solver_options.N_horizon
+            for stage in range(terminal_node + 1):
+                stage_values = np.asarray(
+                    get_numerical_timeseries(self.ocp, 0, stage, slice(None)),
+                    dtype=float,
+                ).reshape(-1)
+                self.ocp_solver.set(stage, "p", stage_values)
+
         param_init = []
         for key in self.ocp.nlp[0].parameters.keys():
             scaled_init = self.ocp.parameter_init[key].scale(
@@ -115,9 +139,10 @@ def patch_bioptim_acados_control_bounds() -> None:
             self.ocp_solver.constraints_set(stage, "lbu", lower)
             self.ocp_solver.constraints_set(stage, "ubu", upper)
 
+    AcadosInterface._AcadosInterface__acados_export_model = patched_export_model
     AcadosInterface._AcadosInterface__set_constraints = patched_set_constraints
     AcadosInterface._AcadosInterface__update_solver = patched_update_solver
-    AcadosInterface._cocofest_control_bounds_patch = True
+    AcadosInterface._cocofest_interface_patch = True
 
 
 def parse_objectives(raw_objective: str) -> set[str]:
@@ -1955,7 +1980,10 @@ def _clip_state_trajectory_to_bounds(
 
 
 def _periodic_ding_rhs(
-    muscle_model, state: np.ndarray, pulse_width: float
+    muscle_model,
+    state: np.ndarray,
+    pulse_width: float,
+    stimulation_intensity: float = 1.0,
 ) -> np.ndarray:
     return _to_numpy_vector(
         muscle_model.system_dynamics(
@@ -1966,17 +1994,20 @@ def _periodic_ding_rhs(
             tau1=state[4],
             km=state[5],
             pulse_width=pulse_width,
+            numerical_timeseries=np.array([stimulation_intensity]),
         )
     )
 
 
-def _periodic_calcium_rhs(muscle_model, state: np.ndarray) -> np.ndarray:
+def _periodic_calcium_rhs(
+    muscle_model, state: np.ndarray, stimulation_intensity: float = 1.0
+) -> np.ndarray:
     cn = state[0]
     cn_sum = state[1]
     return np.array(
         [
             float(muscle_model.cn_dot_fun(cn, cn_sum)),
-            float(muscle_model.cn_sum_dot_fun(cn_sum)),
+            float(muscle_model.cn_sum_dot_fun(cn_sum, stimulation_intensity)),
         ]
     )
 
@@ -1987,6 +2018,7 @@ def _rk4_periodic_ding_step(
     pulse_width: float,
     dt: float,
     n_substeps: int = 1,
+    stimulation_intensity: float = 1.0,
 ) -> np.ndarray:
     if n_substeps < 1:
         raise ValueError("--periodic-fes-warmup-projection-substeps must be >= 1.")
@@ -1994,26 +2026,42 @@ def _rk4_periodic_ding_step(
     sub_dt = dt / n_substeps
     next_state = np.array(state, dtype=float, copy=True)
     for _ in range(n_substeps):
-        k1 = _periodic_ding_rhs(muscle_model, next_state, pulse_width)
+        k1 = _periodic_ding_rhs(
+            muscle_model, next_state, pulse_width, stimulation_intensity
+        )
         k2 = _periodic_ding_rhs(
-            muscle_model, next_state + 0.5 * sub_dt * k1, pulse_width
+            muscle_model,
+            next_state + 0.5 * sub_dt * k1,
+            pulse_width,
+            stimulation_intensity,
         )
         k3 = _periodic_ding_rhs(
-            muscle_model, next_state + 0.5 * sub_dt * k2, pulse_width
+            muscle_model,
+            next_state + 0.5 * sub_dt * k2,
+            pulse_width,
+            stimulation_intensity,
         )
-        k4 = _periodic_ding_rhs(muscle_model, next_state + sub_dt * k3, pulse_width)
+        k4 = _periodic_ding_rhs(
+            muscle_model,
+            next_state + sub_dt * k3,
+            pulse_width,
+            stimulation_intensity,
+        )
         next_state = next_state + sub_dt * (k1 + 2 * k2 + 2 * k3 + k4) / 6
     return next_state
 
 
 def _exact_periodic_calcium_step(
-    muscle_model, state: np.ndarray, dt: float
+    muscle_model,
+    state: np.ndarray,
+    dt: float,
+    stimulation_intensity: float = 1.0,
 ) -> np.ndarray:
     tau = muscle_model.tauc
     decay = np.exp(-dt / tau)
     cn = state[0]
     cn_sum = state[1]
-    cn_sum_steady = tau * muscle_model.periodic_cn_sum_gain()
+    cn_sum_steady = tau * muscle_model.periodic_cn_sum_gain(stimulation_intensity)
     next_cn_sum = cn_sum_steady + (cn_sum - cn_sum_steady) * decay
     next_cn = (
         decay * cn
@@ -2021,6 +2069,23 @@ def _exact_periodic_calcium_step(
         + (cn_sum - cn_sum_steady) * (dt / tau) * decay
     )
     return np.array([next_cn, next_cn_sum])
+
+
+def _muscle_stimulation_intensities(
+    periodic_nmpc, muscle_model, n_intervals: int
+) -> np.ndarray:
+    timeseries = periodic_nmpc.nlp[0].numerical_data_timeseries
+    if timeseries is None or "stimulation_intensity" not in timeseries:
+        return np.ones(n_intervals)
+
+    values = np.asarray(timeseries["stimulation_intensity"], dtype=float)
+    muscle_index = muscle_model.stimulation_intensity_index
+    if values.shape[0] <= muscle_index or values.shape[2] < n_intervals:
+        raise ValueError(
+            "stimulation_intensity numerical timeseries is inconsistent with "
+            f"muscle index {muscle_index} and {n_intervals} intervals."
+        )
+    return values[muscle_index, 0, :n_intervals]
 
 
 def _periodic_fes_rollout_defects(
@@ -2041,14 +2106,20 @@ def _periodic_fes_rollout_defects(
             [periodic_nmpc.nlp[0].x_init[key].init[0, :] for key in state_keys]
         )
         controls = periodic_nmpc.nlp[0].u_init[control_key].init[0, :]
+        stimulation_intensities = _muscle_stimulation_intensities(
+            periodic_nmpc, muscle_model, controls.size
+        )
         max_defect = 0.0
-        for node, pulse_width in enumerate(controls):
+        for node, (pulse_width, stimulation_intensity) in enumerate(
+            zip(controls, stimulation_intensities, strict=True)
+        ):
             expected = _rk4_periodic_ding_step(
                 muscle_model,
                 states[:, node],
                 pulse_width,
                 dt,
                 n_substeps=projection_substeps,
+                stimulation_intensity=stimulation_intensity,
             )
             max_defect = max(
                 max_defect, float(np.max(np.abs(states[:, node + 1] - expected)))
@@ -2079,15 +2150,21 @@ def _periodic_fes_rollout_defect_details(
             [periodic_nmpc.nlp[0].x_init[key].init[0, :] for key in state_keys]
         )
         controls = periodic_nmpc.nlp[0].u_init[control_key].init[0, :]
+        stimulation_intensities = _muscle_stimulation_intensities(
+            periodic_nmpc, muscle_model, controls.size
+        )
         state_scales = np.maximum(np.max(np.abs(states), axis=1), 1.0)
         muscle_max = 0.0
-        for node, pulse_width in enumerate(controls):
+        for node, (pulse_width, stimulation_intensity) in enumerate(
+            zip(controls, stimulation_intensities, strict=True)
+        ):
             expected = _rk4_periodic_ding_step(
                 muscle_model,
                 states[:, node],
                 pulse_width,
                 dt,
                 n_substeps=projection_substeps,
+                stimulation_intensity=stimulation_intensity,
             )
             defects = np.abs(states[:, node + 1] - expected)
             muscle_max = max(muscle_max, float(np.max(defects)))
@@ -2423,16 +2500,20 @@ def _project_periodic_states(
     muscle_model,
     original_states: np.ndarray,
     controls: np.ndarray,
+    stimulation_intensities: np.ndarray,
     dt: float,
     projection_mode: str,
     projection_substeps: int,
 ) -> np.ndarray:
     projected_states = np.empty_like(original_states)
     projected_states[:, 0] = original_states[:, 0]
-    for node in range(controls.size):
+    for node, stimulation_intensity in enumerate(stimulation_intensities):
         if projection_mode == "calcium":
             projected_states[:, node + 1] = _exact_periodic_calcium_step(
-                muscle_model, projected_states[:, node], dt
+                muscle_model,
+                projected_states[:, node],
+                dt,
+                stimulation_intensity,
             )
         else:
             projected_states[:, node + 1] = _rk4_periodic_ding_step(
@@ -2441,6 +2522,7 @@ def _project_periodic_states(
                 controls[node],
                 dt,
                 n_substeps=projection_substeps,
+                stimulation_intensity=stimulation_intensity,
             )
     return projected_states
 
@@ -2516,6 +2598,7 @@ def _bounded_least_squares_project_periodic_states(
     muscle_model,
     original_states: np.ndarray,
     controls: np.ndarray,
+    stimulation_intensities: np.ndarray,
     lower_bounds: np.ndarray,
     upper_bounds: np.ndarray,
     dt: float,
@@ -2584,15 +2667,22 @@ def _bounded_least_squares_project_periodic_states(
         states[:, 1:] = variable_flat.reshape((clipped_original.shape[0], -1))
         return states
 
-    def step(state: np.ndarray, pulse_width: float) -> np.ndarray:
+    def step(
+        state: np.ndarray,
+        pulse_width: float,
+        stimulation_intensity: float,
+    ) -> np.ndarray:
         if projection_mode == "calcium":
-            return _exact_periodic_calcium_step(muscle_model, state, dt)
+            return _exact_periodic_calcium_step(
+                muscle_model, state, dt, stimulation_intensity
+            )
         return _rk4_periodic_ding_step(
             muscle_model,
             state,
             pulse_width,
             dt,
             n_substeps=projection_substeps,
+            stimulation_intensity=stimulation_intensity,
         )
 
     def residual(variable_flat: np.ndarray) -> np.ndarray:
@@ -2600,8 +2690,10 @@ def _bounded_least_squares_project_periodic_states(
         pieces = []
         if include_defects:
             defects = []
-            for node, pulse_width in enumerate(controls):
-                expected = step(states[:, node], pulse_width)
+            for node, (pulse_width, stimulation_intensity) in enumerate(
+                zip(controls, stimulation_intensities, strict=True)
+            ):
+                expected = step(states[:, node], pulse_width, stimulation_intensity)
                 defects.append((states[:, node + 1] - expected) / scales[:, 0])
             pieces.append(sqrt_defect_weight * np.concatenate(defects))
         if include_proximity:
@@ -2643,6 +2735,7 @@ def _sequential_project_periodic_states(
     muscle_model,
     original_states: np.ndarray,
     controls: np.ndarray,
+    stimulation_intensities: np.ndarray,
     lower_bounds: np.ndarray,
     upper_bounds: np.ndarray,
     dt: float,
@@ -2671,10 +2764,15 @@ def _sequential_project_periodic_states(
     projected_states[:, 0] = clipped_original[:, 0]
     scales = _projection_state_scales(clipped_original, lower_bounds, upper_bounds)
     denominator = proximity_weight + defect_weight
-    for node, pulse_width in enumerate(controls):
+    for node, (pulse_width, stimulation_intensity) in enumerate(
+        zip(controls, stimulation_intensities, strict=True)
+    ):
         if projection_mode == "calcium":
             expected = _exact_periodic_calcium_step(
-                muscle_model, projected_states[:, node], dt
+                muscle_model,
+                projected_states[:, node],
+                dt,
+                stimulation_intensity,
             )
         else:
             expected = _rk4_periodic_ding_step(
@@ -2683,6 +2781,7 @@ def _sequential_project_periodic_states(
                 pulse_width,
                 dt,
                 n_substeps=projection_substeps,
+                stimulation_intensity=stimulation_intensity,
             )
         next_values = (
             defect_weight * expected + proximity_weight * clipped_original[:, node + 1]
@@ -2754,6 +2853,9 @@ def project_periodic_fes_initial_guess(
             [periodic_nmpc.nlp[0].x_init[key].init[0, :] for key in state_keys]
         )
         controls = periodic_nmpc.nlp[0].u_init[control_key].init[0, :]
+        stimulation_intensities = _muscle_stimulation_intensities(
+            periodic_nmpc, muscle_model, controls.size
+        )
         lower_bounds = []
         upper_bounds = []
         for key in state_keys:
@@ -2769,6 +2871,7 @@ def project_periodic_fes_initial_guess(
                 muscle_model,
                 original_states,
                 controls,
+                stimulation_intensities,
                 lower_bounds,
                 upper_bounds,
                 dt,
@@ -2788,6 +2891,7 @@ def project_periodic_fes_initial_guess(
                 muscle_model,
                 original_states,
                 controls,
+                stimulation_intensities,
                 lower_bounds,
                 upper_bounds,
                 dt,
@@ -2802,6 +2906,7 @@ def project_periodic_fes_initial_guess(
                 muscle_model,
                 original_states,
                 controls,
+                stimulation_intensities,
                 dt,
                 projection_mode,
                 projection_substeps,
@@ -3760,7 +3865,7 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
     nmpc = prepare_nmpc(model, mhe_info, cycling_info, nmpc_simulation_conditions)
     nmpc.n_cycles_simultaneous = args.cycles_per_window
     if args.solver == "acados":
-        patch_bioptim_acados_control_bounds()
+        patch_bioptim_acados_interface()
         nmpc.first_node_state_slack = {
             "q": [0.0, 0.0, args.acados_wheel_q_slack],
             "qdot": [0.0, 0.0, args.acados_wheel_qdot_slack],
@@ -3945,7 +4050,7 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
                 f"{args.warmup_state_comparison_limit}"
             )
             print(f"acados_print_level: {args.acados_print_level}")
-            print("bioptim_acados_control_bound_patch: True")
+            print("bioptim_acados_interface_patch: True")
             print(f"acados_qp_solver: {args.acados_qp_solver}")
             print(f"acados_integrator_type: {args.acados_integrator_type}")
             print(f"acados_wheel_q_slack: {args.acados_wheel_q_slack}")
