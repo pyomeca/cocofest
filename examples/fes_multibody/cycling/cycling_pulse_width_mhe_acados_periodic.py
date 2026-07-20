@@ -331,6 +331,20 @@ def build_argument_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--acados-horizon-continuation",
+        action="store_true",
+        help=(
+            "Solve and cache a one-cycle ACADOS problem, then tile that solution as the "
+            "initial guess for a longer horizon."
+        ),
+    )
+    parser.add_argument(
+        "--acados-continuation-source-max-iterations",
+        type=int,
+        default=500,
+        help="Maximum SQP iterations used to obtain the one-cycle ACADOS continuation source.",
+    )
+    parser.add_argument(
         "--constant-crank-torque",
         type=float,
         default=-0.2,
@@ -897,6 +911,70 @@ def _load_warmup_cache(cache_path: Path) -> "_WarmupSolutionAdapter":
     return _WarmupSolutionAdapter(states, controls)
 
 
+def _continuation_cache_signature(args: argparse.Namespace) -> str:
+    repository_root = Path(__file__).resolve().parents[3]
+    payload = {
+        "kind": "acados_one_cycle_continuation",
+        "cache_version": 1,
+        "objective": args.objective,
+        "objective_shape": args.objective_shape,
+        "stimulations_per_cycle": args.stimulations_per_cycle,
+        "constant_crank_torque": args.constant_crank_torque,
+        "torque_application": args.torque_application,
+        "state_scaling": args.state_scaling,
+        "pulse_width_scaling": args.pulse_width_scaling,
+        "control_regularization_weight": args.control_regularization_weight,
+        "control_regularization_target": args.control_regularization_target,
+        "wheel_qdot_regularization_weight": args.wheel_qdot_regularization_weight,
+        "wheel_qdot_regularization_target": args.wheel_qdot_regularization_target,
+        "integrator_type": args.acados_integrator_type,
+        "collocation_type": args.acados_collocation_type,
+        "sim_stages": args.acados_sim_stages,
+        "sim_steps": args.acados_sim_steps,
+        "newton_iter": args.acados_newton_iter,
+        "hessian_approx": args.acados_hessian_approx,
+        "nlp_solver_type": args.acados_nlp_solver_type,
+        "qp_solver": args.acados_qp_solver,
+        "max_iterations": args.acados_continuation_source_max_iterations,
+        "source_convergence_tolerance": None,
+        "source_stationarity_tolerance": 1e-3,
+        "standard_warmup_transfer": args.acados_standard_warmup_transfer,
+        "fatigue_warmstart_mode": args.acados_fatigue_warmstart_mode,
+        "periodic_projection": not args.disable_periodic_fes_warmup_projection,
+        "periodic_projection_mode": args.periodic_fes_warmup_projection_mode,
+        "periodic_projection_strategy": args.periodic_fes_warmup_projection_strategy,
+        "periodic_projection_weight": args.periodic_fes_warmup_projection_weight,
+        "periodic_ipopt_refinement": (
+            args.periodic_ipopt_refinement
+            and not args.disable_periodic_ipopt_refinement
+        ),
+        "pulse_width_trust_radius": args.acados_pulse_width_trust_radius,
+        "fes_state_trust_radius": args.acados_fes_state_trust_radius,
+        "sources": [
+            _source_stamp(
+                Path(__file__).resolve().parent / "cycling_pulse_width_mhe.py"
+            ),
+            _source_stamp(
+                repository_root
+                / "cocofest"
+                / "models"
+                / "ding2007"
+                / "ding2007_with_fatigue_periodic.py"
+            ),
+            _source_stamp(
+                repository_root / "cocofest" / "models" / "dynamical_model.py"
+            ),
+        ],
+    }
+    return _short_hash(payload)
+
+
+def _continuation_cache_path(args: argparse.Namespace) -> Path:
+    return _cache_root() / (
+        f"acados_one_cycle_{_continuation_cache_signature(args)}.npz"
+    )
+
+
 def _codegen_signature(args: argparse.Namespace) -> str:
     payload = {
         "solver": args.solver,
@@ -989,6 +1067,12 @@ def _preload_acados_libraries(acados_lib_dir: Path) -> None:
             ctypes.CDLL(str(library_path), mode=mode)
 
 
+def set_acados_unsafe_option(solver: Solver.ACADOS, value, name: str) -> None:
+    # Bioptim 3.4 registers unsafe options on the class without initializing later instances.
+    solver.set_option_unsafe(value, name)
+    setattr(solver, f"_{name}", value)
+
+
 def configure_acados_solver(
     model_name: str,
     generated_code_path: str,
@@ -1041,37 +1125,49 @@ def configure_acados_solver(
     if stationarity_tolerance is not None:
         solver.set_nlp_solver_tol_stat(stationarity_tolerance)
     solver.set_print_level(print_level)
-    solver.set_option_unsafe(collocation_type, "collocation_type")
-    solver.set_option_unsafe(sim_method_jac_reuse, "sim_method_jac_reuse")
-    solver.set_option_unsafe(search_direction_mode, "search_direction_mode")
-    solver.set_option_unsafe(
+    set_acados_unsafe_option(solver, collocation_type, "collocation_type")
+    set_acados_unsafe_option(solver, sim_method_jac_reuse, "sim_method_jac_reuse")
+    set_acados_unsafe_option(solver, search_direction_mode, "search_direction_mode")
+    set_acados_unsafe_option(
+        solver,
         use_constraint_hessian_in_feas_qp,
         "use_constraint_hessian_in_feas_qp",
     )
-    solver.set_option_unsafe(
+    set_acados_unsafe_option(
+        solver,
         allow_direction_mode_switch_to_nominal,
         "allow_direction_mode_switch_to_nominal",
     )
     if sim_method_newton_tol is not None:
-        solver.set_option_unsafe(float(sim_method_newton_tol), "sim_method_newton_tol")
+        set_acados_unsafe_option(
+            solver, float(sim_method_newton_tol), "sim_method_newton_tol"
+        )
     # Favor numerical robustness over raw speed for this periodic MHE.
-    solver.set_option_unsafe(globalization, "globalization")
-    solver.set_option_unsafe(fixed_step_length, "globalization_fixed_step_length")
-    solver.set_option_unsafe(1, "globalization_line_search_use_sufficient_descent")
-    solver.set_option_unsafe(0, "globalization_use_SOC")
-    solver.set_option_unsafe("ROBUST", "hpipm_mode")
-    solver.set_option_unsafe(regularize_method, "regularize_method")
-    solver.set_option_unsafe(levenberg_marquardt, "levenberg_marquardt")
-    solver.set_option_unsafe(qpscaling_scale_objective, "qpscaling_scale_objective")
-    solver.set_option_unsafe(qpscaling_scale_constraints, "qpscaling_scale_constraints")
-    solver.set_option_unsafe(nlp_qp_tol_strategy, "nlp_qp_tol_strategy")
-    solver.set_option_unsafe(qp_iter_max, "qp_solver_iter_max")
-    solver.set_option_unsafe(1 if ext_qp_res else 0, "nlp_solver_ext_qp_res")
-    solver.set_option_unsafe(0, "qp_solver_warm_start")
-    solver.set_option_unsafe(0, "qp_solver_ric_alg")
-    solver.set_option_unsafe(0, "qp_solver_cond_ric_alg")
-    solver.set_option_unsafe(False, "nlp_solver_warm_start_first_qp")
-    solver.set_option_unsafe(False, "nlp_solver_warm_start_first_qp_from_nlp")
+    set_acados_unsafe_option(solver, globalization, "globalization")
+    set_acados_unsafe_option(
+        solver, fixed_step_length, "globalization_fixed_step_length"
+    )
+    set_acados_unsafe_option(
+        solver, 1, "globalization_line_search_use_sufficient_descent"
+    )
+    set_acados_unsafe_option(solver, 0, "globalization_use_SOC")
+    set_acados_unsafe_option(solver, "ROBUST", "hpipm_mode")
+    set_acados_unsafe_option(solver, regularize_method, "regularize_method")
+    set_acados_unsafe_option(solver, levenberg_marquardt, "levenberg_marquardt")
+    set_acados_unsafe_option(
+        solver, qpscaling_scale_objective, "qpscaling_scale_objective"
+    )
+    set_acados_unsafe_option(
+        solver, qpscaling_scale_constraints, "qpscaling_scale_constraints"
+    )
+    set_acados_unsafe_option(solver, nlp_qp_tol_strategy, "nlp_qp_tol_strategy")
+    set_acados_unsafe_option(solver, qp_iter_max, "qp_solver_iter_max")
+    set_acados_unsafe_option(solver, 1 if ext_qp_res else 0, "nlp_solver_ext_qp_res")
+    set_acados_unsafe_option(solver, 0, "qp_solver_warm_start")
+    set_acados_unsafe_option(solver, 0, "qp_solver_ric_alg")
+    set_acados_unsafe_option(solver, 0, "qp_solver_cond_ric_alg")
+    set_acados_unsafe_option(solver, False, "nlp_solver_warm_start_first_qp")
+    set_acados_unsafe_option(solver, False, "nlp_solver_warm_start_first_qp_from_nlp")
     return solver
 
 
@@ -2818,6 +2914,122 @@ def _adapt_warmup_solution_to_periodic_nodes(
     return _WarmupSolutionAdapter(adapted_states, adapted_controls)
 
 
+def _tile_one_cycle_state(
+    key: str, values: np.ndarray, repeat_count: int
+) -> np.ndarray:
+    values = np.asarray(values, dtype=float)
+    if values.ndim == 1:
+        values = values[np.newaxis, :]
+    if values.shape[1] < 2:
+        raise ValueError(f"One-cycle state '{key}' must contain at least two nodes.")
+
+    drift = values[:, -1:] - values[:, :1]
+    pieces = [values]
+    for cycle_index in range(1, repeat_count):
+        repeated = values[:, 1:].copy()
+        if key == "q":
+            repeated[-1, :] += cycle_index * drift[-1, 0]
+            repeated[:-1, :] += drift[:-1] * np.linspace(1.0, 0.0, repeated.shape[1])
+        elif key.startswith(("F_", "A_", "Tau1_", "Km_")):
+            repeated += cycle_index * drift
+        else:
+            repeated += drift * np.linspace(1.0, 0.0, repeated.shape[1])
+        pieces.append(repeated)
+    return np.concatenate(pieces, axis=1)
+
+
+def _tile_one_cycle_control(values: np.ndarray, repeat_count: int) -> np.ndarray:
+    values = np.asarray(values, dtype=float)
+    if values.ndim == 1:
+        values = values[np.newaxis, :]
+    return np.tile(values, (1, repeat_count))
+
+
+def _recenter_boundary_bounds(bounds, values: np.ndarray) -> None:
+    for value_column, bound_column in ((0, 0), (-1, -1)):
+        center = values[:, value_column]
+        lower = np.asarray(bounds.min[:, bound_column], dtype=float)
+        upper = np.asarray(bounds.max[:, bound_column], dtype=float)
+        half_width = 0.5 * (upper - lower)
+        finite = np.isfinite(half_width)
+        bounds.min[finite, bound_column] = center[finite] - half_width[finite]
+        bounds.max[finite, bound_column] = center[finite] + half_width[finite]
+
+
+def tile_one_cycle_solution_to_periodic_nmpc(periodic_nmpc, one_cycle_solution) -> dict:
+    states = one_cycle_solution.decision_states(to_merge=SolutionMerge.NODES)
+    controls = one_cycle_solution.decision_controls(to_merge=SolutionMerge.NODES)
+    nlp = periodic_nmpc.nlp[0]
+
+    first_control_key = next(iter(nlp.u_init.keys()))
+    source_control_nodes = np.asarray(controls[first_control_key]).shape[-1]
+    target_control_nodes = nlp.u_init[first_control_key].init.shape[1]
+    if source_control_nodes < 1 or target_control_nodes % source_control_nodes:
+        raise ValueError(
+            "The target control horizon must be an integer multiple of the one-cycle horizon "
+            f"({target_control_nodes} versus {source_control_nodes})."
+        )
+    repeat_count = target_control_nodes // source_control_nodes
+    if repeat_count < 2:
+        raise ValueError(
+            "Horizon continuation requires a target of at least two cycles."
+        )
+
+    seam_errors = {}
+    for key in nlp.x_init.keys():
+        if key not in states:
+            continue
+        source = np.asarray(states[key], dtype=float)
+        if source.ndim == 1:
+            source = source[np.newaxis, :]
+        expected_source_nodes = source_control_nodes + 1
+        if source.shape[1] != expected_source_nodes:
+            raise ValueError(
+                f"One-cycle state '{key}' has {source.shape[1]} nodes; "
+                f"expected {expected_source_nodes}."
+            )
+        tiled = _tile_one_cycle_state(key, source, repeat_count)
+        target = nlp.x_init[key].init
+        if tiled.shape != target.shape:
+            raise ValueError(
+                f"Cannot tile state '{key}' with shape {tiled.shape} into {target.shape}."
+            )
+        target[:, :] = tiled
+
+        source_first_step = source[:, 1] - source[:, 0]
+        seam_first_step = (
+            tiled[:, expected_source_nodes] - tiled[:, expected_source_nodes - 1]
+        )
+        seam_error = seam_first_step - source_first_step
+        seam_errors[key] = float(np.max(np.abs(seam_error)))
+
+    for key in nlp.u_init.keys():
+        if key not in controls:
+            continue
+        tiled = _tile_one_cycle_control(controls[key], repeat_count)
+        target = nlp.u_init[key].init
+        if tiled.shape != target.shape:
+            raise ValueError(
+                f"Cannot tile control '{key}' with shape {tiled.shape} into {target.shape}."
+            )
+        target[:, :] = tiled
+
+    for key in ("q", "qdot"):
+        if key in nlp.x_bounds.keys() and key in nlp.x_init.keys():
+            _recenter_boundary_bounds(nlp.x_bounds[key], nlp.x_init[key].init)
+
+    periodic_nmpc._correct_init_guess_to_fit_bounds(corrected_input="states")
+    periodic_nmpc._correct_init_guess_to_fit_bounds(corrected_input="controls")
+    periodic_nmpc._sync_acados_state_bounds()
+    return {
+        "repeat_count": repeat_count,
+        "source_control_nodes": source_control_nodes,
+        "target_control_nodes": target_control_nodes,
+        "max_transfer_seam_error": max(seam_errors.values(), default=0.0),
+        "seam_errors": seam_errors,
+    }
+
+
 def _warmup_state_is_directly_comparable(key: str) -> bool:
     return key in ("q", "qdot") or key.startswith(("F_", "A_", "Tau1_", "Km_"))
 
@@ -3587,6 +3799,47 @@ def build_codegen_names(args: argparse.Namespace) -> tuple[str, str]:
     )
 
 
+def get_one_cycle_acados_continuation_source(
+    args: argparse.Namespace, echo: bool
+) -> _WarmupSolutionAdapter:
+    cache_path = _continuation_cache_path(args)
+    if cache_path.exists():
+        if echo:
+            print(f"acados_continuation_cache: hit ({cache_path.name})")
+        return _load_warmup_cache(cache_path)
+
+    source_args = deepcopy(args)
+    source_args.cycles_per_window = 1
+    source_args.n_windows = 1
+    source_args.single_shot = True
+    source_args.acados_horizon_continuation = False
+    source_args.max_acados_iterations = args.acados_continuation_source_max_iterations
+    source_args.acados_tolerance = None
+    source_args.acados_stationarity_tolerance = 1e-3
+    source_args.acados_diagnostics = False
+    source_args.codegen_tag = (
+        f"{args.codegen_tag}_continuation_1cyc"
+        if args.codegen_tag
+        else "continuation_1cyc"
+    )
+
+    if echo:
+        print("running_acados_one_cycle_continuation_source: True")
+    source_result = solve_case(source_args, echo=echo)
+    source_status = source_result.get("status")
+    if not _status_is_success(source_status):
+        raise RuntimeError(
+            "The one-cycle ACADOS continuation source did not converge: "
+            f"status={source_status} ({ACADOS_STATUS_NAMES.get(source_status, 'unknown')})."
+        )
+
+    source_solution = source_result["solution"]
+    _save_warmup_cache(cache_path, source_solution)
+    if echo:
+        print(f"acados_continuation_cache: saved ({cache_path.name})")
+    return _load_warmup_cache(cache_path)
+
+
 def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
     objectives = parse_objectives(args.objective)
 
@@ -3596,6 +3849,16 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
         raise ValueError("--cycles-per-window must be >= 1")
     if args.stimulations_per_cycle < 1:
         raise ValueError("--stimulations-per-cycle must be >= 1")
+    if args.acados_continuation_source_max_iterations < 1:
+        raise ValueError(
+            "--acados-continuation-source-max-iterations must be strictly positive."
+        )
+    if args.acados_horizon_continuation and args.cycles_per_window < 2:
+        raise ValueError(
+            "--acados-horizon-continuation requires --cycles-per-window >= 2."
+        )
+    if args.acados_horizon_continuation and args.solver != "acados":
+        raise ValueError("--acados-horizon-continuation requires --solver acados.")
     if (
         args.acados_stationarity_tolerance is not None
         and args.acados_stationarity_tolerance <= 0
@@ -3610,6 +3873,10 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
     periodic_ipopt_refinement_enabled = (
         args.periodic_ipopt_refinement and not args.disable_periodic_ipopt_refinement
     )
+
+    continuation_source = None
+    if args.acados_horizon_continuation:
+        continuation_source = get_one_cycle_acados_continuation_source(args, echo=echo)
 
     example_dir = Path(__file__).resolve().parent
     model_path = (
@@ -3757,6 +4024,11 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
             print(
                 "acados_standard_warmup_transfer: "
                 f"{args.acados_standard_warmup_transfer}"
+            )
+            print(f"acados_horizon_continuation: {args.acados_horizon_continuation}")
+            print(
+                "acados_continuation_source_max_iterations: "
+                f"{args.acados_continuation_source_max_iterations}"
             )
             print(
                 "periodic_fes_warmup_projection: "
@@ -3979,6 +4251,29 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
                 nmpc,
                 args.warmup_state_comparison_limit,
             )
+
+    if args.solver == "acados" and args.acados_horizon_continuation:
+        continuation_summary = tile_one_cycle_solution_to_periodic_nmpc(
+            nmpc, continuation_source
+        )
+        if echo:
+            print(
+                "acados_horizon_continuation_applied: "
+                f"repeats={continuation_summary['repeat_count']} "
+                f"source_controls={continuation_summary['source_control_nodes']} "
+                f"target_controls={continuation_summary['target_control_nodes']} "
+                "max_transfer_seam_error="
+                f"{continuation_summary['max_transfer_seam_error']:.6g}"
+            )
+            for summary in pulse_width_initial_guess_summary(nmpc):
+                print(
+                    "continuation_pulse_width: "
+                    f"{summary['key']} "
+                    f"min={summary['minimum']:.9g} "
+                    f"mean={summary['mean']:.9g} "
+                    f"max={summary['maximum']:.9g} "
+                    f"span={summary['span']:.9g}"
+                )
 
     if args.solver == "acados" and args.acados_project_qdot_from_q:
         project_qdot_initial_guess_from_q(nmpc)
