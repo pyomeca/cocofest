@@ -30,8 +30,8 @@ Supports predictive musculoskeletal simulation driven by FES, moving time horizo
   - [Available FES models](#available-fes-models)
   - [Musculoskeletal model driven by FES](#musculoskeletal-model-driven-by-fes)
   - [Moving time horizons](#moving-time-horizons)
-  - [Identification](#identification)
   - [Initial value problem](#initial-value-problem)
+  - [Identification](#identification)
   - [Summation truncation](#summation-truncation)
 - [Other](#other)
   - [Want to contribute?](#want-to-contribute)
@@ -42,11 +42,6 @@ Supports predictive musculoskeletal simulation driven by FES, moving time horizo
   - [Acknowledgements](#acknowledgements)
 
 </details>
-
-
-<p align="center"> 
-  <img src="" alt="">
-</p>
 
 <a id="about"></a>
 <h1 align="center">
@@ -69,7 +64,7 @@ and robust solver like [Ipopt](https://github.com/coin-or/Ipopt).
 
 > \[!IMPORTANT]
 >
-> `Cocofest` as no clinical clearance and should not be used for rehabilitation purposes. </br>
+> `Cocofest` has no clinical clearance and should not be used for rehabilitation purposes. </br>
 > Don't forget to <a href="https://github.com/pyomeca/cocofest/stargazers"><img src="https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fthepracticaldev.s3.amazonaws.com%2Fi%2F2nn6mhp57inp6rdxarzt.png" align="center" width="80" alt="Star the repository"> </a>
 > the repository to show your support and help us grow the community!
 
@@ -142,6 +137,7 @@ script under `getting_started` can be run with:
 ```bash
 python examples/getting_started/optimization/pulse_width_optimization.py
 ```
+See [`examples/README.md`](examples/README.md) for an index of every example folder and what each script demonstrates.
 
 <p align="center"> 
   <img src="https://i.imgur.com/zXE9tC6.png" alt="">
@@ -195,7 +191,7 @@ model = ModelMaker.create_model("ding2007_with_fatigue", stim_time=[0, 0.1, 0.2]
 > \[!NOTE]
 >
 > It is possible to implement more FES models into Cocofest.
-> Adventurous enough to code it by yourself, we are looking forward to read your [pull request](how-to-contribute).
+> Adventurous enough to code it by yourself, we are looking forward to read your [pull request](docs/contributing.md).
 > Feel free to reach out on discord or submit an issue if you need help.
 
 <a id="musculoskeletal-model-driven-by-fes"></a>
@@ -250,7 +246,39 @@ You can find more examples of musculoskeletal model driven by FES in the followi
 <a id="moving-time-horizons"></a>
 ## ⏳ Moving time horizons
 
-For longer time span simulation and apprehend muscle fatigue apparition, `Cocofest` implements moving time horizons (MHE).
+For longer time span simulation and apprehend muscle fatigue apparition, `Cocofest` implements moving time horizons (MHE)
+through the [`FesMhe`](cocofest/optimization/fes_mhe.py) (single muscle) and [`FesMheMsk`](cocofest/optimization/fes_mhe_multibody.py)
+(musculoskeletal) classes. Each window is solved, then the horizon slides forward by re-using the previous stimulation
+history to keep fatigue state continuous across windows.
+
+```python
+from cocofest import DingModelPulseWidthFrequencyWithFatigue, OcpFes, FesMhe
+
+model = DingModelPulseWidthFrequencyWithFatigue(stim_time=[...], sum_stim_truncation=10)
+dynamics_options = OcpFes.declare_dynamics_options(...)  # see full example for every argument
+
+mhe = FesMhe(
+    bio_model=model,
+    dynamics=dynamics_options,
+    cycle_len=cycle_len,
+    cycle_duration=cycle_duration,
+    n_cycles_simultaneous=n_cycles_simultaneous,
+    n_cycles_to_advance=1,
+    ...,
+)
+
+
+def update_functions(_mhe, cycle_idx, _sol):
+    return cycle_idx < n_cycles  # keep sliding the window until n_cycles is reached
+
+
+sol = mhe.solve_fes_mhe(update_functions, solver=..., total_cycles=n_cycles, cycle_solutions=...)
+```
+
+> \[!NOTE]
+>
+> See the full, runnable version in [`examples/getting_started/optimization/pulse_width_optimization_mhe.py`](examples/getting_started/optimization/pulse_width_optimization_mhe.py)
+> (single muscle) or [`examples/fes_multibody/cycling/cycling_pulse_width_mhe.py`](examples/fes_multibody/cycling/cycling_pulse_width_mhe.py) (musculoskeletal hand-cycling, below).
 
 ### 💻 A short MHE hand cycling FES-driven example
 
@@ -310,7 +338,41 @@ result, time = ivp.integrate()
 <a id="identification"></a>
 ## 🔎 Identification
 
-To personalize FES models to simulated or experimental force, `Cocofest` supports model identification using optimal control.
+To personalize FES models to simulated or experimental force, `Cocofest` supports model identification using optimal
+control, through the [`OcpFesId`](cocofest/optimization/fes_id_ocp.py) class. Model parameters are treated as
+optimization parameters and identified by minimizing the difference between a tracked force (simulated with
+[`IvpFes`](cocofest/integration/ivp_fes.py), or your own experimental data) and the model's predicted force.
+
+```python
+from cocofest import ModelMaker, OcpFesId, OcpFes
+from cocofest.identification.identification_method import DataExtraction
+
+model = ModelMaker.create_model("hmed2018", stim_time=stim_time, sum_stim_truncation=10)
+
+# force_tracking: simulated (via IvpFes) or experimental (time, force) data to fit
+force_at_node = DataExtraction.force_at_node_in_ocp(time, force, n_shooting, final_time)
+
+x_bounds, x_init = OcpFesId.set_x_bounds(model=model, force_tracking=force_at_node)
+u_bounds, u_init = OcpFesId.set_u_bounds(model=model, control_value=pulse_intensity_values, ...)
+
+additional_key_settings = OcpFesId.set_default_values(model)
+parameters, parameters_bounds, parameters_init = OcpFesId.set_parameters(
+    parameter_to_identify=["a_rest", "km_rest", "tau1_rest", "tau2"],
+    parameter_setting=additional_key_settings,
+    use_sx=True,
+)
+OcpFesId.update_model_param(model, parameters)
+
+ocp = OptimalControlProgram(bio_model=[model], x_bounds=x_bounds, x_init=x_init, u_bounds=u_bounds, u_init=u_init,
+                             parameters=parameters, parameter_bounds=parameters_bounds, parameter_init=parameters_init, ...)
+sol = ocp.solve()
+identified_a_rest = sol.parameters["a_rest"][0]
+```
+
+> \[!NOTE]
+>
+> See the full, runnable version in [`examples/getting_started/identification/muscle_model_id.py`](examples/getting_started/identification/muscle_model_id.py),
+> or [`examples/identification/force_model/`](examples/identification/force_model) for the Ding2003/Ding2007/Hmed2018 variants.
 
 ### 💻 A short model identification example
 
@@ -364,7 +426,8 @@ model = ModelMaker.create_model("ding2007", stim_time=stim_time, sum_stim_trunca
 ## 🙌 Want to contribute?
 
 We are always looking for new contributors to help us improve `Cocofest`. <br>
-Feel free to check our [contributing guidelines](docs/contributing.md) to get started.
+Feel free to check our [contributing guidelines](docs/contributing.md) to get started, and please read our
+[code of conduct](docs/code_of_conduct.md) beforehand.
 
 Don't know where to start? [Issues](https://github.com/pyomeca/cocofest/issues) tagged with "Good first issues" are a great place to begin!
 
@@ -377,8 +440,9 @@ Don't know where to start? [Issues](https://github.com/pyomeca/cocofest/issues) 
 
 <a id="citing"></a>
 ## 📝 Citing
-`Cocofest` is not yet published. <br>
-Meanwhile, if you use `Cocofest`, please cite the following zenodo link: [10.5281/zenodo.17068808](https://doi.org/10.5281/zenodo.17068808).
+The `Cocofest` companion paper is not published yet (submitted to JOSS). <br>
+Meanwhile, if you use `Cocofest`, please cite the software directly via its Zenodo archive:
+[10.5281/zenodo.17068808](https://doi.org/10.5281/zenodo.17068808)
 
 <a id="cited-in"></a>
 ## 📚 Cited in
