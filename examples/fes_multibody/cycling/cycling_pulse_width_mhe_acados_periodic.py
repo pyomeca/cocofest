@@ -23,7 +23,10 @@ from bioptim.optimization.receding_horizon_optimization import (
     RecedingHorizonOptimization,
 )
 
-from cycling_pulse_width_mhe import prepare_nmpc, set_fes_model
+try:
+    from .cycling_pulse_width_mhe import prepare_nmpc, set_fes_model
+except ImportError:
+    from cycling_pulse_width_mhe import prepare_nmpc, set_fes_model
 
 OBJECTIVE_TO_WEIGHT_INDEX = {"force": 0, "fatigue": 1, "control": 2}
 ACADOS_STATUS_NAMES = {
@@ -200,6 +203,77 @@ def pulse_width_activation_from_ipopt(
     return pulse_width_recruitment(muscle_model, pulse_width_values) / denominator
 
 
+def cyclic_moving_average(values: np.ndarray, window: int) -> np.ndarray:
+    values = np.asarray(values, dtype=float)
+    if window < 1:
+        raise ValueError("--stimulation-intensity-smoothing-window must be >= 1.")
+    if window % 2 == 0:
+        raise ValueError("--stimulation-intensity-smoothing-window must be odd.")
+    if window == 1:
+        return values.copy()
+
+    offsets = np.arange(window) - window // 2
+    return np.mean([np.roll(values, offset) for offset in offsets], axis=0)
+
+
+def fatigue_activation_from_values(
+    a_values: np.ndarray,
+    rest_a: float,
+    fatigue_gain: float,
+) -> np.ndarray:
+    a_values = np.asarray(a_values, dtype=float)
+    rest_a = max(float(rest_a), 1e-12)
+    fatigue_index = np.maximum(0.0, (rest_a - a_values) / rest_a)
+    return 1.0 + fatigue_gain * fatigue_index
+
+
+def stimulation_intensity_from_trajectories(
+    args: argparse.Namespace,
+    muscle_model,
+    pulse_width_values: np.ndarray,
+    a_values: np.ndarray | None,
+) -> np.ndarray:
+    pulse_width_values = np.asarray(pulse_width_values, dtype=float).reshape(-1)
+    pulse_factor = np.ones(pulse_width_values.shape)
+    fatigue_factor = np.ones(pulse_width_values.shape)
+
+    if args.stimulation_intensity_ipopt_source in (
+        "pulse_width",
+        "pulse_width_and_fatigue",
+    ):
+        pulse_factor = pulse_width_activation_from_ipopt(
+            muscle_model,
+            pulse_width_values,
+            args.stimulation_intensity_reference_pulse_width,
+        )
+        pulse_factor = cyclic_moving_average(
+            pulse_factor, args.stimulation_intensity_smoothing_window
+        )
+        pulse_factor = 1.0 + args.stimulation_intensity_homotopy_alpha * (
+            pulse_factor - 1.0
+        )
+
+    if (
+        args.stimulation_intensity_ipopt_source
+        in ("fatigue", "pulse_width_and_fatigue")
+        and a_values is not None
+    ):
+        fatigue_reference = (
+            float(a_values[0]) if np.asarray(a_values).size else muscle_model.a_scale
+        )
+        fatigue_factor = fatigue_activation_from_values(
+            a_values,
+            rest_a=fatigue_reference,
+            fatigue_gain=args.stimulation_intensity_fatigue_gain,
+        )
+
+    return np.clip(
+        pulse_factor * fatigue_factor,
+        args.stimulation_intensity_clip_low,
+        args.stimulation_intensity_clip_high,
+    )
+
+
 def ipopt_control_times(
     data, value_count: int, cycle_duration: float, args: argparse.Namespace
 ) -> np.ndarray:
@@ -226,27 +300,6 @@ def sample_periodic_values_by_index(
     offset = 1 if node_convention == "next" else 0
     indices = (np.arange(n_nodes) + offset) % values.size
     return values[indices]
-
-
-def fatigue_activation_from_ipopt(
-    data,
-    muscle_name: str,
-    source_times: np.ndarray,
-    fatigue_gain: float,
-) -> np.ndarray:
-    key = f"A_{muscle_name}"
-    if key not in data.files or "time" not in data.files:
-        return np.ones(source_times.shape)
-
-    time = np.asarray(data["time"], dtype=float).squeeze()
-    a_values = np.asarray(data[key], dtype=float).squeeze()
-    if time.ndim != 1 or a_values.ndim != 1 or time.size != a_values.size:
-        return np.ones(source_times.shape)
-
-    sampled_a = np.interp(source_times, time, a_values)
-    rest_a = max(float(sampled_a[0]), 1e-12)
-    fatigue_index = np.maximum(0.0, (rest_a - sampled_a) / rest_a)
-    return 1.0 + fatigue_gain * fatigue_index
 
 
 def build_ipopt_stimulation_intensity_timeseries(
@@ -293,31 +346,29 @@ def build_ipopt_stimulation_intensity_timeseries(
                 data, pulse_width_values.size, cycle_duration, args
             )
 
-            values = np.ones(pulse_width_values.shape)
-            if args.stimulation_intensity_ipopt_source in (
-                "pulse_width",
-                "pulse_width_and_fatigue",
-            ):
-                values *= pulse_width_activation_from_ipopt(
-                    muscle_model,
-                    pulse_width_values,
-                    args.stimulation_intensity_reference_pulse_width,
-                )
+            a_values = None
             if args.stimulation_intensity_ipopt_source in (
                 "fatigue",
                 "pulse_width_and_fatigue",
             ):
-                values *= fatigue_activation_from_ipopt(
-                    data,
-                    muscle_name,
-                    source_times,
-                    args.stimulation_intensity_fatigue_gain,
-                )
+                fatigue_key = f"A_{muscle_name}"
+                if fatigue_key in data.files and "time" in data.files:
+                    time = np.asarray(data["time"], dtype=float).squeeze()
+                    fatigue_values = np.asarray(
+                        data[fatigue_key], dtype=float
+                    ).squeeze()
+                    if (
+                        time.ndim == 1
+                        and fatigue_values.ndim == 1
+                        and time.size == fatigue_values.size
+                    ):
+                        a_values = np.interp(source_times, time, fatigue_values)
 
-            values = np.clip(
-                values,
-                args.stimulation_intensity_clip_low,
-                args.stimulation_intensity_clip_high,
+            values = stimulation_intensity_from_trajectories(
+                args,
+                muscle_model,
+                pulse_width_values,
+                a_values,
             )
             intensity[muscle_index, 0, :] = sample_periodic_values_by_index(
                 values,
@@ -326,6 +377,103 @@ def build_ipopt_stimulation_intensity_timeseries(
             )
 
     return intensity
+
+
+def build_initial_stimulation_intensity_timeseries(
+    args: argparse.Namespace,
+    model,
+    window_n_shooting: int,
+    cycle_duration: float,
+) -> np.ndarray | None:
+    if args.stimulation_intensity_source == "warmup":
+        return np.ones((len(model.muscles_dynamics_model), 1, window_n_shooting + 1))
+    return build_ipopt_stimulation_intensity_timeseries(
+        args,
+        model,
+        window_n_shooting,
+        cycle_duration,
+    )
+
+
+def build_warmup_stimulation_intensity_timeseries(
+    args: argparse.Namespace,
+    periodic_nmpc,
+) -> np.ndarray:
+    n_intervals = periodic_nmpc.nlp[0].ns
+    models = periodic_nmpc.nlp[0].model.muscles_dynamics_model
+    intensity = np.ones((len(models), 1, n_intervals + 1))
+
+    for muscle_index, muscle_model in enumerate(models):
+        muscle_name = muscle_model.muscle_name
+        control_key = f"last_pulse_width_{muscle_name}"
+        pulse_width_values = np.asarray(
+            periodic_nmpc.nlp[0].u_init[control_key].init, dtype=float
+        ).reshape(1, -1)
+        pulse_width_values = _resample_warmup_data(
+            pulse_width_values, n_intervals, has_terminal_node=False
+        )[0]
+
+        a_values = None
+        fatigue_key = f"A_{muscle_name}"
+        if fatigue_key in periodic_nmpc.nlp[0].x_init.keys():
+            fatigue_values = np.asarray(
+                periodic_nmpc.nlp[0].x_init[fatigue_key].init, dtype=float
+            ).reshape(1, -1)
+            fatigue_values = _resample_warmup_data(
+                fatigue_values, n_intervals + 1, has_terminal_node=True
+            )[0]
+            a_values = fatigue_values[:-1]
+
+        values = stimulation_intensity_from_trajectories(
+            args,
+            muscle_model,
+            pulse_width_values,
+            a_values,
+        )
+        intensity[muscle_index, 0, :] = sample_periodic_values_by_index(
+            values,
+            n_intervals + 1,
+            args.stimulation_intensity_node_convention,
+        )
+
+    return intensity
+
+
+def set_nmpc_stimulation_intensity(periodic_nmpc, intensity: np.ndarray) -> None:
+    if periodic_nmpc.nlp[0].numerical_data_timeseries is None:
+        periodic_nmpc.nlp[0].numerical_data_timeseries = {}
+    periodic_nmpc.nlp[0].numerical_data_timeseries["stimulation_intensity"] = intensity
+
+
+def stimulation_intensity_control_consistency(
+    args: argparse.Namespace,
+    periodic_nmpc,
+) -> list[dict[str, float | str]]:
+    numerical_data = periodic_nmpc.nlp[0].numerical_data_timeseries
+    if numerical_data is None or "stimulation_intensity" not in numerical_data:
+        return []
+
+    installed = np.asarray(numerical_data["stimulation_intensity"], dtype=float)
+    expected = build_warmup_stimulation_intensity_timeseries(args, periodic_nmpc)
+    metrics = []
+    for muscle_index, muscle_model in enumerate(
+        periodic_nmpc.nlp[0].model.muscles_dynamics_model
+    ):
+        installed_values = installed[muscle_index, 0, :]
+        expected_values = expected[muscle_index, 0, :]
+        difference = installed_values - expected_values
+        metrics.append(
+            {
+                "muscle": muscle_model.muscle_name,
+                "rmse": float(np.sqrt(np.mean(difference**2))),
+                "max_abs_error": float(np.max(np.abs(difference))),
+                "installed_min": float(np.min(installed_values)),
+                "installed_max": float(np.max(installed_values)),
+                "expected_min": float(np.min(expected_values)),
+                "expected_max": float(np.max(expected_values)),
+            }
+        )
+    return metrics
 
 
 def stimulation_intensity_summary(intensity: np.ndarray | None) -> str:
@@ -380,9 +528,12 @@ def build_argument_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--stimulation-intensity-source",
         type=str,
-        choices=("none", "ipopt"),
+        choices=("none", "ipopt", "warmup"),
         default="none",
-        help="Optional source for stage-wise lambda_i used by the periodic calcium-history forcing.",
+        help=(
+            "Optional source for stage-wise lambda_i. 'warmup' derives it from the "
+            "controls and fatigue states actually transferred to ACADOS."
+        ),
     )
     parser.add_argument(
         "--stimulation-intensity-ipopt-file",
@@ -410,6 +561,21 @@ def build_argument_parser() -> argparse.ArgumentParser:
         type=float,
         default=8.0,
         help="Gain multiplying the A-state fatigue index when deriving lambda_i from IPOPT data.",
+    )
+    parser.add_argument(
+        "--stimulation-intensity-homotopy-alpha",
+        type=float,
+        default=1.0,
+        help=(
+            "Blend applied to the pulse-width component: 0 keeps only the baseline/fatigue "
+            "component and 1 applies the complete pulse-width recruitment."
+        ),
+    )
+    parser.add_argument(
+        "--stimulation-intensity-smoothing-window",
+        type=int,
+        default=1,
+        help="Cyclic moving-average window applied to pulse-width recruitment before homotopy.",
     )
     parser.add_argument(
         "--stimulation-intensity-clip-low",
@@ -560,6 +726,15 @@ def build_argument_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--acados-standard-warmup-transfer",
+        choices=("advance", "phase_shift"),
+        default="phase_shift",
+        help=(
+            "Transfer the last IPOPT cycle with the historical receding-window rule, or preserve "
+            "the complete IPOPT trajectory and shift only the absolute crank angle by one turn."
+        ),
+    )
+    parser.add_argument(
         "--constant-crank-torque",
         type=float,
         default=-0.2,
@@ -576,6 +751,12 @@ def build_argument_parser() -> argparse.ArgumentParser:
         type=float,
         default=None,
         help="Optional ACADOS NLP convergence tolerance applied to stationarity, constraints and complementarity.",
+    )
+    parser.add_argument(
+        "--acados-stationarity-tolerance",
+        type=float,
+        default=None,
+        help="Optional stationarity-only tolerance; unlike --acados-tolerance it does not relax QP feasibility.",
     )
     parser.add_argument(
         "--acados-qp-solver",
@@ -1054,10 +1235,27 @@ def _warmup_cache_signature(
         "simulation_conditions": simulation_conditions,
         "cycling_info_keys": sorted(cycling_info.keys()),
         "sources": [
-            _source_stamp(Path(__file__).resolve()),
+            _source_stamp(model_path),
             _source_stamp(
                 (
                     Path(__file__).resolve().parent / "cycling_pulse_width_mhe.py"
+                ).resolve()
+            ),
+            _source_stamp(
+                (
+                    Path(__file__).resolve().parents[3]
+                    / "cocofest"
+                    / "models"
+                    / "dynamical_model.py"
+                ).resolve()
+            ),
+            _source_stamp(
+                (
+                    Path(__file__).resolve().parents[3]
+                    / "cocofest"
+                    / "models"
+                    / "ding2007"
+                    / "ding2007_with_fatigue.py"
                 ).resolve()
             ),
         ],
@@ -1130,20 +1328,10 @@ def _codegen_signature(args: argparse.Namespace) -> str:
         "effective_periodic_cn_sum_stimulation_mode": (
             effective_periodic_cn_sum_stimulation_mode(args)
         ),
-        "stimulation_intensity_source": args.stimulation_intensity_source,
-        "stimulation_intensity_ipopt_source": args.stimulation_intensity_ipopt_source,
-        "stimulation_intensity_reference_pulse_width": (
-            args.stimulation_intensity_reference_pulse_width
-        ),
-        "stimulation_intensity_fatigue_gain": args.stimulation_intensity_fatigue_gain,
-        "stimulation_intensity_clip_low": args.stimulation_intensity_clip_low,
-        "stimulation_intensity_clip_high": args.stimulation_intensity_clip_high,
-        "stimulation_intensity_node_convention": (
-            args.stimulation_intensity_node_convention
-        ),
         "acados_pulse_width_trust_radius": args.acados_pulse_width_trust_radius,
         "max_acados_iterations": args.max_acados_iterations,
         "acados_tolerance": args.acados_tolerance,
+        "acados_stationarity_tolerance": args.acados_stationarity_tolerance,
         "acados_qp_solver": args.acados_qp_solver,
         "acados_integrator_type": args.acados_integrator_type,
         "acados_collocation_type": args.acados_collocation_type,
@@ -1214,6 +1402,7 @@ def configure_acados_solver(
     generated_code_path: str,
     max_iterations: int,
     convergence_tolerance: float | None,
+    stationarity_tolerance: float | None,
     qp_solver: str,
     integrator_type: str,
     collocation_type: str,
@@ -1257,6 +1446,8 @@ def configure_acados_solver(
     solver.set_maximum_iterations(max_iterations)
     if convergence_tolerance is not None:
         solver.set_convergence_tolerance(convergence_tolerance)
+    if stationarity_tolerance is not None:
+        solver.set_nlp_solver_tol_stat(stationarity_tolerance)
     solver.set_print_level(print_level)
     solver.set_option_unsafe(collocation_type, "collocation_type")
     solver.set_option_unsafe(sim_method_jac_reuse, "sim_method_jac_reuse")
@@ -2196,15 +2387,38 @@ def _stack_initial_guess_values(container, variables, n_nodes: int) -> np.ndarra
     return values
 
 
+def _numerical_timeseries_at_node(nlp, node: int) -> np.ndarray:
+    timeseries = nlp.numerical_data_timeseries
+    if not timeseries:
+        return np.array([], dtype=float)
+
+    values = []
+    for array in timeseries.values():
+        array = np.asarray(array, dtype=float)
+        for element_index in range(array.shape[1]):
+            values.append(array[:, element_index, node])
+    return np.concatenate(values) if values else np.array([], dtype=float)
+
+
 def _full_dynamics_rhs(
-    nlp, time: float, dt: float, state: np.ndarray, control: np.ndarray
+    nlp,
+    time: float,
+    dt: float,
+    state: np.ndarray,
+    control: np.ndarray,
+    numerical_timeseries: np.ndarray | None = None,
 ) -> np.ndarray:
+    numerical_timeseries = (
+        np.array([], dtype=float)
+        if numerical_timeseries is None
+        else np.asarray(numerical_timeseries, dtype=float).reshape(-1)
+    )
     return _to_numpy_vector(
         nlp.dynamics_func(
             np.array([time, dt], dtype=float),
             state,
             control,
-            np.array([], dtype=float),
+            numerical_timeseries,
             np.array([], dtype=float),
             np.array([], dtype=float),
         )
@@ -2218,18 +2432,27 @@ def _rk4_full_dynamics_step(
     time: float,
     dt: float,
     n_substeps: int,
+    numerical_timeseries: np.ndarray | None = None,
 ) -> np.ndarray:
     sub_dt = dt / n_substeps
     next_state = np.array(state, dtype=float, copy=True)
     for substep in range(n_substeps):
         sub_time = time + substep * sub_dt
-        k1 = _full_dynamics_rhs(nlp, sub_time, sub_dt, next_state, control)
+        k1 = _full_dynamics_rhs(
+            nlp,
+            sub_time,
+            sub_dt,
+            next_state,
+            control,
+            numerical_timeseries,
+        )
         k2 = _full_dynamics_rhs(
             nlp,
             sub_time + 0.5 * sub_dt,
             sub_dt,
             next_state + 0.5 * sub_dt * k1,
             control,
+            numerical_timeseries,
         )
         k3 = _full_dynamics_rhs(
             nlp,
@@ -2237,9 +2460,15 @@ def _rk4_full_dynamics_step(
             sub_dt,
             next_state + 0.5 * sub_dt * k2,
             control,
+            numerical_timeseries,
         )
         k4 = _full_dynamics_rhs(
-            nlp, sub_time + sub_dt, sub_dt, next_state + sub_dt * k3, control
+            nlp,
+            sub_time + sub_dt,
+            sub_dt,
+            next_state + sub_dt * k3,
+            control,
+            numerical_timeseries,
         )
         next_state = next_state + sub_dt * (k1 + 2 * k2 + 2 * k3 + k4) / 6
     return next_state
@@ -2264,6 +2493,9 @@ def _full_dynamics_rollout_defect_details(
     states = _stack_initial_guess_values(nlp.x_init, nlp.states, n_state_nodes)
     controls = _stack_initial_guess_values(nlp.u_init, nlp.controls, n_control_nodes)
     dt = nmpc.cycle_duration / nmpc.cycle_len
+    stage_numerical_timeseries = [
+        _numerical_timeseries_at_node(nlp, node) for node in range(n_control_nodes)
+    ]
 
     predicted = np.empty_like(states)
     predicted[:, 0] = states[:, 0]
@@ -2275,6 +2507,7 @@ def _full_dynamics_rollout_defect_details(
             node * dt,
             dt,
             n_substeps=n_substeps,
+            numerical_timeseries=stage_numerical_timeseries[node],
         )
 
     defects = states[:, 1:] - predicted[:, 1:]
@@ -2361,6 +2594,7 @@ def _full_dynamics_rollout_defect_details(
                 dt,
                 states[:, node],
                 controls[:, node],
+                stage_numerical_timeseries[node],
             )
             dof_name = (
                 str(dof_names[dof_idx])
@@ -3257,6 +3491,42 @@ def apply_fatigue_warmstart_mode(
     return max_delta_by_key
 
 
+def apply_phase_shifted_warmup_initial_guess(
+    periodic_nmpc,
+    adapted_solution,
+) -> None:
+    states = adapted_solution.decision_states(to_merge=SolutionMerge.NODES)
+    controls = adapted_solution.decision_controls(to_merge=SolutionMerge.NODES)
+    wheel_shift = periodic_nmpc._wheel_cycle_shift(states)
+
+    for key in periodic_nmpc.nlp[0].x_init.keys():
+        if key not in states:
+            continue
+        values = np.asarray(states[key], dtype=float).copy()
+        if key == "q":
+            values[-1, :] += wheel_shift
+        target = periodic_nmpc.nlp[0].x_init[key].init
+        if values.shape != target.shape:
+            raise ValueError(
+                f"Cannot phase-shift warmup state {key}: expected {target.shape}, got {values.shape}."
+            )
+        target[:, :] = values
+
+    for key in periodic_nmpc.nlp[0].u_init.keys():
+        if key not in controls:
+            continue
+        values = np.asarray(controls[key], dtype=float)
+        target = periodic_nmpc.nlp[0].u_init[key].init
+        if values.shape != target.shape:
+            raise ValueError(
+                f"Cannot phase-shift warmup control {key}: expected {target.shape}, got {values.shape}."
+            )
+        target[:, :] = values
+
+    periodic_nmpc._correct_init_guess_to_fit_bounds(corrected_input="states")
+    periodic_nmpc._correct_init_guess_to_fit_bounds(corrected_input="controls")
+
+
 def apply_standard_warmup_to_periodic_nmpc(
     periodic_nmpc,
     warmup_solution,
@@ -3273,6 +3543,8 @@ def apply_standard_warmup_to_periodic_nmpc(
     force_projection_weight: float = 0.25,
     force_qdot_defect_limit: float = 3.0,
     force_adaptive_steps: int = 10,
+    stimulation_intensity_args: argparse.Namespace | None = None,
+    warmup_transfer_mode: str = "phase_shift",
     echo: bool = False,
 ):
     if fatigue_warmstart_mode not in ("continuous", "cyclical"):
@@ -3284,19 +3556,28 @@ def apply_standard_warmup_to_periodic_nmpc(
         periodic_nmpc, warmup_solution
     )
     periodic_nmpc.advance_window_bounds_states(adapted_solution)
-    previous_fatigue_warmstart_mode = getattr(
-        periodic_nmpc, "continuous_state_initial_guess_mode", "continuous"
-    )
-    periodic_nmpc.continuous_state_initial_guess_mode = fatigue_warmstart_mode
-    try:
-        periodic_nmpc.advance_window_initial_guess_states(adapted_solution)
-    finally:
-        periodic_nmpc.continuous_state_initial_guess_mode = (
-            previous_fatigue_warmstart_mode
+    if warmup_transfer_mode == "phase_shift":
+        apply_phase_shifted_warmup_initial_guess(periodic_nmpc, adapted_solution)
+        fatigue_warmstart_summary = {}
+    elif warmup_transfer_mode == "advance":
+        previous_fatigue_warmstart_mode = getattr(
+            periodic_nmpc, "continuous_state_initial_guess_mode", "continuous"
         )
-    fatigue_warmstart_summary = apply_fatigue_warmstart_mode(
-        periodic_nmpc, adapted_solution, fatigue_warmstart_mode
-    )
+        periodic_nmpc.continuous_state_initial_guess_mode = fatigue_warmstart_mode
+        try:
+            periodic_nmpc.advance_window_initial_guess_states(adapted_solution)
+        finally:
+            periodic_nmpc.continuous_state_initial_guess_mode = (
+                previous_fatigue_warmstart_mode
+            )
+        fatigue_warmstart_summary = apply_fatigue_warmstart_mode(
+            periodic_nmpc, adapted_solution, fatigue_warmstart_mode
+        )
+        periodic_nmpc.advance_window_initial_guess_controls(adapted_solution)
+    else:
+        raise ValueError(
+            "--acados-standard-warmup-transfer must be 'advance' or 'phase_shift'."
+        )
     if echo and fatigue_warmstart_summary:
         print(
             "acados_fatigue_warmstart: "
@@ -3304,7 +3585,19 @@ def apply_standard_warmup_to_periodic_nmpc(
             f"max_delta={max(fatigue_warmstart_summary.values()):.6g} "
             f"keys={len(fatigue_warmstart_summary)}"
         )
-    periodic_nmpc.advance_window_initial_guess_controls(adapted_solution)
+    if (
+        stimulation_intensity_args is not None
+        and stimulation_intensity_args.stimulation_intensity_source == "warmup"
+    ):
+        warmup_intensity = build_warmup_stimulation_intensity_timeseries(
+            stimulation_intensity_args, periodic_nmpc
+        )
+        set_nmpc_stimulation_intensity(periodic_nmpc, warmup_intensity)
+        if echo:
+            print(
+                "warmup_stimulation_intensity_timeseries: "
+                f"{stimulation_intensity_summary(warmup_intensity)}"
+            )
 
     warmup_states = adapted_solution.decision_states(to_merge=SolutionMerge.NODES)
     dt = periodic_nmpc.cycle_duration / periodic_nmpc.cycle_len
@@ -3762,6 +4055,19 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
         raise ValueError("--cycles-per-window must be >= 1")
     if args.stimulations_per_cycle < 1:
         raise ValueError("--stimulations-per-cycle must be >= 1")
+    if not 0.0 <= args.stimulation_intensity_homotopy_alpha <= 1.0:
+        raise ValueError(
+            "--stimulation-intensity-homotopy-alpha must be between 0 and 1."
+        )
+    if args.stimulation_intensity_smoothing_window < 1:
+        raise ValueError("--stimulation-intensity-smoothing-window must be >= 1.")
+    if args.stimulation_intensity_smoothing_window % 2 == 0:
+        raise ValueError("--stimulation-intensity-smoothing-window must be odd.")
+    if (
+        args.acados_stationarity_tolerance is not None
+        and args.acados_stationarity_tolerance <= 0
+    ):
+        raise ValueError("--acados-stationarity-tolerance must be strictly positive.")
     if (
         args.acados_pulse_width_trust_radius is not None
         and args.acados_pulse_width_trust_radius < 0
@@ -3805,7 +4111,7 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
         periodic_cn_sum_approximation=periodic_cn_sum_approximation,
         periodic_cn_sum_stimulation_mode=periodic_cn_sum_stimulation_mode,
     )
-    stimulation_intensity_timeseries = build_ipopt_stimulation_intensity_timeseries(
+    stimulation_intensity_timeseries = build_initial_stimulation_intensity_timeseries(
         args,
         model,
         total_stimulations,
@@ -3933,6 +4239,14 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
             f"{args.stimulation_intensity_node_convention}"
         )
         print(
+            "stimulation_intensity_homotopy_alpha: "
+            f"{args.stimulation_intensity_homotopy_alpha}"
+        )
+        print(
+            "stimulation_intensity_smoothing_window: "
+            f"{args.stimulation_intensity_smoothing_window}"
+        )
+        print(
             "stimulation_intensity_timeseries: "
             f"{stimulation_intensity_summary(stimulation_intensity_timeseries)}"
         )
@@ -3948,6 +4262,10 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
             print(
                 "acados_fatigue_warmstart_mode: "
                 f"{args.acados_fatigue_warmstart_mode}"
+            )
+            print(
+                "acados_standard_warmup_transfer: "
+                f"{args.acados_standard_warmup_transfer}"
             )
             print(
                 "periodic_fes_warmup_projection: "
@@ -4016,6 +4334,10 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
             print(f"acados_newton_tol: {args.acados_newton_tol}")
             print(f"acados_jac_reuse: {args.acados_jac_reuse}")
             print(f"acados_tolerance: {args.acados_tolerance}")
+            print(
+                "acados_stationarity_tolerance: "
+                f"{args.acados_stationarity_tolerance}"
+            )
             print(f"acados_hessian_approx: {args.acados_hessian_approx}")
             print(f"acados_nlp_solver_type: {args.acados_nlp_solver_type}")
             print(
@@ -4108,8 +4430,30 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
             force_projection_weight=args.periodic_fes_warmup_force_projection_weight,
             force_qdot_defect_limit=(args.periodic_fes_warmup_force_qdot_defect_limit),
             force_adaptive_steps=args.periodic_fes_warmup_force_adaptive_steps,
+            stimulation_intensity_args=args,
+            warmup_transfer_mode=args.acados_standard_warmup_transfer,
             echo=echo,
         )
+        if args.stimulation_intensity_source == "warmup":
+            stimulation_intensity_timeseries = np.asarray(
+                nmpc.nlp[0].numerical_data_timeseries["stimulation_intensity"],
+                dtype=float,
+            )
+            simulation_conditions["stimulation_intensity_timeseries"] = (
+                stimulation_intensity_timeseries
+            )
+            nmpc_simulation_conditions["stimulation_intensity_timeseries"] = (
+                stimulation_intensity_timeseries
+            )
+        if echo and args.stimulation_intensity_source != "none":
+            for metric in stimulation_intensity_control_consistency(args, nmpc):
+                print(
+                    "stimulation_intensity_control_consistency: "
+                    f"{metric['muscle']} rmse={metric['rmse']:.6g} "
+                    f"max_abs_error={metric['max_abs_error']:.6g} "
+                    f"installed=[{metric['installed_min']:.6g}, {metric['installed_max']:.6g}] "
+                    f"warmup_expected=[{metric['expected_min']:.6g}, {metric['expected_max']:.6g}]"
+                )
         if (
             args.solver == "acados"
             and args.control_regularization_target_source == "warmup"
@@ -4224,6 +4568,7 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
             generated_code_path=generated_code_path,
             max_iterations=args.max_acados_iterations,
             convergence_tolerance=args.acados_tolerance,
+            stationarity_tolerance=args.acados_stationarity_tolerance,
             qp_solver=args.acados_qp_solver,
             integrator_type=args.acados_integrator_type,
             collocation_type=args.acados_collocation_type,
