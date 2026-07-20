@@ -1,7 +1,10 @@
 import os
+from types import SimpleNamespace
 
 import numpy as np
+from casadi import DM
 from bioptim import (
+    OdeSolver,
     Solver,
     SolutionMerge,
 )
@@ -17,6 +20,66 @@ from examples.fes_multibody.elbow_flexion import elbow_flexion_task as ocp_modul
 
 biomodel_folder = os.path.dirname(model_path.__file__)
 biorbd_model_path = biomodel_folder + "/Arm26/arm26_biceps_triceps.bioMod"
+
+
+class _StateDotMapping(dict):
+    def __init__(self, values):
+        super().__init__(values)
+        self.scaled = SimpleNamespace(cx=DM.zeros(len(values), 1))
+
+
+def test_multibody_collocation_defects_include_fes_states(monkeypatch):
+    from cocofest.models import dynamical_model
+
+    state_slopes = _StateDotMapping(
+        {
+            "Cn_BIClong": DM([10.0]),
+            "F_BIClong": DM([20.0]),
+            "q": DM([30.0]),
+            "qdot": DM([40.0]),
+        }
+    )
+    nlp = SimpleNamespace(
+        states={"q": DM([0.0]), "qdot": DM([0.0])},
+        controls={},
+        states_dot=state_slopes,
+        dynamics_type=SimpleNamespace(ode_solver=OdeSolver.COLLOCATION()),
+        dt=0.1,
+        model=SimpleNamespace(
+            forward_dynamics=lambda with_contact: (lambda q, qdot, tau, external_forces, parameters: DM([4.0]))
+        ),
+        get_external_forces=lambda *args: DM.zeros(0, 1),
+    )
+    model = SimpleNamespace(
+        activate_residual_torque=False,
+        with_contact=False,
+        muscles_joint_torque=lambda *args: (DM([0.0]), DM([1.0, 2.0])),
+    )
+
+    monkeypatch.setattr(
+        dynamical_model.DynamicsFunctions,
+        "get",
+        staticmethod(lambda variable, values: variable),
+    )
+    monkeypatch.setattr(
+        dynamical_model.DynamicsFunctions,
+        "compute_qdot",
+        staticmethod(lambda nlp, q, qdot: DM([3.0])),
+    )
+
+    evaluation = FesMskModel.dynamics(
+        model,
+        time=DM([0.0]),
+        states=DM.zeros(4, 1),
+        controls=DM.zeros(0, 1),
+        parameters=DM.zeros(0, 1),
+        algebraic_states=DM.zeros(0, 1),
+        numerical_data_timeseries=DM.zeros(0, 1),
+        nlp=nlp,
+    )
+
+    assert evaluation.defects.shape == (4, 1)
+    np.testing.assert_allclose(np.array(evaluation.defects).squeeze(), [0.9, 1.8, 2.7, 3.6])
 
 
 def test_pulse_width_multi_muscle_fes_dynamics():
