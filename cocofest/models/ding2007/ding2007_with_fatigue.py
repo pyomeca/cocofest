@@ -93,7 +93,7 @@ class DingModelPulseWidthFrequencyWithFatigue(DingModelPulseWidthFrequency):
         # This is where you can serialize your models
         # This is useful if you want to save your models and load it later
 
-        # Check commented for nmpc test but might introduce a non continuity from personalized model
+        # Check commented for mhe test but might introduce a non continuity from personalized model
 
         return (
             DingModelPulseWidthFrequencyWithFatigue,

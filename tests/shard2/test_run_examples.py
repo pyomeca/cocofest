@@ -11,7 +11,7 @@ EXAMPLE_MODULES = [
     "examples.getting_started.optimization.frequency_optimization",
     "examples.getting_started.optimization.pulse_intensity_optimization",
     "examples.getting_started.optimization.pulse_width_optimization",
-    "examples.getting_started.optimization.pulse_width_optimization_nmpc",
+    "examples.getting_started.optimization.pulse_width_optimization_mhe",
     "examples.identification.force_model.ding2003_model_id",
     "examples.identification.force_model.ding2007_model_id",
     "examples.identification.force_model.hmed2018_model_id",

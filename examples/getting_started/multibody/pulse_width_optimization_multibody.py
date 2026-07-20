@@ -5,6 +5,8 @@ The stimulation frequency is fixed at 33hz and the pulse width is optimized to s
 elbow residual torque control.
 """
 
+from pathlib import Path
+
 import numpy as np
 
 import cocofest._matplotlib_compat  # Temporary fix, see cocofest/_matplotlib_compat.py
@@ -18,6 +20,10 @@ from bioptim import (
     ParameterList,
 )
 from cocofest import DingModelPulseWidthFrequencyWithFatigue, OcpFesMsk, FesMskModel, CustomObjective
+
+DEFAULT_BIORBD_PATH = str(
+    Path(__file__).resolve().parent.parent.parent / "msk_models" / "Arm26" / "arm26_biceps_1dof.bioMod"
+)
 
 
 def prepare_ocp(model: FesMskModel, final_time: float, external_force: dict, msk_info: dict):
@@ -70,7 +76,7 @@ def prepare_ocp(model: FesMskModel, final_time: float, external_force: dict, msk
     )
 
 
-def main(plot=True, biorbd_path="../../msk_models/Arm26/arm26_biceps_1dof.bioMod"):
+def main(plot=True, biorbd_path=DEFAULT_BIORBD_PATH):
     simulation_ending_time = 1
     model = FesMskModel(
         name=None,

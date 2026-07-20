@@ -2,6 +2,8 @@
 This example is used to compare the effect of the muscle force-length, force-velocity, and passive-force relationships.
 """
 
+from pathlib import Path
+
 import numpy as np
 
 import matplotlib.pyplot as plt
@@ -21,6 +23,8 @@ from bioptim import (
 )
 
 from cocofest import DingModelPulseWidthFrequencyWithFatigue, OcpFesMsk, FesMskModel, CustomObjective, OcpFes
+
+MSK_MODELS_DIR = Path(__file__).resolve().parent.parent.parent / "msk_models"
 
 
 def prepare_ocp(model: FesMskModel, final_time: float, msk_info: dict, fixed_pw):
@@ -95,7 +99,7 @@ for key in keys:
     stim_time = np.linspace(0, 1, 11)[:-1]
     model = FesMskModel(
         name=None,
-        biorbd_path="../../msk_models/Arm26/arm26_biceps_1dof.bioMod",
+        biorbd_path=str(MSK_MODELS_DIR / "Arm26" / "arm26_biceps_1dof.bioMod"),
         muscles_model=[DingModelPulseWidthFrequencyWithFatigue(muscle_name="BIClong")],
         stim_time=list(stim_time),
         activate_force_length_relationship=relationship_activation_dict[key][0],

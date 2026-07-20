@@ -14,11 +14,11 @@ from bioptim import (
     ExternalForceSetTimeSeries,
     ControlType,
 )
-from .fes_nmpc import FesNmpc
+from .fes_mhe import FesMhe
 from ..models.dynamical_model import FesMskModel
 
 
-class FesNmpcMsk(FesNmpc):
+class FesMheMsk(FesMhe):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
 
@@ -206,7 +206,7 @@ class FesNmpcMsk(FesNmpc):
             offset = shifted_stim[-1] + (current_stim[1] - current_stim[0])
         return stim_time
 
-    def solve_fes_nmpc(
+    def solve_fes_mhe(
         self,
         update_functions,
         solver: Solver.IPOPT,
@@ -229,12 +229,12 @@ class FesNmpcMsk(FesNmpc):
         )
         model = self.nlp[0].model
 
-        total_nmpc_duration = self.cycle_duration * total_cycles
-        total_nmpc_shooting_len = self.cycle_len * total_cycles
+        total_mhe_duration = self.cycle_duration * total_cycles
+        total_mhe_shooting_len = self.cycle_len * total_cycles
 
-        external_force_set = ExternalForceSetTimeSeries(nb_frames=total_nmpc_shooting_len)
+        external_force_set = ExternalForceSetTimeSeries(nb_frames=total_mhe_shooting_len)
         external_force_array = np.array(external_force["torque"])
-        reshape_values_array = np.tile(external_force_array[:, np.newaxis], (1, total_nmpc_shooting_len))
+        reshape_values_array = np.tile(external_force_array[:, np.newaxis], (1, total_mhe_shooting_len))
         external_force_set.add_torque(
             segment=external_force["Segment_application"], values=reshape_values_array, force_name="resistance_torque"
         )
@@ -245,7 +245,7 @@ class FesNmpcMsk(FesNmpc):
             self.nlp[0].model.muscles_dynamics_model[0].stim_time = all_stim_time
             numerical_data_time_series, stim_idx_at_node_list = model.muscles_dynamics_model[
                 0
-            ].get_numerical_data_time_series(total_nmpc_shooting_len, total_nmpc_duration)
+            ].get_numerical_data_time_series(total_mhe_shooting_len, total_mhe_duration)
             numerical_time_series.update(numerical_data_time_series)
 
         sol[0].ocp.nlp[0].numerical_data_timeseries = numerical_time_series

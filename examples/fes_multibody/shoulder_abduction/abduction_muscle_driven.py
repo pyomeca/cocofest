@@ -3,6 +3,7 @@ This example will perform an optimal control program for an abduction/adduction 
 """
 
 import pickle
+from pathlib import Path
 from sys import platform
 
 import matplotlib.pyplot as plt
@@ -399,7 +400,7 @@ def main(save=False):
     save_sol = save
 
     # --- Model choice --- #
-    model_path = "../../msk_models/Seth/Seth_abd.bioMod"
+    model_path = str(Path(__file__).resolve().parent.parent.parent / "msk_models" / "Seth" / "Seth_abd.bioMod")
 
     # --- Abduction parameters --- #
     abduction_info = {

@@ -15,9 +15,9 @@ from bioptim import (
 from cocofest.models.ding2007.ding2007_with_fatigue import DingModelPulseWidthFrequencyWithFatigue
 
 
-class FesNmpc(MultiCyclicNonlinearModelPredictiveControl):
+class FesMhe(MultiCyclicNonlinearModelPredictiveControl):
     def __init__(self, **kwargs):
-        super(FesNmpc, self).__init__(**kwargs)
+        super(FesMhe, self).__init__(**kwargs)
         self.all_models = []
         self.cycle_duration = kwargs["cycle_duration"]
         self.n_cycles_simultaneous = kwargs["n_cycles_simultaneous"]
@@ -26,16 +26,16 @@ class FesNmpc(MultiCyclicNonlinearModelPredictiveControl):
         self.use_sx = kwargs["use_sx"]
 
     def advance_window_bounds_states(self, sol, n_cycles_simultaneous=None, **extra):
-        super(FesNmpc, self).advance_window_bounds_states(sol)
+        super(FesMhe, self).advance_window_bounds_states(sol)
         self.update_stim()
         return True
 
     def advance_window_initial_guess_states(self, sol, n_cycles_simultaneous=None):
-        super(FesNmpc, self).advance_window_initial_guess_states(sol)
+        super(FesMhe, self).advance_window_initial_guess_states(sol)
         return True
 
     def advance_window_bounds_controls(self, sol, n_cycles_simultaneous=None, **extra):
-        bound_have_changed = super(FesNmpc, self).advance_window_bounds_controls(sol)
+        bound_have_changed = super(FesMhe, self).advance_window_bounds_controls(sol)
         return bound_have_changed
 
     @staticmethod
@@ -117,7 +117,7 @@ class FesNmpc(MultiCyclicNonlinearModelPredictiveControl):
         )
         return combined_model
 
-    def solve_fes_nmpc(
+    def solve_fes_mhe(
         self,
         update_functions,
         solver: Solver.IPOPT,
@@ -139,24 +139,24 @@ class FesNmpc(MultiCyclicNonlinearModelPredictiveControl):
         )
         model = self.nlp[0].model
 
-        total_nmpc_duration = self.cycle_duration * total_cycles
+        total_mhe_duration = self.cycle_duration * total_cycles
         stim_time = self.nlp[0].model.stim_time
         step = stim_time[1] - stim_time[0]
         stim_interval = int(1 / step) + 1
         all_stim_time = [
             val
-            for start in range(0, total_nmpc_duration, 2)
+            for start in range(0, total_mhe_duration, 2)
             for val in np.linspace(start, start + 1, stim_interval)[:-1]
         ]
         self.nlp[0].model.stim_time = all_stim_time
-        total_nmpc_shooting_len = int(
+        total_mhe_shooting_len = int(
             self.nlp[0].model.get_n_shooting(self.cycle_duration * self.n_cycles_simultaneous)
             / self.n_cycles_simultaneous
             * total_cycles
         )
 
         numerical_data_time_series, stim_idx_at_node_list = model.get_numerical_data_time_series(
-            total_nmpc_shooting_len, total_nmpc_duration, all_stim_time
+            total_mhe_shooting_len, total_mhe_duration, all_stim_time
         )
         sol[0].ocp.nlp[0].numerical_data_timeseries = numerical_data_time_series
 

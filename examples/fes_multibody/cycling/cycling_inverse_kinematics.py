@@ -2,6 +2,8 @@
 This example will do an inverse kinematics and dynamics of a 100 steps hand cycling motion.
 """
 
+from pathlib import Path
+
 import numpy as np
 import matplotlib.pyplot as plt
 from scipy.interpolate import interp1d
@@ -10,6 +12,8 @@ import biorbd
 from pyorerun import BiorbdModel, PhaseRerun
 
 from cocofest import get_circle_coord
+
+MSK_MODELS_DIR = Path(__file__).resolve().parent.parent.parent / "msk_models"
 
 
 def main(show_plot=True, animate=True):
@@ -22,7 +26,7 @@ def main(show_plot=True, animate=True):
     radius = 0.1
 
     # Load a predefined model
-    model = biorbd.Model("../../msk_models/Seth/Modified_UL_Seth_2D_Cycling_for_IK.bioMod")
+    model = biorbd.Model(str(MSK_MODELS_DIR / "Seth" / "Modified_UL_Seth_2D_Cycling_for_IK.bioMod"))
 
     # Define the marker target to match
     z = model.markers(np.array([0] * model.nbQ()))[0].to_array()[2]
@@ -75,7 +79,7 @@ def main(show_plot=True, animate=True):
 
     # pyorerun animation
     if animate:
-        biorbd_model = biorbd.Model("../../msk_models/Seth/Modified_UL_Seth_2D_Cycling.bioMod")
+        biorbd_model = biorbd.Model(str(MSK_MODELS_DIR / "Seth" / "Modified_UL_Seth_2D_Cycling.bioMod"))
         prr_model = BiorbdModel.from_biorbd_object(biorbd_model)
 
         nb_seconds = 1

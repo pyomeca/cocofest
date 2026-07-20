@@ -162,7 +162,7 @@ def set_objective_functions(muscle_fatigue_key, cost_fun_weight):
 # --------------------#
 #    OCP functions    #
 # --------------------#
-def prepare_nmpc_bo(
+def prepare_mhe_bo(
     model,
     mhe_info: dict,
     cycling_info: dict,
@@ -221,7 +221,7 @@ def prepare_nmpc_bo(
     # --- Update model with forces / params --- #
     model = base.updating_model(model=model, external_force_set=external_force_set)
 
-    return base.MyCyclicNMPC(
+    return base.MyCyclicMHE(
         bio_model=[model],
         dynamics=dynamics_options,
         cycle_len=cycle_len,
@@ -261,22 +261,22 @@ def run_optim_bo(
     cycling_info = dict(cycling_info)
     cycling_info["turn_number"] = sim_cond["n_cycles_simultaneous"]  # 1 turn / cycle
 
-    # --- Build NMPC with per-muscle objective --- #
-    nmpc = prepare_nmpc_bo(model, mhe_info, cycling_info, sim_cond)
+    # --- Build MHE with per-muscle objective --- #
+    mhe = prepare_mhe_bo(model, mhe_info, cycling_info, sim_cond)
 
     # --- IPOPT settings --- #
     solver = Solver.IPOPT(show_online_optim=False, _max_iter=2000, show_options=dict(show_bounds=True))
     solver.set_linear_solver("ma57" if platform == "linux" else "mumps")
 
     # Plot penalties
-    nmpc.add_plot_penalty(CostType.ALL)
+    mhe.add_plot_penalty(CostType.ALL)
 
     # --- Solve window by window --- #
-    def _update(_nmpc, cycle_idx, _sol):
+    def _update(_mhe, cycle_idx, _sol):
         print("Optimized window n°", cycle_idx)
         return cycle_idx < mhe_info["n_cycles"]
 
-    sol = nmpc.solve_fes_nmpc(
+    sol = mhe.solve_fes_mhe(
         _update,
         solver=solver,
         total_cycles=mhe_info["n_cycles"],
@@ -295,7 +295,7 @@ def run_optim_bo(
         base.save_sol_in_pkl(
             sol,
             sim_cond,
-            nmpc=nmpc,
+            mhe=mhe,
             is_initial_guess=False,
             torque=cycling_info["resistive_torque"]["torque"][-1],
         )
@@ -704,7 +704,12 @@ def bayes_optimize_weights(
 
 def main_bayes():
     # --- Model choice --- #
-    model_path = "../../msk_models/Wu/Modified_Wu_Shoulder_Model_Cycling.bioMod"
+    model_path = str(
+        Path(__file__).resolve().parent.parent.parent
+        / "msk_models"
+        / "Wu"
+        / "Modified_Wu_Shoulder_Model_Cycling.bioMod"
+    )
 
     # --- MHE parameters --- #
     ode_solver = OdeSolver.COLLOCATION(polynomial_degree=3, method="radau")

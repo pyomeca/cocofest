@@ -1,7 +1,10 @@
 import numpy as np
 import matplotlib
 
-matplotlib.use("TkAgg")
+try:
+    matplotlib.use("TkAgg")
+except (ImportError, RuntimeError):
+    pass
 import matplotlib.pyplot as plt
 
 from bioptim import Solution

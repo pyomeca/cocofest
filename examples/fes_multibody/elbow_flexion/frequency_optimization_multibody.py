@@ -4,11 +4,17 @@ This ocp was build to produce a elbow motion from 5 to 120 degrees.
 The stimulation frequency is fixed at 10 Hz and the elbow torque control is optimized to satisfy the flexion.
 """
 
+from pathlib import Path
+
 import numpy as np
 
 from cocofest import DingModelFrequencyWithFatigue, OcpFesMsk, FesMskModel
 
 from bioptim import OdeSolver, ObjectiveList, ObjectiveFcn, OptimalControlProgram, ControlType
+
+DEFAULT_BIORBD_PATH = str(
+    Path(__file__).resolve().parent.parent.parent / "msk_models" / "Arm26" / "arm26_biceps_1dof.bioMod"
+)
 
 
 def prepare_ocp(model, final_time: float, resistive_torque, msk_info):
@@ -63,7 +69,7 @@ def prepare_ocp(model, final_time: float, resistive_torque, msk_info):
     )
 
 
-def main(plot=True, biorbd_path="../../msk_models/Arm26/arm26_biceps_1dof.bioMod"):
+def main(plot=True, biorbd_path=DEFAULT_BIORBD_PATH):
     simulation_ending_time = 1
     model = FesMskModel(
         name=None,

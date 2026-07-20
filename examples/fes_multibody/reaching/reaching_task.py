@@ -5,6 +5,8 @@ defined in the bioMod file. At the end of the simulation 2 files will be created
 The files will contain the time, states, controls and parameters of the ocp.
 """
 
+from pathlib import Path
+
 import numpy as np
 
 import cocofest._matplotlib_compat  # Temporary fix, see cocofest/_matplotlib_compat.py
@@ -28,6 +30,10 @@ from cocofest import (
     OcpFesMsk,
     FesMskModel,
     CustomObjective,
+)
+
+DEFAULT_MODEL_PATH = str(
+    Path(__file__).resolve().parent.parent.parent / "msk_models" / "Arm26" / "arm26_with_reaching_target.bioMod"
 )
 
 
@@ -138,7 +144,7 @@ def prepare_ocp(
     )
 
 
-def main(plot=True, model_path="../../msk_models/Arm26/arm26_with_reaching_target.bioMod"):
+def main(plot=True, model_path=DEFAULT_MODEL_PATH):
     final_time = 1
     model = initialize_model(final_time, model_path)
     ocp = prepare_ocp(model=model, final_time=final_time, max_bound=0.0006)

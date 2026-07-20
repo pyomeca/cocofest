@@ -47,7 +47,7 @@ shortening rehabilitation sessions and diminishing therapeutic benefit. Conseque
 optimal control-driven FES are gaining interest in personalizing and improving FES rehabilitation efficiency, meanwhile
 delaying muscle fatigue [@co2025optimal]. To address this need, we designed `Cocofest` (Custom Optimal COntrol for
 Functional Electrical STimulation), an open-source Python package for optimal control-driven FES. `Cocofest` provides a
-framework to generate personalized pulse trains (Fig. 1) based on nonlinear dynamics models for FES (Table. 1), for
+framework to generate personalized pulse trains (Fig. 1) based on nonlinear dynamics models for FES, for
 several musculoskeletal models and motor tasks. The package includes over 10 examples, covering optimization of
 FES-related pulse train parameters (including frequency, pulse width, pulse intensity), FES model parameters
 identification from in-vivo measurements, and long duration predictive simulations.
@@ -75,7 +75,7 @@ various OCP transcriptions (e.g., direct collocation or direct multiple shooting
 differential equations [@puchaud2023direct], often embedded in FES models. Muscle fatigue is the primary challenge in
 FES. Enabling the development and comparison of different OCP formulations could help address research questions, yield
 novel stimulation patterns and enhance fatigue reduction. Moreover, using receding-horizon estimation for longer 
-simulations reduces the computational complexity associated with time-varying dynamics (e.g., fatigue)
+simulations reduces the computational complexity [@qu2009computation] associated with time-varying dynamics (e.g., fatigue)
 [@ding2003mathematical]. 
 
 Thirdly, predictive simulations of FES-driven or FES-assisted motions (e.g., walking, cycling, reaching, and grasping)
@@ -100,11 +100,11 @@ is expected to accelerate the increase of technology readiness level by strength
 # State of the Field
 
 Several open-source toolkits support optimal control computations for musculoskeletal biomechanics, such as:
-`OpenSim Moco` [@dembia2020opensim], a C++ OpenSim extension that enables motion tracking and prediction using efficient
+- `OpenSim Moco` [@dembia2020opensim], a C++ OpenSim extension that enables motion tracking and prediction using efficient
 direct-collocation formulations coupled to nonlinear programming solvers. 
-`SCONE` [@geijtenbeek2019], a C++/C predictive-simulation environment for human and animal motion that optimizes
+- `SCONE` [@geijtenbeek2019], a C++/C predictive-simulation environment for human and animal motion that optimizes
 neuromusculoskeletal controllers to achieve task-level objectives (e.g., stable walking at a target speed).
-`Bioptim` [@michaud2022bioptim], a Python optimal-control framework for biomechanics that supports both direct collocation
+- `Bioptim` [@michaud2022bioptim], a Python optimal-control framework for biomechanics that supports both direct collocation
 and multiple shooting, with flexible interfaces to nonlinear programming solvers.
 
 However, these toolkits are not tailored for FES. They control muscle activation as a piecewise linear/constant

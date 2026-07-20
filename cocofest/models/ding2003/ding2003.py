@@ -392,7 +392,7 @@ class DingModelFrequency(FesModel, StateDynamics):
         self.previous_stim = self._get_additional_previous_stim_time()
         stim_time = (
             all_stim_time if all_stim_time else self.stim_time
-        )  # all_stim_time is used for problem reconstruction in NMPC
+        )  # all_stim_time is used for problem reconstruction in MHE
         self.all_stim = self.previous_stim["time"] + stim_time
         stim_time = np.array(self.all_stim)
         dt = final_time / n_shooting
