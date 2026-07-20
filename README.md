@@ -15,7 +15,7 @@ Supports predictive musculoskeletal simulation driven by FES, moving time horizo
 [![Last commit](https://img.shields.io/github/last-commit/pyomeca/cocofest.svg?style=for-the-badge)]()<br/>
 [![Coverage](https://img.shields.io/codecov/c/github/pyomeca/cocofest?style=for-the-badge&logo=codecov&branch=main&token=GPBRI2U4CO)](https://codecov.io/gh/pyomeca/cocofest)
 [![Maintainability](https://img.shields.io/badge/Maintainability-B-green?style=for-the-badge&logo=codeclimate)](https://qlty.sh/gh/pyomeca/projects/cocofest)
-[![Tests](https://img.shields.io/github/actions/workflow/status/pyomeca/cocofest/run_tests_win.yml?branch=main&style=for-the-badge&label=Tests&logo=githubactions)](https://github.com/pyomeca/cocofest/actions/workflows/run_tests_win.yml)<br/>
+[![Tests](https://img.shields.io/github/actions/workflow/status/pyomeca/cocofest/run_tests.yml?branch=main&style=for-the-badge&label=Tests&logo=githubactions)](https://github.com/pyomeca/cocofest/actions/workflows/run_tests.yml)<br/>
 [![Discord](https://img.shields.io/discord/1340640457327247460.svg?label=chat&logo=discord&color=7289DA&style=for-the-badge)](https://discord.gg/s3g2ATpvDs)
 [![Licence](https://img.shields.io/github/license/pyomeca/cocofest.svg?style=for-the-badge)](https://opensource.org/licenses/MIT)
 
@@ -161,13 +161,36 @@ All models are implemented at the muscle actuator level, making them applicable 
 | **Model Name**  | **Citation**                                                                                                                                                                                                                                    | **Description / Focus**                                             |
 | --------------- |-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------| ------------------------------------------------------------------- |
 | **Veltink1992** | Veltink, P. H., Chizeck, H. J., Crago, P. E., & El-Bialy, A. (1992). *Nonlinear joint angle control for artificially stimulated muscle*. IEEE Transactions on Biomedical Engineering, 39(4), 368–380.                                           | Nonlinear control of joint angles via electrical stimulation.       |
-| **Riener1996**  | Riener, R., Quintern, J., & Schmidt, G. (1996). *Biomechanical model of the human knee evaluated by neuromuscular stimulation*. Journal of Biomechanics, 29(9), 1157–1167.                                                                      | Biomechanical knee model validated using neuromuscular stimulation. |
+| **Veltink1992 + Riener1996** | Veltink et al. (1992), combined with the fatigue prediction from Riener, R., Quintern, J., & Schmidt, G. (1996). *Biomechanical model of the human knee evaluated by neuromuscular stimulation*. Journal of Biomechanics, 29(9), 1157–1167.  | Veltink1992 joint angle control, extended with Riener1996 fatigue prediction. |
 | **Ding2003**    | Ding, J., Wexler, A. S., & Binder-Macleod, S. A. (2003). *Mathematical models for fatigue minimization during functional electrical stimulation*. Journal of Electromyography and Kinesiology, 13(6), 575–588.                                  | Focus on mathematical models for minimising fatigue.                |
 | **Ding2007**    | Ding, J., Chou, L. W., Kesar, T. M., et al. (2007). *Mathematical model that predicts the force–intensity and force–frequency relationships after spinal cord injuries*. Muscle & Nerve, 36(2), 214–222.                                        | Predicts force–intensity and force–frequency responses post-SCI.    |
 | **Marion2009**  | Marion, M. S., Wexler, A. S., Hull, M. L., & Binder-Macleod, S. A. (2009). *Predicting the effect of muscle length on fatigue during electrical stimulation*. Muscle & Nerve, 40(4), 573–581.                                                   | Examines muscle length impact on fatigue under stimulation.         |
 | **Marion2013**  | Marion, M. S., Wexler, A. S., & Hull, M. L. (2013). *Predicting non-isometric fatigue induced by electrical stimulation pulse trains as a function of pulse duration*. Journal of NeuroEngineering and Rehabilitation, 10, 1–16.                | Predicts non-isometric fatigue based on pulse duration.             |
 | **Hmed2018**    | Hmed, A. B., Bakir, T., Garnier, Y. M., Sakly, A., Lepers, R., & Binczak, S. (2018). An approach to a muscle force model with force-pulse amplitude relationship of human quadriceps muscles. Computers in Biology and Medicine, 101, 218-228.  | Models the relationship between pulse amplitude and force.          |
 
+> \[!NOTE]
+>
+> Riener1996 alone is not implemented as a standalone model: only its fatigue prediction is available, combined with Veltink1992 (see `VeltinkRienerModelPulseIntensityWithFatigue`).
+
+`Cocofest` gives access to every model above through the [`ModelMaker`](cocofest/models/model_maker.py) factory, using the following string keys. Each base key also has a `_with_fatigue` variant (adds fatigue dynamics) and, for Marion2009/Marion2013, a `_modified` variant (pulse width instead of frequency as control):
+
+| **Key**                                   | **Class**                                            | **Control(s)**             |
+| ------------------------------------------ | ----------------------------------------------------- | --------------------------- |
+| `ding2003` / `ding2003_with_fatigue`        | `DingModelFrequency(WithFatigue)`                      | Frequency                   |
+| `ding2007` / `ding2007_with_fatigue`        | `DingModelPulseWidthFrequency(WithFatigue)`            | Frequency, pulse width      |
+| `hmed2018` / `hmed2018_with_fatigue`        | `DingModelPulseIntensityFrequency(WithFatigue)`        | Frequency, pulse intensity  |
+| `marion2009` / `marion2009_with_fatigue`    | `Marion2009ModelFrequency(WithFatigue)`                | Frequency                   |
+| `marion2009_modified` / `marion2009_modified_with_fatigue` | `Marion2009ModelPulseWidthFrequency(WithFatigue)` | Frequency, pulse width |
+| `marion2013` / `marion2013_with_fatigue`    | `Marion2013ModelFrequency(WithFatigue)`                | Frequency                   |
+| `marion2013_modified` / `marion2013_modified_with_fatigue` | `Marion2013ModelPulseWidthFrequency(WithFatigue)` | Frequency, pulse width |
+| `veltink1992`                                | `VeltinkModelPulseIntensity`                          | Pulse intensity             |
+| `veltink_and_riener1998`                     | `VeltinkRienerModelPulseIntensityWithFatigue`         | Pulse intensity             |
+
+```python
+from cocofest import ModelMaker
+
+model = ModelMaker.create_model("ding2007_with_fatigue", stim_time=[0, 0.1, 0.2])
+```
 
 > \[!NOTE]
 >
@@ -190,7 +213,7 @@ This approach allows motions driven-FES simulations, meanwhile benefiting from m
 > \[!NOTE]
 >
 > Used force-length ($f_l$), force-velocity ($f_v$) and passive force-length ($f_{pas}$) are those published by [De Groot et al., (2016)](https://link.springer.com/article/10.1007/s10439-016-1591-9).
-> Those relationships can be activated or not when initializing your OCP. Modification to the following [file](cocofest/models/hill_coefficients.py) can be done to have more/different relationships. 
+> Those relationships can be activated or not via the `activate_force_length_relationship`, `activate_force_velocity_relationship` and `activate_passive_force_relationship` arguments of the `FesMskModel` constructor (all default to `False`). Modification to the following [file](cocofest/models/hill_coefficients.py) can be done to have more/different relationships. 
 
 ### 💻 A short musculoskeletal FES-driven example
 The following example displays a reaching task using the [Arm26](https://opensimconfluence.atlassian.net/wiki/spaces/OpenSim/pages/53090607/Musculoskeletal+Models) model driven by the [Ding2007](https://onlinelibrary.wiley.com/doi/full/10.1002/mus.20806) FES model.
@@ -275,8 +298,9 @@ For that, the IvpFes class is used to build the problem.
 ```python
 from cocofest import IvpFes, DingModelFrequencyWithFatigue
 
-fes_parameters = {"model": DingModelFrequencyWithFatigue(), "n_stim": 10}
-ivp_parameters = {"n_shooting": 20, "final_time": 1}
+stim_time = list(range(10))  # 10 stimulations, one every second
+fes_parameters = {"model": DingModelFrequencyWithFatigue(stim_time=stim_time)}
+ivp_parameters = {"final_time": 10}
 
 ivp = IvpFes(fes_parameters, ivp_parameters)
 
