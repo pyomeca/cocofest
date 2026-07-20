@@ -11,6 +11,10 @@ from cocofest.models.marion2009.marion2009 import Marion2009ModelFrequency
 from cocofest.models.marion2009.marion2009_with_fatigue import Marion2009ModelFrequencyWithFatigue
 from cocofest.models.marion2009.marion2009_modified import Marion2009ModelPulseWidthFrequency
 from cocofest.models.marion2009.marion2009_modified_with_fatigue import Marion2009ModelPulseWidthFrequencyWithFatigue
+from cocofest.models.marion2013.marion2013 import Marion2013ModelFrequency
+from cocofest.models.marion2013.marion2013_with_fatigue import Marion2013ModelFrequencyWithFatigue
+from cocofest.models.marion2013.marion2013_modified import Marion2013ModelPulseWidthFrequency
+from cocofest.models.marion2013.marion2013_modified_with_fatigue import Marion2013ModelPulseWidthFrequencyWithFatigue
 from cocofest.models.hmed2018.hmed2018 import DingModelPulseIntensityFrequency
 from cocofest.models.hmed2018.hmed2018_with_fatigue import DingModelPulseIntensityFrequencyWithFatigue
 from cocofest.models.veltink1992.veltink1992 import VeltinkModelPulseIntensity
@@ -20,9 +24,10 @@ from .models.model_maker import ModelMaker
 from .optimization.fes_ocp import OcpFes
 from .optimization.fes_id_ocp import OcpFesId
 from .optimization.fes_ocp_multibody import OcpFesMsk
-from .optimization.fes_nmpc import FesNmpc
-from .optimization.fes_nmpc_multibody import FesNmpcMsk
+from .optimization.fes_mhe import FesMhe
+from .optimization.fes_mhe_multibody import FesMheMsk
 from .integration.ivp_fes import IvpFes
+from .identification.identification_method import DataExtraction
 from .fourier_approx import FourierSeries
 from .dynamics.inverse_kinematics_and_dynamics import (
     get_circle_coord,

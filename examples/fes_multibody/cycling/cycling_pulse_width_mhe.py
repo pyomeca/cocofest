@@ -43,7 +43,7 @@ from cocofest import (
     FesMskModel,
     inverse_kinematics_cycling,
     OcpFesMsk,
-    FesNmpcMsk,
+    FesMheMsk,
 )
 from examples.fes_multibody.cycling.cost_functions import CustomCostFunctions
 
@@ -51,7 +51,7 @@ from examples.fes_multibody.cycling.cost_functions import CustomCostFunctions
 # --------------------#
 #    MHE functions    #
 # --------------------#
-class MyCyclicNMPC(FesNmpcMsk):
+class MyCyclicMHE(FesMheMsk):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self.nodes_per_cycle = self.cycle_len * (
@@ -296,7 +296,7 @@ class MyCyclicNMPC(FesNmpcMsk):
 # --------------------#
 #    OCP functions    #
 # --------------------#
-def prepare_nmpc(
+def prepare_mhe(
     model: BiorbdModel | FesMskModel,
     mhe_info: dict,
     cycling_info: dict,
@@ -399,7 +399,7 @@ def prepare_nmpc(
     # --- Update model for resistive torque --- #
     model = updating_model(model=model, external_force_set=external_force_set, parameters=parameters)
 
-    return MyCyclicNMPC(
+    return MyCyclicMHE(
         bio_model=[model],
         dynamics=dynamics_options,
         cycle_len=cycle_len,
@@ -854,7 +854,7 @@ def create_simulation_list(
     return sims
 
 
-def save_sol_in_pkl(sol, simulation_conditions, nmpc, is_initial_guess=False, torque=None):
+def save_sol_in_pkl(sol, simulation_conditions, mhe, is_initial_guess=False, torque=None):
     solution = sol[0] if not is_initial_guess else sol[1][0]
     time = solution.stepwise_time(to_merge=[SolutionMerge.NODES]).T[0]
     states = solution.stepwise_states(to_merge=[SolutionMerge.NODES])
@@ -897,7 +897,7 @@ def save_sol_in_pkl(sol, simulation_conditions, nmpc, is_initial_guess=False, to
 
     recalculate_objective = False
     if recalculate_objective:
-        recalculate_objective_dict = recalculate_objective_fun(sol[1], nmpc, sim_cond=simulation_conditions)
+        recalculate_objective_dict = recalculate_objective_fun(sol[1], mhe, sim_cond=simulation_conditions)
         similar_cost_values = [
             True if objective_values_per_kept_cycle == recalculate_objective_dict[key] else False
             for key in recalculate_objective_dict
@@ -925,7 +925,7 @@ def save_sol_in_pkl(sol, simulation_conditions, nmpc, is_initial_guess=False, to
     print(simulation_conditions["pickle_file_path"])
 
 
-def recalculate_objective_fun(cycle_solutions: list[Solution], nmpc, sim_cond) -> dict:
+def recalculate_objective_fun(cycle_solutions: list[Solution], mhe, sim_cond) -> dict:
     import time
 
     recalculated_cost_functions = {}
@@ -939,12 +939,12 @@ def recalculate_objective_fun(cycle_solutions: list[Solution], nmpc, sim_cond) -
             "cost_fun_weight": sim_cond["cost_fun_weight"],
         }
         objective = set_objective_functions(obj_fun_dict, recalculate=True)
-        nmpc.common_objective_functions = objective
+        mhe.common_objective_functions = objective
         cost_function_values = []
         for i in range(len(cycle_solutions)):
-            _states, _controls, _parameters = nmpc.export_cycles(cycle_solutions[i])
+            _states, _controls, _parameters = mhe.export_cycles(cycle_solutions[i])
             dt = float(cycle_solutions[i].t_span()[0][-1])
-            solution = nmpc._initialize_one_cycle(dt, _states, _controls, _parameters)
+            solution = mhe._initialize_one_cycle(dt, _states, _controls, _parameters)
             cost = float(solution.cost)
             cost_function_values.append(cost)
 
@@ -1014,15 +1014,15 @@ def run_optim(mhe_info, cycling_info, simulation_conditions, model_path, save_so
     mhe_info["n_cycles_simultaneous"] = simulation_conditions["n_cycles_simultaneous"]
     cycling_info["turn_number"] = simulation_conditions["n_cycles_simultaneous"]  # One turn per cycle
 
-    nmpc = prepare_nmpc(
+    mhe = prepare_mhe(
         model=model,
         mhe_info=mhe_info,
         cycling_info=cycling_info,
         simulation_conditions=simulation_conditions,
     )
-    nmpc.n_cycles_simultaneous = simulation_conditions["n_cycles_simultaneous"]
+    mhe.n_cycles_simultaneous = simulation_conditions["n_cycles_simultaneous"]
 
-    def update_functions(_nmpc: MultiCyclicNonlinearModelPredictiveControl, cycle_idx: int, _sol: Solution):
+    def update_functions(_mhe: MultiCyclicNonlinearModelPredictiveControl, cycle_idx: int, _sol: Solution):
         if _sol:
             print("Optimized window n°" + str(cycle_idx))
             result_sol = _sol.decision_states(to_merge=SolutionMerge.NODES)
@@ -1037,7 +1037,7 @@ def run_optim(mhe_info, cycling_info, simulation_conditions, model_path, save_so
         return cycle_idx < mhe_info["n_cycles"]  # True if there are still some cycle to perform
 
     # Add the penalty cost function plot
-    nmpc.add_plot_penalty(CostType.ALL)
+    mhe.add_plot_penalty(CostType.ALL)
 
     # Set solver for the optimal control problem
     solver = Solver.IPOPT(show_online_optim=False, _max_iter=2000, show_options=dict(show_bounds=True))
@@ -1045,7 +1045,7 @@ def run_optim(mhe_info, cycling_info, simulation_conditions, model_path, save_so
     solver.set_linear_solver(linear_solver)
 
     # Solve the optimal control problem
-    sol = nmpc.solve_fes_nmpc(
+    sol = mhe.solve_fes_mhe(
         update_functions,
         solver=solver,
         total_cycles=mhe_info["n_cycles"],
@@ -1066,7 +1066,7 @@ def run_optim(mhe_info, cycling_info, simulation_conditions, model_path, save_so
         save_sol_in_pkl(
             sol,
             simulation_conditions,
-            nmpc=nmpc,
+            mhe=mhe,
             is_initial_guess=is_initial_guess,
             torque=cycling_info["resistive_torque"]["torque"][-1],
         )

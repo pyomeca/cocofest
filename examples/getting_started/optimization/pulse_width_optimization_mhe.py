@@ -2,7 +2,7 @@
 This example showcases a moving time horizon simulation problem of cyclic muscle force tracking at last node.
 The FES model used here is Ding's 2007 pulse width and frequency model with fatigue.
 Only the pulse width is optimized to minimize muscle force production, frequency is fixed at 33 Hz.
-The nmpc cyclic problem stops once the last cycle is reached.
+The mhe cyclic problem stops once the last cycle is reached.
 """
 
 import numpy as np
@@ -28,11 +28,11 @@ from cocofest import (
     OcpFes,
     FesModel,
     FES_plot,
-    FesNmpc,
+    FesMhe,
 )
 
 
-def prepare_nmpc(
+def prepare_mhe(
     model: FesModel,
     cycle_duration: int | float,
     n_cycles_to_advance: int,
@@ -96,7 +96,7 @@ def prepare_nmpc(
     if minimize_fatigue:
         objective_functions.add(ObjectiveFcn.Lagrange.MINIMIZE_STATE, key="A", weight=-1, quadratic=True)
 
-    return FesNmpc(
+    return FesMhe(
         bio_model=model,
         dynamics=dynamics_options,
         cycle_len=cycle_len,
@@ -116,9 +116,9 @@ def prepare_nmpc(
 
 def main(plot=True):
     """
-    Main function to configure and solve the optimal control problem in NMPC.
+    Main function to configure and solve the optimal control problem in MHE.
     """
-    # --- Set nmpc parameters --- #
+    # --- Set mhe parameters --- #
     cycle_duration = 1  # Duration of a cycle in seconds
     n_cycles_simultaneous = 3  # Number of cycles to solve simultaneously
     n_cycles_to_advance = 1  # Number of cycles to advance at each iteration
@@ -133,7 +133,7 @@ def main(plot=True):
     # --- Build FES model --- #
     fes_model = DingModelPulseWidthFrequencyWithFatigue(stim_time=stim_time, sum_stim_truncation=10)
 
-    nmpc = prepare_nmpc(
+    mhe = prepare_mhe(
         model=fes_model,
         cycle_duration=cycle_duration,
         n_cycles_to_advance=n_cycles_to_advance,
@@ -146,13 +146,13 @@ def main(plot=True):
         # ode_solver=OdeSolver.COLLOCATION(polynomial_degree=5, method="radau"),
     )
 
-    def update_functions(_nmpc: MultiCyclicNonlinearModelPredictiveControl, cycle_idx: int, _sol: Solution):
+    def update_functions(_mhe: MultiCyclicNonlinearModelPredictiveControl, cycle_idx: int, _sol: Solution):
         return cycle_idx < n_cycles  # True if there are still some cycle to perform
 
     # Add the penalty cost function plot
-    nmpc.add_plot_penalty(CostType.ALL)
+    mhe.add_plot_penalty(CostType.ALL)
     # Solve the optimal control problem
-    sol = nmpc.solve_fes_nmpc(
+    sol = mhe.solve_fes_mhe(
         update_functions,
         solver=Solver.IPOPT(show_online_optim=False, _max_iter=1000, show_options=dict(show_bounds=True)),
         total_cycles=n_cycles,
@@ -169,7 +169,7 @@ def main(plot=True):
 
     # Plotting the force state result
     if plot:
-        FES_plot(data=result).plot(title="NMPC FES model optimization")
+        FES_plot(data=result).plot(title="MHE FES model optimization")
 
 
 if __name__ == "__main__":
