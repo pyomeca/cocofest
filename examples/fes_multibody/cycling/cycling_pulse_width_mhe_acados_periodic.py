@@ -139,6 +139,181 @@ def build_cost_fun_weight(objectives: set[str]) -> list[int]:
     return weights
 
 
+def effective_periodic_cn_sum_stimulation_mode(args: argparse.Namespace) -> str:
+    if args.stimulation_intensity_source != "none":
+        return "stimulation_intensity"
+    return args.periodic_cn_sum_stimulation_mode
+
+
+def default_stimulation_intensity_ipopt_file(args: argparse.Namespace) -> Path:
+    return (
+        Path(__file__).resolve().parent
+        / "result"
+        / "initial_guess"
+        / f"{args.cycles_per_window}_initial_guess_collocation_3_radau.npz"
+    )
+
+
+def pulse_width_recruitment(muscle_model, pulse_width_values: np.ndarray) -> np.ndarray:
+    pulse_width_values = np.asarray(pulse_width_values, dtype=float)
+    effective_pulse_width = np.maximum(0.0, pulse_width_values - muscle_model.pd0)
+    return 1.0 - np.exp(-effective_pulse_width / muscle_model.pdt)
+
+
+def pulse_width_activation_from_ipopt(
+    muscle_model,
+    pulse_width_values: np.ndarray,
+    reference_pulse_width: float,
+) -> np.ndarray:
+    denominator = pulse_width_recruitment(
+        muscle_model, np.array([reference_pulse_width])
+    )[0]
+    if denominator <= 0:
+        raise ValueError(
+            "--stimulation-intensity-reference-pulse-width must be greater than pd0."
+        )
+    return pulse_width_recruitment(muscle_model, pulse_width_values) / denominator
+
+
+def ipopt_control_times(
+    data, value_count: int, cycle_duration: float, args: argparse.Namespace
+) -> np.ndarray:
+    if "stim_time" in data.files:
+        stim_time = np.asarray(data["stim_time"], dtype=float).squeeze()
+        if stim_time.ndim == 1 and stim_time.size == value_count:
+            return stim_time
+
+    if "n_shooting_per_cycle" in data.files:
+        stimulations_per_cycle = int(np.asarray(data["n_shooting_per_cycle"]).item())
+    else:
+        stimulations_per_cycle = args.stimulations_per_cycle
+    return np.arange(value_count, dtype=float) * cycle_duration / stimulations_per_cycle
+
+
+def sample_periodic_values_by_index(
+    values: np.ndarray,
+    n_nodes: int,
+    node_convention: str,
+) -> np.ndarray:
+    if values.size == 0:
+        raise ValueError("Cannot sample an empty IPOPT stimulation intensity series.")
+
+    offset = 1 if node_convention == "next" else 0
+    indices = (np.arange(n_nodes) + offset) % values.size
+    return values[indices]
+
+
+def fatigue_activation_from_ipopt(
+    data,
+    muscle_name: str,
+    source_times: np.ndarray,
+    fatigue_gain: float,
+) -> np.ndarray:
+    key = f"A_{muscle_name}"
+    if key not in data.files or "time" not in data.files:
+        return np.ones(source_times.shape)
+
+    time = np.asarray(data["time"], dtype=float).squeeze()
+    a_values = np.asarray(data[key], dtype=float).squeeze()
+    if time.ndim != 1 or a_values.ndim != 1 or time.size != a_values.size:
+        return np.ones(source_times.shape)
+
+    sampled_a = np.interp(source_times, time, a_values)
+    rest_a = max(float(sampled_a[0]), 1e-12)
+    fatigue_index = np.maximum(0.0, (rest_a - sampled_a) / rest_a)
+    return 1.0 + fatigue_gain * fatigue_index
+
+
+def build_ipopt_stimulation_intensity_timeseries(
+    args: argparse.Namespace,
+    model,
+    window_n_shooting: int,
+    cycle_duration: float,
+) -> np.ndarray | None:
+    if args.stimulation_intensity_source == "none":
+        return None
+    if args.stimulation_intensity_source != "ipopt":
+        raise ValueError(
+            f"Unsupported stimulation intensity source: {args.stimulation_intensity_source}"
+        )
+    if args.stimulation_intensity_clip_high < args.stimulation_intensity_clip_low:
+        raise ValueError(
+            "--stimulation-intensity-clip-high must be >= --stimulation-intensity-clip-low."
+        )
+
+    data_file = (
+        args.stimulation_intensity_ipopt_file
+        or default_stimulation_intensity_ipopt_file(args)
+    )
+    if not data_file.exists():
+        raise FileNotFoundError(
+            f"Could not find IPOPT stimulation intensity source '{data_file}'."
+        )
+
+    n_nodes = window_n_shooting + 1
+    intensity = np.ones((len(model.muscles_dynamics_model), 1, n_nodes))
+    with np.load(data_file, allow_pickle=True) as data:
+        for muscle_index, muscle_model in enumerate(model.muscles_dynamics_model):
+            muscle_name = muscle_model.muscle_name
+            control_key = f"last_pulse_width_{muscle_name}"
+            if control_key not in data.files:
+                raise KeyError(
+                    f"Could not find '{control_key}' in IPOPT file '{data_file}'."
+                )
+
+            pulse_width_values = np.asarray(data[control_key], dtype=float).squeeze()
+            if pulse_width_values.ndim != 1:
+                raise ValueError(f"'{control_key}' must be a one-dimensional series.")
+            source_times = ipopt_control_times(
+                data, pulse_width_values.size, cycle_duration, args
+            )
+
+            values = np.ones(pulse_width_values.shape)
+            if args.stimulation_intensity_ipopt_source in (
+                "pulse_width",
+                "pulse_width_and_fatigue",
+            ):
+                values *= pulse_width_activation_from_ipopt(
+                    muscle_model,
+                    pulse_width_values,
+                    args.stimulation_intensity_reference_pulse_width,
+                )
+            if args.stimulation_intensity_ipopt_source in (
+                "fatigue",
+                "pulse_width_and_fatigue",
+            ):
+                values *= fatigue_activation_from_ipopt(
+                    data,
+                    muscle_name,
+                    source_times,
+                    args.stimulation_intensity_fatigue_gain,
+                )
+
+            values = np.clip(
+                values,
+                args.stimulation_intensity_clip_low,
+                args.stimulation_intensity_clip_high,
+            )
+            intensity[muscle_index, 0, :] = sample_periodic_values_by_index(
+                values,
+                n_nodes,
+                args.stimulation_intensity_node_convention,
+            )
+
+    return intensity
+
+
+def stimulation_intensity_summary(intensity: np.ndarray | None) -> str:
+    if intensity is None:
+        return "None"
+    return (
+        f"shape={intensity.shape} "
+        f"min={np.min(intensity):.6g} "
+        f"mean={np.mean(intensity):.6g} "
+        f"max={np.max(intensity):.6g}"
+    )
+
+
 def build_argument_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -165,6 +340,72 @@ def build_argument_parser() -> argparse.ArgumentParser:
         choices=("periodic", "standard"),
         default="periodic",
         help="Use the ACADOS-friendly periodic Ding formulation or the historical standard one.",
+    )
+    parser.add_argument(
+        "--periodic-cn-sum-stimulation-mode",
+        type=str,
+        choices=("mean", "stimulation_intensity"),
+        default="mean",
+        help=(
+            "Calcium-history forcing used by the periodic Ding model. "
+            "'mean' keeps the historical constant-intensity approximation; "
+            "'stimulation_intensity' reads lambda_i from numerical timeseries."
+        ),
+    )
+    parser.add_argument(
+        "--stimulation-intensity-source",
+        type=str,
+        choices=("none", "ipopt"),
+        default="none",
+        help="Optional source for stage-wise lambda_i used by the periodic calcium-history forcing.",
+    )
+    parser.add_argument(
+        "--stimulation-intensity-ipopt-file",
+        type=Path,
+        default=None,
+        help=(
+            "Saved IPOPT .npz solution used when --stimulation-intensity-source=ipopt. "
+            "Defaults to the matching result/initial_guess file when available."
+        ),
+    )
+    parser.add_argument(
+        "--stimulation-intensity-ipopt-source",
+        choices=("pulse_width", "fatigue", "pulse_width_and_fatigue"),
+        default="pulse_width_and_fatigue",
+        help="How to derive lambda_i from the IPOPT solution.",
+    )
+    parser.add_argument(
+        "--stimulation-intensity-reference-pulse-width",
+        type=float,
+        default=0.000365702,
+        help="Reference pulse width, in seconds, used to normalize IPOPT pulse-width recruitment into lambda_i.",
+    )
+    parser.add_argument(
+        "--stimulation-intensity-fatigue-gain",
+        type=float,
+        default=8.0,
+        help="Gain multiplying the A-state fatigue index when deriving lambda_i from IPOPT data.",
+    )
+    parser.add_argument(
+        "--stimulation-intensity-clip-low",
+        type=float,
+        default=0.0,
+        help="Lower clipping value for derived lambda_i.",
+    )
+    parser.add_argument(
+        "--stimulation-intensity-clip-high",
+        type=float,
+        default=2.5,
+        help="Upper clipping value for derived lambda_i.",
+    )
+    parser.add_argument(
+        "--stimulation-intensity-node-convention",
+        choices=("current", "next"),
+        default="next",
+        help=(
+            "Use lambda_i at the current stimulation node or the next stimulation node "
+            "as the continuous equivalent forcing over a shooting interval."
+        ),
     )
     parser.add_argument(
         "--torque-application",
@@ -860,6 +1101,21 @@ def _codegen_signature(args: argparse.Namespace) -> str:
         "wheel_qdot_regularization_target": args.wheel_qdot_regularization_target,
         "state_scaling": args.state_scaling,
         "pulse_width_scaling": args.pulse_width_scaling,
+        "periodic_cn_sum_stimulation_mode": args.periodic_cn_sum_stimulation_mode,
+        "effective_periodic_cn_sum_stimulation_mode": (
+            effective_periodic_cn_sum_stimulation_mode(args)
+        ),
+        "stimulation_intensity_source": args.stimulation_intensity_source,
+        "stimulation_intensity_ipopt_source": args.stimulation_intensity_ipopt_source,
+        "stimulation_intensity_reference_pulse_width": (
+            args.stimulation_intensity_reference_pulse_width
+        ),
+        "stimulation_intensity_fatigue_gain": args.stimulation_intensity_fatigue_gain,
+        "stimulation_intensity_clip_low": args.stimulation_intensity_clip_low,
+        "stimulation_intensity_clip_high": args.stimulation_intensity_clip_high,
+        "stimulation_intensity_node_convention": (
+            args.stimulation_intensity_node_convention
+        ),
         "acados_pulse_width_trust_radius": args.acados_pulse_width_trust_radius,
         "max_acados_iterations": args.max_acados_iterations,
         "acados_tolerance": args.acados_tolerance,
@@ -895,6 +1151,15 @@ def _codegen_signature(args: argparse.Namespace) -> str:
             _source_stamp(
                 (
                     Path(__file__).resolve().parent / "cycling_pulse_width_mhe.py"
+                ).resolve()
+            ),
+            _source_stamp(
+                (
+                    Path(__file__).resolve().parents[3]
+                    / "cocofest"
+                    / "models"
+                    / "ding2007"
+                    / "ding2007_with_fatigue_periodic.py"
                 ).resolve()
             ),
         ],
@@ -3413,6 +3678,14 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
         np.linspace(0, total_window_duration, total_stimulations, endpoint=False)
     )
     periodic_cn_sum_approximation = args.model_formulation == "periodic"
+    periodic_cn_sum_stimulation_mode = effective_periodic_cn_sum_stimulation_mode(args)
+    if (
+        args.model_formulation != "periodic"
+        and args.stimulation_intensity_source != "none"
+    ):
+        raise ValueError(
+            "--stimulation-intensity-source is only supported with --model-formulation periodic."
+        )
     use_external_forces = args.torque_application == "external_forces"
     ode_solver = build_ode_solver(args)
     historical_init_guess_path = None
@@ -3425,6 +3698,13 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
         str(model_path),
         stim_time,
         periodic_cn_sum_approximation=periodic_cn_sum_approximation,
+        periodic_cn_sum_stimulation_mode=periodic_cn_sum_stimulation_mode,
+    )
+    stimulation_intensity_timeseries = build_ipopt_stimulation_intensity_timeseries(
+        args,
+        model,
+        total_stimulations,
+        cycle_duration,
     )
 
     mhe_info = {
@@ -3463,6 +3743,7 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
         "wheel_qdot_regularization_target": args.wheel_qdot_regularization_target,
         "state_scaling": args.state_scaling,
         "pulse_width_scaling": args.pulse_width_scaling,
+        "stimulation_intensity_timeseries": stimulation_intensity_timeseries,
         "init_guess_file_path": (
             str(historical_init_guess_path)
             if historical_init_guess_path is not None
@@ -3530,6 +3811,26 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
         )
         print(f"state_scaling: {args.state_scaling}")
         print(f"pulse_width_scaling: {args.pulse_width_scaling}")
+        print(
+            "periodic_cn_sum_stimulation_mode: " f"{periodic_cn_sum_stimulation_mode}"
+        )
+        print(f"stimulation_intensity_source: {args.stimulation_intensity_source}")
+        print(
+            "stimulation_intensity_ipopt_file: "
+            f"{args.stimulation_intensity_ipopt_file or default_stimulation_intensity_ipopt_file(args)}"
+        )
+        print(
+            "stimulation_intensity_ipopt_source: "
+            f"{args.stimulation_intensity_ipopt_source}"
+        )
+        print(
+            "stimulation_intensity_node_convention: "
+            f"{args.stimulation_intensity_node_convention}"
+        )
+        print(
+            "stimulation_intensity_timeseries: "
+            f"{stimulation_intensity_summary(stimulation_intensity_timeseries)}"
+        )
         if args.solver == "acados":
             print(
                 "acados_pulse_width_trust_radius: "
@@ -3672,6 +3973,7 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
         if echo:
             print("running_standard_ipopt_warmup: True")
         warmup_simulation_conditions = dict(simulation_conditions)
+        warmup_simulation_conditions["stimulation_intensity_timeseries"] = None
         if (
             args.solver == "acados"
             and args.control_regularization_target_source == "warmup"
