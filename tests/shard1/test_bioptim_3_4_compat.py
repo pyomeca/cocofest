@@ -9,7 +9,7 @@ from cocofest.models.ding2003.ding2003 import DingModelFrequency
 from cocofest.models.ding2007.ding2007 import DingModelPulseWidthFrequency
 from cocofest.models.ding2007.ding2007_with_fatigue import DingModelPulseWidthFrequencyWithFatigue
 from cocofest.models.hmed2018.hmed2018 import DingModelPulseIntensityFrequency
-from examples.getting_started.optimization.pulse_width_optimization_nmpc import prepare_nmpc
+from examples.getting_started.optimization.pulse_width_optimization_mhe import prepare_mhe
 
 
 def _build_fake_nlp(model, states_dot, ode_solver, dt=0.2):
@@ -144,13 +144,13 @@ def test_hmed2018_collocation_dynamics_returns_expected_defects():
     np.testing.assert_allclose(np.array(dynamics.defects).squeeze(), np.array(expected_defects).squeeze())
 
 
-def test_prepare_nmpc_supports_collocation_with_ding2007_fatigue_model():
+def test_prepare_mhe_supports_collocation_with_ding2007_fatigue_model():
     cycle_duration = 1
     stimulation_frequency = 10
     stim_time = list(np.linspace(0, cycle_duration, stimulation_frequency + 1)[:-1])
     model = DingModelPulseWidthFrequencyWithFatigue(stim_time=stim_time, sum_stim_truncation=10)
 
-    nmpc = prepare_nmpc(
+    mhe = prepare_mhe(
         model=model,
         cycle_duration=cycle_duration,
         n_cycles_to_advance=1,
@@ -162,4 +162,4 @@ def test_prepare_nmpc_supports_collocation_with_ding2007_fatigue_model():
         ode_solver=OdeSolver.COLLOCATION(polynomial_degree=3, method="radau"),
     )
 
-    assert nmpc is not None
+    assert mhe is not None
