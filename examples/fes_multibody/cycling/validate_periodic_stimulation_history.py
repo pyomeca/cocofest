@@ -57,6 +57,18 @@ def build_argument_parser() -> argparse.ArgumentParser:
         default="constant",
     )
     parser.add_argument(
+        "--activation-profile",
+        choices=("constant", "sinusoidal", "staircase", "alternating", "random"),
+        default="constant",
+        help=(
+            "Effective stimulation intensity profile used as lambda_i in the base "
+            "calcium history. The current periodic surrogate uses only its mean."
+        ),
+    )
+    parser.add_argument("--activation-low", type=float, default=0.2)
+    parser.add_argument("--activation-high", type=float, default=1.8)
+    parser.add_argument("--random-seed", type=int, default=42)
+    parser.add_argument(
         "--output-dir",
         type=Path,
         default=Path(__file__).resolve().parent
@@ -92,23 +104,83 @@ def finite_stimulation_history(
     return history[-truncation:]
 
 
-def base_cn_sum(
-    parameters: Ding2007Parameters,
+def finite_stimulation_history_indices(
     stim_times: np.ndarray,
     time: float,
     truncation: int,
+) -> np.ndarray:
+    indices = np.where(stim_times <= time + 1e-12)[0]
+    if indices.size == 0:
+        return np.array([], dtype=int)
+    return indices[-truncation:]
+
+
+def build_activation_values(
+    stim_times: np.ndarray,
+    cycle_duration: float,
+    profile: str,
+    low: float,
+    high: float,
+    random_seed: int,
+) -> np.ndarray:
+    if low < 0.0 or high < 0.0:
+        raise ValueError("--activation-low and --activation-high must be non-negative.")
+    if high < low:
+        raise ValueError("--activation-high must be >= --activation-low.")
+
+    if profile == "constant":
+        return np.ones(stim_times.shape)
+
+    phase = (stim_times % cycle_duration) / cycle_duration
+    mid = 0.5 * (low + high)
+    amplitude = 0.5 * (high - low)
+    if profile == "sinusoidal":
+        return mid + amplitude * np.sin(2.0 * np.pi * phase)
+    if profile == "staircase":
+        return np.where(phase < 0.5, low, high)
+    if profile == "alternating":
+        return np.where(np.arange(stim_times.size) % 2 == 0, low, high)
+
+    rng = np.random.default_rng(random_seed)
+    return rng.uniform(low, high, size=stim_times.shape)
+
+
+def activation_at_time(
+    stim_times: np.ndarray,
+    activation_values: np.ndarray,
+    time: float,
 ) -> float:
-    history = finite_stimulation_history(stim_times, time, truncation)
+    previous_indices = np.where(stim_times <= time + 1e-12)[0]
+    if previous_indices.size == 0:
+        return float(activation_values[0])
+    return float(activation_values[previous_indices[-1]])
+
+
+def base_cn_sum(
+    parameters: Ding2007Parameters,
+    stim_times: np.ndarray,
+    activation_values: np.ndarray,
+    time: float,
+    truncation: int,
+) -> float:
+    history_indices = finite_stimulation_history_indices(stim_times, time, truncation)
+    if history_indices.size == 0:
+        return 0.0
+
+    history = stim_times[history_indices]
+    history_activation = activation_values[history_indices]
     r0 = parameters.km_rest + parameters.r0_km_relationship
     value = 0.0
-    for idx, stim_time in enumerate(history):
+    for idx, (stim_time, activation) in enumerate(
+        zip(history, history_activation, strict=True)
+    ):
         if idx == 0:
             ri = 1.0
         else:
             ri = 1.0 + (r0 - 1.0) * np.exp(
                 -(stim_time - history[idx - 1]) / parameters.tauc
             )
-        value += ri * np.exp(-(time - stim_time) / parameters.tauc)
+        value += ri * np.exp(-(time - stim_time) / parameters.tauc) * activation
     return float(value)
 
 
@@ -159,10 +231,11 @@ def fatigue_rhs(
 def periodic_cn_sum_gain(
     parameters: Ding2007Parameters,
     stim_interval: float,
+    activation: float = 1.0,
 ) -> float:
     decay = np.exp(-stim_interval / parameters.tauc)
     ri = 1.0 + ((parameters.km_rest + parameters.r0_km_relationship) - 1.0) * decay
-    return float(ri / (parameters.tauc * (1.0 - decay)))
+    return float(activation * ri / (parameters.tauc * (1.0 - decay)))
 
 
 def base_rhs(
@@ -171,10 +244,13 @@ def base_rhs(
     time: float,
     pulse_width: float,
     stim_times: np.ndarray,
+    activation_values: np.ndarray,
     truncation: int,
 ) -> np.ndarray:
     cn, force, a, tau1, km = state
-    history_sum = base_cn_sum(parameters, stim_times, time, truncation)
+    history_sum = base_cn_sum(
+        parameters, stim_times, activation_values, time, truncation
+    )
     effective_a = a_calculation(parameters, a, pulse_width)
     force_dot = f_dot(parameters, cn, force, effective_a, tau1, km)
     a_dot, tau1_dot, km_dot = fatigue_rhs(parameters, force, a, tau1, km)
@@ -195,6 +271,7 @@ def periodic_rhs(
     state: np.ndarray,
     pulse_width: float,
     stim_interval: float,
+    activation: float = 1.0,
 ) -> np.ndarray:
     cn, cn_sum, force, a, tau1, km = state
     effective_a = a_calculation(parameters, a, pulse_width)
@@ -203,7 +280,8 @@ def periodic_rhs(
     return np.array(
         [
             cn_dot(parameters, cn, cn_sum),
-            -cn_sum / parameters.tauc + periodic_cn_sum_gain(parameters, stim_interval),
+            -cn_sum / parameters.tauc
+            + periodic_cn_sum_gain(parameters, stim_interval, activation),
             force_dot,
             a_dot,
             tau1_dot,
@@ -241,6 +319,15 @@ def simulate(
         stim_interval,
         dtype=float,
     )
+    activation_values = build_activation_values(
+        stim_times,
+        cycle_duration,
+        args.activation_profile,
+        args.activation_low,
+        args.activation_high,
+        args.random_seed,
+    )
+    periodic_activation = float(np.mean(activation_values))
     base_state = np.array(
         [
             0.0,
@@ -268,12 +355,13 @@ def simulate(
     periodic_states = np.empty((times.size, periodic_state.size))
     cn_sum_history = np.empty(times.size)
     pulse_width = np.empty(times.size)
+    activation = np.empty(times.size)
 
     for idx, time in enumerate(times):
         base_states[idx, :] = base_state
         periodic_states[idx, :] = periodic_state
         cn_sum_history[idx] = base_cn_sum(
-            parameters, stim_times, time, args.sum_stim_truncation
+            parameters, stim_times, activation_values, time, args.sum_stim_truncation
         )
         pulse_width[idx] = pulse_width_at_time(
             time,
@@ -281,6 +369,7 @@ def simulate(
             args.pulse_width,
             args.pulse_width_profile,
         )
+        activation[idx] = activation_at_time(stim_times, activation_values, time)
         if idx == times.size - 1:
             break
 
@@ -296,6 +385,7 @@ def simulate(
                     args.pulse_width_profile,
                 ),
                 stim_times,
+                activation_values,
                 args.sum_stim_truncation,
             )
 
@@ -310,6 +400,7 @@ def simulate(
                     args.pulse_width_profile,
                 ),
                 stim_interval,
+                periodic_activation,
             )
 
         base_state = rk4_step(base_step_rhs, base_state, time, dt)
@@ -321,6 +412,7 @@ def simulate(
     validation_periodic_states = periodic_states[validation_mask, :]
     validation_cn_sum_history = cn_sum_history[validation_mask]
     validation_pulse_width = pulse_width[validation_mask]
+    validation_activation = activation[validation_mask]
 
     node_times = np.arange(0.0, final_time + 0.5 * stim_interval, stim_interval)
     node_indices = np.array(
@@ -334,6 +426,7 @@ def simulate(
     node_periodic = validation_periodic_states[node_indices, :]
     node_cn_sum_history = validation_cn_sum_history[node_indices]
     node_pulse_width = validation_pulse_width[node_indices]
+    node_activation = validation_activation[node_indices]
 
     comparable_periodic = node_periodic[:, [0, 2, 3, 4, 5]]
     node_error = comparable_periodic - node_base
@@ -344,6 +437,7 @@ def simulate(
         node_base,
         node_cn_sum_history,
         node_pulse_width,
+        activation_values,
         stim_times,
         args.sum_stim_truncation,
         stim_interval,
@@ -373,11 +467,14 @@ def simulate(
         "periodic_states": validation_periodic_states,
         "cn_sum_history": validation_cn_sum_history,
         "pulse_width": validation_pulse_width,
+        "activation": validation_activation,
         "node_times": node_times,
         "node_base_states": node_base,
         "node_periodic_states": node_periodic,
         "node_cn_sum_history": node_cn_sum_history,
         "node_pulse_width": node_pulse_width,
+        "node_activation": node_activation,
+        "periodic_activation": periodic_activation,
         "node_rhs_error": node_rhs_error,
         "metrics": metrics,
     }
@@ -389,6 +486,7 @@ def rhs_equivalence_error(
     node_base_states: np.ndarray,
     node_cn_sum_history: np.ndarray,
     node_pulse_width: np.ndarray,
+    activation_values: np.ndarray,
     stim_times: np.ndarray,
     truncation: int,
     stim_interval: float,
@@ -409,6 +507,7 @@ def rhs_equivalence_error(
             time,
             pulse_width,
             stim_times,
+            activation_values,
             truncation,
         )
         periodic_state = np.array(
@@ -420,6 +519,7 @@ def rhs_equivalence_error(
             periodic_state,
             pulse_width,
             stim_interval,
+            activation_at_time(stim_times, activation_values, time),
         )
         errors[idx, :] = periodic_derivative[[0, 2, 3, 4, 5]] - base_derivative
     return errors
@@ -458,7 +558,7 @@ def plot_cn_sum(results: dict[str, dict], output_dir: Path) -> Path:
         axis.plot(
             times,
             result["periodic_states"][:, 1],
-            label="periodic state Cn_sum(t)",
+            label="periodic mean-intensity Cn_sum(t)",
             color="tab:orange",
             linewidth=1.8,
         )
@@ -473,7 +573,7 @@ def plot_cn_sum(results: dict[str, dict], output_dir: Path) -> Path:
         axis.scatter(
             result["node_times"],
             result["node_periodic_states"][:, 1],
-            label="periodic at stim nodes",
+            label="periodic mean-intensity at stim nodes",
             color="tab:orange",
             s=12,
             zorder=3,
@@ -534,10 +634,39 @@ def plot_states(results: dict[str, dict], output_dir: Path) -> Path:
         )
         axis.set_title(label)
         axis.grid(True, alpha=0.25)
-    axes[-1].plot(times, result["pulse_width"] * 1e6, color="tab:green")
-    axes[-1].set_title("pulse width command")
-    axes[-1].set_ylabel("us")
+    axes[-1].plot(
+        times,
+        result["pulse_width"] * 1e6,
+        color="tab:green",
+        label="pulse width",
+    )
+    activation_axis = axes[-1].twinx()
+    activation_axis.step(
+        times,
+        result["activation"],
+        color="tab:purple",
+        where="post",
+        alpha=0.75,
+        label="lambda",
+    )
+    activation_axis.axhline(
+        result["periodic_activation"],
+        color="tab:purple",
+        linestyle=":",
+        alpha=0.8,
+        label="mean lambda",
+    )
+    axes[-1].set_title("pulse width and effective stimulation intensity")
+    axes[-1].set_ylabel("pulse width (us)")
+    activation_axis.set_ylabel("lambda")
     axes[-1].grid(True, alpha=0.25)
+    handles, labels = axes[-1].get_legend_handles_labels()
+    activation_handles, activation_labels = activation_axis.get_legend_handles_labels()
+    axes[-1].legend(
+        handles + activation_handles,
+        labels + activation_labels,
+        loc="best",
+    )
     for axis in axes[-2:]:
         axis.set_xlabel("time (s)")
     axes[0].legend(loc="best")
