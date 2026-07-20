@@ -75,7 +75,7 @@ various OCP transcriptions (e.g., direct collocation or direct multiple shooting
 differential equations [@puchaud2023direct], often embedded in FES models. Muscle fatigue is the primary challenge in
 FES. Enabling the development and comparison of different OCP formulations could help address research questions, yield
 novel stimulation patterns and enhance fatigue reduction. Moreover, using receding-horizon estimation for longer 
-simulations reduces the computational complexity associated with time-varying dynamics (e.g., fatigue)
+simulations reduces the computational complexity [@qu2009computation] associated with time-varying dynamics (e.g., fatigue)
 [@ding2003mathematical]. 
 
 Thirdly, predictive simulations of FES-driven or FES-assisted motions (e.g., walking, cycling, reaching, and grasping)
