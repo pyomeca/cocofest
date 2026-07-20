@@ -3,10 +3,9 @@ Validate periodic Ding stimulation-history surrogates against the base Ding mode
 
 The base Ding 2007 fatigue model evaluates the calcium driving term from the
 truncated list of previous stimulation times. The periodic variant replaces this
-history by the additional state Cn_sum. This script compares a mean-intensity
-periodic approximation and a pulse-aware periodic state update with the same
-stimulation times, pulse-width command history, and optional IPOPT-derived
-effective stimulation intensity history.
+history by the additional state Cn_sum. This script compares the fixed-intensity
+periodic approximation with the base model using the same stimulation times and
+variable pulse-width command history. Stimulation intensity remains fixed at one.
 """
 
 from __future__ import annotations
@@ -58,46 +57,6 @@ def build_argument_parser() -> argparse.ArgumentParser:
         choices=("constant", "sinusoidal", "staircase"),
         default="constant",
     )
-    parser.add_argument(
-        "--activation-profile",
-        choices=(
-            "constant",
-            "sinusoidal",
-            "staircase",
-            "alternating",
-            "random",
-            "ipopt",
-        ),
-        default="constant",
-        help=(
-            "Effective stimulation intensity profile used as lambda_i in the base "
-            "calcium history. Use 'ipopt' to derive lambda_i from a saved IPOPT "
-            "solution."
-        ),
-    )
-    parser.add_argument("--activation-low", type=float, default=0.2)
-    parser.add_argument("--activation-high", type=float, default=1.8)
-    parser.add_argument("--activation-clip-low", type=float, default=None)
-    parser.add_argument("--activation-clip-high", type=float, default=None)
-    parser.add_argument("--random-seed", type=int, default=42)
-    parser.add_argument(
-        "--ipopt-data-file",
-        type=Path,
-        default=None,
-        help=(
-            "Saved IPOPT .npz solution used when --activation-profile ipopt. "
-            "Defaults to result/initial_guess/2_initial_guess_collocation_3_radau.npz "
-            "when it exists."
-        ),
-    )
-    parser.add_argument("--ipopt-muscle", default="Triceps")
-    parser.add_argument("--ipopt-control-key", default=None)
-    parser.add_argument(
-        "--ipopt-activation-source",
-        choices=("pulse_width", "fatigue", "pulse_width_and_fatigue"),
-        default="pulse_width_and_fatigue",
-    )
-    parser.add_argument("--fatigue-activation-gain", type=float, default=8.0)
     parser.add_argument(
         "--output-dir",
         type=Path,
@@ -151,200 +110,8 @@ def build_activation_values(
     args: argparse.Namespace,
     parameters: Ding2007Parameters,
 ) -> np.ndarray:
-    profile = args.activation_profile
-    low = args.activation_low
-    high = args.activation_high
-    if low < 0.0 or high < 0.0:
-        raise ValueError("--activation-low and --activation-high must be non-negative.")
-    if high < low:
-        raise ValueError("--activation-high must be >= --activation-low.")
-    if (
-        args.activation_clip_low is not None
-        and args.activation_clip_high is not None
-        and args.activation_clip_high < args.activation_clip_low
-    ):
-        raise ValueError("--activation-clip-high must be >= --activation-clip-low.")
-
-    if profile == "constant":
-        return np.ones(stim_times.shape)
-
-    if profile == "ipopt":
-        values = load_ipopt_activation_values(
-            stim_times, cycle_duration, args, parameters
-        )
-        return clip_activation_values(values, args)
-
-    phase = (stim_times % cycle_duration) / cycle_duration
-    mid = 0.5 * (low + high)
-    amplitude = 0.5 * (high - low)
-    if profile == "sinusoidal":
-        return mid + amplitude * np.sin(2.0 * np.pi * phase)
-    if profile == "staircase":
-        return np.where(phase < 0.5, low, high)
-    if profile == "alternating":
-        return np.where(np.arange(stim_times.size) % 2 == 0, low, high)
-
-    rng = np.random.default_rng(args.random_seed)
-    return rng.uniform(low, high, size=stim_times.shape)
-
-
-def clip_activation_values(values: np.ndarray, args: argparse.Namespace) -> np.ndarray:
-    clipped = np.asarray(values, dtype=float)
-    if args.activation_clip_low is not None:
-        clipped = np.maximum(clipped, args.activation_clip_low)
-    if args.activation_clip_high is not None:
-        clipped = np.minimum(clipped, args.activation_clip_high)
-    return clipped
-
-
-def load_ipopt_activation_values(
-    stim_times: np.ndarray,
-    cycle_duration: float,
-    args: argparse.Namespace,
-    parameters: Ding2007Parameters,
-) -> np.ndarray:
-    data_file = args.ipopt_data_file or (
-        Path(__file__).resolve().parent
-        / "result"
-        / "initial_guess"
-        / "2_initial_guess_collocation_3_radau.npz"
-    )
-    if not data_file.exists():
-        raise FileNotFoundError(
-            f"Could not find IPOPT data file '{data_file}'. Pass --ipopt-data-file."
-        )
-
-    with np.load(data_file, allow_pickle=True) as data:
-        pulse_width_values, source_times = load_ipopt_pulse_width_series(
-            data,
-            cycle_duration,
-            args,
-        )
-        activation = np.ones(pulse_width_values.shape)
-        if args.ipopt_activation_source in ("pulse_width", "pulse_width_and_fatigue"):
-            activation *= pulse_width_to_activation(
-                parameters,
-                pulse_width_values,
-                args.pulse_width,
-            )
-        if args.ipopt_activation_source in ("fatigue", "pulse_width_and_fatigue"):
-            activation *= fatigue_compensation_from_ipopt(
-                data,
-                source_times,
-                args,
-            )
-
-    return sample_periodic_series_at_stimulations(
-        stim_times,
-        source_times,
-        activation,
-    )
-
-
-def load_ipopt_pulse_width_series(
-    data: np.lib.npyio.NpzFile,
-    cycle_duration: float,
-    args: argparse.Namespace,
-) -> tuple[np.ndarray, np.ndarray]:
-    key = args.ipopt_control_key or f"last_pulse_width_{args.ipopt_muscle}"
-    if key not in data.files:
-        available_controls = sorted(
-            k for k in data.files if k.startswith("last_pulse_width_")
-        )
-        if not available_controls:
-            raise KeyError(
-                "No last_pulse_width_* control found in the IPOPT data file."
-            )
-        key = available_controls[0]
-
-    pulse_width_values = np.asarray(data[key], dtype=float).squeeze()
-    if pulse_width_values.ndim != 1:
-        raise ValueError(f"IPOPT control '{key}' must be a one-dimensional series.")
-
-    source_times = build_ipopt_control_times(
-        data, pulse_width_values.size, cycle_duration, args
-    )
-    return pulse_width_values, source_times
-
-
-def build_ipopt_control_times(
-    data: np.lib.npyio.NpzFile,
-    value_count: int,
-    cycle_duration: float,
-    args: argparse.Namespace,
-) -> np.ndarray:
-    if "stim_time" in data.files:
-        stim_time = np.asarray(data["stim_time"], dtype=float).squeeze()
-        if stim_time.ndim == 1 and stim_time.size == value_count:
-            return stim_time
-
-    if "n_shooting_per_cycle" in data.files:
-        n_per_cycle = int(np.asarray(data["n_shooting_per_cycle"]).item())
-    else:
-        n_per_cycle = args.stimulations_per_cycle
-    stim_interval = cycle_duration / n_per_cycle
-    return np.arange(value_count, dtype=float) * stim_interval
-
-
-def pulse_width_to_activation(
-    parameters: Ding2007Parameters,
-    pulse_width_values: np.ndarray,
-    reference_pulse_width: float,
-) -> np.ndarray:
-    denominator = pulse_width_recruitment(parameters, reference_pulse_width)
-    if denominator <= 0.0:
-        raise ValueError(
-            "--pulse-width must be above pd0 to define an activation reference."
-        )
-    return pulse_width_recruitment(parameters, pulse_width_values) / denominator
-
-
-def pulse_width_recruitment(
-    parameters: Ding2007Parameters,
-    pulse_width_values: float | np.ndarray,
-) -> np.ndarray:
-    pulse_width_array = np.asarray(pulse_width_values, dtype=float)
-    effective_pulse_width = np.maximum(0.0, pulse_width_array - parameters.pd0)
-    return 1.0 - np.exp(-effective_pulse_width / parameters.pdt)
-
-
-def fatigue_compensation_from_ipopt(
-    data: np.lib.npyio.NpzFile,
-    source_times: np.ndarray,
-    args: argparse.Namespace,
-) -> np.ndarray:
-    key = f"A_{args.ipopt_muscle}"
-    if key not in data.files or "time" not in data.files:
-        return np.ones(source_times.shape)
-
-    time = np.asarray(data["time"], dtype=float).squeeze()
-    a_values = np.asarray(data[key], dtype=float).squeeze()
-    if time.ndim != 1 or a_values.ndim != 1 or time.size != a_values.size:
-        return np.ones(source_times.shape)
-
-    sampled_a = np.interp(source_times, time, a_values)
-    rest_a = max(float(sampled_a[0]), 1e-12)
-    fatigue_index = np.maximum(0.0, (rest_a - sampled_a) / rest_a)
-    return 1.0 + args.fatigue_activation_gain * fatigue_index
-
-
-def sample_periodic_series_at_stimulations(
-    stim_times: np.ndarray,
-    source_times: np.ndarray,
-    values: np.ndarray,
-) -> np.ndarray:
-    if values.size == 0:
-        raise ValueError("Cannot sample an empty IPOPT activation series.")
-    if values.size == 1:
-        return np.full(stim_times.shape, float(values[0]))
-
-    source_times = np.asarray(source_times, dtype=float)
-    values = np.asarray(values, dtype=float)
-    dt = float(np.median(np.diff(source_times)))
-    period = float(source_times[-1] - source_times[0] + dt)
-    wrapped_times = np.mod(stim_times - source_times[0], period)
-    indices = np.floor(wrapped_times / dt + 0.5).astype(int) % values.size
-    return values[indices]
+    del cycle_duration, args, parameters
+    return np.ones(stim_times.shape)
 
 
 def time_is_stimulation_node(stim_times: np.ndarray, time: float) -> bool:
@@ -892,14 +659,14 @@ def plot_cn_sum(results: dict[str, dict], output_dir: Path) -> Path:
         axis.plot(
             times,
             result["periodic_states"][:, 1],
-            label="periodic mean-intensity Cn_sum(t)",
+            label="periodic fixed-intensity Cn_sum(t)",
             color="tab:orange",
             linewidth=1.8,
         )
         axis.plot(
             times,
             result["pulse_periodic_states"][:, 1],
-            label="periodic pulse-aware Cn_sum(t)",
+            label="periodic node-updated Cn_sum(t)",
             color="tab:red",
             linewidth=1.4,
             linestyle="--",
@@ -915,7 +682,7 @@ def plot_cn_sum(results: dict[str, dict], output_dir: Path) -> Path:
         axis.scatter(
             result["node_times"],
             result["node_periodic_states"][:, 1],
-            label="periodic mean-intensity at stim nodes",
+            label="periodic fixed-intensity at stim nodes",
             color="tab:orange",
             s=12,
             zorder=3,
@@ -923,7 +690,7 @@ def plot_cn_sum(results: dict[str, dict], output_dir: Path) -> Path:
         axis.scatter(
             result["node_times"],
             result["node_pulse_periodic_states"][:, 1],
-            label="pulse-aware at stim nodes",
+            label="node-updated at stim nodes",
             color="tab:red",
             s=9,
             zorder=3,
@@ -979,7 +746,7 @@ def plot_states(results: dict[str, dict], output_dir: Path) -> Path:
         axis.plot(
             times,
             pulse_periodic_comparable[label],
-            label="periodic pulse-aware",
+            label="periodic node-updated",
             color="tab:red",
             linewidth=1.4,
             linestyle=":",
@@ -1013,33 +780,10 @@ def plot_states(results: dict[str, dict], output_dir: Path) -> Path:
         color="tab:green",
         label="pulse width",
     )
-    activation_axis = axes[-1].twinx()
-    activation_axis.step(
-        times,
-        result["activation"],
-        color="tab:purple",
-        where="post",
-        alpha=0.75,
-        label="lambda",
-    )
-    activation_axis.axhline(
-        result["periodic_activation"],
-        color="tab:purple",
-        linestyle=":",
-        alpha=0.8,
-        label="mean lambda",
-    )
-    axes[-1].set_title("pulse width and effective stimulation intensity")
+    axes[-1].set_title("variable pulse width with fixed stimulation intensity")
     axes[-1].set_ylabel("pulse width (us)")
-    activation_axis.set_ylabel("lambda")
     axes[-1].grid(True, alpha=0.25)
-    handles, labels = axes[-1].get_legend_handles_labels()
-    activation_handles, activation_labels = activation_axis.get_legend_handles_labels()
-    axes[-1].legend(
-        handles + activation_handles,
-        labels + activation_labels,
-        loc="best",
-    )
+    axes[-1].legend(loc="best")
     for axis in axes[-2:]:
         axis.set_xlabel("time (s)")
     axes[0].legend(loc="best")
@@ -1054,9 +798,9 @@ def plot_error_summary(results: dict[str, dict], output_dir: Path) -> Path:
     x = np.arange(len(labels))
     bar_specs = [
         ("steady_history", "mean", "", -0.3),
-        ("steady_history", "pulse-aware", "pulse_", -0.1),
+        ("steady_history", "node-updated", "pulse_", -0.1),
         ("from_rest", "mean", "", 0.1),
-        ("from_rest", "pulse-aware", "pulse_", 0.3),
+        ("from_rest", "node-updated", "pulse_", 0.3),
     ]
     width = 0.18
 
@@ -1134,20 +878,14 @@ def plot_rhs_equivalence(results: dict[str, dict], output_dir: Path) -> Path:
 
 
 def print_metrics(results: dict[str, dict]) -> None:
-    steady_activation = results["steady_history"]["node_activation"]
-    print(
-        "activation | "
-        f"node_min {np.min(steady_activation):.6g} | "
-        f"node_mean {np.mean(steady_activation):.6g} | "
-        f"node_max {np.max(steady_activation):.6g}"
-    )
+    print("stimulation_intensity_lambda: 1.0")
     print(
         "scenario | periodic_model | quantity | node_rmse | node_max_abs | "
         "dense_rmse | dense_max_abs"
     )
     for scenario, result in results.items():
         metrics = result["metrics"]
-        for model_name, prefix in (("mean", ""), ("pulse-aware", "pulse_")):
+        for model_name, prefix in (("mean", ""), ("node-updated", "pulse_")):
             rows = ("cn_sum", *COMPARABLE_STATE_LABELS)
             for row in rows:
                 print(

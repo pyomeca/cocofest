@@ -552,9 +552,6 @@ def prepare_nmpc(
     )
     state_scaling = simulation_conditions.get("state_scaling", "none")
     pulse_width_scaling = simulation_conditions.get("pulse_width_scaling", 1 / 400)
-    stimulation_intensity_timeseries = simulation_conditions.get(
-        "stimulation_intensity_timeseries"
-    )
     # --- Pickle file info --- #
     initial_guess_path = simulation_conditions["init_guess_file_path"]
 
@@ -573,23 +570,6 @@ def prepare_nmpc(
         0
     ].get_numerical_data_time_series(window_n_shooting, window_cycle_duration)
     numerical_time_series.update(numerical_data_time_series)
-    if stimulation_intensity_timeseries is not None:
-        stimulation_intensity_timeseries = np.asarray(
-            stimulation_intensity_timeseries, dtype=float
-        )
-        expected_shape = (
-            len(model.muscles_dynamics_model),
-            1,
-            window_n_shooting + 1,
-        )
-        if stimulation_intensity_timeseries.shape != expected_shape:
-            raise ValueError(
-                "stimulation_intensity_timeseries must have shape "
-                f"{expected_shape}, got {stimulation_intensity_timeseries.shape}."
-            )
-        numerical_time_series["stimulation_intensity"] = (
-            stimulation_intensity_timeseries
-        )
     # --- Dynamics --- #
     dynamics_options = set_dynamics_options(
         numerical_time_series=numerical_time_series if numerical_time_series else None,
@@ -1084,7 +1064,6 @@ def set_fes_model(
     model_path,
     stim_time,
     periodic_cn_sum_approximation: bool = False,
-    periodic_cn_sum_stimulation_mode: str = "mean",
 ):
     # Set FES model (set to Ding et al. 2007 + fatigue, for now)
     dummy_biomodel = BiorbdModel(model_path)
@@ -1095,15 +1074,12 @@ def set_fes_model(
         else DingModelPulseWidthFrequencyWithFatigue
     )
     muscles_model = []
-    for muscle_index, muscle in enumerate(muscle_name_list):
+    for muscle in muscle_name_list:
         kwargs = {
             "muscle_name": muscle,
             "sum_stim_truncation": 6,
             "stim_time": stim_time,
         }
-        if periodic_cn_sum_approximation:
-            kwargs["cn_sum_stimulation_mode"] = periodic_cn_sum_stimulation_mode
-            kwargs["stimulation_intensity_index"] = muscle_index
         muscles_model.append(model_cls(**kwargs))
 
     # --- Muscle parameter scaling --- #

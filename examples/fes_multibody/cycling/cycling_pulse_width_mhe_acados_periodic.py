@@ -167,326 +167,6 @@ def build_cost_fun_weight(objectives: set[str]) -> list[int]:
     return weights
 
 
-def effective_periodic_cn_sum_stimulation_mode(args: argparse.Namespace) -> str:
-    if args.stimulation_intensity_source != "none":
-        return "stimulation_intensity"
-    return args.periodic_cn_sum_stimulation_mode
-
-
-def default_stimulation_intensity_ipopt_file(args: argparse.Namespace) -> Path:
-    return (
-        Path(__file__).resolve().parent
-        / "result"
-        / "initial_guess"
-        / f"{args.cycles_per_window}_initial_guess_collocation_3_radau.npz"
-    )
-
-
-def pulse_width_recruitment(muscle_model, pulse_width_values: np.ndarray) -> np.ndarray:
-    pulse_width_values = np.asarray(pulse_width_values, dtype=float)
-    effective_pulse_width = np.maximum(0.0, pulse_width_values - muscle_model.pd0)
-    return 1.0 - np.exp(-effective_pulse_width / muscle_model.pdt)
-
-
-def pulse_width_activation_from_ipopt(
-    muscle_model,
-    pulse_width_values: np.ndarray,
-    reference_pulse_width: float,
-) -> np.ndarray:
-    denominator = pulse_width_recruitment(
-        muscle_model, np.array([reference_pulse_width])
-    )[0]
-    if denominator <= 0:
-        raise ValueError(
-            "--stimulation-intensity-reference-pulse-width must be greater than pd0."
-        )
-    return pulse_width_recruitment(muscle_model, pulse_width_values) / denominator
-
-
-def cyclic_moving_average(values: np.ndarray, window: int) -> np.ndarray:
-    values = np.asarray(values, dtype=float)
-    if window < 1:
-        raise ValueError("--stimulation-intensity-smoothing-window must be >= 1.")
-    if window % 2 == 0:
-        raise ValueError("--stimulation-intensity-smoothing-window must be odd.")
-    if window == 1:
-        return values.copy()
-
-    offsets = np.arange(window) - window // 2
-    return np.mean([np.roll(values, offset) for offset in offsets], axis=0)
-
-
-def fatigue_activation_from_values(
-    a_values: np.ndarray,
-    rest_a: float,
-    fatigue_gain: float,
-) -> np.ndarray:
-    a_values = np.asarray(a_values, dtype=float)
-    rest_a = max(float(rest_a), 1e-12)
-    fatigue_index = np.maximum(0.0, (rest_a - a_values) / rest_a)
-    return 1.0 + fatigue_gain * fatigue_index
-
-
-def stimulation_intensity_from_trajectories(
-    args: argparse.Namespace,
-    muscle_model,
-    pulse_width_values: np.ndarray,
-    a_values: np.ndarray | None,
-) -> np.ndarray:
-    pulse_width_values = np.asarray(pulse_width_values, dtype=float).reshape(-1)
-    pulse_factor = np.ones(pulse_width_values.shape)
-    fatigue_factor = np.ones(pulse_width_values.shape)
-
-    if args.stimulation_intensity_ipopt_source in (
-        "pulse_width",
-        "pulse_width_and_fatigue",
-    ):
-        pulse_factor = pulse_width_activation_from_ipopt(
-            muscle_model,
-            pulse_width_values,
-            args.stimulation_intensity_reference_pulse_width,
-        )
-        pulse_factor = cyclic_moving_average(
-            pulse_factor, args.stimulation_intensity_smoothing_window
-        )
-        pulse_factor = 1.0 + args.stimulation_intensity_homotopy_alpha * (
-            pulse_factor - 1.0
-        )
-
-    if (
-        args.stimulation_intensity_ipopt_source
-        in ("fatigue", "pulse_width_and_fatigue")
-        and a_values is not None
-    ):
-        fatigue_reference = (
-            float(a_values[0]) if np.asarray(a_values).size else muscle_model.a_scale
-        )
-        fatigue_factor = fatigue_activation_from_values(
-            a_values,
-            rest_a=fatigue_reference,
-            fatigue_gain=args.stimulation_intensity_fatigue_gain,
-        )
-
-    return np.clip(
-        pulse_factor * fatigue_factor,
-        args.stimulation_intensity_clip_low,
-        args.stimulation_intensity_clip_high,
-    )
-
-
-def ipopt_control_times(
-    data, value_count: int, cycle_duration: float, args: argparse.Namespace
-) -> np.ndarray:
-    if "stim_time" in data.files:
-        stim_time = np.asarray(data["stim_time"], dtype=float).squeeze()
-        if stim_time.ndim == 1 and stim_time.size == value_count:
-            return stim_time
-
-    if "n_shooting_per_cycle" in data.files:
-        stimulations_per_cycle = int(np.asarray(data["n_shooting_per_cycle"]).item())
-    else:
-        stimulations_per_cycle = args.stimulations_per_cycle
-    return np.arange(value_count, dtype=float) * cycle_duration / stimulations_per_cycle
-
-
-def sample_periodic_values_by_index(
-    values: np.ndarray,
-    n_nodes: int,
-    node_convention: str,
-) -> np.ndarray:
-    if values.size == 0:
-        raise ValueError("Cannot sample an empty IPOPT stimulation intensity series.")
-
-    offset = 1 if node_convention == "next" else 0
-    indices = (np.arange(n_nodes) + offset) % values.size
-    return values[indices]
-
-
-def build_ipopt_stimulation_intensity_timeseries(
-    args: argparse.Namespace,
-    model,
-    window_n_shooting: int,
-    cycle_duration: float,
-) -> np.ndarray | None:
-    if args.stimulation_intensity_source == "none":
-        return None
-    if args.stimulation_intensity_source != "ipopt":
-        raise ValueError(
-            f"Unsupported stimulation intensity source: {args.stimulation_intensity_source}"
-        )
-    if args.stimulation_intensity_clip_high < args.stimulation_intensity_clip_low:
-        raise ValueError(
-            "--stimulation-intensity-clip-high must be >= --stimulation-intensity-clip-low."
-        )
-
-    data_file = (
-        args.stimulation_intensity_ipopt_file
-        or default_stimulation_intensity_ipopt_file(args)
-    )
-    if not data_file.exists():
-        raise FileNotFoundError(
-            f"Could not find IPOPT stimulation intensity source '{data_file}'."
-        )
-
-    n_nodes = window_n_shooting + 1
-    intensity = np.ones((len(model.muscles_dynamics_model), 1, n_nodes))
-    with np.load(data_file, allow_pickle=True) as data:
-        for muscle_index, muscle_model in enumerate(model.muscles_dynamics_model):
-            muscle_name = muscle_model.muscle_name
-            control_key = f"last_pulse_width_{muscle_name}"
-            if control_key not in data.files:
-                raise KeyError(
-                    f"Could not find '{control_key}' in IPOPT file '{data_file}'."
-                )
-
-            pulse_width_values = np.asarray(data[control_key], dtype=float).squeeze()
-            if pulse_width_values.ndim != 1:
-                raise ValueError(f"'{control_key}' must be a one-dimensional series.")
-            source_times = ipopt_control_times(
-                data, pulse_width_values.size, cycle_duration, args
-            )
-
-            a_values = None
-            if args.stimulation_intensity_ipopt_source in (
-                "fatigue",
-                "pulse_width_and_fatigue",
-            ):
-                fatigue_key = f"A_{muscle_name}"
-                if fatigue_key in data.files and "time" in data.files:
-                    time = np.asarray(data["time"], dtype=float).squeeze()
-                    fatigue_values = np.asarray(
-                        data[fatigue_key], dtype=float
-                    ).squeeze()
-                    if (
-                        time.ndim == 1
-                        and fatigue_values.ndim == 1
-                        and time.size == fatigue_values.size
-                    ):
-                        a_values = np.interp(source_times, time, fatigue_values)
-
-            values = stimulation_intensity_from_trajectories(
-                args,
-                muscle_model,
-                pulse_width_values,
-                a_values,
-            )
-            intensity[muscle_index, 0, :] = sample_periodic_values_by_index(
-                values,
-                n_nodes,
-                args.stimulation_intensity_node_convention,
-            )
-
-    return intensity
-
-
-def build_initial_stimulation_intensity_timeseries(
-    args: argparse.Namespace,
-    model,
-    window_n_shooting: int,
-    cycle_duration: float,
-) -> np.ndarray | None:
-    if args.stimulation_intensity_source == "warmup":
-        return np.ones((len(model.muscles_dynamics_model), 1, window_n_shooting + 1))
-    return build_ipopt_stimulation_intensity_timeseries(
-        args,
-        model,
-        window_n_shooting,
-        cycle_duration,
-    )
-
-
-def build_warmup_stimulation_intensity_timeseries(
-    args: argparse.Namespace,
-    periodic_nmpc,
-) -> np.ndarray:
-    n_intervals = periodic_nmpc.nlp[0].ns
-    models = periodic_nmpc.nlp[0].model.muscles_dynamics_model
-    intensity = np.ones((len(models), 1, n_intervals + 1))
-
-    for muscle_index, muscle_model in enumerate(models):
-        muscle_name = muscle_model.muscle_name
-        control_key = f"last_pulse_width_{muscle_name}"
-        pulse_width_values = np.asarray(
-            periodic_nmpc.nlp[0].u_init[control_key].init, dtype=float
-        ).reshape(1, -1)
-        pulse_width_values = _resample_warmup_data(
-            pulse_width_values, n_intervals, has_terminal_node=False
-        )[0]
-
-        a_values = None
-        fatigue_key = f"A_{muscle_name}"
-        if fatigue_key in periodic_nmpc.nlp[0].x_init.keys():
-            fatigue_values = np.asarray(
-                periodic_nmpc.nlp[0].x_init[fatigue_key].init, dtype=float
-            ).reshape(1, -1)
-            fatigue_values = _resample_warmup_data(
-                fatigue_values, n_intervals + 1, has_terminal_node=True
-            )[0]
-            a_values = fatigue_values[:-1]
-
-        values = stimulation_intensity_from_trajectories(
-            args,
-            muscle_model,
-            pulse_width_values,
-            a_values,
-        )
-        intensity[muscle_index, 0, :] = sample_periodic_values_by_index(
-            values,
-            n_intervals + 1,
-            args.stimulation_intensity_node_convention,
-        )
-
-    return intensity
-
-
-def set_nmpc_stimulation_intensity(periodic_nmpc, intensity: np.ndarray) -> None:
-    if periodic_nmpc.nlp[0].numerical_data_timeseries is None:
-        periodic_nmpc.nlp[0].numerical_data_timeseries = {}
-    periodic_nmpc.nlp[0].numerical_data_timeseries["stimulation_intensity"] = intensity
-
-
-def stimulation_intensity_control_consistency(
-    args: argparse.Namespace,
-    periodic_nmpc,
-) -> list[dict[str, float | str]]:
-    numerical_data = periodic_nmpc.nlp[0].numerical_data_timeseries
-    if numerical_data is None or "stimulation_intensity" not in numerical_data:
-        return []
-
-    installed = np.asarray(numerical_data["stimulation_intensity"], dtype=float)
-    expected = build_warmup_stimulation_intensity_timeseries(args, periodic_nmpc)
-    metrics = []
-    for muscle_index, muscle_model in enumerate(
-        periodic_nmpc.nlp[0].model.muscles_dynamics_model
-    ):
-        installed_values = installed[muscle_index, 0, :]
-        expected_values = expected[muscle_index, 0, :]
-        difference = installed_values - expected_values
-        metrics.append(
-            {
-                "muscle": muscle_model.muscle_name,
-                "rmse": float(np.sqrt(np.mean(difference**2))),
-                "max_abs_error": float(np.max(np.abs(difference))),
-                "installed_min": float(np.min(installed_values)),
-                "installed_max": float(np.max(installed_values)),
-                "expected_min": float(np.min(expected_values)),
-                "expected_max": float(np.max(expected_values)),
-            }
-        )
-    return metrics
-
-
-def stimulation_intensity_summary(intensity: np.ndarray | None) -> str:
-    if intensity is None:
-        return "None"
-    return (
-        f"shape={intensity.shape} "
-        f"min={np.min(intensity):.6g} "
-        f"mean={np.mean(intensity):.6g} "
-        f"max={np.max(intensity):.6g}"
-    )
-
-
 def build_argument_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -513,90 +193,6 @@ def build_argument_parser() -> argparse.ArgumentParser:
         choices=("periodic", "standard"),
         default="periodic",
         help="Use the ACADOS-friendly periodic Ding formulation or the historical standard one.",
-    )
-    parser.add_argument(
-        "--periodic-cn-sum-stimulation-mode",
-        type=str,
-        choices=("mean", "stimulation_intensity"),
-        default="mean",
-        help=(
-            "Calcium-history forcing used by the periodic Ding model. "
-            "'mean' keeps the historical constant-intensity approximation; "
-            "'stimulation_intensity' reads lambda_i from numerical timeseries."
-        ),
-    )
-    parser.add_argument(
-        "--stimulation-intensity-source",
-        type=str,
-        choices=("none", "ipopt", "warmup"),
-        default="none",
-        help=(
-            "Optional source for stage-wise lambda_i. 'warmup' derives it from the "
-            "controls and fatigue states actually transferred to ACADOS."
-        ),
-    )
-    parser.add_argument(
-        "--stimulation-intensity-ipopt-file",
-        type=Path,
-        default=None,
-        help=(
-            "Saved IPOPT .npz solution used when --stimulation-intensity-source=ipopt. "
-            "Defaults to the matching result/initial_guess file when available."
-        ),
-    )
-    parser.add_argument(
-        "--stimulation-intensity-ipopt-source",
-        choices=("pulse_width", "fatigue", "pulse_width_and_fatigue"),
-        default="pulse_width_and_fatigue",
-        help="How to derive lambda_i from the IPOPT solution.",
-    )
-    parser.add_argument(
-        "--stimulation-intensity-reference-pulse-width",
-        type=float,
-        default=0.000365702,
-        help="Reference pulse width, in seconds, used to normalize IPOPT pulse-width recruitment into lambda_i.",
-    )
-    parser.add_argument(
-        "--stimulation-intensity-fatigue-gain",
-        type=float,
-        default=8.0,
-        help="Gain multiplying the A-state fatigue index when deriving lambda_i from IPOPT data.",
-    )
-    parser.add_argument(
-        "--stimulation-intensity-homotopy-alpha",
-        type=float,
-        default=1.0,
-        help=(
-            "Blend applied to the pulse-width component: 0 keeps only the baseline/fatigue "
-            "component and 1 applies the complete pulse-width recruitment."
-        ),
-    )
-    parser.add_argument(
-        "--stimulation-intensity-smoothing-window",
-        type=int,
-        default=1,
-        help="Cyclic moving-average window applied to pulse-width recruitment before homotopy.",
-    )
-    parser.add_argument(
-        "--stimulation-intensity-clip-low",
-        type=float,
-        default=0.0,
-        help="Lower clipping value for derived lambda_i.",
-    )
-    parser.add_argument(
-        "--stimulation-intensity-clip-high",
-        type=float,
-        default=2.5,
-        help="Upper clipping value for derived lambda_i.",
-    )
-    parser.add_argument(
-        "--stimulation-intensity-node-convention",
-        choices=("current", "next"),
-        default="next",
-        help=(
-            "Use lambda_i at the current stimulation node or the next stimulation node "
-            "as the continuous equivalent forcing over a shooting interval."
-        ),
     )
     parser.add_argument(
         "--torque-application",
@@ -1324,10 +920,6 @@ def _codegen_signature(args: argparse.Namespace) -> str:
         "wheel_qdot_regularization_target": args.wheel_qdot_regularization_target,
         "state_scaling": args.state_scaling,
         "pulse_width_scaling": args.pulse_width_scaling,
-        "periodic_cn_sum_stimulation_mode": args.periodic_cn_sum_stimulation_mode,
-        "effective_periodic_cn_sum_stimulation_mode": (
-            effective_periodic_cn_sum_stimulation_mode(args)
-        ),
         "acados_pulse_width_trust_radius": args.acados_pulse_width_trust_radius,
         "max_acados_iterations": args.max_acados_iterations,
         "acados_tolerance": args.acados_tolerance,
@@ -2174,7 +1766,6 @@ def _periodic_ding_rhs(
     muscle_model,
     state: np.ndarray,
     pulse_width: float,
-    stimulation_intensity: float = 1.0,
 ) -> np.ndarray:
     return _to_numpy_vector(
         muscle_model.system_dynamics(
@@ -2185,20 +1776,17 @@ def _periodic_ding_rhs(
             tau1=state[4],
             km=state[5],
             pulse_width=pulse_width,
-            numerical_timeseries=np.array([stimulation_intensity]),
         )
     )
 
 
-def _periodic_calcium_rhs(
-    muscle_model, state: np.ndarray, stimulation_intensity: float = 1.0
-) -> np.ndarray:
+def _periodic_calcium_rhs(muscle_model, state: np.ndarray) -> np.ndarray:
     cn = state[0]
     cn_sum = state[1]
     return np.array(
         [
             float(muscle_model.cn_dot_fun(cn, cn_sum)),
-            float(muscle_model.cn_sum_dot_fun(cn_sum, stimulation_intensity)),
+            float(muscle_model.cn_sum_dot_fun(cn_sum)),
         ]
     )
 
@@ -2209,7 +1797,6 @@ def _rk4_periodic_ding_step(
     pulse_width: float,
     dt: float,
     n_substeps: int = 1,
-    stimulation_intensity: float = 1.0,
 ) -> np.ndarray:
     if n_substeps < 1:
         raise ValueError("--periodic-fes-warmup-projection-substeps must be >= 1.")
@@ -2217,26 +1804,21 @@ def _rk4_periodic_ding_step(
     sub_dt = dt / n_substeps
     next_state = np.array(state, dtype=float, copy=True)
     for _ in range(n_substeps):
-        k1 = _periodic_ding_rhs(
-            muscle_model, next_state, pulse_width, stimulation_intensity
-        )
+        k1 = _periodic_ding_rhs(muscle_model, next_state, pulse_width)
         k2 = _periodic_ding_rhs(
             muscle_model,
             next_state + 0.5 * sub_dt * k1,
             pulse_width,
-            stimulation_intensity,
         )
         k3 = _periodic_ding_rhs(
             muscle_model,
             next_state + 0.5 * sub_dt * k2,
             pulse_width,
-            stimulation_intensity,
         )
         k4 = _periodic_ding_rhs(
             muscle_model,
             next_state + sub_dt * k3,
             pulse_width,
-            stimulation_intensity,
         )
         next_state = next_state + sub_dt * (k1 + 2 * k2 + 2 * k3 + k4) / 6
     return next_state
@@ -2246,13 +1828,12 @@ def _exact_periodic_calcium_step(
     muscle_model,
     state: np.ndarray,
     dt: float,
-    stimulation_intensity: float = 1.0,
 ) -> np.ndarray:
     tau = muscle_model.tauc
     decay = np.exp(-dt / tau)
     cn = state[0]
     cn_sum = state[1]
-    cn_sum_steady = tau * muscle_model.periodic_cn_sum_gain(stimulation_intensity)
+    cn_sum_steady = tau * muscle_model.periodic_cn_sum_gain()
     next_cn_sum = cn_sum_steady + (cn_sum - cn_sum_steady) * decay
     next_cn = (
         decay * cn
@@ -2260,23 +1841,6 @@ def _exact_periodic_calcium_step(
         + (cn_sum - cn_sum_steady) * (dt / tau) * decay
     )
     return np.array([next_cn, next_cn_sum])
-
-
-def _muscle_stimulation_intensities(
-    periodic_nmpc, muscle_model, n_intervals: int
-) -> np.ndarray:
-    timeseries = periodic_nmpc.nlp[0].numerical_data_timeseries
-    if timeseries is None or "stimulation_intensity" not in timeseries:
-        return np.ones(n_intervals)
-
-    values = np.asarray(timeseries["stimulation_intensity"], dtype=float)
-    muscle_index = muscle_model.stimulation_intensity_index
-    if values.shape[0] <= muscle_index or values.shape[2] < n_intervals:
-        raise ValueError(
-            "stimulation_intensity numerical timeseries is inconsistent with "
-            f"muscle index {muscle_index} and {n_intervals} intervals."
-        )
-    return values[muscle_index, 0, :n_intervals]
 
 
 def _periodic_fes_rollout_defects(
@@ -2297,20 +1861,14 @@ def _periodic_fes_rollout_defects(
             [periodic_nmpc.nlp[0].x_init[key].init[0, :] for key in state_keys]
         )
         controls = periodic_nmpc.nlp[0].u_init[control_key].init[0, :]
-        stimulation_intensities = _muscle_stimulation_intensities(
-            periodic_nmpc, muscle_model, controls.size
-        )
         max_defect = 0.0
-        for node, (pulse_width, stimulation_intensity) in enumerate(
-            zip(controls, stimulation_intensities, strict=True)
-        ):
+        for node, pulse_width in enumerate(controls):
             expected = _rk4_periodic_ding_step(
                 muscle_model,
                 states[:, node],
                 pulse_width,
                 dt,
                 n_substeps=projection_substeps,
-                stimulation_intensity=stimulation_intensity,
             )
             max_defect = max(
                 max_defect, float(np.max(np.abs(states[:, node + 1] - expected)))
@@ -2341,21 +1899,15 @@ def _periodic_fes_rollout_defect_details(
             [periodic_nmpc.nlp[0].x_init[key].init[0, :] for key in state_keys]
         )
         controls = periodic_nmpc.nlp[0].u_init[control_key].init[0, :]
-        stimulation_intensities = _muscle_stimulation_intensities(
-            periodic_nmpc, muscle_model, controls.size
-        )
         state_scales = np.maximum(np.max(np.abs(states), axis=1), 1.0)
         muscle_max = 0.0
-        for node, (pulse_width, stimulation_intensity) in enumerate(
-            zip(controls, stimulation_intensities, strict=True)
-        ):
+        for node, pulse_width in enumerate(controls):
             expected = _rk4_periodic_ding_step(
                 muscle_model,
                 states[:, node],
                 pulse_width,
                 dt,
                 n_substeps=projection_substeps,
-                stimulation_intensity=stimulation_intensity,
             )
             defects = np.abs(states[:, node + 1] - expected)
             muscle_max = max(muscle_max, float(np.max(defects)))
@@ -2734,29 +2286,26 @@ def _project_periodic_states(
     muscle_model,
     original_states: np.ndarray,
     controls: np.ndarray,
-    stimulation_intensities: np.ndarray,
     dt: float,
     projection_mode: str,
     projection_substeps: int,
 ) -> np.ndarray:
     projected_states = np.empty_like(original_states)
     projected_states[:, 0] = original_states[:, 0]
-    for node, stimulation_intensity in enumerate(stimulation_intensities):
+    for node, pulse_width in enumerate(controls):
         if projection_mode == "calcium":
             projected_states[:, node + 1] = _exact_periodic_calcium_step(
                 muscle_model,
                 projected_states[:, node],
                 dt,
-                stimulation_intensity,
             )
         else:
             projected_states[:, node + 1] = _rk4_periodic_ding_step(
                 muscle_model,
                 projected_states[:, node],
-                controls[node],
+                pulse_width,
                 dt,
                 n_substeps=projection_substeps,
-                stimulation_intensity=stimulation_intensity,
             )
     return projected_states
 
@@ -2832,7 +2381,6 @@ def _bounded_least_squares_project_periodic_states(
     muscle_model,
     original_states: np.ndarray,
     controls: np.ndarray,
-    stimulation_intensities: np.ndarray,
     lower_bounds: np.ndarray,
     upper_bounds: np.ndarray,
     dt: float,
@@ -2901,22 +2449,15 @@ def _bounded_least_squares_project_periodic_states(
         states[:, 1:] = variable_flat.reshape((clipped_original.shape[0], -1))
         return states
 
-    def step(
-        state: np.ndarray,
-        pulse_width: float,
-        stimulation_intensity: float,
-    ) -> np.ndarray:
+    def step(state: np.ndarray, pulse_width: float) -> np.ndarray:
         if projection_mode == "calcium":
-            return _exact_periodic_calcium_step(
-                muscle_model, state, dt, stimulation_intensity
-            )
+            return _exact_periodic_calcium_step(muscle_model, state, dt)
         return _rk4_periodic_ding_step(
             muscle_model,
             state,
             pulse_width,
             dt,
             n_substeps=projection_substeps,
-            stimulation_intensity=stimulation_intensity,
         )
 
     def residual(variable_flat: np.ndarray) -> np.ndarray:
@@ -2924,10 +2465,8 @@ def _bounded_least_squares_project_periodic_states(
         pieces = []
         if include_defects:
             defects = []
-            for node, (pulse_width, stimulation_intensity) in enumerate(
-                zip(controls, stimulation_intensities, strict=True)
-            ):
-                expected = step(states[:, node], pulse_width, stimulation_intensity)
+            for node, pulse_width in enumerate(controls):
+                expected = step(states[:, node], pulse_width)
                 defects.append((states[:, node + 1] - expected) / scales[:, 0])
             pieces.append(sqrt_defect_weight * np.concatenate(defects))
         if include_proximity:
@@ -2969,7 +2508,6 @@ def _sequential_project_periodic_states(
     muscle_model,
     original_states: np.ndarray,
     controls: np.ndarray,
-    stimulation_intensities: np.ndarray,
     lower_bounds: np.ndarray,
     upper_bounds: np.ndarray,
     dt: float,
@@ -2998,15 +2536,12 @@ def _sequential_project_periodic_states(
     projected_states[:, 0] = clipped_original[:, 0]
     scales = _projection_state_scales(clipped_original, lower_bounds, upper_bounds)
     denominator = proximity_weight + defect_weight
-    for node, (pulse_width, stimulation_intensity) in enumerate(
-        zip(controls, stimulation_intensities, strict=True)
-    ):
+    for node, pulse_width in enumerate(controls):
         if projection_mode == "calcium":
             expected = _exact_periodic_calcium_step(
                 muscle_model,
                 projected_states[:, node],
                 dt,
-                stimulation_intensity,
             )
         else:
             expected = _rk4_periodic_ding_step(
@@ -3015,7 +2550,6 @@ def _sequential_project_periodic_states(
                 pulse_width,
                 dt,
                 n_substeps=projection_substeps,
-                stimulation_intensity=stimulation_intensity,
             )
         next_values = (
             defect_weight * expected + proximity_weight * clipped_original[:, node + 1]
@@ -3087,9 +2621,6 @@ def project_periodic_fes_initial_guess(
             [periodic_nmpc.nlp[0].x_init[key].init[0, :] for key in state_keys]
         )
         controls = periodic_nmpc.nlp[0].u_init[control_key].init[0, :]
-        stimulation_intensities = _muscle_stimulation_intensities(
-            periodic_nmpc, muscle_model, controls.size
-        )
         lower_bounds = []
         upper_bounds = []
         for key in state_keys:
@@ -3105,7 +2636,6 @@ def project_periodic_fes_initial_guess(
                 muscle_model,
                 original_states,
                 controls,
-                stimulation_intensities,
                 lower_bounds,
                 upper_bounds,
                 dt,
@@ -3125,7 +2655,6 @@ def project_periodic_fes_initial_guess(
                 muscle_model,
                 original_states,
                 controls,
-                stimulation_intensities,
                 lower_bounds,
                 upper_bounds,
                 dt,
@@ -3140,7 +2669,6 @@ def project_periodic_fes_initial_guess(
                 muscle_model,
                 original_states,
                 controls,
-                stimulation_intensities,
                 dt,
                 projection_mode,
                 projection_substeps,
@@ -3527,6 +3055,24 @@ def apply_phase_shifted_warmup_initial_guess(
     periodic_nmpc._correct_init_guess_to_fit_bounds(corrected_input="controls")
 
 
+def pulse_width_initial_guess_summary(periodic_nmpc) -> list[dict[str, float | str]]:
+    summaries = []
+    for key in periodic_nmpc.nlp[0].u_init.keys():
+        if not key.startswith("last_pulse_width_"):
+            continue
+        values = np.asarray(periodic_nmpc.nlp[0].u_init[key].init, dtype=float)
+        summaries.append(
+            {
+                "key": key,
+                "minimum": float(np.min(values)),
+                "mean": float(np.mean(values)),
+                "maximum": float(np.max(values)),
+                "span": float(np.ptp(values)),
+            }
+        )
+    return summaries
+
+
 def apply_standard_warmup_to_periodic_nmpc(
     periodic_nmpc,
     warmup_solution,
@@ -3543,7 +3089,6 @@ def apply_standard_warmup_to_periodic_nmpc(
     force_projection_weight: float = 0.25,
     force_qdot_defect_limit: float = 3.0,
     force_adaptive_steps: int = 10,
-    stimulation_intensity_args: argparse.Namespace | None = None,
     warmup_transfer_mode: str = "phase_shift",
     echo: bool = False,
 ):
@@ -3578,6 +3123,16 @@ def apply_standard_warmup_to_periodic_nmpc(
         raise ValueError(
             "--acados-standard-warmup-transfer must be 'advance' or 'phase_shift'."
         )
+    if echo:
+        for summary in pulse_width_initial_guess_summary(periodic_nmpc):
+            print(
+                "warmup_pulse_width: "
+                f"{summary['key']} "
+                f"min={summary['minimum']:.9g} "
+                f"mean={summary['mean']:.9g} "
+                f"max={summary['maximum']:.9g} "
+                f"span={summary['span']:.9g}"
+            )
     if echo and fatigue_warmstart_summary:
         print(
             "acados_fatigue_warmstart: "
@@ -3585,20 +3140,6 @@ def apply_standard_warmup_to_periodic_nmpc(
             f"max_delta={max(fatigue_warmstart_summary.values()):.6g} "
             f"keys={len(fatigue_warmstart_summary)}"
         )
-    if (
-        stimulation_intensity_args is not None
-        and stimulation_intensity_args.stimulation_intensity_source == "warmup"
-    ):
-        warmup_intensity = build_warmup_stimulation_intensity_timeseries(
-            stimulation_intensity_args, periodic_nmpc
-        )
-        set_nmpc_stimulation_intensity(periodic_nmpc, warmup_intensity)
-        if echo:
-            print(
-                "warmup_stimulation_intensity_timeseries: "
-                f"{stimulation_intensity_summary(warmup_intensity)}"
-            )
-
     warmup_states = adapted_solution.decision_states(to_merge=SolutionMerge.NODES)
     dt = periodic_nmpc.cycle_duration / periodic_nmpc.cycle_len
     muscle_models = {
@@ -4055,14 +3596,6 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
         raise ValueError("--cycles-per-window must be >= 1")
     if args.stimulations_per_cycle < 1:
         raise ValueError("--stimulations-per-cycle must be >= 1")
-    if not 0.0 <= args.stimulation_intensity_homotopy_alpha <= 1.0:
-        raise ValueError(
-            "--stimulation-intensity-homotopy-alpha must be between 0 and 1."
-        )
-    if args.stimulation_intensity_smoothing_window < 1:
-        raise ValueError("--stimulation-intensity-smoothing-window must be >= 1.")
-    if args.stimulation_intensity_smoothing_window % 2 == 0:
-        raise ValueError("--stimulation-intensity-smoothing-window must be odd.")
     if (
         args.acados_stationarity_tolerance is not None
         and args.acados_stationarity_tolerance <= 0
@@ -4089,14 +3622,6 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
         np.linspace(0, total_window_duration, total_stimulations, endpoint=False)
     )
     periodic_cn_sum_approximation = args.model_formulation == "periodic"
-    periodic_cn_sum_stimulation_mode = effective_periodic_cn_sum_stimulation_mode(args)
-    if (
-        args.model_formulation != "periodic"
-        and args.stimulation_intensity_source != "none"
-    ):
-        raise ValueError(
-            "--stimulation-intensity-source is only supported with --model-formulation periodic."
-        )
     use_external_forces = args.torque_application == "external_forces"
     ode_solver = build_ode_solver(args)
     historical_init_guess_path = None
@@ -4109,13 +3634,6 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
         str(model_path),
         stim_time,
         periodic_cn_sum_approximation=periodic_cn_sum_approximation,
-        periodic_cn_sum_stimulation_mode=periodic_cn_sum_stimulation_mode,
-    )
-    stimulation_intensity_timeseries = build_initial_stimulation_intensity_timeseries(
-        args,
-        model,
-        total_stimulations,
-        cycle_duration,
     )
 
     mhe_info = {
@@ -4154,7 +3672,6 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
         "wheel_qdot_regularization_target": args.wheel_qdot_regularization_target,
         "state_scaling": args.state_scaling,
         "pulse_width_scaling": args.pulse_width_scaling,
-        "stimulation_intensity_timeseries": stimulation_intensity_timeseries,
         "init_guess_file_path": (
             str(historical_init_guess_path)
             if historical_init_guess_path is not None
@@ -4222,34 +3739,8 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
         )
         print(f"state_scaling: {args.state_scaling}")
         print(f"pulse_width_scaling: {args.pulse_width_scaling}")
-        print(
-            "periodic_cn_sum_stimulation_mode: " f"{periodic_cn_sum_stimulation_mode}"
-        )
-        print(f"stimulation_intensity_source: {args.stimulation_intensity_source}")
-        print(
-            "stimulation_intensity_ipopt_file: "
-            f"{args.stimulation_intensity_ipopt_file or default_stimulation_intensity_ipopt_file(args)}"
-        )
-        print(
-            "stimulation_intensity_ipopt_source: "
-            f"{args.stimulation_intensity_ipopt_source}"
-        )
-        print(
-            "stimulation_intensity_node_convention: "
-            f"{args.stimulation_intensity_node_convention}"
-        )
-        print(
-            "stimulation_intensity_homotopy_alpha: "
-            f"{args.stimulation_intensity_homotopy_alpha}"
-        )
-        print(
-            "stimulation_intensity_smoothing_window: "
-            f"{args.stimulation_intensity_smoothing_window}"
-        )
-        print(
-            "stimulation_intensity_timeseries: "
-            f"{stimulation_intensity_summary(stimulation_intensity_timeseries)}"
-        )
+        if periodic_cn_sum_approximation:
+            print("periodic_cn_sum_lambda: 1.0")
         if args.solver == "acados":
             print(
                 "acados_pulse_width_trust_radius: "
@@ -4400,7 +3891,6 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
         if echo:
             print("running_standard_ipopt_warmup: True")
         warmup_simulation_conditions = dict(simulation_conditions)
-        warmup_simulation_conditions["stimulation_intensity_timeseries"] = None
         if (
             args.solver == "acados"
             and args.control_regularization_target_source == "warmup"
@@ -4430,30 +3920,9 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
             force_projection_weight=args.periodic_fes_warmup_force_projection_weight,
             force_qdot_defect_limit=(args.periodic_fes_warmup_force_qdot_defect_limit),
             force_adaptive_steps=args.periodic_fes_warmup_force_adaptive_steps,
-            stimulation_intensity_args=args,
             warmup_transfer_mode=args.acados_standard_warmup_transfer,
             echo=echo,
         )
-        if args.stimulation_intensity_source == "warmup":
-            stimulation_intensity_timeseries = np.asarray(
-                nmpc.nlp[0].numerical_data_timeseries["stimulation_intensity"],
-                dtype=float,
-            )
-            simulation_conditions["stimulation_intensity_timeseries"] = (
-                stimulation_intensity_timeseries
-            )
-            nmpc_simulation_conditions["stimulation_intensity_timeseries"] = (
-                stimulation_intensity_timeseries
-            )
-        if echo and args.stimulation_intensity_source != "none":
-            for metric in stimulation_intensity_control_consistency(args, nmpc):
-                print(
-                    "stimulation_intensity_control_consistency: "
-                    f"{metric['muscle']} rmse={metric['rmse']:.6g} "
-                    f"max_abs_error={metric['max_abs_error']:.6g} "
-                    f"installed=[{metric['installed_min']:.6g}, {metric['installed_max']:.6g}] "
-                    f"warmup_expected=[{metric['expected_min']:.6g}, {metric['expected_max']:.6g}]"
-                )
         if (
             args.solver == "acados"
             and args.control_regularization_target_source == "warmup"

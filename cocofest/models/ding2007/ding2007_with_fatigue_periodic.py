@@ -24,8 +24,8 @@ class DingModelPulseWidthFrequencyWithFatiguePeriodic(
 
     Instead of injecting a truncated list of stimulation times into the dynamics, this variant introduces an
     auxiliary state `Cn_sum` whose dynamics approximate the calcium summation under a fixed stimulation period.
-    The default mode keeps the historical constant-intensity approximation. The stimulation-intensity mode lets
-    the calcium summation gain vary from one shooting interval to the next through numerical timeseries data.
+    Stimulation intensity is fixed, as in the historical pulse-width formulation. The optimized pulse width acts
+    on force recruitment through `a_calculation`; it does not alter the calcium-history impulse amplitude.
     """
 
     def __init__(
@@ -36,8 +36,6 @@ class DingModelPulseWidthFrequencyWithFatiguePeriodic(
         previous_stim: dict = None,
         sum_stim_truncation: int = 20,
         stim_interval: float | None = None,
-        cn_sum_stimulation_mode: str = "mean",
-        stimulation_intensity_index: int = 0,
     ):
         super().__init__(
             model_name=model_name,
@@ -51,12 +49,6 @@ class DingModelPulseWidthFrequencyWithFatiguePeriodic(
             if stim_interval is not None
             else self._infer_stim_interval(stim_time)
         )
-        if cn_sum_stimulation_mode not in ("mean", "stimulation_intensity"):
-            raise ValueError(
-                "cn_sum_stimulation_mode must be 'mean' or 'stimulation_intensity'."
-            )
-        self.cn_sum_stimulation_mode = cn_sum_stimulation_mode
-        self.stimulation_intensity_index = stimulation_intensity_index
 
     @staticmethod
     def _infer_stim_interval(stim_time: list[float] | None) -> float | None:
@@ -97,8 +89,6 @@ class DingModelPulseWidthFrequencyWithFatiguePeriodic(
     def serialize(self) -> tuple[Callable, dict]:
         _, base_dict = super().serialize()
         base_dict["stim_interval"] = self._stim_interval
-        base_dict["cn_sum_stimulation_mode"] = self.cn_sum_stimulation_mode
-        base_dict["stimulation_intensity_index"] = self.stimulation_intensity_index
         return DingModelPulseWidthFrequencyWithFatiguePeriodic, base_dict
 
     def stimulation_decay_factor(self) -> float:
@@ -108,34 +98,13 @@ class DingModelPulseWidthFrequencyWithFatiguePeriodic(
             )
         return float(np.exp(-self._stim_interval / self.tauc))
 
-    def periodic_cn_sum_gain(self, stimulation_intensity: MX | float = 1) -> MX | float:
+    def periodic_cn_sum_gain(self) -> float:
         decay = self.stimulation_decay_factor()
         ri = 1 + (self.get_r0(self.km_rest) - 1) * decay
-        return stimulation_intensity * ri / (self.tauc * (1 - decay))
+        return ri / (self.tauc * (1 - decay))
 
-    def cn_sum_dot_fun(self, cn_sum: MX, stimulation_intensity: MX | float = 1) -> MX:
-        return -cn_sum / self.tauc + self.periodic_cn_sum_gain(stimulation_intensity)
-
-    def stimulation_intensity_from_numerical_timeseries(
-        self, numerical_timeseries: MX | None
-    ) -> MX | float:
-        if self.cn_sum_stimulation_mode == "mean":
-            return 1
-        if numerical_timeseries is None:
-            return 1
-        if (
-            not hasattr(numerical_timeseries, "shape")
-            or numerical_timeseries.shape[0] == 0
-        ):
-            return 1
-        if numerical_timeseries.shape[0] == 1:
-            return numerical_timeseries[0]
-        if self.stimulation_intensity_index >= numerical_timeseries.shape[0]:
-            raise RuntimeError(
-                f"stimulation_intensity_index={self.stimulation_intensity_index} is out of range for "
-                f"numerical_timeseries with {numerical_timeseries.shape[0]} rows."
-            )
-        return numerical_timeseries[self.stimulation_intensity_index]
+    def cn_sum_dot_fun(self, cn_sum: MX) -> MX:
+        return -cn_sum / self.tauc + self.periodic_cn_sum_gain()
 
     def system_dynamics(
         self,
@@ -167,10 +136,7 @@ class DingModelPulseWidthFrequencyWithFatiguePeriodic(
         if isinstance(pulse_width, (list, tuple)):
             pulse_width = pulse_width[0]
 
-        stimulation_intensity = self.stimulation_intensity_from_numerical_timeseries(
-            numerical_timeseries
-        )
-        cn_sum_dot = self.cn_sum_dot_fun(cn_sum, stimulation_intensity)
+        cn_sum_dot = self.cn_sum_dot_fun(cn_sum)
         cn_dot = self.cn_dot_fun(cn, cn_sum)
         a_scale = self.a_calculation(a_scale=a, pulse_width=pulse_width)
         f_dot = self.f_dot_fun(
