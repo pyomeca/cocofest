@@ -70,6 +70,7 @@ class MyCyclicNMPC(FesNmpcMsk):
         self.wheel_q_path_margin = 2.0
         self.use_signed_wheel_shift = False
         self.continuous_state_initial_guess_mode = "continuous"
+        self.before_window_advance = None
 
     def _state_slack_for(self, key: str, index: int) -> float:
         if key in self.first_node_state_slack:
@@ -99,6 +100,9 @@ class MyCyclicNMPC(FesNmpcMsk):
         return self.pedal_turn_in_one_cycle
 
     def advance_window_bounds_states(self, sol, n_cycles_simultaneous=None, **extra):
+        if self.before_window_advance is not None:
+            self.before_window_advance(self, sol)
+
         # --- Get states results --- #
         states = sol.decision_states(to_merge=SolutionMerge.NODES)
         states_keys = states.keys()
@@ -222,6 +226,12 @@ class MyCyclicNMPC(FesNmpcMsk):
                     if key == "q" and i == states[key].shape[0] - 1:
                         # Special case for the wheel position
                         self.set_init_cyclical_wheel(states, key, i)
+                    elif (
+                        key == "qdot"
+                        and i == states[key].shape[0] - 1
+                        and self.use_signed_wheel_shift
+                    ):
+                        self.set_init_cyclical_wheel_velocity(states, key, i)
                     else:
                         self.set_init_cyclical(states, key, i)
                 elif key in continuous_keys:
@@ -317,14 +327,31 @@ class MyCyclicNMPC(FesNmpcMsk):
 
         wheel_cycle_shift = self._wheel_cycle_shift(states)
         n_plus_one_cycles = states[key][i][self.nodes_per_cycle : -1]
-        shifted_last_cycle = (
-            states[key][i][-self.nodes_per_cycle - 1 :] + wheel_cycle_shift
+        last_cycle = states[key][i][-self.nodes_per_cycle - 1 :]
+        observed_cycle_shift = last_cycle[-1] - last_cycle[0]
+        shift = np.linspace(
+            observed_cycle_shift,
+            wheel_cycle_shift,
+            last_cycle.shape[0],
         )
+        shifted_last_cycle = last_cycle + shift
         if n_plus_one_cycles.size == 0:
             values = shifted_last_cycle
         else:
             values = np.concatenate((n_plus_one_cycles, shifted_last_cycle))
         self.nlp[0].x_init[key].init[i, :] = values
+        return True
+
+    def set_init_cyclical_wheel_velocity(self, states, key, i):
+        self.set_init_cyclical(states, key, i)
+        wheel_q = states["q"][-1]
+        last_cycle_q = wheel_q[-self.nodes_per_cycle - 1 :]
+        observed_cycle_shift = last_cycle_q[-1] - last_cycle_q[0]
+        target_cycle_shift = self._wheel_cycle_shift(states)
+        velocity_correction = (
+            target_cycle_shift - observed_cycle_shift
+        ) / self.cycle_duration
+        self.nlp[0].x_init[key].init[i, self.nodes_per_cycle :] += velocity_correction
         return True
 
     def _correct_init_guess_to_fit_bounds(self, corrected_input="states"):

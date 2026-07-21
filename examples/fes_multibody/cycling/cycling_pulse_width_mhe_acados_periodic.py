@@ -369,6 +369,18 @@ def build_argument_parser() -> argparse.ArgumentParser:
         help="Optional stationarity-only tolerance; unlike --acados-tolerance it does not relax QP feasibility.",
     )
     parser.add_argument(
+        "--acados-first-window-tolerance",
+        type=float,
+        default=None,
+        help="Optional relaxed feasibility tolerance used only on the first ACADOS window.",
+    )
+    parser.add_argument(
+        "--acados-first-window-stationarity-tolerance",
+        type=float,
+        default=None,
+        help="Optional relaxed stationarity tolerance used only on the first ACADOS window.",
+    )
+    parser.add_argument(
         "--acados-qp-solver",
         choices=(
             "PARTIAL_CONDENSING_HPIPM",
@@ -492,6 +504,23 @@ def build_argument_parser() -> argparse.ArgumentParser:
         type=int,
         default=50,
         help="Maximum number of HPIPM QP iterations.",
+    )
+    parser.add_argument(
+        "--acados-qp-warm-start-level",
+        type=int,
+        choices=(0, 1, 2, 3),
+        default=0,
+        help="HPIPM QP warm-start level (0 disables it).",
+    )
+    parser.add_argument(
+        "--acados-warm-start-first-qp",
+        action="store_true",
+        help="Warm-start the first QP of each ACADOS NLP solve.",
+    )
+    parser.add_argument(
+        "--acados-warm-start-first-qp-from-nlp",
+        action="store_true",
+        help="Initialize the first QP warm start from the current NLP iterate.",
     )
     parser.add_argument(
         "--acados-qpscaling-scale-objective",
@@ -832,6 +861,7 @@ def _warmup_cache_signature(
 ) -> str:
     payload = {
         "kind": "warmup",
+        "nmpc_builder_version": 1,
         "model_path": str(model_path.resolve()),
         "cycles_per_window": args.cycles_per_window,
         "stimulations_per_cycle": args.stimulations_per_cycle,
@@ -846,11 +876,6 @@ def _warmup_cache_signature(
         "cycling_info_keys": sorted(cycling_info.keys()),
         "sources": [
             _source_stamp(model_path),
-            _source_stamp(
-                (
-                    Path(__file__).resolve().parent / "cycling_pulse_width_mhe.py"
-                ).resolve()
-            ),
             _source_stamp(
                 (
                     Path(__file__).resolve().parents[3]
@@ -916,6 +941,7 @@ def _continuation_cache_signature(args: argparse.Namespace) -> str:
     payload = {
         "kind": "acados_one_cycle_continuation",
         "cache_version": 1,
+        "nmpc_builder_version": 1,
         "objective": args.objective,
         "objective_shape": args.objective_shape,
         "stimulations_per_cycle": args.stimulations_per_cycle,
@@ -952,9 +978,6 @@ def _continuation_cache_signature(args: argparse.Namespace) -> str:
         "fes_state_trust_radius": args.acados_fes_state_trust_radius,
         "sources": [
             _source_stamp(
-                Path(__file__).resolve().parent / "cycling_pulse_width_mhe.py"
-            ),
-            _source_stamp(
                 repository_root
                 / "cocofest"
                 / "models"
@@ -963,6 +986,13 @@ def _continuation_cache_signature(args: argparse.Namespace) -> str:
             ),
             _source_stamp(
                 repository_root / "cocofest" / "models" / "dynamical_model.py"
+            ),
+            _source_stamp(
+                repository_root
+                / "examples"
+                / "msk_models"
+                / "Wu"
+                / "Modified_Wu_Shoulder_Model_Cycling.bioMod"
             ),
         ],
     }
@@ -975,8 +1005,72 @@ def _continuation_cache_path(args: argparse.Namespace) -> Path:
     )
 
 
-def _codegen_signature(args: argparse.Namespace) -> str:
+def _horizon_seed_cache_signature(args: argparse.Namespace) -> str:
+    repository_root = Path(__file__).resolve().parents[3]
     payload = {
+        "kind": "acados_horizon_seed",
+        "cache_version": 3,
+        "nmpc_builder_version": 1,
+        "model_formulation": args.model_formulation,
+        "cycles_per_window": args.cycles_per_window,
+        "stimulations_per_cycle": args.stimulations_per_cycle,
+        "objective": args.objective,
+        "objective_shape": args.objective_shape,
+        "constant_crank_torque": args.constant_crank_torque,
+        "torque_application": args.torque_application,
+        "ode_solver": args.ode_solver,
+        "rk_steps": args.rk_steps,
+        "enforce_start_constraints": args.enforce_start_constraints,
+        "state_scaling": args.state_scaling,
+        "pulse_width_scaling": args.pulse_width_scaling,
+        "control_regularization_weight": args.control_regularization_weight,
+        "control_regularization_target": args.control_regularization_target,
+        "control_regularization_target_source": args.control_regularization_target_source,
+        "wheel_qdot_regularization_weight": args.wheel_qdot_regularization_weight,
+        "wheel_qdot_regularization_target": args.wheel_qdot_regularization_target,
+        "pulse_width_trust_radius": args.acados_pulse_width_trust_radius,
+        "fes_state_trust_radius": args.acados_fes_state_trust_radius,
+        "wheel_q_slack": args.acados_wheel_q_slack,
+        "wheel_qdot_slack": args.acados_wheel_qdot_slack,
+        "wheel_q_path_margin": args.acados_wheel_q_path_margin,
+        "project_qdot_from_q": args.acados_project_qdot_from_q,
+        "sources": [
+            _source_stamp(
+                repository_root
+                / "cocofest"
+                / "models"
+                / "ding2007"
+                / "ding2007_with_fatigue_periodic.py"
+            ),
+            _source_stamp(
+                repository_root / "cocofest" / "models" / "dynamical_model.py"
+            ),
+            _source_stamp(
+                repository_root
+                / "examples"
+                / "msk_models"
+                / "Wu"
+                / "Modified_Wu_Shoulder_Model_Cycling.bioMod"
+            ),
+        ],
+    }
+    return _short_hash(payload)
+
+
+def _horizon_seed_cache_path(args: argparse.Namespace) -> Path:
+    return _cache_root() / (
+        f"acados_{args.cycles_per_window}_cycle_seed_"
+        f"{_horizon_seed_cache_signature(args)}.npz"
+    )
+
+
+def _codegen_signature(args: argparse.Namespace) -> str:
+    repository_root = Path(__file__).resolve().parents[3]
+    payload = {
+        # Increment when solve_case changes the generated OCP structure in a way that is
+        # not represented by the arguments or the model sources below.
+        "problem_builder_version": 1,
+        "nmpc_builder_version": 1,
         "solver": args.solver,
         "model_formulation": args.model_formulation,
         "torque_application": args.torque_application,
@@ -1002,6 +1096,10 @@ def _codegen_signature(args: argparse.Namespace) -> str:
         "max_acados_iterations": args.max_acados_iterations,
         "acados_tolerance": args.acados_tolerance,
         "acados_stationarity_tolerance": args.acados_stationarity_tolerance,
+        "acados_first_window_tolerance": args.acados_first_window_tolerance,
+        "acados_first_window_stationarity_tolerance": (
+            args.acados_first_window_stationarity_tolerance
+        ),
         "acados_qp_solver": args.acados_qp_solver,
         "acados_integrator_type": args.acados_integrator_type,
         "acados_collocation_type": args.acados_collocation_type,
@@ -1025,17 +1123,16 @@ def _codegen_signature(args: argparse.Namespace) -> str:
         "acados_fixed_step_length": args.acados_fixed_step_length,
         "acados_nlp_qp_tol_strategy": args.acados_nlp_qp_tol_strategy,
         "acados_qp_iter_max": args.acados_qp_iter_max,
+        "acados_qp_warm_start_level": args.acados_qp_warm_start_level,
+        "acados_warm_start_first_qp": args.acados_warm_start_first_qp,
+        "acados_warm_start_first_qp_from_nlp": (
+            args.acados_warm_start_first_qp_from_nlp
+        ),
         "acados_qpscaling_scale_objective": args.acados_qpscaling_scale_objective,
         "acados_qpscaling_scale_constraints": args.acados_qpscaling_scale_constraints,
         "acados_ext_qp_res": args.acados_ext_qp_res,
         "acados_print_level": args.acados_print_level,
         "sources": [
-            _source_stamp(Path(__file__).resolve()),
-            _source_stamp(
-                (
-                    Path(__file__).resolve().parent / "cycling_pulse_width_mhe.py"
-                ).resolve()
-            ),
             _source_stamp(
                 (
                     Path(__file__).resolve().parents[3]
@@ -1044,6 +1141,16 @@ def _codegen_signature(args: argparse.Namespace) -> str:
                     / "ding2007"
                     / "ding2007_with_fatigue_periodic.py"
                 ).resolve()
+            ),
+            _source_stamp(
+                repository_root / "cocofest" / "models" / "dynamical_model.py"
+            ),
+            _source_stamp(
+                repository_root
+                / "examples"
+                / "msk_models"
+                / "Wu"
+                / "Modified_Wu_Shoulder_Model_Cycling.bioMod"
             ),
         ],
     }
@@ -1098,6 +1205,9 @@ def configure_acados_solver(
     fixed_step_length: float,
     nlp_qp_tol_strategy: str,
     qp_iter_max: int,
+    qp_warm_start_level: int,
+    warm_start_first_qp: bool,
+    warm_start_first_qp_from_nlp: bool,
     qpscaling_scale_objective: str,
     qpscaling_scale_constraints: str,
     ext_qp_res: bool,
@@ -1163,11 +1273,17 @@ def configure_acados_solver(
     set_acados_unsafe_option(solver, nlp_qp_tol_strategy, "nlp_qp_tol_strategy")
     set_acados_unsafe_option(solver, qp_iter_max, "qp_solver_iter_max")
     set_acados_unsafe_option(solver, 1 if ext_qp_res else 0, "nlp_solver_ext_qp_res")
-    set_acados_unsafe_option(solver, 0, "qp_solver_warm_start")
+    set_acados_unsafe_option(solver, qp_warm_start_level, "qp_solver_warm_start")
     set_acados_unsafe_option(solver, 0, "qp_solver_ric_alg")
     set_acados_unsafe_option(solver, 0, "qp_solver_cond_ric_alg")
-    set_acados_unsafe_option(solver, False, "nlp_solver_warm_start_first_qp")
-    set_acados_unsafe_option(solver, False, "nlp_solver_warm_start_first_qp_from_nlp")
+    set_acados_unsafe_option(
+        solver, warm_start_first_qp, "nlp_solver_warm_start_first_qp"
+    )
+    set_acados_unsafe_option(
+        solver,
+        warm_start_first_qp_from_nlp,
+        "nlp_solver_warm_start_first_qp_from_nlp",
+    )
     return solver
 
 
@@ -1404,6 +1520,39 @@ def collect_acados_diagnostics(solution) -> dict:
     diagnostics["stage_nonfinite"] = stage_nonfinite
     diagnostics["n_stages_scanned"] = stage
     return diagnostics
+
+
+def snapshot_acados_diagnostics(solution) -> dict:
+    # Every receding-horizon Solution points to the same mutable Acados solver.
+    return deepcopy(collect_acados_diagnostics(solution))
+
+
+def acados_diagnostics_meet_tolerances(
+    diagnostics: dict,
+    convergence_tolerance: float | None,
+    stationarity_tolerance: float | None,
+) -> bool:
+    residuals = diagnostics.get("residuals")
+    if residuals is None:
+        return False
+    residuals = np.asarray(residuals, dtype=float).reshape(-1)
+    if residuals.size < 4 or not np.all(np.isfinite(residuals[:4])):
+        return False
+
+    thresholds = (
+        (
+            stationarity_tolerance
+            if stationarity_tolerance is not None
+            else convergence_tolerance
+        ),
+        convergence_tolerance,
+        convergence_tolerance,
+        convergence_tolerance,
+    )
+    return all(
+        threshold is None or abs(residual) <= threshold
+        for residual, threshold in zip(residuals[:4], thresholds)
+    )
 
 
 def _format_array(values) -> str:
@@ -3435,7 +3584,9 @@ def apply_standard_warmup_to_periodic_nmpc(
     return adapted_solution
 
 
-def apply_solution_directly_to_periodic_nmpc_initial_guess(periodic_nmpc, solution):
+def apply_solution_directly_to_periodic_nmpc_initial_guess(
+    periodic_nmpc, solution, recenter_kinematic_bounds: bool = False
+):
     adapted_solution = _adapt_warmup_solution_to_periodic_nodes(periodic_nmpc, solution)
     states = adapted_solution.decision_states(to_merge=SolutionMerge.NODES)
     controls = adapted_solution.decision_controls(to_merge=SolutionMerge.NODES)
@@ -3463,6 +3614,14 @@ def apply_solution_directly_to_periodic_nmpc_initial_guess(periodic_nmpc, soluti
                 f"into initial guess shape {target.shape}."
             )
         target[:, :] = values
+
+    if recenter_kinematic_bounds:
+        for key in ("q", "qdot"):
+            if key in periodic_nmpc.nlp[0].x_bounds.keys():
+                _recenter_boundary_bounds(
+                    periodic_nmpc.nlp[0].x_bounds[key],
+                    periodic_nmpc.nlp[0].x_init[key].init,
+                )
 
     periodic_nmpc._correct_init_guess_to_fit_bounds(corrected_input="states")
     periodic_nmpc._correct_init_guess_to_fit_bounds(corrected_input="controls")
@@ -3864,6 +4023,25 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
         and args.acados_stationarity_tolerance <= 0
     ):
         raise ValueError("--acados-stationarity-tolerance must be strictly positive.")
+    for option_name in (
+        "acados_first_window_tolerance",
+        "acados_first_window_stationarity_tolerance",
+    ):
+        value = getattr(args, option_name)
+        if value is not None and value <= 0:
+            raise ValueError(
+                f"--{option_name.replace('_', '-')} must be strictly positive."
+            )
+    if args.acados_warm_start_first_qp_from_nlp and not args.acados_warm_start_first_qp:
+        raise ValueError(
+            "--acados-warm-start-first-qp-from-nlp requires "
+            "--acados-warm-start-first-qp."
+        )
+    if args.acados_warm_start_first_qp and args.acados_qp_warm_start_level == 0:
+        raise ValueError(
+            "--acados-warm-start-first-qp requires a non-zero "
+            "--acados-qp-warm-start-level."
+        )
     if (
         args.acados_pulse_width_trust_radius is not None
         and args.acados_pulse_width_trust_radius < 0
@@ -3875,8 +4053,20 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
     )
 
     continuation_source = None
+    horizon_seed = None
+    horizon_seed_cache_path = None
     if args.acados_horizon_continuation:
-        continuation_source = get_one_cycle_acados_continuation_source(args, echo=echo)
+        horizon_seed_cache_path = _horizon_seed_cache_path(args)
+        if horizon_seed_cache_path.exists():
+            horizon_seed = _load_warmup_cache(horizon_seed_cache_path)
+            if echo:
+                print(
+                    f"acados_horizon_seed_cache: hit ({horizon_seed_cache_path.name})"
+                )
+        else:
+            continuation_source = get_one_cycle_acados_continuation_source(
+                args, echo=echo
+            )
 
     example_dir = Path(__file__).resolve().parent
     model_path = (
@@ -4101,6 +4291,14 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
                 "acados_stationarity_tolerance: "
                 f"{args.acados_stationarity_tolerance}"
             )
+            print(
+                "acados_first_window_tolerance: "
+                f"{args.acados_first_window_tolerance}"
+            )
+            print(
+                "acados_first_window_stationarity_tolerance: "
+                f"{args.acados_first_window_stationarity_tolerance}"
+            )
             print(f"acados_hessian_approx: {args.acados_hessian_approx}")
             print(f"acados_nlp_solver_type: {args.acados_nlp_solver_type}")
             print(
@@ -4120,6 +4318,12 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
             print(f"acados_fixed_step_length: {args.acados_fixed_step_length}")
             print(f"acados_nlp_qp_tol_strategy: {args.acados_nlp_qp_tol_strategy}")
             print(f"acados_qp_iter_max: {args.acados_qp_iter_max}")
+            print("acados_qp_warm_start_level: " f"{args.acados_qp_warm_start_level}")
+            print("acados_warm_start_first_qp: " f"{args.acados_warm_start_first_qp}")
+            print(
+                "acados_warm_start_first_qp_from_nlp: "
+                f"{args.acados_warm_start_first_qp_from_nlp}"
+            )
             print(
                 "acados_qpscaling_scale_objective: "
                 f"{args.acados_qpscaling_scale_objective}"
@@ -4253,18 +4457,26 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
             )
 
     if args.solver == "acados" and args.acados_horizon_continuation:
-        continuation_summary = tile_one_cycle_solution_to_periodic_nmpc(
-            nmpc, continuation_source
-        )
-        if echo:
-            print(
-                "acados_horizon_continuation_applied: "
-                f"repeats={continuation_summary['repeat_count']} "
-                f"source_controls={continuation_summary['source_control_nodes']} "
-                f"target_controls={continuation_summary['target_control_nodes']} "
-                "max_transfer_seam_error="
-                f"{continuation_summary['max_transfer_seam_error']:.6g}"
+        if horizon_seed is not None:
+            apply_solution_directly_to_periodic_nmpc_initial_guess(
+                nmpc, horizon_seed, recenter_kinematic_bounds=True
             )
+            if echo:
+                print("acados_horizon_seed_applied: True")
+        else:
+            continuation_summary = tile_one_cycle_solution_to_periodic_nmpc(
+                nmpc, continuation_source
+            )
+            if echo:
+                print(
+                    "acados_horizon_continuation_applied: "
+                    f"repeats={continuation_summary['repeat_count']} "
+                    f"source_controls={continuation_summary['source_control_nodes']} "
+                    f"target_controls={continuation_summary['target_control_nodes']} "
+                    "max_transfer_seam_error="
+                    f"{continuation_summary['max_transfer_seam_error']:.6g}"
+                )
+        if echo:
             for summary in pulse_width_initial_guess_summary(nmpc):
                 print(
                     "continuation_pulse_width: "
@@ -4315,6 +4527,34 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
         initial_guess_state_traces = _initial_guess_traces(nmpc.nlp[0].x_init)
         initial_guess_control_traces = _initial_guess_traces(nmpc.nlp[0].u_init)
 
+    acados_window_diagnostics = []
+
+    def cache_first_successful_window(_nmpc, solution):
+        diagnostics = snapshot_acados_diagnostics(solution)
+        if (
+            horizon_seed_cache_path is None
+            or horizon_seed_cache_path.exists()
+            or _nmpc.total_optimization_run != 0
+            or not _status_is_success(solution.status)
+        ):
+            return
+        if not acados_diagnostics_meet_tolerances(
+            diagnostics,
+            args.acados_tolerance,
+            args.acados_stationarity_tolerance,
+        ):
+            if echo:
+                print("acados_horizon_seed_cache: skipped_non_strict_solution")
+            return
+        _save_warmup_cache(horizon_seed_cache_path, solution)
+        if echo:
+            print(
+                "acados_horizon_seed_cache: saved " f"({horizon_seed_cache_path.name})"
+            )
+
+    if args.solver == "acados" and horizon_seed_cache_path is not None:
+        nmpc.before_window_advance = cache_first_successful_window
+
     def update_functions(_nmpc, cycle_idx, _sol):
         print(f"window {cycle_idx}")
         if echo and _sol is not None:
@@ -4323,8 +4563,18 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
                 f"window {cycle_idx} terminal wheel q={states['q'][2, -1]:.6f} "
                 f"qdot={states['qdot'][2, -1]:.6f}"
             )
-        return cycle_idx + 1 < args.n_windows
+        continue_solving = cycle_idx + 1 < args.n_windows
+        if args.solver == "acados" and _sol is not None:
+            diagnostics = snapshot_acados_diagnostics(_sol)
+            acados_window_diagnostics.append(diagnostics)
+            if echo and args.acados_diagnostics:
+                print_acados_diagnostics(f"window[{cycle_idx - 1}]", diagnostics)
+                if continue_solving:
+                    print(f"window[{cycle_idx}] transferred_initial_guess_diagnostics:")
+                    print_initial_guess_diagnostics(_nmpc)
+        return continue_solving
 
+    solver_first_iter = None
     if args.solver == "acados":
         model_name, generated_code_path = build_codegen_names(args)
         solver = configure_acados_solver(
@@ -4360,11 +4610,30 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
             fixed_step_length=args.acados_fixed_step_length,
             nlp_qp_tol_strategy=args.acados_nlp_qp_tol_strategy,
             qp_iter_max=args.acados_qp_iter_max,
+            qp_warm_start_level=args.acados_qp_warm_start_level,
+            warm_start_first_qp=args.acados_warm_start_first_qp,
+            warm_start_first_qp_from_nlp=(args.acados_warm_start_first_qp_from_nlp),
             qpscaling_scale_objective=args.acados_qpscaling_scale_objective,
             qpscaling_scale_constraints=args.acados_qpscaling_scale_constraints,
             ext_qp_res=args.acados_ext_qp_res,
             print_level=args.acados_print_level,
         )
+        if (
+            args.acados_first_window_tolerance is not None
+            or args.acados_first_window_stationarity_tolerance is not None
+        ):
+            solver_first_iter = deepcopy(solver)
+            if args.acados_first_window_tolerance is not None:
+                solver_first_iter.set_convergence_tolerance(
+                    args.acados_first_window_tolerance
+                )
+            if args.acados_first_window_stationarity_tolerance is not None:
+                solver_first_iter.set_nlp_solver_tol_stat(
+                    args.acados_first_window_stationarity_tolerance
+                )
+            # The second solver has the same generated problem and only restores the
+            # strict tolerances, which Acados can update at runtime.
+            solver.set_only_first_options_has_changed(False)
     else:
         solver = configure_ipopt_solver(
             max_iterations=args.max_ipopt_iterations,
@@ -4392,6 +4661,7 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
     sol = nmpc.solve_fes_nmpc(
         update_functions,
         solver=solver,
+        solver_first_iter=solver_first_iter,
         total_cycles=args.n_windows,
         external_force=cycling_info.get("resistive_torque"),
         cycle_solutions=MultiCyclicCycleSolutions.ALL_CYCLES,
@@ -4406,24 +4676,13 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
             cycles_per_window=args.cycles_per_window,
         )
         if args.solver == "acados" and args.acados_diagnostics:
-            _, source_window_solutions, _ = _split_receding_solution(sol)
-            if source_window_solutions:
-                for idx, window_solution in enumerate(source_window_solutions):
-                    print_acados_diagnostics(
-                        f"window[{idx}]",
-                        collect_acados_diagnostics(window_solution),
-                    )
-            else:
+            if not acados_window_diagnostics:
                 print_acados_diagnostics("merged", collect_acados_diagnostics(sol[0]))
     summary = build_window_summary(
         sol, requested_windows=args.n_windows, cycles_per_window=args.cycles_per_window
     )
     if args.solver == "acados" and args.acados_diagnostics:
-        _, source_window_solutions, _ = _split_receding_solution(sol)
-        summary["acados_diagnostics"] = [
-            collect_acados_diagnostics(window_solution)
-            for window_solution in source_window_solutions
-        ]
+        summary["acados_diagnostics"] = acados_window_diagnostics
     if initial_guess_state_traces is not None:
         summary["initial_guess_state_traces"] = initial_guess_state_traces
         summary["initial_guess_control_traces"] = initial_guess_control_traces

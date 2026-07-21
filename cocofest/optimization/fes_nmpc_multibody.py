@@ -276,6 +276,7 @@ class FesNmpcMsk(FesNmpc):
         total_cycles: int,
         external_force: dict | None,
         cycle_solutions: MultiCyclicCycleSolutions,
+        solver_first_iter=None,
         get_all_iterations: bool = True,
         cyclic_options: dict = None,
         max_consecutive_failing: int = 3,
@@ -284,6 +285,7 @@ class FesNmpcMsk(FesNmpc):
             sol = self.solve(
                 update_functions,
                 solver=solver,
+                solver_first_iter=solver_first_iter,
                 cycle_solutions=cycle_solutions,
                 get_all_iterations=get_all_iterations,
                 cyclic_options=cyclic_options,
