@@ -259,6 +259,199 @@ def test_pulse_width_trust_region_keeps_nodewise_centers():
     np.testing.assert_allclose(upper, np.array([[0.31, 0.51, 0.56]]))
 
 
+def test_control_homotopy_radii_are_parsed_as_an_increasing_sequence():
+    parser = periodic_example.build_argument_parser()
+    args = parser.parse_args(
+        [
+            "--acados-control-homotopy-radii",
+            "1e-8,1e-7,1e-6",
+            "--acados-control-homotopy-keep-final-radius",
+            "--acados-control-homotopy-each-window",
+            "--acados-control-homotopy-window-growth",
+            "1.25",
+            "--acados-control-homotopy-max-restarts",
+            "3",
+        ]
+    )
+
+    assert args.acados_control_homotopy_radii == (1e-8, 1e-7, 1e-6)
+    assert args.acados_control_homotopy_keep_final_radius is True
+    assert args.acados_control_homotopy_each_window is True
+    assert args.acados_control_homotopy_window_growth == 1.25
+    assert args.acados_control_homotopy_max_restarts == 3
+
+
+def test_acados_cyclical_transfer_extrapolates_by_default():
+    args = periodic_example.build_argument_parser().parse_args([])
+
+    assert args.acados_cyclical_transfer_mode == "extrapolate"
+
+
+def test_control_homotopy_stops_on_failure_and_restores_bounds(monkeypatch):
+    class FakeSolver:
+        def set_maximum_iterations(self, value):
+            self.max_iterations = value
+
+        def set_convergence_tolerance(self, value):
+            self.tolerance = value
+
+    bounds = SimpleNamespace(
+        min=np.array([[0.1, 0.1, 0.1]]), max=np.array([[0.6, 0.6, 0.6]])
+    )
+    nmpc = SimpleNamespace(
+        nlp=[
+            SimpleNamespace(
+                u_init={
+                    "last_pulse_width_Biceps": SimpleNamespace(
+                        init=np.array([[0.2, 0.4, 0.5]])
+                    )
+                },
+                u_bounds={"last_pulse_width_Biceps": bounds},
+            )
+        ]
+    )
+    solutions = iter(
+        [
+            SimpleNamespace(
+                status=2,
+                residuals=np.array([4e-4, 1e-6, 0.0, 1e-6]),
+                solver_time_to_optimize=1.0,
+                real_time_to_optimize=1.1,
+            ),
+            SimpleNamespace(
+                status=0,
+                residuals=np.zeros(4),
+                solver_time_to_optimize=2.0,
+                real_time_to_optimize=2.1,
+            ),
+            SimpleNamespace(
+                status=2,
+                residuals=np.array([2.0, 0.1, 0.0, 0.0]),
+                solver_time_to_optimize=3.0,
+                real_time_to_optimize=3.1,
+            ),
+        ]
+    )
+    stage_bounds = []
+
+    def solve_stage():
+        nodewise = getattr(nmpc, "_cocofest_nodewise_control_bounds", {})
+        stage_bounds.append(
+            {
+                key: (lower.copy(), upper.copy())
+                for key, (lower, upper) in nodewise.items()
+            }
+        )
+        return next(solutions)
+
+    applied_statuses = []
+    monkeypatch.setattr(
+        periodic_example,
+        "snapshot_acados_diagnostics",
+        lambda solution: {"residuals": solution.residuals},
+    )
+    monkeypatch.setattr(
+        periodic_example,
+        "apply_solution_directly_to_periodic_nmpc_initial_guess",
+        lambda _nmpc, solution: applied_statuses.append(solution.status),
+    )
+
+    summaries = periodic_example.run_acados_control_homotopy(
+        nmpc,
+        FakeSolver(),
+        radii=(0.01, 0.02),
+        convergence_tolerance=5e-4,
+        fixed_control_tolerance=1e-8,
+        echo=False,
+        solve_stage=solve_stage,
+        max_restarts=0,
+    )
+
+    assert [summary["accepted"] for summary in summaries] == [True, True, False]
+    assert applied_statuses == [2, 0]
+    assert stage_bounds[0] == {}
+    np.testing.assert_allclose(
+        stage_bounds[1]["last_pulse_width_Biceps"][0], [[0.19, 0.39, 0.49]]
+    )
+    np.testing.assert_allclose(bounds.min, [[0.1, 0.1, 0.1]])
+    np.testing.assert_allclose(bounds.max, [[0.6, 0.6, 0.6]])
+    assert nmpc._cocofest_fix_controls_to_warmup is False
+    assert nmpc._cocofest_nodewise_control_bounds == {}
+
+
+def test_control_homotopy_restarts_a_nearly_feasible_stage(monkeypatch):
+    class FakeSolver:
+        def set_convergence_tolerance(self, value):
+            self.tolerance = value
+
+    bounds = SimpleNamespace(min=np.array([[0.1, 0.1]]), max=np.array([[0.6, 0.6]]))
+    nmpc = SimpleNamespace(
+        nlp=[
+            SimpleNamespace(
+                u_init={
+                    "last_pulse_width_Biceps": SimpleNamespace(
+                        init=np.array([[0.2, 0.4]])
+                    )
+                },
+                u_bounds={"last_pulse_width_Biceps": bounds},
+            )
+        ]
+    )
+    solutions = iter(
+        [
+            SimpleNamespace(
+                status=2,
+                residuals=np.array([0.2, 1e-6, 0.0, 1e-5]),
+                solver_time_to_optimize=1.0,
+                real_time_to_optimize=1.1,
+            ),
+            SimpleNamespace(
+                status=0,
+                residuals=np.array([4e-4, 1e-7, 0.0, 1e-6]),
+                solver_time_to_optimize=2.0,
+                real_time_to_optimize=2.1,
+            ),
+            SimpleNamespace(
+                status=0,
+                residuals=np.zeros(4),
+                solver_time_to_optimize=3.0,
+                real_time_to_optimize=3.1,
+            ),
+        ]
+    )
+    applied_statuses = []
+    monkeypatch.setattr(
+        periodic_example,
+        "snapshot_acados_diagnostics",
+        lambda solution: {"residuals": solution.residuals},
+    )
+    monkeypatch.setattr(
+        periodic_example,
+        "apply_solution_directly_to_periodic_nmpc_initial_guess",
+        lambda _nmpc, solution: applied_statuses.append(solution.status),
+    )
+
+    summaries = periodic_example.run_acados_control_homotopy(
+        nmpc,
+        FakeSolver(),
+        radii=(0.01,),
+        convergence_tolerance=5e-4,
+        fixed_control_tolerance=1e-8,
+        max_restarts=1,
+        echo=False,
+        solve_stage=lambda: next(solutions),
+    )
+
+    assert [(item["stage"], item["attempt"]) for item in summaries] == [
+        (0, 0),
+        (0, 1),
+        (1, 0),
+    ]
+    assert [item["accepted"] for item in summaries] == [False, True, True]
+    assert summaries[0]["restartable"] is True
+    assert applied_statuses == [2, 0, 0]
+
+
 def _benchmark_result(statuses, solver_success=False, success=False):
     cycle_count = 3
     shooting_per_cycle = 2

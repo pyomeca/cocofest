@@ -449,6 +449,23 @@ def parse_objectives(raw_objective: str) -> set[str]:
     return values or {"force"}
 
 
+def parse_control_homotopy_radii(raw_radii: str) -> tuple[float, ...]:
+    radii = tuple(float(item.strip()) for item in raw_radii.split(",") if item.strip())
+    if not radii:
+        raise argparse.ArgumentTypeError(
+            "The control homotopy requires at least one radius."
+        )
+    if any(not np.isfinite(radius) or radius <= 0.0 for radius in radii):
+        raise argparse.ArgumentTypeError(
+            "Control homotopy radii must be finite and strictly positive."
+        )
+    if any(next_radius <= radius for radius, next_radius in zip(radii, radii[1:])):
+        raise argparse.ArgumentTypeError(
+            "Control homotopy radii must be strictly increasing."
+        )
+    return radii
+
+
 def build_cost_fun_weight(objectives: set[str]) -> list[int]:
     weights = [0, 0, 0]
     for objective in objectives:
@@ -936,6 +953,15 @@ def build_argument_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--acados-cyclical-transfer-mode",
+        choices=("extrapolate", "repeat"),
+        default="extrapolate",
+        help=(
+            "Construct cyclic states in the appended MHE cycle by preserving the "
+            "last observed cycle drift or by repeating the last cycle verbatim."
+        ),
+    )
+    parser.add_argument(
         "--acados-transfer-rollout-substeps",
         type=int,
         default=5,
@@ -1017,6 +1043,53 @@ def build_argument_parser() -> argparse.ArgumentParser:
         type=float,
         default=1e-5,
         help="Half-width of fixed ACADOS control bounds in scaled control units.",
+    )
+    parser.add_argument(
+        "--acados-control-homotopy-radii",
+        type=parse_control_homotopy_radii,
+        default=None,
+        help=(
+            "Comma-separated, strictly increasing pulse-width radii in seconds. "
+            "ACADOS first solves with controls fixed to the IPOPT seed, then solves "
+            "one proximal subproblem per radius before restoring the original bounds."
+        ),
+    )
+    parser.add_argument(
+        "--acados-control-homotopy-tolerance",
+        type=float,
+        default=5e-4,
+        help="KKT tolerance used only by the ACADOS control-homotopy subproblems.",
+    )
+    parser.add_argument(
+        "--acados-control-homotopy-max-restarts",
+        type=int,
+        default=2,
+        help=(
+            "Maximum number of same-radius SQP restarts when a homotopy stage has "
+            "small feasibility residuals but has not reached stationarity."
+        ),
+    )
+    parser.add_argument(
+        "--acados-control-homotopy-keep-final-radius",
+        action="store_true",
+        help=(
+            "Keep the largest accepted homotopy radius for the first MHE window "
+            "instead of immediately restoring unrestricted control bounds."
+        ),
+    )
+    parser.add_argument(
+        "--acados-control-homotopy-each-window",
+        action="store_true",
+        help=(
+            "Repeat the fixed-control and radius continuation after each MHE "
+            "window transfer before solving the next window."
+        ),
+    )
+    parser.add_argument(
+        "--acados-control-homotopy-window-growth",
+        type=float,
+        default=1.0,
+        help=("Factor applied to the retained homotopy radius after each MHE window."),
     )
     parser.add_argument(
         "--ipopt-linear-solver",
@@ -2258,6 +2331,119 @@ def acados_diagnostics_meet_tolerances(
     )
 
 
+def acados_homotopy_stage_is_restartable(
+    diagnostics: dict, convergence_tolerance: float
+) -> bool:
+    """Allow another SQP call only when feasibility is already under control."""
+
+    residuals = diagnostics.get("residuals")
+    if residuals is None:
+        return False
+    residuals = np.asarray(residuals, dtype=float).reshape(-1)
+    return bool(
+        residuals.size >= 4
+        and np.all(np.isfinite(residuals[:4]))
+        and np.max(np.abs(residuals[1:4])) <= convergence_tolerance
+    )
+
+
+def run_acados_control_homotopy(
+    periodic_nmpc,
+    solver,
+    radii: tuple[float, ...],
+    convergence_tolerance: float,
+    fixed_control_tolerance: float,
+    max_restarts: int = 2,
+    echo: bool = True,
+    solve_stage=None,
+) -> list[dict]:
+    """Build an IRK-feasible seed before progressively releasing pulse widths."""
+
+    stage_solver = deepcopy(solver)
+    stage_solver.set_convergence_tolerance(convergence_tolerance)
+    summaries = []
+
+    if solve_stage is None:
+
+        def solve_stage():
+            return super(RecedingHorizonOptimization, periodic_nmpc).solve(
+                solver=stage_solver,
+                warm_start=None,
+            )
+
+    stages = (("fixed", None),) + tuple(("radius", radius) for radius in radii)
+    try:
+        for stage_index, (kind, radius) in enumerate(stages):
+            restore_pulse_width_control_bounds(periodic_nmpc)
+            periodic_nmpc._cocofest_fix_controls_to_warmup = kind == "fixed"
+            periodic_nmpc._cocofest_fixed_control_tolerance = fixed_control_tolerance
+            if radius is not None:
+                apply_pulse_width_control_trust_region(periodic_nmpc, radius)
+
+            stage_accepted = False
+            for attempt in range(max_restarts + 1):
+                solution = solve_stage()
+                diagnostics = snapshot_acados_diagnostics(solution)
+                accepted = _status_is_success(
+                    solution.status
+                ) or acados_diagnostics_meet_tolerances(
+                    diagnostics,
+                    convergence_tolerance=convergence_tolerance,
+                    stationarity_tolerance=convergence_tolerance,
+                )
+                restartable = (
+                    not accepted
+                    and attempt < max_restarts
+                    and acados_homotopy_stage_is_restartable(
+                        diagnostics, convergence_tolerance
+                    )
+                )
+                residuals = diagnostics.get("residuals")
+                summary = {
+                    "stage": stage_index,
+                    "attempt": attempt,
+                    "kind": kind,
+                    "radius": radius,
+                    "status": solution.status,
+                    "accepted": accepted,
+                    "restartable": restartable,
+                    "residuals": (
+                        None
+                        if residuals is None
+                        else np.asarray(residuals, dtype=float).copy()
+                    ),
+                    "solver_time_s": solution.solver_time_to_optimize,
+                    "wall_time_s": solution.real_time_to_optimize,
+                }
+                summaries.append(summary)
+                if echo:
+                    print(
+                        "acados_control_homotopy: "
+                        f"stage={stage_index} attempt={attempt} kind={kind} "
+                        f"radius={radius} status={solution.status} "
+                        f"accepted={accepted} restartable={restartable} "
+                        f"residuals={_format_array(summary['residuals'])}"
+                    )
+                if accepted:
+                    apply_solution_directly_to_periodic_nmpc_initial_guess(
+                        periodic_nmpc, solution
+                    )
+                    stage_accepted = True
+                    break
+                if not restartable:
+                    break
+                apply_solution_directly_to_periodic_nmpc_initial_guess(
+                    periodic_nmpc, solution
+                )
+            if not stage_accepted:
+                break
+    finally:
+        periodic_nmpc._cocofest_fix_controls_to_warmup = False
+        restore_pulse_width_control_bounds(periodic_nmpc)
+
+    return summaries
+
+
 def _format_array(values) -> str:
     if values is None:
         return "None"
@@ -3495,6 +3681,7 @@ def rollout_transferred_cycle_full_dynamics(
 
     max_bound_violation = 0.0
     max_bound_violation_by_key = {}
+    worst_bound_violation = None
     terminal_delta = {}
     max_delta_by_key = {}
     state_values = {}
@@ -3507,6 +3694,19 @@ def rollout_transferred_cycle_full_dynamics(
         violations = np.maximum(lower - values, 0.0) + np.maximum(values - upper, 0.0)
         key_bound_violation = float(np.max(violations))
         max_bound_violation_by_key[key] = key_bound_violation
+        if key_bound_violation >= max_bound_violation:
+            component, node = np.unravel_index(
+                int(np.argmax(violations)), violations.shape
+            )
+            worst_bound_violation = {
+                "key": key,
+                "component": int(component),
+                "node": int(node),
+                "value": float(values[component, node]),
+                "lower": float(lower[component, node]),
+                "upper": float(upper[component, node]),
+                "violation": key_bound_violation,
+            }
         max_bound_violation = max(max_bound_violation, key_bound_violation)
         terminal_delta[key] = float(
             np.max(np.abs(values[:, -1] - original_values[:, -1]))
@@ -3531,6 +3731,7 @@ def rollout_transferred_cycle_full_dynamics(
         "start_node": start_node,
         "max_bound_violation": max_bound_violation,
         "max_bound_violation_by_key": max_bound_violation_by_key,
+        "worst_bound_violation": worst_bound_violation,
         "terminal_delta": terminal_delta,
         "max_delta_by_key": max_delta_by_key,
     }
@@ -3654,6 +3855,7 @@ def rollout_transferred_cycle_acados_irk(
 
     max_bound_violation = 0.0
     max_bound_violation_by_key = {}
+    worst_bound_violation = None
     terminal_delta = {}
     state_values = {}
     for key in nlp.states.keys():
@@ -3664,6 +3866,19 @@ def rollout_transferred_cycle_acados_irk(
         violations = np.maximum(lower - values, 0.0) + np.maximum(values - upper, 0.0)
         key_bound_violation = float(np.max(violations))
         max_bound_violation_by_key[key] = key_bound_violation
+        if key_bound_violation >= max_bound_violation:
+            component, node = np.unravel_index(
+                int(np.argmax(violations)), violations.shape
+            )
+            worst_bound_violation = {
+                "key": key,
+                "component": int(component),
+                "node": int(node),
+                "value": float(values[component, node]),
+                "lower": float(lower[component, node]),
+                "upper": float(upper[component, node]),
+                "violation": key_bound_violation,
+            }
         max_bound_violation = max(max_bound_violation, key_bound_violation)
         terminal_delta[key] = float(
             np.max(np.abs(values[:, -1] - original_states[indexes, -1]))
@@ -3682,6 +3897,7 @@ def rollout_transferred_cycle_acados_irk(
         "start_node": start_node,
         "max_bound_violation": max_bound_violation,
         "max_bound_violation_by_key": max_bound_violation_by_key,
+        "worst_bound_violation": worst_bound_violation,
         "terminal_delta": terminal_delta,
         "simulator_built": simulator_built,
         "simulation_time_s": simulation_time_s,
@@ -5303,6 +5519,15 @@ def apply_pulse_width_control_trust_region(
     return summary
 
 
+def restore_pulse_width_control_bounds(periodic_nmpc) -> None:
+    original_bounds = getattr(periodic_nmpc, "_cocofest_original_control_bounds", {})
+    for key, (lower, upper) in original_bounds.items():
+        bounds = periodic_nmpc.nlp[0].u_bounds[key]
+        bounds.min[:, :] = lower
+        bounds.max[:, :] = upper
+    periodic_nmpc._cocofest_nodewise_control_bounds = {}
+
+
 def apply_fes_state_trust_region(
     periodic_nmpc, normalized_radius: float
 ) -> dict[str, dict[str, float]]:
@@ -5535,6 +5760,46 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
         )
     if args.acados_fixed_control_tolerance <= 0:
         raise ValueError("--acados-fixed-control-tolerance must be strictly positive.")
+    if args.acados_control_homotopy_tolerance <= 0:
+        raise ValueError(
+            "--acados-control-homotopy-tolerance must be strictly positive."
+        )
+    if args.acados_control_homotopy_max_restarts < 0:
+        raise ValueError(
+            "--acados-control-homotopy-max-restarts must be greater than or equal to zero."
+        )
+    if args.acados_control_homotopy_window_growth < 1.0:
+        raise ValueError(
+            "--acados-control-homotopy-window-growth must be greater than or equal to one."
+        )
+    if (
+        args.acados_control_homotopy_radii is not None
+        and args.acados_pulse_width_trust_radius is not None
+    ):
+        raise ValueError(
+            "Control homotopy cannot be combined with a persistent pulse-width trust region."
+        )
+    if (
+        args.acados_control_homotopy_radii is not None
+        and args.acados_fix_controls_to_warmup
+    ):
+        raise ValueError(
+            "Control homotopy already includes its own fixed-control stage."
+        )
+    if args.acados_control_homotopy_radii is not None and args.solver != "acados":
+        raise ValueError("Control homotopy is only available with ACADOS.")
+    if (
+        args.acados_control_homotopy_keep_final_radius
+        and args.acados_control_homotopy_radii is None
+    ):
+        raise ValueError(
+            "Keeping the final homotopy radius requires control homotopy radii."
+        )
+    if (
+        args.acados_control_homotopy_each_window
+        and args.acados_control_homotopy_radii is None
+    ):
+        raise ValueError("Per-window control homotopy requires control homotopy radii.")
     if args.acados_terminal_wheel_q_slack < 0:
         raise ValueError("--acados-terminal-wheel-q-slack must be non-negative.")
     if args.terminal_qdot_regularization_weight < 0:
@@ -5678,7 +5943,9 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
         nmpc.wheel_q_path_margin = args.acados_wheel_q_path_margin
         nmpc.use_signed_wheel_shift = True
         nmpc.transfer_initial_guess_mode = "anchored"
-        nmpc.repeat_cyclical_state_initial_guess = True
+        nmpc.repeat_cyclical_state_initial_guess = (
+            args.acados_cyclical_transfer_mode == "repeat"
+        )
         nmpc.transfer_debug = echo
         nmpc._cocofest_dual_warm_start_mode = args.acados_dual_warm_start_mode
         nmpc._cocofest_dual_shift_stages = args.stimulations_per_cycle
@@ -5737,6 +6004,30 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
             print(
                 "acados_transfer_pulse_width_trust_radius: "
                 f"{args.acados_transfer_pulse_width_trust_radius}"
+            )
+            print(
+                "acados_control_homotopy_radii: "
+                f"{args.acados_control_homotopy_radii}"
+            )
+            print(
+                "acados_control_homotopy_tolerance: "
+                f"{args.acados_control_homotopy_tolerance}"
+            )
+            print(
+                "acados_control_homotopy_max_restarts: "
+                f"{args.acados_control_homotopy_max_restarts}"
+            )
+            print(
+                "acados_control_homotopy_keep_final_radius: "
+                f"{args.acados_control_homotopy_keep_final_radius}"
+            )
+            print(
+                "acados_control_homotopy_each_window: "
+                f"{args.acados_control_homotopy_each_window}"
+            )
+            print(
+                "acados_control_homotopy_window_growth: "
+                f"{args.acados_control_homotopy_window_growth}"
             )
             print(
                 "acados_fes_state_trust_radius: "
@@ -5895,6 +6186,10 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
             )
             print(f"acados_transfer_irk_rollout: {args.acados_transfer_irk_rollout}")
             print(f"acados_transfer_phase_one: {args.acados_transfer_phase_one}")
+            print(
+                "acados_cyclical_transfer_mode: "
+                f"{args.acados_cyclical_transfer_mode}"
+            )
             print(
                 "acados_transfer_rollout_substeps: "
                 f"{args.acados_transfer_rollout_substeps}"
@@ -6197,6 +6492,8 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
     transfer_rollout_summaries = []
     transfer_bound_projection_summaries = []
     inter_window_refinement_summaries = []
+    inter_window_control_homotopy_summaries = []
+    control_homotopy_summaries = []
 
     def cache_first_successful_window(_nmpc, solution):
         diagnostics = snapshot_acados_diagnostics(solution)
@@ -6383,6 +6680,18 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
                     f"{rollout_summary.get('max_bound_violation')} "
                     f"reason={rollout_summary.get('reason')}"
                 )
+                worst_violation = rollout_summary.get("worst_bound_violation")
+                if worst_violation is not None:
+                    print(
+                        "acados_transfer_irk_rollout_worst_bound: "
+                        f"key={worst_violation['key']} "
+                        f"component={worst_violation['component']} "
+                        f"node={worst_violation['node']} "
+                        f"value={worst_violation['value']:.6g} "
+                        f"bounds=[{worst_violation['lower']:.6g}, "
+                        f"{worst_violation['upper']:.6g}] "
+                        f"violation={worst_violation['violation']:.6g}"
+                    )
         if (
             continue_solving
             and _sol is not None
@@ -6411,6 +6720,40 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
                     f"state_max_change={bound_projection['state_max_change']:.6g} "
                     f"control_max_change={bound_projection['control_max_change']:.6g}"
                 )
+        if (
+            continue_solving
+            and _sol is not None
+            and args.solver == "acados"
+            and args.acados_control_homotopy_each_window
+        ):
+            if echo:
+                print(f"running_acados_control_homotopy_window: {cycle_idx}")
+            window_homotopy = run_acados_control_homotopy(
+                _nmpc,
+                solver,
+                radii=args.acados_control_homotopy_radii,
+                convergence_tolerance=args.acados_control_homotopy_tolerance,
+                fixed_control_tolerance=args.acados_fixed_control_tolerance,
+                max_restarts=args.acados_control_homotopy_max_restarts,
+                echo=echo,
+            )
+            for item in window_homotopy:
+                item["window"] = cycle_idx
+            inter_window_control_homotopy_summaries.extend(window_homotopy)
+            accepted_window_radii = [
+                item["radius"]
+                for item in window_homotopy
+                if item["accepted"] and item["radius"] is not None
+            ]
+            if accepted_window_radii:
+                _nmpc._cocofest_retained_control_homotopy_radius = (
+                    accepted_window_radii[-1]
+                )
+            elif echo:
+                print(
+                    "acados_control_homotopy_window_warning: "
+                    f"window={cycle_idx} no_finite_radius_accepted"
+                )
         if args.solver == "acados" and _sol is not None:
             diagnostics = snapshot_acados_diagnostics(_sol)
             acados_window_diagnostics.append(diagnostics)
@@ -6419,17 +6762,30 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
                 if continue_solving:
                     print(f"window[{cycle_idx}] transferred_initial_guess_diagnostics:")
                     print_initial_guess_diagnostics(_nmpc)
+        retained_homotopy_radius = getattr(
+            _nmpc, "_cocofest_retained_control_homotopy_radius", None
+        )
         if (
             continue_solving
             and _sol is not None
             and args.solver == "acados"
-            and args.acados_pulse_width_trust_radius is not None
-        ):
-            transfer_radius = (
-                args.acados_transfer_pulse_width_trust_radius
-                if args.acados_transfer_pulse_width_trust_radius is not None
-                else args.acados_pulse_width_trust_radius
+            and (
+                args.acados_pulse_width_trust_radius is not None
+                or retained_homotopy_radius is not None
             )
+        ):
+            if retained_homotopy_radius is not None:
+                transfer_radius = (
+                    retained_homotopy_radius
+                    * args.acados_control_homotopy_window_growth
+                )
+                _nmpc._cocofest_retained_control_homotopy_radius = transfer_radius
+            else:
+                transfer_radius = (
+                    args.acados_transfer_pulse_width_trust_radius
+                    if args.acados_transfer_pulse_width_trust_radius is not None
+                    else args.acados_pulse_width_trust_radius
+                )
             trust_summary = apply_pulse_width_control_trust_region(
                 _nmpc, transfer_radius
             )
@@ -6437,7 +6793,8 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
                 max_center = max(item["center_max"] for item in trust_summary.values())
                 print(
                     "acados_pulse_width_trust_region_recentered: "
-                    f"window={cycle_idx} max_center={max_center:.9g}"
+                    f"window={cycle_idx} radius={transfer_radius:.9g} "
+                    f"max_center={max_center:.9g}"
                 )
         return continue_solving
 
@@ -6519,6 +6876,42 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
             linear_solver=args.ipopt_linear_solver,
         )
 
+    if args.solver == "acados" and args.acados_control_homotopy_radii is not None:
+        control_homotopy_summaries = run_acados_control_homotopy(
+            nmpc,
+            solver,
+            radii=args.acados_control_homotopy_radii,
+            convergence_tolerance=args.acados_control_homotopy_tolerance,
+            fixed_control_tolerance=args.acados_fixed_control_tolerance,
+            max_restarts=args.acados_control_homotopy_max_restarts,
+            echo=echo,
+        )
+        solver.set_only_first_options_has_changed(False)
+        solver.set_nlp_solver_tol_eq(solver.nlp_solver_tol_eq)
+        solver.set_nlp_solver_tol_ineq(solver.nlp_solver_tol_ineq)
+        solver.set_nlp_solver_tol_comp(solver.nlp_solver_tol_comp)
+        solver.set_nlp_solver_tol_stat(solver.nlp_solver_tol_stat)
+        if args.acados_control_homotopy_keep_final_radius:
+            accepted_radii = [
+                summary["radius"]
+                for summary in control_homotopy_summaries
+                if summary["accepted"] and summary["radius"] is not None
+            ]
+            if not accepted_radii:
+                raise RuntimeError(
+                    "Control homotopy did not accept any finite control radius."
+                )
+            retained_radius = accepted_radii[-1]
+            apply_pulse_width_control_trust_region(nmpc, retained_radius)
+            nmpc._cocofest_retained_control_homotopy_radius = retained_radius
+            if echo:
+                print(
+                    "acados_control_homotopy_retained_radius: " f"{retained_radius:.9g}"
+                )
+        if echo and args.acados_diagnostics:
+            print("post_control_homotopy_initial_guess_diagnostics:")
+            print_initial_guess_diagnostics(nmpc)
+
     if args.single_shot:
         sol = super(RecedingHorizonOptimization, nmpc).solve(
             solver=solver,
@@ -6570,6 +6963,8 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
             summary["initial_guess_control_traces"] = initial_guess_control_traces
         summary["args"] = args
         summary["control_bounds"] = _control_bounds_summary(nmpc)
+        if control_homotopy_summaries:
+            summary["control_homotopy_summaries"] = control_homotopy_summaries
         return summary
 
     sol = nmpc.solve_fes_nmpc(
@@ -6603,6 +6998,12 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
         summary["transfer_rollout_summaries"] = transfer_rollout_summaries
     if inter_window_refinement_summaries:
         summary["inter_window_refinement_summaries"] = inter_window_refinement_summaries
+    if inter_window_control_homotopy_summaries:
+        summary["inter_window_control_homotopy_summaries"] = (
+            inter_window_control_homotopy_summaries
+        )
+    if control_homotopy_summaries:
+        summary["control_homotopy_summaries"] = control_homotopy_summaries
     if initial_guess_state_traces is not None:
         summary["initial_guess_state_traces"] = initial_guess_state_traces
         summary["initial_guess_control_traces"] = initial_guess_control_traces
