@@ -342,3 +342,63 @@ def test_horizon_seed_recenters_kinematic_boundary_bounds():
     np.testing.assert_allclose(nlp.x_bounds["q"].max[:, [0, 2]], [[-4.9, -6.9]])
     np.testing.assert_allclose(nlp.x_bounds["qdot"].min[:, [0, 2]], [[-1.2, -3.2]])
     np.testing.assert_allclose(nlp.x_bounds["qdot"].max[:, [0, 2]], [[-0.8, -2.8]])
+
+
+def test_full_dynamics_transfer_rollout_reintegrates_appended_cycle():
+    class Variables(dict):
+        def __init__(self, *args, shape, **kwargs):
+            super().__init__(*args, **kwargs)
+            self.shape = shape
+
+    state_variables = Variables(
+        {
+            "q": SimpleNamespace(index=[0]),
+            "qdot": SimpleNamespace(index=[1]),
+        },
+        shape=2,
+    )
+    control_variables = Variables({"acceleration": SimpleNamespace(index=[0])}, shape=1)
+    x_init = {
+        "q": SimpleNamespace(init=np.array([[0.0, 0.5, 9.0, 9.0, 9.0]])),
+        "qdot": SimpleNamespace(init=np.array([[1.0, 1.0, 9.0, 9.0, 9.0]])),
+    }
+    loose_bounds = SimpleNamespace(
+        min=np.full((1, 3), -100.0), max=np.full((1, 3), 100.0)
+    )
+    nlp = SimpleNamespace(
+        x_init=x_init,
+        u_init={"acceleration": SimpleNamespace(init=np.zeros((1, 4)))},
+        x_bounds={"q": loose_bounds, "qdot": loose_bounds},
+        states=state_variables,
+        controls=control_variables,
+        numerical_data_timeseries=None,
+        dynamics_func=lambda time, state, control, numerical, algebraic, parameters: np.array(
+            [state[1], control[0]]
+        ),
+    )
+    nmpc = SimpleNamespace(
+        nlp=[nlp], nodes_per_cycle=2, cycle_duration=1.0, cycle_len=2
+    )
+
+    summary = periodic_example.rollout_transferred_cycle_full_dynamics(
+        nmpc, n_substeps=2
+    )
+
+    assert summary["applied"] is True
+    assert summary["start_node"] == 1
+    assert summary["max_bound_violation"] == 0.0
+    np.testing.assert_allclose(x_init["q"].init, [[0.0, 0.5, 1.0, 1.5, 2.0]])
+    np.testing.assert_allclose(x_init["qdot"].init, [[1.0, 1.0, 1.0, 1.0, 1.0]])
+
+    x_init["q"].init[:, 2:] = 9.0
+    x_init["qdot"].init[:, 2:] = 9.0
+    nlp.x_bounds["q"] = SimpleNamespace(
+        min=np.full((1, 3), -100.0), max=np.full((1, 3), 1.0)
+    )
+    rejected = periodic_example.rollout_transferred_cycle_full_dynamics(
+        nmpc, n_substeps=2, max_allowed_bound_violation=0.1
+    )
+
+    assert rejected["applied"] is False
+    assert rejected["max_bound_violation"] == 1.0
+    np.testing.assert_allclose(x_init["q"].init[:, 2:], 9.0)

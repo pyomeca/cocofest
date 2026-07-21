@@ -574,6 +574,23 @@ def build_argument_parser() -> argparse.ArgumentParser:
         help="Project the ACADOS qdot initial guess from finite differences of q before solving.",
     )
     parser.add_argument(
+        "--acados-transfer-full-dynamics-rollout",
+        action="store_true",
+        help="Reintegrate the appended cycle with the complete dynamics after each window transfer.",
+    )
+    parser.add_argument(
+        "--acados-transfer-rollout-substeps",
+        type=int,
+        default=5,
+        help="RK4 substeps used by the full-dynamics inter-window rollout.",
+    )
+    parser.add_argument(
+        "--acados-transfer-rollout-max-bound-violation",
+        type=float,
+        default=1.0,
+        help="Reject the inter-window rollout when a state exceeds its bounds by more than this value.",
+    )
+    parser.add_argument(
         "--warmup-state-comparison-limit",
         type=int,
         default=12,
@@ -2435,6 +2452,96 @@ def _full_dynamics_rollout_defect_details(
     }
 
 
+def rollout_transferred_cycle_full_dynamics(
+    periodic_nmpc,
+    n_substeps: int = 5,
+    max_allowed_bound_violation: float | None = None,
+) -> dict:
+    if n_substeps < 1:
+        raise ValueError("ACADOS transfer rollout substeps must be >= 1.")
+
+    nlp = periodic_nmpc.nlp[0]
+    first_state_key = next(iter(nlp.x_init.keys()))
+    first_control_key = next(iter(nlp.u_init.keys()))
+    n_state_nodes = nlp.x_init[first_state_key].init.shape[1]
+    n_control_nodes = nlp.u_init[first_control_key].init.shape[1]
+    if n_state_nodes != n_control_nodes + 1:
+        raise ValueError(
+            "The transfer rollout requires one more state node than controls."
+        )
+
+    start_node = periodic_nmpc.nodes_per_cycle - 1
+    if start_node < 0 or start_node >= n_control_nodes:
+        raise ValueError("The transfer rollout start node is outside the horizon.")
+
+    states = _stack_initial_guess_values(nlp.x_init, nlp.states, n_state_nodes)
+    original_states = states.copy()
+    controls = _stack_initial_guess_values(nlp.u_init, nlp.controls, n_control_nodes)
+    dt = periodic_nmpc.cycle_duration / periodic_nmpc.cycle_len
+    stage_numerical_timeseries = [
+        _numerical_timeseries_at_node(nlp, node) for node in range(n_control_nodes)
+    ]
+
+    for node in range(start_node, n_control_nodes):
+        states[:, node + 1] = _rk4_full_dynamics_step(
+            nlp,
+            states[:, node],
+            controls[:, node],
+            node * dt,
+            dt,
+            n_substeps=n_substeps,
+            numerical_timeseries=stage_numerical_timeseries[node],
+        )
+        if not np.all(np.isfinite(states[:, node + 1])):
+            return {
+                "applied": False,
+                "start_node": start_node,
+                "nonfinite_node": node + 1,
+            }
+
+    max_bound_violation = 0.0
+    max_bound_violation_by_key = {}
+    terminal_delta = {}
+    max_delta_by_key = {}
+    state_values = {}
+    for key in nlp.states.keys():
+        indexes = np.asarray(nlp.states[key].index).reshape((-1,)).tolist()
+        values = states[indexes, :]
+        state_values[key] = values
+        original_values = original_states[indexes, :]
+        lower, upper = _trajectory_bounds_for_guess(nlp.x_bounds[key], n_state_nodes)
+        violations = np.maximum(lower - values, 0.0) + np.maximum(values - upper, 0.0)
+        key_bound_violation = float(np.max(violations))
+        max_bound_violation_by_key[key] = key_bound_violation
+        max_bound_violation = max(max_bound_violation, key_bound_violation)
+        terminal_delta[key] = float(
+            np.max(np.abs(values[:, -1] - original_values[:, -1]))
+        )
+        max_delta_by_key[key] = float(
+            np.max(
+                np.abs(
+                    values[:, start_node + 1 :] - original_values[:, start_node + 1 :]
+                )
+            )
+        )
+    applied = (
+        max_allowed_bound_violation is None
+        or max_bound_violation <= max_allowed_bound_violation
+    )
+    if applied:
+        for key, values in state_values.items():
+            nlp.x_init[key].init[:, :] = values
+
+    return {
+        "applied": applied,
+        "start_node": start_node,
+        "max_bound_violation": max_bound_violation,
+        "max_bound_violation_by_key": max_bound_violation_by_key,
+        "terminal_delta": terminal_delta,
+        "max_delta_by_key": max_delta_by_key,
+    }
+
+
 def _projection_state_keys(muscle_name: str, projection_mode: str) -> tuple[str, ...]:
     state_keys = _ding_state_keys(muscle_name)
     if projection_mode == "calcium":
@@ -4047,6 +4154,12 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
         and args.acados_pulse_width_trust_radius < 0
     ):
         raise ValueError("--acados-pulse-width-trust-radius must be non-negative.")
+    if args.acados_transfer_rollout_substeps < 1:
+        raise ValueError("--acados-transfer-rollout-substeps must be >= 1.")
+    if args.acados_transfer_rollout_max_bound_violation < 0:
+        raise ValueError(
+            "--acados-transfer-rollout-max-bound-violation must be non-negative."
+        )
 
     periodic_ipopt_refinement_enabled = (
         args.periodic_ipopt_refinement and not args.disable_periodic_ipopt_refinement
@@ -4345,6 +4458,18 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
             print(f"acados_wheel_q_slack: {args.acados_wheel_q_slack}")
             print(f"acados_wheel_qdot_slack: {args.acados_wheel_qdot_slack}")
             print(f"acados_wheel_q_path_margin: {args.acados_wheel_q_path_margin}")
+            print(
+                "acados_transfer_full_dynamics_rollout: "
+                f"{args.acados_transfer_full_dynamics_rollout}"
+            )
+            print(
+                "acados_transfer_rollout_substeps: "
+                f"{args.acados_transfer_rollout_substeps}"
+            )
+            print(
+                "acados_transfer_rollout_max_bound_violation: "
+                f"{args.acados_transfer_rollout_max_bound_violation}"
+            )
         if (
             args.solver == "ipopt"
             or (
@@ -4528,6 +4653,7 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
         initial_guess_control_traces = _initial_guess_traces(nmpc.nlp[0].u_init)
 
     acados_window_diagnostics = []
+    transfer_rollout_summaries = []
 
     def cache_first_successful_window(_nmpc, solution):
         diagnostics = snapshot_acados_diagnostics(solution)
@@ -4538,18 +4664,17 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
             or not _status_is_success(solution.status)
         ):
             return
-        if not acados_diagnostics_meet_tolerances(
+        meets_strict_tolerances = acados_diagnostics_meet_tolerances(
             diagnostics,
             args.acados_tolerance,
             args.acados_stationarity_tolerance,
-        ):
-            if echo:
-                print("acados_horizon_seed_cache: skipped_non_strict_solution")
-            return
+        )
         _save_warmup_cache(horizon_seed_cache_path, solution)
         if echo:
             print(
-                "acados_horizon_seed_cache: saved " f"({horizon_seed_cache_path.name})"
+                "acados_horizon_seed_cache: saved "
+                f"quality={'strict' if meets_strict_tolerances else 'relaxed'} "
+                f"({horizon_seed_cache_path.name})"
             )
 
     if args.solver == "acados" and horizon_seed_cache_path is not None:
@@ -4564,6 +4689,47 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
                 f"qdot={states['qdot'][2, -1]:.6f}"
             )
         continue_solving = cycle_idx + 1 < args.n_windows
+        if (
+            continue_solving
+            and _sol is not None
+            and args.solver == "acados"
+            and args.acados_transfer_full_dynamics_rollout
+        ):
+            rollout_summary = rollout_transferred_cycle_full_dynamics(
+                _nmpc,
+                n_substeps=args.acados_transfer_rollout_substeps,
+                max_allowed_bound_violation=(
+                    args.acados_transfer_rollout_max_bound_violation
+                ),
+            )
+            transfer_rollout_summaries.append(rollout_summary)
+            if echo:
+                print(
+                    "acados_transfer_full_dynamics_rollout: "
+                    f"applied={rollout_summary['applied']} "
+                    f"start_node={rollout_summary['start_node']} "
+                    "max_bound_violation="
+                    f"{rollout_summary.get('max_bound_violation')}"
+                )
+                violation_by_key = rollout_summary.get("max_bound_violation_by_key", {})
+                if violation_by_key:
+                    worst_key = max(violation_by_key, key=violation_by_key.get)
+                    print(
+                        "acados_transfer_rollout_worst_bound: "
+                        f"key={worst_key} "
+                        f"violation={violation_by_key[worst_key]:.6g}"
+                    )
+                if rollout_summary["applied"]:
+                    print(
+                        "acados_transfer_rollout_terminal_delta: "
+                        f"q={rollout_summary['terminal_delta'].get('q')} "
+                        f"qdot={rollout_summary['terminal_delta'].get('qdot')}"
+                    )
+                else:
+                    print(
+                        "acados_transfer_rollout_nonfinite_node: "
+                        f"{rollout_summary.get('nonfinite_node')}"
+                    )
         if args.solver == "acados" and _sol is not None:
             diagnostics = snapshot_acados_diagnostics(_sol)
             acados_window_diagnostics.append(diagnostics)
@@ -4683,6 +4849,8 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
     )
     if args.solver == "acados" and args.acados_diagnostics:
         summary["acados_diagnostics"] = acados_window_diagnostics
+    if transfer_rollout_summaries:
+        summary["transfer_rollout_summaries"] = transfer_rollout_summaries
     if initial_guess_state_traces is not None:
         summary["initial_guess_state_traces"] = initial_guess_state_traces
         summary["initial_guess_control_traces"] = initial_guess_control_traces
