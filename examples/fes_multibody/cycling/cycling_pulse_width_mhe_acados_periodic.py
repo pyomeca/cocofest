@@ -920,6 +920,14 @@ def build_argument_parser() -> argparse.ArgumentParser:
         help="Reintegrate the appended cycle with the complete dynamics after each window transfer.",
     )
     parser.add_argument(
+        "--acados-transfer-irk-rollout",
+        action="store_true",
+        help=(
+            "Reintegrate the appended cycle with the exact generated ACADOS IRK simulator "
+            "after each window transfer."
+        ),
+    )
+    parser.add_argument(
         "--acados-transfer-phase-one",
         action="store_true",
         help=(
@@ -2504,9 +2512,11 @@ def summarize_windows(sol, requested_windows: int, cycles_per_window: int) -> No
     def _fmt(value) -> str:
         return "None" if value is None else f"{value:.6f}"
 
-    merged_solution, source_window_solutions, exported_cycle_solutions = (
-        _split_receding_solution(sol)
-    )
+    (
+        merged_solution,
+        source_window_solutions,
+        exported_cycle_solutions,
+    ) = _split_receding_solution(sol)
     accounting = _window_accounting(
         source_window_solutions, exported_cycle_solutions, cycles_per_window
     )
@@ -2554,9 +2564,11 @@ def summarize_windows(sol, requested_windows: int, cycles_per_window: int) -> No
 
 
 def build_window_summary(sol, requested_windows: int, cycles_per_window: int) -> dict:
-    merged_solution, source_window_solutions, exported_cycle_solutions = (
-        _split_receding_solution(sol)
-    )
+    (
+        merged_solution,
+        source_window_solutions,
+        exported_cycle_solutions,
+    ) = _split_receding_solution(sol)
     accounting = _window_accounting(
         source_window_solutions, exported_cycle_solutions, cycles_per_window
     )
@@ -3450,7 +3462,9 @@ def rollout_transferred_cycle_full_dynamics(
             "The transfer rollout requires one more state node than controls."
         )
 
-    start_node = periodic_nmpc.nodes_per_cycle - 1
+    # Nodes 0..nodes_per_cycle are retained from the solved horizon. Only the
+    # intervals after that shared endpoint belong to the appended cycle.
+    start_node = periodic_nmpc.nodes_per_cycle
     if start_node < 0 or start_node >= n_control_nodes:
         raise ValueError("The transfer rollout start node is outside the horizon.")
 
@@ -3519,6 +3533,190 @@ def rollout_transferred_cycle_full_dynamics(
         "max_bound_violation_by_key": max_bound_violation_by_key,
         "terminal_delta": terminal_delta,
         "max_delta_by_key": max_delta_by_key,
+    }
+
+
+def _acados_variable_scaling(nlp, variables, scaling_container) -> np.ndarray:
+    scaling = np.ones(variables.shape)
+    for key in variables.keys():
+        indexes = np.asarray(variables[key].index).reshape((-1,)).tolist()
+        key_scaling = np.asarray(
+            scaling_container[key].scaling[:, 0], dtype=float
+        ).reshape(-1)
+        if key_scaling.size != len(indexes):
+            raise ValueError(
+                f"ACADOS scaling for '{key}' has {key_scaling.size} rows, "
+                f"expected {len(indexes)}."
+            )
+        scaling[indexes] = key_scaling
+    if not np.all(np.isfinite(scaling)) or np.any(scaling <= 0.0):
+        raise ValueError(
+            "ACADOS transfer scaling must be finite and strictly positive."
+        )
+    return scaling
+
+
+def _get_or_create_acados_sim_solver(periodic_nmpc):
+    cached_solver = getattr(periodic_nmpc, "_cocofest_acados_sim_solver", None)
+    if cached_solver is not None:
+        return cached_solver, False
+
+    interface = getattr(periodic_nmpc, "ocp_solver", None)
+    acados_ocp = getattr(interface, "acados_ocp", None)
+    if acados_ocp is None or getattr(interface, "ocp_solver", None) is None:
+        raise RuntimeError(
+            "The ACADOS IRK transfer requires an initialized ACADOS OCP solver."
+        )
+
+    from acados_template import AcadosSimSolver
+
+    library_path = (
+        Path(acados_ocp.code_export_directory)
+        / f"libacados_sim_solver_{acados_ocp.model.name}{_shared_lib_ext()}"
+    )
+    needs_build = not library_path.exists()
+    simulator = AcadosSimSolver(
+        acados_ocp,
+        generate=False,
+        build=needs_build,
+        verbose=False,
+    )
+    periodic_nmpc._cocofest_acados_sim_solver = simulator
+    return simulator, needs_build
+
+
+def rollout_transferred_cycle_acados_irk(
+    periodic_nmpc,
+    max_allowed_bound_violation: float | None = None,
+) -> dict:
+    """Roll out the appended cycle with the same generated IRK map as the OCP."""
+
+    nlp = periodic_nmpc.nlp[0]
+    first_state_key = next(iter(nlp.x_init.keys()))
+    first_control_key = next(iter(nlp.u_init.keys()))
+    n_state_nodes = nlp.x_init[first_state_key].init.shape[1]
+    n_control_nodes = nlp.u_init[first_control_key].init.shape[1]
+    if n_state_nodes != n_control_nodes + 1:
+        raise ValueError(
+            "The ACADOS IRK transfer requires one more state node than controls."
+        )
+
+    start_node = periodic_nmpc.nodes_per_cycle
+    if start_node < 0 or start_node >= n_control_nodes:
+        raise ValueError("The ACADOS IRK transfer start node is outside the horizon.")
+
+    simulator, simulator_built = _get_or_create_acados_sim_solver(periodic_nmpc)
+    states = _stack_initial_guess_values(nlp.x_init, nlp.states, n_state_nodes)
+    original_states = states.copy()
+    controls = _stack_initial_guess_values(nlp.u_init, nlp.controls, n_control_nodes)
+    state_scaling = _acados_variable_scaling(nlp, nlp.states, nlp.x_scaling)
+    control_scaling = _acados_variable_scaling(nlp, nlp.controls, nlp.u_scaling)
+
+    expected_states = int(simulator.acados_sim.dims.nx)
+    expected_controls = int(simulator.acados_sim.dims.nu)
+    if states.shape[0] != expected_states or controls.shape[0] != expected_controls:
+        raise ValueError(
+            "ACADOS simulator dimensions do not match the Bioptim variables "
+            f"(x: {states.shape[0]} != {expected_states}, "
+            f"u: {controls.shape[0]} != {expected_controls})."
+        )
+
+    simulation_time_s = 0.0
+    for node in range(start_node, n_control_nodes):
+        stage_parameters = _numerical_timeseries_at_node(nlp, node)
+        simulator.set("t0", np.array([0.0]))
+        try:
+            next_scaled_state = simulator.simulate(
+                x=states[:, node] / state_scaling,
+                u=controls[:, node] / control_scaling,
+                p=stage_parameters,
+            )
+        except RuntimeError as exc:
+            return {
+                "applied": False,
+                "start_node": start_node,
+                "failed_node": node,
+                "reason": str(exc),
+                "simulator_built": simulator_built,
+                "simulation_time_s": simulation_time_s,
+            }
+        simulation_time_s += float(simulator.get("time_tot"))
+        states[:, node + 1] = np.asarray(next_scaled_state) * state_scaling
+        if not np.all(np.isfinite(states[:, node + 1])):
+            return {
+                "applied": False,
+                "start_node": start_node,
+                "nonfinite_node": node + 1,
+                "reason": "nonfinite_state",
+                "simulator_built": simulator_built,
+                "simulation_time_s": simulation_time_s,
+            }
+
+    max_bound_violation = 0.0
+    max_bound_violation_by_key = {}
+    terminal_delta = {}
+    state_values = {}
+    for key in nlp.states.keys():
+        indexes = np.asarray(nlp.states[key].index).reshape((-1,)).tolist()
+        values = states[indexes, :]
+        state_values[key] = values
+        lower, upper = _trajectory_bounds_for_guess(nlp.x_bounds[key], n_state_nodes)
+        violations = np.maximum(lower - values, 0.0) + np.maximum(values - upper, 0.0)
+        key_bound_violation = float(np.max(violations))
+        max_bound_violation_by_key[key] = key_bound_violation
+        max_bound_violation = max(max_bound_violation, key_bound_violation)
+        terminal_delta[key] = float(
+            np.max(np.abs(values[:, -1] - original_states[indexes, -1]))
+        )
+
+    applied = (
+        max_allowed_bound_violation is None
+        or max_bound_violation <= max_allowed_bound_violation
+    )
+    if applied:
+        for key, values in state_values.items():
+            nlp.x_init[key].init[:, :] = values
+
+    return {
+        "applied": applied,
+        "start_node": start_node,
+        "max_bound_violation": max_bound_violation,
+        "max_bound_violation_by_key": max_bound_violation_by_key,
+        "terminal_delta": terminal_delta,
+        "simulator_built": simulator_built,
+        "simulation_time_s": simulation_time_s,
+    }
+
+
+def project_transferred_initial_guess_to_bounds(periodic_nmpc) -> dict:
+    """Make the shifted primal warm start admissible after bounds have moved."""
+
+    nlp = periodic_nmpc.nlp[0]
+    states_before = {
+        key: np.asarray(nlp.x_init[key].init, dtype=float).copy()
+        for key in nlp.x_init.keys()
+    }
+    controls_before = {
+        key: np.asarray(nlp.u_init[key].init, dtype=float).copy()
+        for key in nlp.u_init.keys()
+    }
+    periodic_nmpc._correct_init_guess_to_fit_bounds(corrected_input="states")
+    periodic_nmpc._correct_init_guess_to_fit_bounds(corrected_input="controls")
+    periodic_nmpc._sync_acados_state_bounds()
+
+    state_changes = {
+        key: float(np.max(np.abs(nlp.x_init[key].init - values)))
+        for key, values in states_before.items()
+    }
+    control_changes = {
+        key: float(np.max(np.abs(nlp.u_init[key].init - values)))
+        for key, values in controls_before.items()
+    }
+    return {
+        "state_max_change": max(state_changes.values(), default=0.0),
+        "control_max_change": max(control_changes.values(), default=0.0),
+        "state_changes": state_changes,
+        "control_changes": control_changes,
     }
 
 
@@ -5330,6 +5528,11 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
         raise ValueError(
             "--acados-transfer-rollout-max-bound-violation must be non-negative."
         )
+    if args.acados_transfer_full_dynamics_rollout and args.acados_transfer_irk_rollout:
+        raise ValueError(
+            "Choose only one of --acados-transfer-full-dynamics-rollout and "
+            "--acados-transfer-irk-rollout."
+        )
     if args.acados_fixed_control_tolerance <= 0:
         raise ValueError("--acados-fixed-control-tolerance must be strictly positive.")
     if args.acados_terminal_wheel_q_slack < 0:
@@ -5690,6 +5893,7 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
                 "acados_transfer_full_dynamics_rollout: "
                 f"{args.acados_transfer_full_dynamics_rollout}"
             )
+            print(f"acados_transfer_irk_rollout: {args.acados_transfer_irk_rollout}")
             print(f"acados_transfer_phase_one: {args.acados_transfer_phase_one}")
             print(
                 "acados_transfer_rollout_substeps: "
@@ -5991,6 +6195,7 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
     acados_window_diagnostics = []
     ipopt_dual_warm_start_summaries = []
     transfer_rollout_summaries = []
+    transfer_bound_projection_summaries = []
     inter_window_refinement_summaries = []
 
     def cache_first_successful_window(_nmpc, solution):
@@ -6158,6 +6363,30 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
             continue_solving
             and _sol is not None
             and args.solver == "acados"
+            and args.acados_transfer_irk_rollout
+        ):
+            rollout_summary = rollout_transferred_cycle_acados_irk(
+                _nmpc,
+                max_allowed_bound_violation=(
+                    args.acados_transfer_rollout_max_bound_violation
+                ),
+            )
+            transfer_rollout_summaries.append(rollout_summary)
+            if echo:
+                print(
+                    "acados_transfer_irk_rollout: "
+                    f"applied={rollout_summary['applied']} "
+                    f"start_node={rollout_summary['start_node']} "
+                    f"simulator_built={rollout_summary['simulator_built']} "
+                    f"simulation_time_s={rollout_summary['simulation_time_s']:.6g} "
+                    "max_bound_violation="
+                    f"{rollout_summary.get('max_bound_violation')} "
+                    f"reason={rollout_summary.get('reason')}"
+                )
+        if (
+            continue_solving
+            and _sol is not None
+            and args.solver == "acados"
             and args.acados_transfer_phase_one
         ):
             phase_one_summary = project_full_dynamics_initial_guess(
@@ -6172,6 +6401,15 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
                     f"scaled_defect_before={phase_one_summary['scaled_defect_before']:.6g} "
                     f"scaled_defect_after={phase_one_summary['scaled_defect_after']:.6g} "
                     f"max_state_change={phase_one_summary['max_state_change']:.6g}"
+                )
+        if continue_solving and _sol is not None and args.solver == "acados":
+            bound_projection = project_transferred_initial_guess_to_bounds(_nmpc)
+            transfer_bound_projection_summaries.append(bound_projection)
+            if echo:
+                print(
+                    "acados_transfer_bound_projection: "
+                    f"state_max_change={bound_projection['state_max_change']:.6g} "
+                    f"control_max_change={bound_projection['control_max_change']:.6g}"
                 )
         if args.solver == "acados" and _sol is not None:
             diagnostics = snapshot_acados_diagnostics(_sol)

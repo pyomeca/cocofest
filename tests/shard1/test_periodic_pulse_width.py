@@ -1153,8 +1153,8 @@ def test_full_dynamics_transfer_rollout_reintegrates_appended_cycle():
     )
     control_variables = Variables({"acceleration": SimpleNamespace(index=[0])}, shape=1)
     x_init = {
-        "q": SimpleNamespace(init=np.array([[0.0, 0.5, 9.0, 9.0, 9.0]])),
-        "qdot": SimpleNamespace(init=np.array([[1.0, 1.0, 9.0, 9.0, 9.0]])),
+        "q": SimpleNamespace(init=np.array([[0.0, 0.5, 1.0, 9.0, 9.0]])),
+        "qdot": SimpleNamespace(init=np.array([[1.0, 1.0, 1.0, 9.0, 9.0]])),
     }
     loose_bounds = SimpleNamespace(
         min=np.full((1, 3), -100.0), max=np.full((1, 3), 100.0)
@@ -1179,13 +1179,13 @@ def test_full_dynamics_transfer_rollout_reintegrates_appended_cycle():
     )
 
     assert summary["applied"] is True
-    assert summary["start_node"] == 1
+    assert summary["start_node"] == 2
     assert summary["max_bound_violation"] == 0.0
     np.testing.assert_allclose(x_init["q"].init, [[0.0, 0.5, 1.0, 1.5, 2.0]])
     np.testing.assert_allclose(x_init["qdot"].init, [[1.0, 1.0, 1.0, 1.0, 1.0]])
 
-    x_init["q"].init[:, 2:] = 9.0
-    x_init["qdot"].init[:, 2:] = 9.0
+    x_init["q"].init[:, 3:] = 9.0
+    x_init["qdot"].init[:, 3:] = 9.0
     nlp.x_bounds["q"] = SimpleNamespace(
         min=np.full((1, 3), -100.0), max=np.full((1, 3), 1.0)
     )
@@ -1195,7 +1195,137 @@ def test_full_dynamics_transfer_rollout_reintegrates_appended_cycle():
 
     assert rejected["applied"] is False
     assert rejected["max_bound_violation"] == 1.0
-    np.testing.assert_allclose(x_init["q"].init[:, 2:], 9.0)
+    np.testing.assert_allclose(x_init["q"].init[:, 3:], 9.0)
+
+
+def test_acados_irk_transfer_rollout_uses_scaled_variables_and_stage_data():
+    class Variables(dict):
+        def __init__(self, *args, shape, **kwargs):
+            super().__init__(*args, **kwargs)
+            self.shape = shape
+
+    class FakeSimulator:
+        def __init__(self):
+            self.acados_sim = SimpleNamespace(dims=SimpleNamespace(nx=2, nu=1))
+            self.calls = []
+
+        def set(self, field, value):
+            assert field == "t0"
+            np.testing.assert_allclose(value, [0.0])
+
+        def simulate(self, x, u, p):
+            self.calls.append((x.copy(), u.copy(), p.copy()))
+            return x + np.array([u[0], p[0]])
+
+        def get(self, field):
+            assert field == "time_tot"
+            return 0.001
+
+    states = Variables(
+        {"q": SimpleNamespace(index=[0]), "qdot": SimpleNamespace(index=[1])},
+        shape=2,
+    )
+    controls = Variables({"acceleration": SimpleNamespace(index=[0])}, shape=1)
+    x_init = {
+        "q": SimpleNamespace(init=np.array([[0.0, 1.0, 2.0, 9.0, 9.0]])),
+        "qdot": SimpleNamespace(init=np.array([[2.0, 2.0, 2.0, 9.0, 9.0]])),
+    }
+    scaling = lambda value: SimpleNamespace(  # noqa: E731 - compact test fixture.
+        scaling=np.array([[value]])
+    )
+    loose_bounds = SimpleNamespace(
+        min=np.full((1, 3), -100.0), max=np.full((1, 3), 100.0)
+    )
+    numerical_data = {"periodic_calcium": np.arange(1.0, 6.0).reshape((1, 1, 5))}
+    nlp = SimpleNamespace(
+        x_init=x_init,
+        u_init={"acceleration": SimpleNamespace(init=np.full((1, 4), 6.0))},
+        x_bounds={"q": loose_bounds, "qdot": loose_bounds},
+        states=states,
+        controls=controls,
+        x_scaling={"q": scaling(2.0), "qdot": scaling(4.0)},
+        u_scaling={"acceleration": scaling(3.0)},
+        numerical_data_timeseries=numerical_data,
+    )
+    simulator = FakeSimulator()
+    nmpc = SimpleNamespace(
+        nlp=[nlp],
+        nodes_per_cycle=2,
+        _cocofest_acados_sim_solver=simulator,
+    )
+
+    summary = periodic_example.rollout_transferred_cycle_acados_irk(nmpc)
+
+    assert summary["applied"] is True
+    assert summary["simulator_built"] is False
+    np.testing.assert_allclose(summary["simulation_time_s"], 0.002)
+    np.testing.assert_allclose(x_init["q"].init, [[0.0, 1.0, 2.0, 6.0, 10.0]])
+    np.testing.assert_allclose(x_init["qdot"].init, [[2.0, 2.0, 2.0, 14.0, 30.0]])
+    np.testing.assert_allclose(simulator.calls[0][0], [1.0, 0.5])
+    np.testing.assert_allclose(simulator.calls[0][1], [2.0])
+    np.testing.assert_allclose(simulator.calls[0][2], [3.0])
+
+
+def test_acados_irk_transfer_rejects_dimension_mismatch_without_mutating_guess():
+    class Variables(dict):
+        def __init__(self, *args, shape, **kwargs):
+            super().__init__(*args, **kwargs)
+            self.shape = shape
+
+    simulator = SimpleNamespace(
+        acados_sim=SimpleNamespace(dims=SimpleNamespace(nx=3, nu=1))
+    )
+    states = Variables({"q": SimpleNamespace(index=[0])}, shape=1)
+    controls = Variables({"u": SimpleNamespace(index=[0])}, shape=1)
+    guess = np.zeros((1, 3))
+    nlp = SimpleNamespace(
+        x_init={"q": SimpleNamespace(init=guess)},
+        u_init={"u": SimpleNamespace(init=np.zeros((1, 2)))},
+        x_bounds={"q": SimpleNamespace(min=np.full((1, 3), -1.0), max=np.ones((1, 3)))},
+        states=states,
+        controls=controls,
+        x_scaling={"q": SimpleNamespace(scaling=np.ones((1, 1)))},
+        u_scaling={"u": SimpleNamespace(scaling=np.ones((1, 1)))},
+    )
+    nmpc = SimpleNamespace(
+        nlp=[nlp], nodes_per_cycle=1, _cocofest_acados_sim_solver=simulator
+    )
+
+    with np.testing.assert_raises_regex(ValueError, "dimensions do not match"):
+        periodic_example.rollout_transferred_cycle_acados_irk(nmpc)
+
+    np.testing.assert_allclose(guess, 0.0)
+
+
+def test_transferred_guess_is_projected_after_bounds_move():
+    state_guess = SimpleNamespace(init=np.array([[2.0, -3.0]]))
+    control_guess = SimpleNamespace(init=np.array([[4.0]]))
+    calls = []
+
+    def correct(corrected_input):
+        calls.append(corrected_input)
+        if corrected_input == "states":
+            state_guess.init[:] = np.clip(state_guess.init, -1.0, 1.0)
+        else:
+            control_guess.init[:] = np.clip(control_guess.init, 0.0, 2.0)
+
+    nmpc = SimpleNamespace(
+        nlp=[
+            SimpleNamespace(
+                x_init={"state": state_guess}, u_init={"control": control_guess}
+            )
+        ],
+        _correct_init_guess_to_fit_bounds=correct,
+        _sync_acados_state_bounds=lambda: calls.append("sync"),
+    )
+
+    summary = periodic_example.project_transferred_initial_guess_to_bounds(nmpc)
+
+    assert calls == ["states", "controls", "sync"]
+    assert summary["state_max_change"] == 2.0
+    assert summary["control_max_change"] == 2.0
+    np.testing.assert_allclose(state_guess.init, [[1.0, -1.0]])
+    np.testing.assert_allclose(control_guess.init, [[2.0]])
 
 
 def test_full_dynamics_rhs_passes_numerical_timeseries_as_data():
