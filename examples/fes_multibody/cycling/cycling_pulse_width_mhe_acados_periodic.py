@@ -1067,6 +1067,14 @@ def build_argument_parser() -> argparse.ArgumentParser:
         help="Maximum IPOPT iterations for the periodic warmstart refinement.",
     )
     parser.add_argument(
+        "--periodic-ipopt-refinement-each-window",
+        action="store_true",
+        help=(
+            "Diagnostically rerun the periodic IPOPT refinement after each MHE "
+            "transfer before calling ACADOS. Its time is warmstart overhead."
+        ),
+    )
+    parser.add_argument(
         "--periodic-ipopt-refinement-use-sx",
         action="store_true",
         help=(
@@ -4825,11 +4833,15 @@ def _copy_periodic_runtime_settings(source_nmpc, target_nmpc) -> None:
     target_nmpc.n_cycles_simultaneous = source_nmpc.n_cycles_simultaneous
     for attribute_name in (
         "first_node_state_slack",
+        "terminal_state_slack",
         "bound_first_node_all_states",
         "bound_first_node_wheel_qdot",
         "advance_wheel_q_bounds",
         "wheel_q_path_margin",
         "use_signed_wheel_shift",
+        "transfer_initial_guess_mode",
+        "repeat_cyclical_state_initial_guess",
+        "continuous_state_initial_guess_mode",
     ):
         if hasattr(source_nmpc, attribute_name):
             setattr(
@@ -5330,6 +5342,14 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
     periodic_ipopt_refinement_enabled = (
         args.periodic_ipopt_refinement and not args.disable_periodic_ipopt_refinement
     )
+    if (
+        args.periodic_ipopt_refinement_each_window
+        and not periodic_ipopt_refinement_enabled
+    ):
+        raise ValueError(
+            "--periodic-ipopt-refinement-each-window requires "
+            "--periodic-ipopt-refinement."
+        )
     periodic_ipopt_reference_solution = None
 
     continuation_source = None
@@ -5583,6 +5603,10 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
             )
             print("periodic_ipopt_refinement: " f"{periodic_ipopt_refinement_enabled}")
             print(
+                "periodic_ipopt_refinement_each_window: "
+                f"{args.periodic_ipopt_refinement_each_window}"
+            )
+            print(
                 "periodic_ipopt_refinement_iterations: "
                 f"{args.periodic_ipopt_refinement_iterations}"
             )
@@ -5758,6 +5782,7 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
                 f"l2_rhs_difference={periodicity['l2_rhs_difference']:.12g}"
             )
 
+    refinement_nmpc = None
     if (
         args.solver == "acados"
         and periodic_cn_sum_approximation
@@ -5781,7 +5806,10 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
                     f"hit ({refinement_cache_path.name})"
                 )
                 print("periodic_ipopt_refinement_applied: True")
-        else:
+        if (
+            not refinement_cache_path.exists()
+            or args.periodic_ipopt_refinement_each_window
+        ):
             refinement_nmpc = build_periodic_ipopt_refinement_nmpc(
                 source_nmpc=nmpc,
                 model_path=model_path,
@@ -5810,6 +5838,7 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
                     )
                 ),
             )
+        if not refinement_cache_path.exists():
             periodic_ipopt_reference_solution = run_periodic_ipopt_refinement(
                 refinement_nmpc,
                 target_nmpc=nmpc,
@@ -5962,6 +5991,7 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
     acados_window_diagnostics = []
     ipopt_dual_warm_start_summaries = []
     transfer_rollout_summaries = []
+    inter_window_refinement_summaries = []
 
     def cache_first_successful_window(_nmpc, solution):
         diagnostics = snapshot_acados_diagnostics(solution)
@@ -6036,6 +6066,53 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
                 )
             if targets_updated and args.solver == "acados":
                 refresh_acados_cached_objective_targets(_nmpc)
+        if (
+            continue_solving
+            and _sol is not None
+            and args.solver == "acados"
+            and args.periodic_ipopt_refinement_each_window
+        ):
+            if refinement_nmpc is None:
+                raise RuntimeError(
+                    "Per-window IPOPT refinement requires --periodic-ipopt-refinement."
+                )
+            refinement_nmpc.update_stim()
+            _copy_initial_guesses_and_bounds(_nmpc, refinement_nmpc)
+            _copy_objective_targets(_nmpc, refinement_nmpc)
+            if echo:
+                print(f"running_periodic_ipopt_refinement_window: {cycle_idx}")
+            refinement_solution = run_periodic_ipopt_refinement(
+                refinement_nmpc,
+                target_nmpc=_nmpc,
+                max_iterations=args.periodic_ipopt_refinement_iterations,
+                linear_solver=args.ipopt_linear_solver,
+                echo=echo,
+            )
+            refinement_success = bool(
+                refinement_solution is not None
+                and _status_is_success(refinement_solution.status)
+            )
+            inter_window_refinement_summaries.append(
+                {
+                    "window": cycle_idx,
+                    "success": refinement_success,
+                    "status": (
+                        None
+                        if refinement_solution is None
+                        else refinement_solution.status
+                    ),
+                    "solver_time_s": (
+                        None
+                        if refinement_solution is None
+                        else refinement_solution.solver_time_to_optimize
+                    ),
+                    "wall_time_s": (
+                        None
+                        if refinement_solution is None
+                        else refinement_solution.real_time_to_optimize
+                    ),
+                }
+            )
         if (
             continue_solving
             and _sol is not None
@@ -6286,6 +6363,8 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
         summary["ipopt_dual_warm_start_summaries"] = ipopt_dual_warm_start_summaries
     if transfer_rollout_summaries:
         summary["transfer_rollout_summaries"] = transfer_rollout_summaries
+    if inter_window_refinement_summaries:
+        summary["inter_window_refinement_summaries"] = inter_window_refinement_summaries
     if initial_guess_state_traces is not None:
         summary["initial_guess_state_traces"] = initial_guess_state_traces
         summary["initial_guess_control_traces"] = initial_guess_control_traces

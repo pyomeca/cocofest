@@ -516,6 +516,7 @@ def test_regularized_mhe_cli_exposes_previous_window_targets_and_terminal_slack(
     assert args.acados_terminal_wheel_q_slack == 0.2
     assert args.wheel_qdot_bound_margin == 3.0
     assert args.acados_globalization == "FUNNEL_L1PEN_LINESEARCH"
+    assert args.periodic_ipopt_refinement_each_window is False
 
 
 def test_previous_control_and_terminal_velocity_targets_are_recentered():
