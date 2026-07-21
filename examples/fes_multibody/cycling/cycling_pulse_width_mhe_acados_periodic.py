@@ -42,6 +42,66 @@ ACADOS_STATUS_NAMES = {
 }
 
 
+def build_time_dependent_rk4_map(
+    rhs,
+    state,
+    control,
+    stage_parameters,
+    local_time,
+    interval_duration: float,
+    n_substeps: int,
+):
+    """Build a node-to-node RK4 map while retaining the local time dependence."""
+    from casadi import Function
+
+    if n_substeps < 1:
+        raise ValueError("n_substeps must be strictly positive.")
+    rhs_function = Function(
+        "cocofest_discrete_rhs",
+        [state, control, stage_parameters, local_time],
+        [rhs],
+    )
+    step = float(interval_duration) / n_substeps
+    next_state = state
+    for substep in range(n_substeps):
+        time = substep * step
+        k1 = rhs_function(next_state, control, stage_parameters, time)
+        k2 = rhs_function(
+            next_state + step * k1 / 2,
+            control,
+            stage_parameters,
+            time + step / 2,
+        )
+        k3 = rhs_function(
+            next_state + step * k2 / 2,
+            control,
+            stage_parameters,
+            time + step / 2,
+        )
+        k4 = rhs_function(
+            next_state + step * k3,
+            control,
+            stage_parameters,
+            time + step,
+        )
+        next_state = next_state + step * (k1 + 2 * k2 + 2 * k3 + k4) / 6
+    return next_state
+
+
+def _periodic_node_interval_duration(ocp) -> float:
+    muscle_models = getattr(ocp.nlp[0].model, "muscles_dynamics_model", ())
+    intervals = {
+        float(model._stim_interval)
+        for model in muscle_models
+        if getattr(model, "_stim_interval", None) is not None
+    }
+    if len(intervals) != 1:
+        raise RuntimeError(
+            "The periodic-node DISCRETE map requires one shared stimulation interval."
+        )
+    return intervals.pop()
+
+
 def patch_bioptim_acados_interface() -> None:
     """
     Patch the Bioptim 3.4 ACADOS interface for this example.
@@ -72,8 +132,52 @@ def patch_bioptim_acados_interface() -> None:
         if numerical_timeseries.shape[0] == 0:
             return
 
+        from casadi import SX, substitute
+
+        original_time = ocp.nlp[0].time_cx
+        local_time = SX.sym("cocofest_local_time", 1, 1)
+        is_periodic_node = "periodic_calcium" in str(
+            ocp.nlp[0].numerical_data_timeseries
+        )
+        interval_duration = (
+            _periodic_node_interval_duration(ocp) if is_periodic_node else None
+        )
+        if is_periodic_node and self.opts.integrator_type == "DISCRETE":
+            timed_rhs = substitute(
+                self.acados_model.f_expl_expr,
+                original_time,
+                local_time + numerical_timeseries[-1],
+            )
+            self.acados_model.disc_dyn_expr = build_time_dependent_rk4_map(
+                rhs=timed_rhs,
+                state=self.acados_model.x,
+                control=self.acados_model.u,
+                stage_parameters=numerical_timeseries,
+                local_time=local_time,
+                interval_duration=interval_duration,
+                n_substeps=getattr(ocp, "_cocofest_discrete_substeps", 5),
+            )
+        else:
+            if is_periodic_node and self.opts.integrator_type == "ERK":
+                # The bundled explicit-ODE generator has no time input. Use the
+                # interval midpoint as a documented approximation for ERK.
+                dynamics_time = numerical_timeseries[-1] + interval_duration / 2
+            elif is_periodic_node:
+                dynamics_time = local_time + numerical_timeseries[-1]
+                self.acados_model.t = local_time
+            else:
+                dynamics_time = original_time
+            self.acados_model.f_expl_expr = substitute(
+                self.acados_model.f_expl_expr, original_time, dynamics_time
+            )
+            self.acados_model.f_impl_expr = substitute(
+                self.acados_model.f_impl_expr, original_time, dynamics_time
+            )
         self.acados_model.p = numerical_timeseries
-        self.acados_ocp.parameter_values = np.zeros(numerical_timeseries.shape[0])
+        initial_numerical_data = np.asarray(
+            get_numerical_timeseries(ocp, 0, 0, slice(None)), dtype=float
+        ).reshape(-1)
+        self.acados_ocp.parameter_values = initial_numerical_data
 
     def scaled_control_bounds(interface) -> tuple[np.ndarray, np.ndarray]:
         lower = np.empty(interface.acados_ocp.dims.nu)
@@ -139,8 +243,20 @@ def patch_bioptim_acados_interface() -> None:
 
         lower, upper = scaled_control_bounds(self)
         for stage in range(self.acados_ocp.solver_options.N_horizon):
-            self.ocp_solver.constraints_set(stage, "lbu", lower)
-            self.ocp_solver.constraints_set(stage, "ubu", upper)
+            if getattr(self.ocp, "_cocofest_fix_controls_to_warmup", False):
+                stage_control = np.empty(self.ocp.nlp[0].controls.shape)
+                for key in self.ocp.nlp[0].controls.keys():
+                    index = self.ocp.nlp[0].controls[key].index
+                    stage_control[index] = (
+                        self.ocp.nlp[0].u_init[key].init.evaluate_at(stage)
+                        / self.ocp.nlp[0].u_scaling[key].scaling[:, 0]
+                    )
+                tolerance = 1e-10
+                self.ocp_solver.constraints_set(stage, "lbu", stage_control - tolerance)
+                self.ocp_solver.constraints_set(stage, "ubu", stage_control + tolerance)
+            else:
+                self.ocp_solver.constraints_set(stage, "lbu", lower)
+                self.ocp_solver.constraints_set(stage, "ubu", upper)
 
     AcadosInterface._AcadosInterface__acados_export_model = patched_export_model
     AcadosInterface._AcadosInterface__set_constraints = patched_set_constraints
@@ -190,9 +306,12 @@ def build_argument_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--model-formulation",
         type=str,
-        choices=("periodic", "standard"),
+        choices=("periodic_node", "periodic", "standard"),
         default="periodic",
-        help="Use the ACADOS-friendly periodic Ding formulation or the historical standard one.",
+        help=(
+            "Use exact node-wise periodic calcium forcing, the continuous periodic surrogate, "
+            "or the historical finite stimulation history."
+        ),
     )
     parser.add_argument(
         "--torque-application",
@@ -392,9 +511,12 @@ def build_argument_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--acados-integrator-type",
-        choices=("ERK", "IRK"),
+        choices=("ERK", "IRK", "DISCRETE"),
         default="IRK",
-        help="ACADOS integrator type used on the generated shooting model.",
+        help=(
+            "ACADOS integrator type. DISCRETE uses a time-aware RK4 node map "
+            "for the periodic-node formulation."
+        ),
     )
     parser.add_argument(
         "--acados-collocation-type",
@@ -601,6 +723,42 @@ def build_argument_parser() -> argparse.ArgumentParser:
         type=int,
         default=2000,
         help="Maximum number of IPOPT iterations per window.",
+    )
+    parser.add_argument(
+        "--full-dynamics-phase-one",
+        action="store_true",
+        help=(
+            "Apply a bounded proximal projection of the complete dynamics before solving. "
+            "This is a feasibility diagnostic, not a replacement for solver convergence."
+        ),
+    )
+    parser.add_argument(
+        "--full-dynamics-phase-one-proximity-weight",
+        type=float,
+        default=1.0,
+        help="Weight retaining the IPOPT reference trajectory during the phase-I projection.",
+    )
+    parser.add_argument(
+        "--full-dynamics-phase-one-defect-weight",
+        type=float,
+        default=10.0,
+        help="Weight reducing one-step complete-dynamics defects during phase I.",
+    )
+    parser.add_argument(
+        "--full-dynamics-phase-one-substeps",
+        type=int,
+        default=10,
+        help="RK4 substeps used by the complete-dynamics phase-I projection.",
+    )
+    parser.add_argument(
+        "--check-wheel-periodicity",
+        action="store_true",
+        help="Compare the complete dynamics at q_crank and q_crank + 2*pi before solving.",
+    )
+    parser.add_argument(
+        "--acados-fix-controls-to-warmup",
+        action="store_true",
+        help="Fix every ACADOS pulse-width control to its node-wise IPOPT warmup value.",
     )
     parser.add_argument(
         "--ipopt-linear-solver",
@@ -957,8 +1115,9 @@ def _continuation_cache_signature(args: argparse.Namespace) -> str:
     repository_root = Path(__file__).resolve().parents[3]
     payload = {
         "kind": "acados_one_cycle_continuation",
-        "cache_version": 1,
+        "cache_version": 2,
         "nmpc_builder_version": 1,
+        "model_formulation": args.model_formulation,
         "objective": args.objective,
         "objective_shape": args.objective_shape,
         "stimulations_per_cycle": args.stimulations_per_cycle,
@@ -979,8 +1138,8 @@ def _continuation_cache_signature(args: argparse.Namespace) -> str:
         "nlp_solver_type": args.acados_nlp_solver_type,
         "qp_solver": args.acados_qp_solver,
         "max_iterations": args.acados_continuation_source_max_iterations,
-        "source_convergence_tolerance": None,
-        "source_stationarity_tolerance": 1e-3,
+        "source_convergence_tolerance": args.acados_tolerance,
+        "source_stationarity_tolerance": args.acados_stationarity_tolerance,
         "standard_warmup_transfer": args.acados_standard_warmup_transfer,
         "fatigue_warmstart_mode": args.acados_fatigue_warmstart_mode,
         "periodic_projection": not args.disable_periodic_fes_warmup_projection,
@@ -999,7 +1158,11 @@ def _continuation_cache_signature(args: argparse.Namespace) -> str:
                 / "cocofest"
                 / "models"
                 / "ding2007"
-                / "ding2007_with_fatigue_periodic.py"
+                / (
+                    "ding2007_with_fatigue_periodic_node.py"
+                    if args.model_formulation == "periodic_node"
+                    else "ding2007_with_fatigue_periodic.py"
+                )
             ),
             _source_stamp(
                 repository_root / "cocofest" / "models" / "dynamical_model.py"
@@ -1486,6 +1649,9 @@ def collect_acados_diagnostics(solution) -> dict:
         return diagnostics
 
     diagnostics["solver_available"] = True
+    first_stage_parameters = _safe_acados_stage_field(acados_solver, 0, "p")
+    if not isinstance(first_stage_parameters, dict):
+        diagnostics["first_stage_parameters"] = np.asarray(first_stage_parameters)
     for field in (
         "sqp_iter",
         "nlp_iter",
@@ -1517,7 +1683,7 @@ def collect_acados_diagnostics(solution) -> dict:
     while True:
         stage_items = {}
         any_available = False
-        for field in ("x", "u", "pi", "lam"):
+        for field in ("x", "u", "p", "pi", "lam"):
             values = _safe_acados_stage_field(acados_solver, stage, field)
             if isinstance(values, dict):
                 continue
@@ -1605,6 +1771,11 @@ def print_acados_diagnostics(label: str, diagnostics: dict) -> None:
         print(f"{label} control_nonfinite={diagnostics['control_nonfinite']}")
     if diagnostics.get("stage_nonfinite"):
         print(f"{label} stage_nonfinite={diagnostics['stage_nonfinite'][:5]}")
+    if "first_stage_parameters" in diagnostics:
+        print(
+            f"{label} first_stage_parameters="
+            f"{_format_array(diagnostics['first_stage_parameters'])}"
+        )
     print(f"{label} residuals={_format_array(diagnostics.get('residuals'))}")
     print(f"{label} sqp_iter={_format_array(diagnostics.get('sqp_iter'))}")
     print(f"{label} qp_iter={_format_array(diagnostics.get('qp_iter'))}")
@@ -2232,9 +2403,9 @@ def _full_dynamics_rhs(
             np.array([time, dt], dtype=float),
             state,
             control,
+            np.array([], dtype=float),
+            np.array([], dtype=float),
             numerical_timeseries,
-            np.array([], dtype=float),
-            np.array([], dtype=float),
         )
     )
 
@@ -2449,6 +2620,134 @@ def _full_dynamics_rollout_defect_details(
         "q_by_dof": defects_by_dof("q"),
         "qdot_by_dof": defects_by_dof("qdot"),
         "worst_qdot_nodes": worst_qdot_nodes(),
+    }
+
+
+def _proximal_phase_one_update(
+    reference: np.ndarray,
+    predicted: np.ndarray,
+    lower: np.ndarray,
+    upper: np.ndarray,
+    proximity_weight: float,
+    defect_weight: float,
+) -> np.ndarray:
+    if proximity_weight < 0.0 or defect_weight < 0.0:
+        raise ValueError("Phase-I weights must be non-negative.")
+    denominator = proximity_weight + defect_weight
+    if denominator <= 0.0:
+        raise ValueError("At least one phase-I weight must be strictly positive.")
+    candidate = (proximity_weight * reference + defect_weight * predicted) / denominator
+    return np.minimum(np.maximum(candidate, lower), upper)
+
+
+def project_full_dynamics_initial_guess(
+    nmpc,
+    proximity_weight: float = 1.0,
+    defect_weight: float = 10.0,
+    n_substeps: int = 10,
+) -> dict:
+    """Sequential proximal phase I with controls fixed to the reference values."""
+
+    if n_substeps < 1:
+        raise ValueError("Phase-I RK4 substeps must be strictly positive.")
+    before = _full_dynamics_rollout_defect_details(nmpc, n_substeps=n_substeps)
+    nlp = nmpc.nlp[0]
+    first_state_key = next(iter(nlp.x_init.keys()))
+    first_control_key = next(iter(nlp.u_init.keys()))
+    n_state_nodes = nlp.x_init[first_state_key].init.shape[1]
+    n_control_nodes = nlp.u_init[first_control_key].init.shape[1]
+    if n_state_nodes != n_control_nodes + 1:
+        raise ValueError(
+            "The complete-dynamics phase-I projection currently requires one state node "
+            "per shooting endpoint; use RK4, RK8 or IRK instead of direct collocation."
+        )
+    states = _stack_initial_guess_values(nlp.x_init, nlp.states, n_state_nodes)
+    reference = states.copy()
+    controls = _stack_initial_guess_values(nlp.u_init, nlp.controls, n_control_nodes)
+    lower = np.empty_like(states)
+    upper = np.empty_like(states)
+    for key in nlp.states.keys():
+        indexes = np.asarray(nlp.states[key].index).reshape((-1,)).tolist()
+        key_lower, key_upper = _trajectory_bounds_for_guess(
+            nlp.x_bounds[key], n_state_nodes
+        )
+        lower[indexes, :] = key_lower
+        upper[indexes, :] = key_upper
+
+    dt = nmpc.cycle_duration / nmpc.cycle_len
+    for node in range(n_control_nodes):
+        numerical_data = _numerical_timeseries_at_node(nlp, node)
+        predicted = _rk4_full_dynamics_step(
+            nlp,
+            states[:, node],
+            controls[:, node],
+            node * dt,
+            dt,
+            n_substeps=n_substeps,
+            numerical_timeseries=numerical_data,
+        )
+        states[:, node + 1] = _proximal_phase_one_update(
+            reference[:, node + 1],
+            predicted,
+            lower[:, node + 1],
+            upper[:, node + 1],
+            proximity_weight,
+            defect_weight,
+        )
+
+    for key in nlp.states.keys():
+        indexes = np.asarray(nlp.states[key].index).reshape((-1,)).tolist()
+        nlp.x_init[key].init[:, :] = states[indexes, :]
+    nmpc._correct_init_guess_to_fit_bounds(corrected_input="states")
+    nmpc._sync_acados_state_bounds()
+    after = _full_dynamics_rollout_defect_details(nmpc, n_substeps=n_substeps)
+
+    def maximum_scaled_defect(details: dict) -> float:
+        return max(details.get("scaled_by_block", {}).values(), default=0.0)
+
+    return {
+        "proximity_weight": proximity_weight,
+        "defect_weight": defect_weight,
+        "n_substeps": n_substeps,
+        "scaled_defect_before": maximum_scaled_defect(before),
+        "scaled_defect_after": maximum_scaled_defect(after),
+        "absolute_by_block_before": before.get("absolute_by_block", {}),
+        "absolute_by_block_after": after.get("absolute_by_block", {}),
+        "max_state_change": float(np.max(np.abs(states - reference))),
+    }
+
+
+def wheel_angle_periodicity_diagnostics(nmpc, node: int = 0) -> dict[str, float]:
+    """Check whether a full revolution is a pure coordinate change in the dynamics."""
+
+    nlp = nmpc.nlp[0]
+    first_state_key = next(iter(nlp.x_init.keys()))
+    first_control_key = next(iter(nlp.u_init.keys()))
+    n_state_nodes = nlp.x_init[first_state_key].init.shape[1]
+    n_control_nodes = nlp.u_init[first_control_key].init.shape[1]
+    states = _stack_initial_guess_values(nlp.x_init, nlp.states, n_state_nodes)
+    controls = _stack_initial_guess_values(nlp.u_init, nlp.controls, n_control_nodes)
+    q_indexes = np.asarray(nlp.states["q"].index).reshape((-1,))
+    if q_indexes.size < 3:
+        raise ValueError("The cycling model must expose the crank as q[2].")
+    if node < 0 or node >= n_control_nodes:
+        raise ValueError("The periodicity diagnostic node is outside the horizon.")
+
+    dt = nmpc.cycle_duration / nmpc.cycle_len
+    numerical_data = _numerical_timeseries_at_node(nlp, node)
+    base_state = states[:, node].copy()
+    shifted_state = base_state.copy()
+    shifted_state[int(q_indexes[2])] += 2.0 * np.pi
+    base_rhs = _full_dynamics_rhs(
+        nlp, node * dt, dt, base_state, controls[:, node], numerical_data
+    )
+    shifted_rhs = _full_dynamics_rhs(
+        nlp, node * dt, dt, shifted_state, controls[:, node], numerical_data
+    )
+    difference = shifted_rhs - base_rhs
+    return {
+        "max_abs_rhs_difference": float(np.max(np.abs(difference))),
+        "l2_rhs_difference": float(np.linalg.norm(difference)),
     }
 
 
@@ -3212,6 +3511,68 @@ def _recenter_boundary_bounds(bounds, values: np.ndarray) -> None:
         bounds.max[finite, bound_column] = center[finite] + half_width[finite]
 
 
+def _rollout_tiled_fes_states(
+    periodic_nmpc, start_node: int, n_substeps: int = 10
+) -> dict:
+    """Propagate the non-periodic FES states after tiling a one-cycle solution."""
+
+    nlp = periodic_nmpc.nlp[0]
+    if not hasattr(nlp, "model") or not hasattr(nlp, "states"):
+        return {"applied": False, "reason": "model_or_state_mapping_unavailable"}
+
+    fes_keys = [
+        key
+        for key in nlp.x_init.keys()
+        if key.startswith(("Cn_", "Cn_sum_", "F_", "A_", "Tau1_", "Km_"))
+    ]
+    if not fes_keys:
+        return {"applied": False, "reason": "no_fes_states"}
+
+    first_state_key = next(iter(nlp.x_init.keys()))
+    first_control_key = next(iter(nlp.u_init.keys()))
+    n_state_nodes = nlp.x_init[first_state_key].init.shape[1]
+    n_control_nodes = nlp.u_init[first_control_key].init.shape[1]
+    if n_state_nodes != n_control_nodes + 1:
+        raise ValueError(
+            "FES continuation rollout requires one more state node than controls."
+        )
+    if start_node < 0 or start_node >= n_control_nodes:
+        raise ValueError("FES continuation rollout start node is outside the horizon.")
+
+    states = _stack_initial_guess_values(nlp.x_init, nlp.states, n_state_nodes)
+    controls = _stack_initial_guess_values(nlp.u_init, nlp.controls, n_control_nodes)
+    fes_indexes = np.concatenate(
+        [np.asarray(nlp.states[key].index).reshape((-1,)) for key in fes_keys]
+    ).astype(int)
+    tiled_fes = states[fes_indexes, :].copy()
+    dt = periodic_nmpc.cycle_duration / periodic_nmpc.cycle_len
+
+    for node in range(start_node, n_control_nodes):
+        propagated = _rk4_full_dynamics_step(
+            nlp,
+            states[:, node],
+            controls[:, node],
+            node * dt,
+            dt,
+            n_substeps=n_substeps,
+            numerical_timeseries=_numerical_timeseries_at_node(nlp, node),
+        )
+        states[fes_indexes, node + 1] = propagated[fes_indexes]
+
+    max_change = float(np.max(np.abs(states[fes_indexes, :] - tiled_fes)))
+    for key in fes_keys:
+        indexes = np.asarray(nlp.states[key].index).reshape((-1,)).astype(int)
+        nlp.x_init[key].init[:, :] = states[indexes, :]
+
+    return {
+        "applied": True,
+        "state_count": len(fes_keys),
+        "start_node": start_node,
+        "substeps": n_substeps,
+        "max_change": max_change,
+    }
+
+
 def tile_one_cycle_solution_to_periodic_nmpc(periodic_nmpc, one_cycle_solution) -> dict:
     states = one_cycle_solution.decision_states(to_merge=SolutionMerge.NODES)
     controls = one_cycle_solution.decision_controls(to_merge=SolutionMerge.NODES)
@@ -3274,15 +3635,32 @@ def tile_one_cycle_solution_to_periodic_nmpc(periodic_nmpc, one_cycle_solution) 
         if key in nlp.x_bounds.keys() and key in nlp.x_init.keys():
             _recenter_boundary_bounds(nlp.x_bounds[key], nlp.x_init[key].init)
 
+    fes_rollout = _rollout_tiled_fes_states(
+        periodic_nmpc, start_node=source_control_nodes
+    )
+    fes_before_bound_correction = {
+        key: np.asarray(nlp.x_init[key].init, dtype=float).copy()
+        for key in nlp.x_init.keys()
+        if key.startswith(("Cn_", "Cn_sum_", "F_", "A_", "Tau1_", "Km_"))
+    }
     periodic_nmpc._correct_init_guess_to_fit_bounds(corrected_input="states")
     periodic_nmpc._correct_init_guess_to_fit_bounds(corrected_input="controls")
     periodic_nmpc._sync_acados_state_bounds()
+    clipped_value_count = 0
+    max_clip = 0.0
+    for key, before in fes_before_bound_correction.items():
+        difference = np.abs(np.asarray(nlp.x_init[key].init, dtype=float) - before)
+        clipped_value_count += int(np.count_nonzero(difference > 1e-12))
+        max_clip = max(max_clip, float(np.max(difference)))
+    fes_rollout["clipped_value_count"] = clipped_value_count
+    fes_rollout["max_clip"] = max_clip
     return {
         "repeat_count": repeat_count,
         "source_control_nodes": source_control_nodes,
         "target_control_nodes": target_control_nodes,
         "max_transfer_seam_error": max(seam_errors.values(), default=0.0),
         "seam_errors": seam_errors,
+        "fes_rollout": fes_rollout,
     }
 
 
@@ -3796,11 +4174,13 @@ def build_periodic_ipopt_refinement_nmpc(
     mhe_info: dict,
     cycling_info: dict,
     simulation_conditions: dict,
+    model_formulation: str,
 ):
     refinement_model = set_fes_model(
         str(model_path),
         stim_time,
-        periodic_cn_sum_approximation=True,
+        periodic_cn_sum_approximation=model_formulation == "periodic",
+        periodic_node_forcing=model_formulation == "periodic_node",
     )
     refinement_mhe_info = dict(mhe_info)
     refinement_nmpc = prepare_nmpc(
@@ -4080,8 +4460,6 @@ def get_one_cycle_acados_continuation_source(
     source_args.single_shot = True
     source_args.acados_horizon_continuation = False
     source_args.max_acados_iterations = args.acados_continuation_source_max_iterations
-    source_args.acados_tolerance = None
-    source_args.acados_stationarity_tolerance = 1e-3
     source_args.acados_diagnostics = False
     source_args.codegen_tag = (
         f"{args.codegen_tag}_continuation_1cyc"
@@ -4191,7 +4569,7 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
     stim_time = list(
         np.linspace(0, total_window_duration, total_stimulations, endpoint=False)
     )
-    periodic_cn_sum_approximation = args.model_formulation == "periodic"
+    periodic_cn_sum_approximation = args.model_formulation != "standard"
     use_external_forces = args.torque_application == "external_forces"
     ode_solver = build_ode_solver(args)
     historical_init_guess_path = None
@@ -4203,7 +4581,8 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
     model = set_fes_model(
         str(model_path),
         stim_time,
-        periodic_cn_sum_approximation=periodic_cn_sum_approximation,
+        periodic_cn_sum_approximation=args.model_formulation == "periodic",
+        periodic_node_forcing=args.model_formulation == "periodic_node",
     )
 
     mhe_info = {
@@ -4269,14 +4648,20 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
             "Tau1_": 5e-3,
             "Km_": 5e-3,
         }
-        nmpc.bound_first_node_all_states = False
+        # The periodic-node states have the same physical meaning as the
+        # historical Ding states. Keep their initial value near the IPOPT
+        # warmup; otherwise ACADOS can manufacture a low-cost but nonphysical
+        # initial fatigue state that cannot be continued to another cycle.
+        nmpc.bound_first_node_all_states = args.model_formulation == "periodic_node"
         nmpc.bound_first_node_wheel_qdot = False
         nmpc.advance_wheel_q_bounds = True
         nmpc.wheel_q_path_margin = args.acados_wheel_q_path_margin
         nmpc.use_signed_wheel_shift = True
         nmpc.transfer_debug = echo
-        relaxed_fes_bounds = relax_acados_first_node_fes_bounds(nmpc)
-        if echo:
+        relaxed_fes_bounds = []
+        if not nmpc.bound_first_node_all_states:
+            relaxed_fes_bounds = relax_acados_first_node_fes_bounds(nmpc)
+        if echo and relaxed_fes_bounds:
             print(
                 "acados_relaxed_first_node_fes_bounds: "
                 f"keys={len(relaxed_fes_bounds)}"
@@ -4487,6 +4872,7 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
                 "historical_initial_guess: "
                 f"{historical_init_guess_path if historical_init_guess_path else 'None'}"
             )
+        print(f"full_dynamics_phase_one: {args.full_dynamics_phase_one}")
 
     if periodic_cn_sum_approximation and not args.disable_standard_ipopt_warmup:
         if echo:
@@ -4545,6 +4931,15 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
                 args.warmup_state_comparison_limit,
             )
 
+    if args.check_wheel_periodicity:
+        periodicity = wheel_angle_periodicity_diagnostics(nmpc)
+        if echo:
+            print(
+                "wheel_angle_periodicity: "
+                f"max_abs_rhs_difference={periodicity['max_abs_rhs_difference']:.12g} "
+                f"l2_rhs_difference={periodicity['l2_rhs_difference']:.12g}"
+            )
+
     if (
         args.solver == "acados"
         and periodic_cn_sum_approximation
@@ -4565,6 +4960,7 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
             },
             cycling_info=cycling_info,
             simulation_conditions=nmpc_simulation_conditions,
+            model_formulation=args.model_formulation,
         )
         run_periodic_ipopt_refinement(
             refinement_nmpc,
@@ -4601,6 +4997,17 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
                     "max_transfer_seam_error="
                     f"{continuation_summary['max_transfer_seam_error']:.6g}"
                 )
+                fes_rollout = continuation_summary["fes_rollout"]
+                print(
+                    "acados_horizon_continuation_fes_rollout: "
+                    f"applied={fes_rollout['applied']} "
+                    f"state_count={fes_rollout.get('state_count', 0)} "
+                    f"start_node={fes_rollout.get('start_node')} "
+                    f"substeps={fes_rollout.get('substeps')} "
+                    f"max_change={fes_rollout.get('max_change')} "
+                    f"clipped_values={fes_rollout.get('clipped_value_count')} "
+                    f"max_clip={fes_rollout.get('max_clip')}"
+                )
         if echo:
             for summary in pulse_width_initial_guess_summary(nmpc):
                 print(
@@ -4616,6 +5023,23 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
         project_qdot_initial_guess_from_q(nmpc)
         if echo:
             print("acados_project_qdot_from_q: True")
+
+    if args.full_dynamics_phase_one:
+        phase_one_summary = project_full_dynamics_initial_guess(
+            nmpc,
+            proximity_weight=args.full_dynamics_phase_one_proximity_weight,
+            defect_weight=args.full_dynamics_phase_one_defect_weight,
+            n_substeps=args.full_dynamics_phase_one_substeps,
+        )
+        if echo:
+            print(
+                "full_dynamics_phase_one: "
+                f"proximity_weight={phase_one_summary['proximity_weight']:.6g} "
+                f"defect_weight={phase_one_summary['defect_weight']:.6g} "
+                f"scaled_defect_before={phase_one_summary['scaled_defect_before']:.6g} "
+                f"scaled_defect_after={phase_one_summary['scaled_defect_after']:.6g} "
+                f"max_state_change={phase_one_summary['max_state_change']:.6g}"
+            )
 
     if args.solver == "acados" and args.acados_fes_state_trust_radius is not None:
         trust_summary = apply_fes_state_trust_region(
@@ -4742,6 +5166,17 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
 
     solver_first_iter = None
     if args.solver == "acados":
+        nmpc._cocofest_fix_controls_to_warmup = args.acados_fix_controls_to_warmup
+        nmpc._cocofest_discrete_substeps = (
+            args.acados_sim_steps
+            if args.acados_sim_steps is not None
+            else max(3, args.rk_steps)
+        )
+        if echo:
+            print(
+                "acados_fix_controls_to_warmup: "
+                f"{args.acados_fix_controls_to_warmup}"
+            )
         model_name, generated_code_path = build_codegen_names(args)
         solver = configure_acados_solver(
             model_name=model_name,

@@ -1,10 +1,14 @@
 import numpy as np
+from casadi import Function, SX
 from types import SimpleNamespace
 from bioptim import Solver
 
 import examples.fes_multibody.cycling.cycling_pulse_width_mhe_acados_periodic as periodic_example
 from cocofest.models.ding2007.ding2007_with_fatigue_periodic import (
     DingModelPulseWidthFrequencyWithFatiguePeriodic,
+)
+from cocofest.models.ding2007.ding2007_with_fatigue_periodic_node import (
+    DingModelPulseWidthFrequencyWithFatiguePeriodicNode,
 )
 from examples.fes_multibody.cycling.cycling_pulse_width_mhe import MyCyclicNMPC
 from examples.fes_multibody.cycling.cycling_pulse_width_mhe_acados_periodic import (
@@ -60,6 +64,149 @@ def test_pulse_width_changes_force_recruitment_not_calcium_forcing():
 
     np.testing.assert_allclose(short_pulse[:2], long_pulse[:2])
     assert long_pulse[2] > short_pulse[2]
+
+
+def test_periodic_node_amplitude_matches_truncated_historical_sum():
+    model = DingModelPulseWidthFrequencyWithFatiguePeriodicNode(
+        muscle_name="Biceps",
+        stim_time=[0.0, 1 / 30],
+        sum_stim_truncation=6,
+    )
+    decay = np.exp(-(1 / 30) / model.tauc)
+    ri = 1.0 + (model.get_r0(model.km_rest) - 1.0) * decay
+    expected = decay**5 + ri * sum(decay**age for age in range(5))
+
+    np.testing.assert_allclose(model.post_stimulation_amplitude(), expected)
+
+
+def test_periodic_node_data_reconstructs_exact_within_interval_decay():
+    model = DingModelPulseWidthFrequencyWithFatiguePeriodicNode(
+        muscle_name="Biceps",
+        stim_time=[0.0, 1 / 30],
+        sum_stim_truncation=6,
+    )
+    data, _ = model.get_numerical_data_time_series(3, 0.1)
+    stage_data = data["periodic_calcium"][:, 0, 1]
+    local_time = 0.012
+    absolute_time = stage_data[1] + local_time
+
+    observed = float(model.calcium_history(np.array([absolute_time]), stage_data))
+    expected = stage_data[0] * np.exp(-local_time / model.tauc)
+
+    np.testing.assert_allclose(observed, expected)
+
+
+def test_periodic_node_pulse_width_does_not_change_calcium_derivative():
+    model = DingModelPulseWidthFrequencyWithFatiguePeriodicNode(
+        muscle_name="Biceps",
+        stim_time=[0.0, 1 / 30],
+    )
+    state = model.standard_rest_values().reshape(-1)
+    state[0] = 0.5
+    data = np.array([model.post_stimulation_amplitude(), 0.0])
+
+    short = np.asarray(
+        model.system_dynamics(
+            states=state,
+            controls=np.array([0.00015]),
+            time=np.array([0.005]),
+            numerical_timeseries=data,
+        ),
+        dtype=float,
+    ).reshape(-1)
+    long = np.asarray(
+        model.system_dynamics(
+            states=state,
+            controls=np.array([0.0006]),
+            time=np.array([0.005]),
+            numerical_timeseries=data,
+        ),
+        dtype=float,
+    ).reshape(-1)
+
+    np.testing.assert_allclose(short[0], long[0])
+    assert long[1] > short[1]
+
+
+def test_time_dependent_rk4_map_retains_local_time_inside_interval():
+    state = SX.sym("state", 1)
+    control = SX.sym("control", 0)
+    parameters = SX.sym("parameters", 0)
+    local_time = SX.sym("local_time", 1)
+    discrete_map = periodic_example.build_time_dependent_rk4_map(
+        rhs=local_time,
+        state=state,
+        control=control,
+        stage_parameters=parameters,
+        local_time=local_time,
+        interval_duration=2.0,
+        n_substeps=2,
+    )
+
+    observed = float(Function("discrete_map", [state], [discrete_map])(3.0))
+
+    np.testing.assert_allclose(observed, 5.0)
+
+
+def test_continuation_source_inherits_requested_acados_tolerances(
+    monkeypatch, tmp_path
+):
+    args = SimpleNamespace(
+        cycles_per_window=2,
+        n_windows=1,
+        single_shot=False,
+        acados_horizon_continuation=True,
+        max_acados_iterations=100,
+        acados_continuation_source_max_iterations=50,
+        acados_tolerance=1e-4,
+        acados_stationarity_tolerance=0.1,
+        acados_diagnostics=True,
+        codegen_tag="test",
+    )
+    observed = {}
+
+    monkeypatch.setattr(
+        periodic_example, "_continuation_cache_path", lambda _: tmp_path / "missing.npz"
+    )
+
+    def fake_solve_case(source_args, echo):
+        observed["feasibility"] = source_args.acados_tolerance
+        observed["stationarity"] = source_args.acados_stationarity_tolerance
+        return {"status": 1, "solution": None}
+
+    monkeypatch.setattr(periodic_example, "solve_case", fake_solve_case)
+
+    with np.testing.assert_raises(RuntimeError):
+        periodic_example.get_one_cycle_acados_continuation_source(args, echo=False)
+
+    assert observed == {"feasibility": 1e-4, "stationarity": 0.1}
+
+
+def test_proximal_phase_one_update_balances_reference_and_dynamics():
+    observed = periodic_example._proximal_phase_one_update(
+        reference=np.array([0.0, 10.0]),
+        predicted=np.array([2.0, 20.0]),
+        lower=np.array([-1.0, -1.0]),
+        upper=np.array([1.0, 100.0]),
+        proximity_weight=1.0,
+        defect_weight=3.0,
+    )
+
+    np.testing.assert_allclose(observed, [1.0, 17.5])
+
+
+def test_proximal_phase_one_rejects_collocation_layout():
+    nmpc = SimpleNamespace(
+        nlp=[
+            SimpleNamespace(
+                x_init={"q": SimpleNamespace(init=np.zeros((3, 5)))},
+                u_init={"u": SimpleNamespace(init=np.zeros((1, 1)))},
+            )
+        ]
+    )
+
+    with np.testing.assert_raises_regex(ValueError, "one state node"):
+        periodic_example.project_full_dynamics_initial_guess(nmpc)
 
 
 def test_pulse_width_summary_preserves_ipopt_control_variation():
@@ -157,6 +304,47 @@ def test_one_cycle_solution_is_tiled_with_wheel_and_fatigue_drift():
     )
     assert summary["repeat_count"] == 2
     assert summary["max_transfer_seam_error"] == 0.0
+
+
+def test_tiled_fes_states_are_rolled_out_causally():
+    class Variables(dict):
+        def __init__(self, values, shape):
+            super().__init__(values)
+            self.shape = shape
+
+    states = Variables(
+        {
+            "q": SimpleNamespace(index=[0]),
+            "F_Biceps": SimpleNamespace(index=[1]),
+        },
+        shape=2,
+    )
+    controls = Variables(
+        {"last_pulse_width_Biceps": SimpleNamespace(index=[0])}, shape=1
+    )
+    nlp = SimpleNamespace(
+        model=SimpleNamespace(),
+        states=states,
+        controls=controls,
+        x_init={
+            "q": SimpleNamespace(init=np.zeros((1, 5))),
+            "F_Biceps": SimpleNamespace(init=np.array([[0.0, 0.5, 1.0, 9.0, 9.0]])),
+        },
+        u_init={"last_pulse_width_Biceps": SimpleNamespace(init=np.ones((1, 4)))},
+        numerical_data_timeseries=None,
+        dynamics_func=lambda time, state, control, parameters, algebraic, data: np.array(
+            [0.0, control[0]]
+        ),
+    )
+    nmpc = SimpleNamespace(nlp=[nlp], cycle_duration=1.0, cycle_len=2)
+
+    summary = periodic_example._rollout_tiled_fes_states(
+        nmpc, start_node=2, n_substeps=2
+    )
+
+    assert summary["applied"] is True
+    assert summary["start_node"] == 2
+    np.testing.assert_allclose(nlp.x_init["F_Biceps"].init, [[0.0, 0.5, 1.0, 1.5, 2.0]])
 
 
 def test_unsafe_acados_option_is_initialized_on_each_solver_instance():
@@ -402,3 +590,32 @@ def test_full_dynamics_transfer_rollout_reintegrates_appended_cycle():
     assert rejected["applied"] is False
     assert rejected["max_bound_violation"] == 1.0
     np.testing.assert_allclose(x_init["q"].init[:, 2:], 9.0)
+
+
+def test_full_dynamics_rhs_passes_numerical_timeseries_as_data():
+    recorded = {}
+
+    def dynamics(
+        time, states, controls, parameters, algebraic_states, numerical_timeseries
+    ):
+        recorded["parameters"] = np.asarray(parameters)
+        recorded["algebraic_states"] = np.asarray(algebraic_states)
+        recorded["numerical_timeseries"] = np.asarray(numerical_timeseries)
+        return states
+
+    nlp = SimpleNamespace(dynamics_func=dynamics)
+    numerical_timeseries = np.array([1.0, 2.0, 3.0])
+
+    result = periodic_example._full_dynamics_rhs(
+        nlp,
+        time=0.0,
+        dt=0.1,
+        state=np.array([4.0, 5.0]),
+        control=np.array([6.0]),
+        numerical_timeseries=numerical_timeseries,
+    )
+
+    np.testing.assert_allclose(result, [4.0, 5.0])
+    assert recorded["parameters"].size == 0
+    assert recorded["algebraic_states"].size == 0
+    np.testing.assert_allclose(recorded["numerical_timeseries"], numerical_timeseries)

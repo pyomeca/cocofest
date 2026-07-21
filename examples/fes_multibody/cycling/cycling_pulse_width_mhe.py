@@ -42,6 +42,7 @@ from cocofest import (
     CustomObjective,
     DingModelPulseWidthFrequencyWithFatigue,
     DingModelPulseWidthFrequencyWithFatiguePeriodic,
+    DingModelPulseWidthFrequencyWithFatiguePeriodicNode,
     FesMskModel,
     inverse_kinematics_cycling,
     OcpFesMsk,
@@ -1091,15 +1092,19 @@ def set_fes_model(
     model_path,
     stim_time,
     periodic_cn_sum_approximation: bool = False,
+    periodic_node_forcing: bool = False,
 ):
     # Set FES model (set to Ding et al. 2007 + fatigue, for now)
     dummy_biomodel = BiorbdModel(model_path)
     muscle_name_list = dummy_biomodel.muscle_names
-    model_cls = (
-        DingModelPulseWidthFrequencyWithFatiguePeriodic
-        if periodic_cn_sum_approximation
-        else DingModelPulseWidthFrequencyWithFatigue
-    )
+    if periodic_cn_sum_approximation and periodic_node_forcing:
+        raise ValueError("Select only one periodic Ding formulation.")
+    if periodic_node_forcing:
+        model_cls = DingModelPulseWidthFrequencyWithFatiguePeriodicNode
+    elif periodic_cn_sum_approximation:
+        model_cls = DingModelPulseWidthFrequencyWithFatiguePeriodic
+    else:
+        model_cls = DingModelPulseWidthFrequencyWithFatigue
     muscles_model = []
     for muscle in muscle_name_list:
         kwargs = {

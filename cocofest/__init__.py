@@ -4,16 +4,33 @@ from .models.fes_model import FesModel
 from cocofest.models.ding2003.ding2003 import DingModelFrequency
 from cocofest.models.ding2003.ding2003_with_fatigue import DingModelFrequencyWithFatigue
 from cocofest.models.ding2007.ding2007 import DingModelPulseWidthFrequency
-from cocofest.models.ding2007.ding2007_with_fatigue import DingModelPulseWidthFrequencyWithFatigue
-from cocofest.models.ding2007.ding2007_with_fatigue_periodic import DingModelPulseWidthFrequencyWithFatiguePeriodic
+from cocofest.models.ding2007.ding2007_with_fatigue import (
+    DingModelPulseWidthFrequencyWithFatigue,
+)
+from cocofest.models.ding2007.ding2007_with_fatigue_periodic import (
+    DingModelPulseWidthFrequencyWithFatiguePeriodic,
+)
+from cocofest.models.ding2007.ding2007_with_fatigue_periodic_node import (
+    DingModelPulseWidthFrequencyWithFatiguePeriodicNode,
+)
 from cocofest.models.marion2009.marion2009 import Marion2009ModelFrequency
-from cocofest.models.marion2009.marion2009_with_fatigue import Marion2009ModelFrequencyWithFatigue
-from cocofest.models.marion2009.marion2009_modified import Marion2009ModelPulseWidthFrequency
-from cocofest.models.marion2009.marion2009_modified_with_fatigue import Marion2009ModelPulseWidthFrequencyWithFatigue
+from cocofest.models.marion2009.marion2009_with_fatigue import (
+    Marion2009ModelFrequencyWithFatigue,
+)
+from cocofest.models.marion2009.marion2009_modified import (
+    Marion2009ModelPulseWidthFrequency,
+)
+from cocofest.models.marion2009.marion2009_modified_with_fatigue import (
+    Marion2009ModelPulseWidthFrequencyWithFatigue,
+)
 from cocofest.models.hmed2018.hmed2018 import DingModelPulseIntensityFrequency
-from cocofest.models.hmed2018.hmed2018_with_fatigue import DingModelPulseIntensityFrequencyWithFatigue
+from cocofest.models.hmed2018.hmed2018_with_fatigue import (
+    DingModelPulseIntensityFrequencyWithFatigue,
+)
 from cocofest.models.veltink1992.veltink1992 import VeltinkModelPulseIntensity
-from cocofest.models.veltink1992.veltink1992_and_riener1998 import VeltinkRienerModelPulseIntensityWithFatigue
+from cocofest.models.veltink1992.veltink1992_and_riener1998 import (
+    VeltinkRienerModelPulseIntensityWithFatigue,
+)
 from .models.dynamical_model import FesMskModel
 from .models.model_maker import ModelMaker
 from .optimization.fes_ocp import OcpFes
