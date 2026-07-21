@@ -478,6 +478,15 @@ def build_argument_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--acados-transfer-pulse-width-trust-radius",
+        type=float,
+        default=None,
+        help=(
+            "Optional pulse-width trust-region radius after the first solved window. "
+            "Defaults to --acados-pulse-width-trust-radius."
+        ),
+    )
+    parser.add_argument(
         "--acados-fes-state-trust-radius",
         type=float,
         default=None,
@@ -894,6 +903,15 @@ def build_argument_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--periodic-ipopt-refinement-ode-solver",
+        choices=("target", "rk4", "irk"),
+        default="target",
+        help=(
+            "Integrator used by the periodic IPOPT bridge. 'target' preserves "
+            "the main Bioptim transcription; 'irk' can match an ACADOS IRK map."
+        ),
+    )
+    parser.add_argument(
         "--periodic-fes-warmup-projection-weight",
         type=float,
         default=1.0,
@@ -1182,6 +1200,10 @@ def _periodic_ipopt_refinement_cache_path(
         "standard_warmup_transfer": args.acados_standard_warmup_transfer,
         "fatigue_warmstart_mode": args.acados_fatigue_warmstart_mode,
         "use_sx": args.periodic_ipopt_refinement_use_sx,
+        "ode_solver": args.periodic_ipopt_refinement_ode_solver,
+        "acados_sim_stages": args.acados_sim_stages,
+        "acados_sim_steps": args.acados_sim_steps,
+        "acados_collocation_type": args.acados_collocation_type,
         "ipopt_linear_solver": args.ipopt_linear_solver,
         "sources": [
             _source_stamp(model_path),
@@ -1719,6 +1741,22 @@ def _initial_guess_traces(container) -> dict[str, np.ndarray]:
         key: np.array(container[key].init, dtype=float, copy=True)
         for key in container.keys()
     }
+
+
+def _control_bounds_summary(nmpc) -> dict[str, dict[str, float]]:
+    summary = {}
+    original_bounds = getattr(nmpc, "_cocofest_original_control_bounds", {})
+    for key in nmpc.nlp[0].controls.keys():
+        bounds = original_bounds.get(key, nmpc.nlp[0].u_bounds[key])
+        if isinstance(bounds, tuple):
+            lower, upper = bounds
+        else:
+            lower, upper = bounds.min, bounds.max
+        summary[key] = {
+            "lower": float(np.min(np.asarray(lower, dtype=float))),
+            "upper": float(np.max(np.asarray(upper, dtype=float))),
+        }
+    return summary
 
 
 def _status_is_success(status) -> bool:
@@ -4461,6 +4499,7 @@ def build_periodic_ipopt_refinement_nmpc(
     cycling_info: dict,
     simulation_conditions: dict,
     model_formulation: str,
+    refinement_ode_solver=None,
 ):
     refinement_model = set_fes_model(
         str(model_path),
@@ -4469,6 +4508,8 @@ def build_periodic_ipopt_refinement_nmpc(
         periodic_node_forcing=model_formulation == "periodic_node",
     )
     refinement_mhe_info = dict(mhe_info)
+    if refinement_ode_solver is not None:
+        refinement_mhe_info["ode_solver"] = refinement_ode_solver
     refinement_nmpc = prepare_nmpc(
         refinement_model,
         refinement_mhe_info,
@@ -4578,6 +4619,20 @@ def apply_pulse_width_control_trust_region(
     if radius < 0:
         raise ValueError("--acados-pulse-width-trust-radius must be non-negative.")
 
+    if not hasattr(periodic_nmpc, "_cocofest_original_control_bounds"):
+        periodic_nmpc._cocofest_original_control_bounds = {
+            key: (
+                np.array(
+                    periodic_nmpc.nlp[0].u_bounds[key].min, dtype=float, copy=True
+                ),
+                np.array(
+                    periodic_nmpc.nlp[0].u_bounds[key].max, dtype=float, copy=True
+                ),
+            )
+            for key in periodic_nmpc.nlp[0].u_init.keys()
+            if key.startswith("last_pulse_width_")
+        }
+
     summary = {}
     nodewise_bounds = {}
     for key in periodic_nmpc.nlp[0].u_init.keys():
@@ -4586,8 +4641,11 @@ def apply_pulse_width_control_trust_region(
 
         center = np.asarray(periodic_nmpc.nlp[0].u_init[key].init, dtype=float)
         bounds = periodic_nmpc.nlp[0].u_bounds[key]
-        original_lower = float(np.min(np.asarray(bounds.min, dtype=float)))
-        original_upper = float(np.max(np.asarray(bounds.max, dtype=float)))
+        original_min, original_max = periodic_nmpc._cocofest_original_control_bounds[
+            key
+        ]
+        original_lower = float(np.min(original_min))
+        original_upper = float(np.max(original_max))
         center_min = float(np.min(center))
         center_max = float(np.max(center))
         lower = np.maximum(original_lower, center - radius)
@@ -4824,6 +4882,13 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
         and args.acados_pulse_width_trust_radius < 0
     ):
         raise ValueError("--acados-pulse-width-trust-radius must be non-negative.")
+    if (
+        args.acados_transfer_pulse_width_trust_radius is not None
+        and args.acados_transfer_pulse_width_trust_radius < 0
+    ):
+        raise ValueError(
+            "--acados-transfer-pulse-width-trust-radius must be non-negative."
+        )
     if args.acados_transfer_rollout_substeps < 1:
         raise ValueError("--acados-transfer-rollout-substeps must be >= 1.")
     if args.acados_transfer_rollout_max_bound_violation < 0:
@@ -4998,6 +5063,10 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
             print(
                 "acados_pulse_width_trust_radius: "
                 f"{args.acados_pulse_width_trust_radius}"
+            )
+            print(
+                "acados_transfer_pulse_width_trust_radius: "
+                f"{args.acados_transfer_pulse_width_trust_radius}"
             )
             print(
                 "acados_fes_state_trust_radius: "
@@ -5273,6 +5342,22 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
                 cycling_info=cycling_info,
                 simulation_conditions=nmpc_simulation_conditions,
                 model_formulation=args.model_formulation,
+                refinement_ode_solver=(
+                    OdeSolver.IRK(
+                        polynomial_degree=args.acados_sim_stages,
+                        method=(
+                            "legendre"
+                            if args.acados_collocation_type == "GAUSS_LEGENDRE"
+                            else "radau"
+                        ),
+                    )
+                    if args.periodic_ipopt_refinement_ode_solver == "irk"
+                    else (
+                        OdeSolver.RK4(n_integration_steps=args.rk_steps)
+                        if args.periodic_ipopt_refinement_ode_solver == "rk4"
+                        else None
+                    )
+                ),
             )
             periodic_ipopt_reference_solution = run_periodic_ipopt_refinement(
                 refinement_nmpc,
@@ -5494,6 +5579,26 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
                 if continue_solving:
                     print(f"window[{cycle_idx}] transferred_initial_guess_diagnostics:")
                     print_initial_guess_diagnostics(_nmpc)
+        if (
+            continue_solving
+            and _sol is not None
+            and args.solver == "acados"
+            and args.acados_pulse_width_trust_radius is not None
+        ):
+            transfer_radius = (
+                args.acados_transfer_pulse_width_trust_radius
+                if args.acados_transfer_pulse_width_trust_radius is not None
+                else args.acados_pulse_width_trust_radius
+            )
+            trust_summary = apply_pulse_width_control_trust_region(
+                _nmpc, transfer_radius
+            )
+            if echo:
+                max_center = max(item["center_max"] for item in trust_summary.values())
+                print(
+                    "acados_pulse_width_trust_region_recentered: "
+                    f"window={cycle_idx} max_center={max_center:.9g}"
+                )
         return continue_solving
 
     solver_first_iter = None
@@ -5624,6 +5729,7 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
             summary["initial_guess_state_traces"] = initial_guess_state_traces
             summary["initial_guess_control_traces"] = initial_guess_control_traces
         summary["args"] = args
+        summary["control_bounds"] = _control_bounds_summary(nmpc)
         return summary
 
     sol = nmpc.solve_fes_nmpc(
@@ -5657,6 +5763,7 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
         summary["initial_guess_state_traces"] = initial_guess_state_traces
         summary["initial_guess_control_traces"] = initial_guess_control_traces
     summary["args"] = args
+    summary["control_bounds"] = _control_bounds_summary(nmpc)
     return summary
 
 

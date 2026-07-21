@@ -11,6 +11,7 @@ import argparse
 import os
 from pathlib import Path
 import sys
+from time import perf_counter
 
 import numpy as np
 
@@ -18,11 +19,18 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from cycling_pulse_width_mhe_acados_periodic import (
-    ACADOS_STATUS_NAMES,
-    build_argument_parser,
-    solve_case,
-)
+try:
+    from .cycling_pulse_width_mhe_acados_periodic import (
+        ACADOS_STATUS_NAMES,
+        build_argument_parser,
+        solve_case,
+    )
+except ImportError:
+    from cycling_pulse_width_mhe_acados_periodic import (
+        ACADOS_STATUS_NAMES,
+        build_argument_parser,
+        solve_case,
+    )
 
 EXAMPLE_DIR = Path(__file__).resolve().parent
 
@@ -111,6 +119,181 @@ def _effective_status(result: dict):
         if status != 0:
             return status
     return result.get("status")
+
+
+def _successful_prefix_length(statuses: list | None) -> int:
+    length = 0
+    for status in statuses or []:
+        if status != 0:
+            break
+        length += 1
+    return length
+
+
+def _validated_cycle_count(result: dict) -> int:
+    prefix = _successful_prefix_length(result.get("window_statuses"))
+    if result.get("solver_success"):
+        return int(result.get("covered_cycles") or prefix)
+    return prefix
+
+
+def _truncate_result_to_cycles(result: dict, cycle_count: int) -> dict:
+    shooting_per_cycle = int(result["args"].stimulations_per_cycle)
+    state_nodes = cycle_count * shooting_per_cycle + 1
+    control_nodes = cycle_count * shooting_per_cycle
+    return {
+        **result,
+        "wheel_angle_trace": np.asarray(result["wheel_angle_trace"])[:state_nodes],
+        "state_traces": {
+            key: np.asarray(values)[..., :state_nodes]
+            for key, values in result.get("state_traces", {}).items()
+        },
+        "control_traces": {
+            key: np.asarray(values)[..., :control_nodes]
+            for key, values in result.get("control_traces", {}).items()
+        },
+    }
+
+
+def _window_performance(result: dict) -> dict:
+    windows = result.get("window_solutions") or []
+    rows = []
+    for index, solution in enumerate(windows):
+        rows.append(
+            {
+                "window": index,
+                "status": solution.status,
+                "success": solution.status == 0,
+                "solver_time_s": solution.solver_time_to_optimize,
+                "wall_time_s": solution.real_time_to_optimize,
+            }
+        )
+
+    prefix = _successful_prefix_length(result.get("window_statuses"))
+    successful_rows = rows[:prefix]
+
+    def total(key: str) -> float:
+        return float(sum(float(row[key] or 0.0) for row in successful_rows))
+
+    validated_cycles = _validated_cycle_count(result)
+    successful_solver_time = total("solver_time_s")
+    successful_wall_time = total("wall_time_s")
+    return {
+        "rows": rows,
+        "successful_prefix_windows": prefix,
+        "validated_cycles": validated_cycles,
+        "successful_solver_time_s": successful_solver_time,
+        "successful_wall_time_s": successful_wall_time,
+        "solver_time_per_cycle_s": (
+            successful_solver_time / validated_cycles if validated_cycles else None
+        ),
+        "wall_time_per_cycle_s": (
+            successful_wall_time / validated_cycles if validated_cycles else None
+        ),
+    }
+
+
+def _fatigue_metrics(result: dict, cycle_count: int) -> list[dict]:
+    if cycle_count <= 0:
+        return []
+    limited = _truncate_result_to_cycles(result, cycle_count)
+    rows = []
+    for key, values in sorted(limited.get("state_traces", {}).items()):
+        if not key.startswith(("A_", "Tau1_", "Km_")):
+            continue
+        trace = np.asarray(values, dtype=float).reshape(-1)
+        if trace.size == 0 or not np.all(np.isfinite(trace)):
+            continue
+        initial = float(trace[0])
+        final = float(trace[-1])
+        rows.append(
+            {
+                "key": key,
+                "initial": initial,
+                "final": final,
+                "relative_final": final / initial if initial else None,
+                "minimum": float(np.min(trace)),
+                "maximum": float(np.max(trace)),
+            }
+        )
+    return rows
+
+
+def _control_saturation_metrics(result: dict, cycle_count: int) -> list[dict]:
+    if cycle_count <= 0:
+        return []
+    limited = _truncate_result_to_cycles(result, cycle_count)
+    bounds = result.get("control_bounds", {})
+    rows = []
+    for key, values in sorted(limited.get("control_traces", {}).items()):
+        if key not in bounds:
+            continue
+        trace = np.asarray(values, dtype=float).reshape(-1)
+        lower = float(bounds[key]["lower"])
+        upper = float(bounds[key]["upper"])
+        span = upper - lower
+        tolerance = max(1e-12, span * 1e-3)
+        rows.append(
+            {
+                "key": key,
+                "lower": lower,
+                "upper": upper,
+                "lower_fraction": float(np.mean(trace <= lower + tolerance)),
+                "upper_fraction": float(np.mean(trace >= upper - tolerance)),
+                "maximum": float(np.max(trace)),
+                "mean": float(np.mean(trace)),
+            }
+        )
+    return rows
+
+
+def _stop_classification(result: dict) -> dict:
+    validated_cycles = _validated_cycle_count(result)
+    statuses = result.get("window_statuses") or []
+    if result.get("success"):
+        return {
+            "label": "completed_requested_horizon",
+            "validated_cycles": validated_cycles,
+            "first_failure_status": None,
+        }
+    first_failure = next((status for status in statuses if status != 0), None)
+    return {
+        "label": (
+            "numerical_failure_before_valid_cycle"
+            if validated_cycles == 0
+            else "solver_failure_after_valid_cycles"
+        ),
+        "validated_cycles": validated_cycles,
+        "first_failure_status": first_failure,
+    }
+
+
+def _shared_stop_classification(ipopt_result: dict, acados_result: dict) -> dict:
+    ipopt = _stop_classification(ipopt_result)
+    acados = _stop_classification(acados_result)
+    if ipopt_result.get("success") and acados_result.get("success"):
+        return {"label": "horizon_completed", "evidence": []}
+
+    evidence = []
+    if not ipopt_result.get("success") and not acados_result.get("success"):
+        cycle_gap = abs(ipopt["validated_cycles"] - acados["validated_cycles"])
+        if cycle_gap <= 1:
+            evidence.append("both_solvers_stop_at_similar_cycle")
+
+    saturation = []
+    for result, stop in ((ipopt_result, ipopt), (acados_result, acados)):
+        saturation.extend(_control_saturation_metrics(result, stop["validated_cycles"]))
+    if saturation and max(row["upper_fraction"] for row in saturation) >= 0.1:
+        evidence.append("pulse_width_upper_bound_active")
+
+    if set(evidence) == {
+        "both_solvers_stop_at_similar_cycle",
+        "pulse_width_upper_bound_active",
+    }:
+        label = "shared_capacity_limit_candidate"
+    else:
+        label = "numerical_or_unconfirmed_limit"
+    return {"label": label, "evidence": evidence}
 
 
 def _resample_trace(trace: np.ndarray, target_len: int) -> np.ndarray:
@@ -285,6 +468,7 @@ def _solver_config(
     state_scaling: str,
     pulse_width_scaling: float,
     acados_pulse_width_trust_radius: float | None,
+    acados_transfer_pulse_width_trust_radius: float | None,
     acados_fes_state_trust_radius: float | None,
     acados_fatigue_warmstart_mode: str,
     acados_tolerance: float | None,
@@ -390,6 +574,7 @@ def _solver_config(
             state_scaling=state_scaling,
             pulse_width_scaling=pulse_width_scaling,
             acados_pulse_width_trust_radius=None,
+            acados_transfer_pulse_width_trust_radius=None,
             acados_fes_state_trust_radius=None,
             acados_fatigue_warmstart_mode=_pick(
                 ipopt_fatigue_warmstart_mode, fatigue_warmstart_default
@@ -455,7 +640,7 @@ def _solver_config(
         return _namespace_from_cli(
             solver="acados",
             single_shot=False,
-            model_formulation="periodic",
+            model_formulation="periodic_node",
             torque_application="constant",
             cycles_per_window=cycles_per_window,
             stimulations_per_cycle=stimulations_per_cycle,
@@ -482,6 +667,9 @@ def _solver_config(
             state_scaling=state_scaling,
             pulse_width_scaling=pulse_width_scaling,
             acados_pulse_width_trust_radius=acados_pulse_width_trust_radius,
+            acados_transfer_pulse_width_trust_radius=(
+                acados_transfer_pulse_width_trust_radius
+            ),
             acados_fes_state_trust_radius=acados_fes_state_trust_radius,
             acados_fatigue_warmstart_mode=acados_fatigue_warmstart_mode,
             acados_tolerance=acados_tolerance,
@@ -546,6 +734,10 @@ def print_comparison(
     print_traces: bool = False,
     state_comparison_limit: int = 12,
 ) -> None:
+    performance = {
+        "IPOPT": _window_performance(ipopt_result),
+        "ACADOS": _window_performance(acados_result),
+    }
     print(
         "solver | success | solver_success | physical_success | status | status_label | objective | solver_time_s | wall_time_s | final_wheel_angle | "
         "requested_cycles | attempted_windows | successful_windows | exported_cycles | covered_cycles"
@@ -582,6 +774,16 @@ def print_comparison(
             f"max_step={_format_metric(diagnostics.get('max_step'))} "
             f"window_statuses={result.get('window_statuses')}"
         )
+        solver_per_cycle = performance[label]["solver_time_per_cycle_s"]
+        wall_per_cycle = performance[label]["wall_time_per_cycle_s"]
+        print(
+            f"{label} benchmark timing: "
+            f"validated_cycles={performance[label]['validated_cycles']} "
+            f"successful_prefix_windows={performance[label]['successful_prefix_windows']} "
+            f"solver_time_per_cycle_s={_format_metric(solver_per_cycle)} "
+            f"wall_time_per_cycle_s={_format_metric(wall_per_cycle)} "
+            f"end_to_end_wall_time_s={_format_metric(result.get('end_to_end_wall_time_s'))}"
+        )
         if label == "ACADOS" and result.get("window_statuses"):
             labels = [_status_label(status) for status in result["window_statuses"]]
             print(f"{label} window_status_labels: {labels}")
@@ -598,11 +800,29 @@ def print_comparison(
                     f"qp_stat={_format_array(item.get('qp_stat'))}"
                 )
 
+    common_validated_cycles = min(
+        performance["IPOPT"]["validated_cycles"],
+        performance["ACADOS"]["validated_cycles"],
+    )
     if not (ipopt_result.get("success") and acados_result.get("success")):
         print(
             "wheel trace comparison warning: at least one solver did not cover all requested cycles successfully."
         )
-    trace_metrics = _trace_comparison(ipopt_result, acados_result)
+    if common_validated_cycles == 0:
+        print("solution comparison unavailable: no commonly validated cycle.")
+        shared_stop = _shared_stop_classification(ipopt_result, acados_result)
+        print(
+            "benchmark stop classification | "
+            f"label={shared_stop['label']} | evidence={shared_stop['evidence']}"
+        )
+        return
+
+    comparison_ipopt = _truncate_result_to_cycles(ipopt_result, common_validated_cycles)
+    comparison_acados = _truncate_result_to_cycles(
+        acados_result, common_validated_cycles
+    )
+    print(f"solution comparison validated cycles: {common_validated_cycles}")
+    trace_metrics = _trace_comparison(comparison_ipopt, comparison_acados)
     print(
         "wheel trace comparison | "
         f"common_len={trace_metrics['common_len']} | "
@@ -623,7 +843,7 @@ def print_comparison(
         f"raw_final_turn_offset={trace_metrics['raw_final_turn_offset']}"
     )
 
-    control_metrics = _control_comparisons(ipopt_result, acados_result)
+    control_metrics = _control_comparisons(comparison_ipopt, comparison_acados)
     if control_metrics:
         print(
             "control comparison | key | common_len | rmse | mae | max_abs_error | final_error | "
@@ -648,7 +868,7 @@ def print_comparison(
     else:
         print("control comparison warning: no common control keys were found.")
 
-    state_metrics = _state_comparisons(ipopt_result, acados_result)
+    state_metrics = _state_comparisons(comparison_ipopt, comparison_acados)
     if state_metrics and state_comparison_limit:
         print(
             "state comparison | key | common_len | rmse | mae | max_abs_error | final_error | "
@@ -700,6 +920,29 @@ def print_comparison(
             "acados initial guess vs solution warning: no common state keys were found."
         )
 
+    for label, result in (("IPOPT", ipopt_result), ("ACADOS", acados_result)):
+        validated_cycles = performance[label]["validated_cycles"]
+        fatigue = _fatigue_metrics(result, validated_cycles)
+        saturation = _control_saturation_metrics(result, validated_cycles)
+        a_ratios = [
+            row["relative_final"]
+            for row in fatigue
+            if row["key"].startswith("A_") and row["relative_final"] is not None
+        ]
+        print(
+            f"{label} endurance: "
+            f"stop={_stop_classification(result)['label']} "
+            f"min_A_capacity_ratio={_format_metric(min(a_ratios) if a_ratios else None)} "
+            "max_pulse_width_upper_fraction="
+            f"{_format_metric(max((row['upper_fraction'] for row in saturation), default=None))}"
+        )
+
+    shared_stop = _shared_stop_classification(ipopt_result, acados_result)
+    print(
+        "benchmark stop classification | "
+        f"label={shared_stop['label']} | evidence={shared_stop['evidence']}"
+    )
+
     ipopt_solver_time = ipopt_result["solver_time_s"]
     acados_solver_time = acados_result["solver_time_s"]
     ipopt_wall_time = ipopt_result["wall_time_s"]
@@ -745,9 +988,11 @@ def main(
     pulse_width_scaling: float = 1 / 400,
     acados_pulse_width_scaling: float | None = None,
     acados_pulse_width_trust_radius: float | None = None,
+    acados_transfer_pulse_width_trust_radius: float | None = None,
     acados_fes_state_trust_radius: float | None = None,
     acados_fatigue_warmstart_mode: str = "continuous",
     acados_tolerance: float | None = None,
+    acados_stationarity_tolerance: float | None = None,
     acados_qp_iter_max: int = 50,
     acados_levenberg_marquardt: float = 0.0,
     acados_regularize_method: str = "GERSHGORIN_LEVENBERG_MARQUARDT",
@@ -761,6 +1006,10 @@ def main(
     acados_qpscaling_scale_constraints: str = "INF_NORM",
     acados_ext_qp_res: bool = False,
     acados_project_qdot_from_q: bool = False,
+    acados_integrator_type: str = "IRK",
+    acados_collocation_type: str = "GAUSS_LEGENDRE",
+    acados_sim_stages: int = 4,
+    acados_sim_steps: int = 5,
     disable_periodic_fes_warmup_projection: bool = False,
     periodic_fes_warmup_projection_weight: float = 1.0,
     periodic_fes_warmup_projection_mode: str = "all",
@@ -777,6 +1026,7 @@ def main(
     periodic_ipopt_refinement: bool = False,
     periodic_ipopt_refinement_iterations: int = 300,
     periodic_ipopt_refinement_use_sx: bool = False,
+    periodic_ipopt_refinement_ode_solver: str = "target",
     warmup_state_comparison_limit: int = 12,
     state_comparison_limit: int = 12,
     print_traces: bool = False,
@@ -793,6 +1043,7 @@ def main(
     ipopt_disable_periodic_fes_warmup_projection: bool | None = None,
     ipopt_fatigue_warmstart_mode: str | None = None,
     ipopt_disable_historical_initial_guess: bool = False,
+    max_consecutive_failing: int = 1,
 ):
     os.chdir(EXAMPLE_DIR)
     if acados_dir:
@@ -818,6 +1069,7 @@ def main(
         state_scaling=state_scaling,
         pulse_width_scaling=pulse_width_scaling,
         acados_pulse_width_trust_radius=None,
+        acados_transfer_pulse_width_trust_radius=None,
         acados_fes_state_trust_radius=None,
         acados_fatigue_warmstart_mode="continuous",
         acados_tolerance=acados_tolerance,
@@ -919,6 +1171,9 @@ def main(
             else pulse_width_scaling
         ),
         acados_pulse_width_trust_radius=acados_pulse_width_trust_radius,
+        acados_transfer_pulse_width_trust_radius=(
+            acados_transfer_pulse_width_trust_radius
+        ),
         acados_fes_state_trust_radius=acados_fes_state_trust_radius,
         acados_fatigue_warmstart_mode=acados_fatigue_warmstart_mode,
         acados_tolerance=acados_tolerance,
@@ -967,6 +1222,16 @@ def main(
         periodic_ipopt_refinement_use_sx=periodic_ipopt_refinement_use_sx,
         warmup_state_comparison_limit=warmup_state_comparison_limit,
     )
+    ipopt_args.max_consecutive_failing = max_consecutive_failing
+    acados_args.max_consecutive_failing = max_consecutive_failing
+    acados_args.acados_integrator_type = acados_integrator_type
+    acados_args.acados_collocation_type = acados_collocation_type
+    acados_args.acados_sim_stages = acados_sim_stages
+    acados_args.acados_sim_steps = acados_sim_steps
+    acados_args.periodic_ipopt_refinement_ode_solver = (
+        periodic_ipopt_refinement_ode_solver
+    )
+    acados_args.acados_stationarity_tolerance = acados_stationarity_tolerance
 
     normalized_ipopt_profile = _normalize_ipopt_profile(ipopt_profile)
     ipopt_label = (
@@ -975,10 +1240,14 @@ def main(
         else "ACADOS-like diagnostic"
     )
     print(f"Running IPOPT configuration ({ipopt_label})...")
+    start = perf_counter()
     ipopt_result = solve_case(ipopt_args, echo=True)
+    ipopt_result["end_to_end_wall_time_s"] = perf_counter() - start
     print()
     print("Running ACADOS-compatible configuration...")
+    start = perf_counter()
     acados_result = solve_case(acados_args, echo=True)
+    acados_result["end_to_end_wall_time_s"] = perf_counter() - start
     print()
     print_comparison(
         ipopt_result,
@@ -998,6 +1267,16 @@ def build_cli() -> argparse.ArgumentParser:
     parser.add_argument("--cycles-per-window", type=int, default=2)
     parser.add_argument("--stimulations-per-cycle", type=int, default=30)
     parser.add_argument("--n-windows", type=int, default=2)
+    parser.add_argument(
+        "--max-consecutive-failing",
+        type=int,
+        default=1,
+        help=(
+            "Stop the endurance benchmark after this many consecutive failed "
+            "windows. The default avoids benchmarking trajectories returned by "
+            "failed solves."
+        ),
+    )
     parser.add_argument("--resistive-torque", type=float, default=-0.2)
     parser.add_argument("--acados-dir", default=os.environ.get("ACADOS_SOURCE_DIR"))
     parser.add_argument("--codegen-tag", default="fes_compare")
@@ -1116,6 +1395,24 @@ def build_cli() -> argparse.ArgumentParser:
         help="Do not load the historical initial guess file for the direct IPOPT-side solve.",
     )
     parser.add_argument("--acados-max-iter", type=int, default=100)
+    parser.add_argument(
+        "--acados-integrator-type", choices=("ERK", "IRK", "DISCRETE"), default="IRK"
+    )
+    parser.add_argument(
+        "--acados-collocation-type",
+        choices=("GAUSS_LEGENDRE", "GAUSS_RADAU_IIA", "EXPLICIT_RUNGE_KUTTA"),
+        default="GAUSS_LEGENDRE",
+    )
+    parser.add_argument("--acados-sim-stages", type=int, default=4)
+    parser.add_argument(
+        "--acados-sim-steps",
+        type=int,
+        default=5,
+        help=(
+            "Integration steps per shooting interval. Five is the robust IRK "
+            "default; one can be used with an experimental IPOPT-IRK bridge."
+        ),
+    )
     parser.add_argument("--control-regularization-weight", type=float, default=0.0)
     parser.add_argument(
         "--acados-control-regularization-weight", type=float, default=None
@@ -1149,6 +1446,9 @@ def build_cli() -> argparse.ArgumentParser:
     parser.add_argument("--pulse-width-scaling", type=float, default=1 / 400)
     parser.add_argument("--acados-pulse-width-scaling", type=float, default=None)
     parser.add_argument("--acados-pulse-width-trust-radius", type=float, default=None)
+    parser.add_argument(
+        "--acados-transfer-pulse-width-trust-radius", type=float, default=None
+    )
     parser.add_argument("--acados-fes-state-trust-radius", type=float, default=None)
     parser.add_argument(
         "--acados-fatigue-warmstart-mode",
@@ -1156,6 +1456,12 @@ def build_cli() -> argparse.ArgumentParser:
         default="continuous",
     )
     parser.add_argument("--acados-tolerance", type=float, default=None)
+    parser.add_argument(
+        "--acados-stationarity-tolerance",
+        type=float,
+        default=None,
+        help="Stationarity tolerance applied independently from ACADOS feasibility.",
+    )
     parser.add_argument("--acados-qp-iter-max", type=int, default=50)
     parser.add_argument("--acados-levenberg-marquardt", type=float, default=0.0)
     parser.add_argument(
@@ -1274,6 +1580,12 @@ def build_cli() -> argparse.ArgumentParser:
             "By default it uses MX to reduce memory pressure."
         ),
     )
+    parser.add_argument(
+        "--periodic-ipopt-refinement-ode-solver",
+        choices=("target", "rk4", "irk"),
+        default="target",
+        help="Integrator for the IPOPT bridge used to initialize ACADOS.",
+    )
     parser.add_argument("--state-comparison-limit", type=int, default=12)
     parser.add_argument("--warmup-state-comparison-limit", type=int, default=12)
     parser.add_argument("--print-traces", action="store_true")
@@ -1307,9 +1619,13 @@ if __name__ == "__main__":
         pulse_width_scaling=args.pulse_width_scaling,
         acados_pulse_width_scaling=args.acados_pulse_width_scaling,
         acados_pulse_width_trust_radius=args.acados_pulse_width_trust_radius,
+        acados_transfer_pulse_width_trust_radius=(
+            args.acados_transfer_pulse_width_trust_radius
+        ),
         acados_fes_state_trust_radius=args.acados_fes_state_trust_radius,
         acados_fatigue_warmstart_mode=args.acados_fatigue_warmstart_mode,
         acados_tolerance=args.acados_tolerance,
+        acados_stationarity_tolerance=args.acados_stationarity_tolerance,
         acados_qp_iter_max=args.acados_qp_iter_max,
         acados_levenberg_marquardt=args.acados_levenberg_marquardt,
         acados_regularize_method=args.acados_regularize_method,
@@ -1323,6 +1639,10 @@ if __name__ == "__main__":
         acados_qpscaling_scale_constraints=args.acados_qpscaling_scale_constraints,
         acados_ext_qp_res=args.acados_ext_qp_res,
         acados_project_qdot_from_q=args.acados_project_qdot_from_q,
+        acados_integrator_type=args.acados_integrator_type,
+        acados_collocation_type=args.acados_collocation_type,
+        acados_sim_stages=args.acados_sim_stages,
+        acados_sim_steps=args.acados_sim_steps,
         disable_periodic_fes_warmup_projection=(
             args.disable_periodic_fes_warmup_projection
         ),
@@ -1361,6 +1681,9 @@ if __name__ == "__main__":
         periodic_ipopt_refinement=args.periodic_ipopt_refinement,
         periodic_ipopt_refinement_iterations=args.periodic_ipopt_refinement_iterations,
         periodic_ipopt_refinement_use_sx=args.periodic_ipopt_refinement_use_sx,
+        periodic_ipopt_refinement_ode_solver=(
+            args.periodic_ipopt_refinement_ode_solver
+        ),
         warmup_state_comparison_limit=args.warmup_state_comparison_limit,
         state_comparison_limit=args.state_comparison_limit,
         print_traces=args.print_traces,
@@ -1381,4 +1704,5 @@ if __name__ == "__main__":
         ipopt_disable_historical_initial_guess=(
             args.ipopt_disable_historical_initial_guess
         ),
+        max_consecutive_failing=args.max_consecutive_failing,
     )

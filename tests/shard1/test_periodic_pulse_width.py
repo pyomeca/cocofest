@@ -4,6 +4,7 @@ from types import SimpleNamespace
 from bioptim import Solver
 
 import examples.fes_multibody.cycling.cycling_pulse_width_mhe_acados_periodic as periodic_example
+import examples.fes_multibody.cycling.cycling_fes_solver_comparison as comparison_example
 from cocofest.models.ding2007.ding2007_with_fatigue_periodic import (
     DingModelPulseWidthFrequencyWithFatiguePeriodic,
 )
@@ -249,6 +250,124 @@ def test_pulse_width_trust_region_keeps_nodewise_centers():
 
     np.testing.assert_allclose(lower, np.array([[0.19, 0.39, 0.49]]))
     np.testing.assert_allclose(upper, np.array([[0.21, 0.41, 0.51]]))
+
+    nmpc.nlp[0].u_init["last_pulse_width_Biceps"].init[:, :] = [0.3, 0.5, 0.55]
+    periodic_example.apply_pulse_width_control_trust_region(nmpc, radius=0.01)
+    lower, upper = nmpc._cocofest_nodewise_control_bounds["last_pulse_width_Biceps"]
+
+    np.testing.assert_allclose(lower, np.array([[0.29, 0.49, 0.54]]))
+    np.testing.assert_allclose(upper, np.array([[0.31, 0.51, 0.56]]))
+
+
+def _benchmark_result(statuses, solver_success=False, success=False):
+    cycle_count = 3
+    shooting_per_cycle = 2
+    return {
+        "args": SimpleNamespace(stimulations_per_cycle=shooting_per_cycle),
+        "window_statuses": statuses,
+        "solver_success": solver_success,
+        "success": success,
+        "covered_cycles": cycle_count if solver_success else 0,
+        "wheel_angle_trace": np.arange(cycle_count * shooting_per_cycle + 1),
+        "state_traces": {
+            "A_Biceps": np.linspace(100.0, 80.0, 7)[np.newaxis, :],
+            "Tau1_Biceps": np.linspace(0.05, 0.06, 7)[np.newaxis, :],
+        },
+        "control_traces": {
+            "last_pulse_width_Biceps": np.array(
+                [[0.0002, 0.0006, 0.0003, 0.0004, 0.0005, 0.0006]]
+            )
+        },
+        "control_bounds": {
+            "last_pulse_width_Biceps": {"lower": 0.0001, "upper": 0.0006}
+        },
+    }
+
+
+def test_benchmark_compares_only_the_successful_prefix():
+    result = _benchmark_result([0, 0, 4])
+
+    assert comparison_example._successful_prefix_length([0, 0, 4, 0]) == 2
+    assert comparison_example._validated_cycle_count(result) == 2
+
+    limited = comparison_example._truncate_result_to_cycles(result, 2)
+    assert limited["wheel_angle_trace"].shape == (5,)
+    assert limited["state_traces"]["A_Biceps"].shape == (1, 5)
+    assert limited["control_traces"]["last_pulse_width_Biceps"].shape == (1, 4)
+
+
+def test_endurance_metrics_report_fatigue_and_control_saturation():
+    result = _benchmark_result([0, 0, 4])
+
+    fatigue = comparison_example._fatigue_metrics(result, cycle_count=2)
+    saturation = comparison_example._control_saturation_metrics(result, cycle_count=2)
+
+    a_row = next(row for row in fatigue if row["key"] == "A_Biceps")
+    np.testing.assert_allclose(a_row["relative_final"], (100 - 4 * 20 / 6) / 100)
+    assert saturation[0]["upper_fraction"] == 0.25
+
+
+def test_shared_capacity_limit_requires_two_independent_signals():
+    ipopt = _benchmark_result([0, 0, 1])
+    acados = _benchmark_result([0, 4])
+
+    classification = comparison_example._shared_stop_classification(ipopt, acados)
+
+    assert classification["label"] == "shared_capacity_limit_candidate"
+    assert set(classification["evidence"]) == {
+        "both_solvers_stop_at_similar_cycle",
+        "pulse_width_upper_bound_active",
+    }
+
+
+def test_completed_endurance_horizon_uses_all_covered_cycles():
+    result = _benchmark_result([0, 0], solver_success=True, success=True)
+
+    assert comparison_example._validated_cycle_count(result) == 3
+    assert comparison_example._stop_classification(result)["label"] == (
+        "completed_requested_horizon"
+    )
+
+
+def test_endurance_cli_stops_on_failure_and_keeps_robust_irk_defaults():
+    args = comparison_example.build_cli().parse_args([])
+
+    assert args.max_consecutive_failing == 1
+    assert args.acados_integrator_type == "IRK"
+    assert args.acados_sim_stages == 4
+    assert args.acados_sim_steps == 5
+    assert args.acados_transfer_pulse_width_trust_radius is None
+    assert args.periodic_ipopt_refinement_ode_solver == "target"
+
+
+def test_control_bounds_summary_preserves_physical_units():
+    nmpc = SimpleNamespace(
+        nlp=[
+            SimpleNamespace(
+                controls={"last_pulse_width_Biceps": SimpleNamespace()},
+                u_bounds={
+                    "last_pulse_width_Biceps": SimpleNamespace(
+                        min=np.array([[0.000131405]]),
+                        max=np.array([[0.0006]]),
+                    )
+                },
+            )
+        ]
+    )
+
+    assert periodic_example._control_bounds_summary(nmpc) == {
+        "last_pulse_width_Biceps": {"lower": 0.000131405, "upper": 0.0006}
+    }
+
+    nmpc._cocofest_original_control_bounds = {
+        "last_pulse_width_Biceps": (
+            np.array([[0.0001]]),
+            np.array([[0.0007]]),
+        )
+    }
+    assert periodic_example._control_bounds_summary(nmpc) == {
+        "last_pulse_width_Biceps": {"lower": 0.0001, "upper": 0.0007}
+    }
 
 
 def test_continuation_source_inherits_requested_acados_tolerances(
@@ -536,7 +655,17 @@ def test_acados_qp_warm_start_cli_options_are_explicit():
 
 
 def test_signed_wheel_transfer_preserves_seam_and_terminal_turn():
-    source = np.array([0.0, -1.0, -2.0, -6.0, -7.0, -8.0, -12.5])
+    source = np.array(
+        [
+            0.0,
+            -1.0,
+            -2.0,
+            -2 * np.pi,
+            -2 * np.pi - 1.0,
+            -2 * np.pi - 2.0,
+            -4 * np.pi,
+        ]
+    )
     initial_guess = np.zeros((1, source.shape[0]))
     qdot_source = np.full_like(source, -6.5)
     qdot_initial_guess = np.zeros((1, source.shape[0]))
@@ -563,14 +692,51 @@ def test_signed_wheel_transfer_preserves_seam_and_terminal_turn():
     MyCyclicNMPC.set_init_cyclical_wheel_velocity(nmpc, states, "qdot", 0)
 
     transferred = initial_guess[0]
-    source_final_increment = source[-1] - source[-2]
-    transferred_seam_increment = transferred[3] - transferred[2]
-    np.testing.assert_allclose(transferred_seam_increment, source_final_increment)
+    np.testing.assert_allclose(transferred[:4], source[3:])
+    np.testing.assert_allclose(transferred[4:], source[4:] - 2 * np.pi)
+    transferred_seam_increment = transferred[4] - transferred[3]
+    np.testing.assert_allclose(transferred_seam_increment, source[4] - source[3])
     np.testing.assert_allclose(transferred[-1], source[-1] - 2 * np.pi)
-    expected_velocity_correction = -2 * np.pi - (source[-1] - source[-4])
+    np.testing.assert_allclose(qdot_initial_guess[0], qdot_source)
+
+
+def test_cyclical_transfer_keeps_complete_state_cycle_and_repeats_controls():
+    nmpc = SimpleNamespace(
+        nodes_per_cycle=3,
+        nlp=[
+            SimpleNamespace(
+                x_init={"state": SimpleNamespace(init=np.zeros((1, 7)))},
+                u_init={"control": SimpleNamespace(init=np.zeros((1, 6)))},
+            )
+        ],
+    )
+    states = {"state": np.arange(7, dtype=float)[None, :]}
+    controls = {"control": np.arange(6, dtype=float)[None, :]}
+
+    MyCyclicNMPC.set_init_cyclical(nmpc, states, "state", 0)
+    MyCyclicNMPC.set_init_cyclical(nmpc, controls, "control", 0, state=False)
+
     np.testing.assert_allclose(
-        qdot_initial_guess[0, 3:],
-        qdot_source[-4:] + expected_velocity_correction,
+        nmpc.nlp[0].x_init["state"].init[0], [3, 4, 5, 6, 7, 8, 9]
+    )
+    np.testing.assert_allclose(
+        nmpc.nlp[0].u_init["control"].init[0], [3, 4, 5, 3, 4, 5]
+    )
+
+
+def test_continuous_transfer_extrapolates_cycle_delta_without_duplicate_seam():
+    nmpc = SimpleNamespace(
+        nodes_per_cycle=3,
+        nlp=[
+            SimpleNamespace(x_init={"fatigue": SimpleNamespace(init=np.zeros((1, 7)))})
+        ],
+    )
+    states = {"fatigue": np.array([[0.0, 1.0, 2.0, 10.0, 11.0, 12.0, 14.0]])}
+
+    MyCyclicNMPC.set_init_continuous(nmpc, states, "fatigue", 0)
+
+    np.testing.assert_allclose(
+        nmpc.nlp[0].x_init["fatigue"].init[0], [10, 11, 12, 14, 15, 16, 18]
     )
 
 

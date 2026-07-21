@@ -289,24 +289,24 @@ class MyCyclicNMPC(FesNmpcMsk):
         return True
 
     def set_init_continuous(self, states, key, i):
-        n_plus_one_cycles = states[key][i][self.nodes_per_cycle : -1]
-        last_cycle = states[key][i][-self.nodes_per_cycle - 1 :]
-        if n_plus_one_cycles.size == 0:
-            self.nlp[0].x_init[key].init[i, :] = last_cycle
-            return True
-        delta = n_plus_one_cycles[-1] - last_cycle[0]
-        shifted_last_cycle = states[key][i][-self.nodes_per_cycle - 1 :] + delta
-        values = np.concatenate((n_plus_one_cycles, shifted_last_cycle))
-        self.nlp[0].x_init[key].init[:, :] = values
+        source = states[key][i]
+        retained_cycle = source[self.nodes_per_cycle :]
+        cycle_delta = source[-1] - source[self.nodes_per_cycle]
+        appended_cycle = source[self.nodes_per_cycle + 1 :] + cycle_delta
+        values = np.concatenate((retained_cycle, appended_cycle))
+        self.nlp[0].x_init[key].init[i, :] = values
         return True
 
     def set_init_cyclical(self, data, key, i, state=True):
-        n_plus_one_cycles = data[key][i][self.nodes_per_cycle : -1]
-        last_cycle = data[key][i][-self.nodes_per_cycle - 1 :]
-        if n_plus_one_cycles.size == 0:
-            values = last_cycle
+        source = data[key][i]
+        if state:
+            retained_cycle = source[self.nodes_per_cycle :]
+            cycle_delta = source[-1] - source[self.nodes_per_cycle]
+            appended_cycle = source[self.nodes_per_cycle + 1 :] + cycle_delta
         else:
-            values = np.concatenate((n_plus_one_cycles, last_cycle))
+            retained_cycle = source[self.nodes_per_cycle :]
+            appended_cycle = source[-self.nodes_per_cycle :]
+        values = np.concatenate((retained_cycle, appended_cycle))
         if state:
             self.nlp[0].x_init[key].init[i, :] = values
         else:
@@ -314,45 +314,24 @@ class MyCyclicNMPC(FesNmpcMsk):
         return True
 
     def set_init_cyclical_wheel(self, states, key, i):
+        source = states[key][i]
+        retained_cycle = source[self.nodes_per_cycle :]
         if not self.use_signed_wheel_shift:
-            shifted_n_plus_one_cycles = (
-                states[key][i][self.nodes_per_cycle : -1] + self.pedal_turn_in_one_cycle
+            appended_cycle = (
+                source[self.nodes_per_cycle + 1 :] + self.pedal_turn_in_one_cycle
             )
-            last_cycle = states[key][i][-self.nodes_per_cycle - 1 :]
-            if shifted_n_plus_one_cycles.size == 0:
-                values = last_cycle
-            else:
-                values = np.concatenate((shifted_n_plus_one_cycles, last_cycle))
+            values = np.concatenate((retained_cycle, appended_cycle))
             self.nlp[0].x_init[key].init[i, :] = values
             return True
 
         wheel_cycle_shift = self._wheel_cycle_shift(states)
-        n_plus_one_cycles = states[key][i][self.nodes_per_cycle : -1]
-        last_cycle = states[key][i][-self.nodes_per_cycle - 1 :]
-        observed_cycle_shift = last_cycle[-1] - last_cycle[0]
-        shift = np.linspace(
-            observed_cycle_shift,
-            wheel_cycle_shift,
-            last_cycle.shape[0],
-        )
-        shifted_last_cycle = last_cycle + shift
-        if n_plus_one_cycles.size == 0:
-            values = shifted_last_cycle
-        else:
-            values = np.concatenate((n_plus_one_cycles, shifted_last_cycle))
+        appended_cycle = source[self.nodes_per_cycle + 1 :] + wheel_cycle_shift
+        values = np.concatenate((retained_cycle, appended_cycle))
         self.nlp[0].x_init[key].init[i, :] = values
         return True
 
     def set_init_cyclical_wheel_velocity(self, states, key, i):
         self.set_init_cyclical(states, key, i)
-        wheel_q = states["q"][-1]
-        last_cycle_q = wheel_q[-self.nodes_per_cycle - 1 :]
-        observed_cycle_shift = last_cycle_q[-1] - last_cycle_q[0]
-        target_cycle_shift = self._wheel_cycle_shift(states)
-        velocity_correction = (
-            target_cycle_shift - observed_cycle_shift
-        ) / self.cycle_duration
-        self.nlp[0].x_init[key].init[i, self.nodes_per_cycle :] += velocity_correction
         return True
 
     def _correct_init_guess_to_fit_bounds(self, corrected_input="states"):
