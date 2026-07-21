@@ -71,6 +71,7 @@ class MyCyclicNMPC(FesNmpcMsk):
         self.wheel_q_path_margin = 2.0
         self.use_signed_wheel_shift = False
         self.continuous_state_initial_guess_mode = "continuous"
+        self.transfer_initial_guess_mode = "historical"
         self.before_window_advance = None
 
     def _state_slack_for(self, key: str, index: int) -> float:
@@ -289,6 +290,19 @@ class MyCyclicNMPC(FesNmpcMsk):
         return True
 
     def set_init_continuous(self, states, key, i):
+        if self.transfer_initial_guess_mode == "historical":
+            n_plus_one_cycles = states[key][i][self.nodes_per_cycle : -1]
+            last_cycle = states[key][i][-self.nodes_per_cycle - 1 :]
+            if n_plus_one_cycles.size == 0:
+                self.nlp[0].x_init[key].init[i, :] = last_cycle
+                return True
+            delta = n_plus_one_cycles[-1] - last_cycle[0]
+            shifted_last_cycle = last_cycle + delta
+            self.nlp[0].x_init[key].init[i, :] = np.concatenate(
+                (n_plus_one_cycles, shifted_last_cycle)
+            )
+            return True
+
         source = states[key][i]
         retained_cycle = source[self.nodes_per_cycle :]
         cycle_delta = source[-1] - source[self.nodes_per_cycle]
@@ -298,6 +312,20 @@ class MyCyclicNMPC(FesNmpcMsk):
         return True
 
     def set_init_cyclical(self, data, key, i, state=True):
+        if self.transfer_initial_guess_mode == "historical":
+            n_plus_one_cycles = data[key][i][self.nodes_per_cycle : -1]
+            last_cycle = data[key][i][-self.nodes_per_cycle - 1 :]
+            values = (
+                last_cycle
+                if n_plus_one_cycles.size == 0
+                else np.concatenate((n_plus_one_cycles, last_cycle))
+            )
+            if state:
+                self.nlp[0].x_init[key].init[i, :] = values
+            else:
+                self.nlp[0].u_init[key].init[i, :] = values
+            return True
+
         source = data[key][i]
         if state:
             retained_cycle = source[self.nodes_per_cycle :]
@@ -314,6 +342,19 @@ class MyCyclicNMPC(FesNmpcMsk):
         return True
 
     def set_init_cyclical_wheel(self, states, key, i):
+        if self.transfer_initial_guess_mode == "historical":
+            shifted_n_plus_one_cycles = (
+                states[key][i][self.nodes_per_cycle : -1] + self.pedal_turn_in_one_cycle
+            )
+            last_cycle = states[key][i][-self.nodes_per_cycle - 1 :]
+            values = (
+                last_cycle
+                if shifted_n_plus_one_cycles.size == 0
+                else np.concatenate((shifted_n_plus_one_cycles, last_cycle))
+            )
+            self.nlp[0].x_init[key].init[i, :] = values
+            return True
+
         source = states[key][i]
         retained_cycle = source[self.nodes_per_cycle :]
         if not self.use_signed_wheel_shift:
@@ -332,6 +373,17 @@ class MyCyclicNMPC(FesNmpcMsk):
 
     def set_init_cyclical_wheel_velocity(self, states, key, i):
         self.set_init_cyclical(states, key, i)
+        if self.transfer_initial_guess_mode == "historical":
+            wheel_q = states["q"][-1]
+            last_cycle_q = wheel_q[-self.nodes_per_cycle - 1 :]
+            observed_cycle_shift = last_cycle_q[-1] - last_cycle_q[0]
+            target_cycle_shift = self._wheel_cycle_shift(states)
+            velocity_correction = (
+                target_cycle_shift - observed_cycle_shift
+            ) / self.cycle_duration
+            self.nlp[0].x_init[key].init[
+                i, self.nodes_per_cycle :
+            ] += velocity_correction
         return True
 
     def _correct_init_guess_to_fit_bounds(self, corrected_input="states"):

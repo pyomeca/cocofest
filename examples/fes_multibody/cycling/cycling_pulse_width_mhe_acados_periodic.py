@@ -5020,6 +5020,7 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
         nmpc.advance_wheel_q_bounds = True
         nmpc.wheel_q_path_margin = args.acados_wheel_q_path_margin
         nmpc.use_signed_wheel_shift = True
+        nmpc.transfer_initial_guess_mode = "anchored"
         nmpc.transfer_debug = echo
         relaxed_fes_bounds = []
         if not nmpc.bound_first_node_all_states:

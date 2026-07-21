@@ -673,6 +673,7 @@ def test_signed_wheel_transfer_preserves_seam_and_terminal_turn():
         nodes_per_cycle=3,
         cycle_duration=1.0,
         use_signed_wheel_shift=True,
+        transfer_initial_guess_mode="anchored",
         nlp=[
             SimpleNamespace(
                 x_init={
@@ -703,6 +704,7 @@ def test_signed_wheel_transfer_preserves_seam_and_terminal_turn():
 def test_cyclical_transfer_keeps_complete_state_cycle_and_repeats_controls():
     nmpc = SimpleNamespace(
         nodes_per_cycle=3,
+        transfer_initial_guess_mode="anchored",
         nlp=[
             SimpleNamespace(
                 x_init={"state": SimpleNamespace(init=np.zeros((1, 7)))},
@@ -727,6 +729,7 @@ def test_cyclical_transfer_keeps_complete_state_cycle_and_repeats_controls():
 def test_continuous_transfer_extrapolates_cycle_delta_without_duplicate_seam():
     nmpc = SimpleNamespace(
         nodes_per_cycle=3,
+        transfer_initial_guess_mode="anchored",
         nlp=[
             SimpleNamespace(x_init={"fatigue": SimpleNamespace(init=np.zeros((1, 7)))})
         ],
