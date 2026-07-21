@@ -148,6 +148,109 @@ def test_time_dependent_rk4_map_retains_local_time_inside_interval():
     np.testing.assert_allclose(observed, 5.0)
 
 
+def test_periodic_node_irk_converts_acados_local_stage_time_to_absolute_time():
+    observed = periodic_example._periodic_node_dynamics_time(
+        "IRK", acados_time=0.012, interval_start=0.5, interval_duration=1 / 30
+    )
+
+    np.testing.assert_allclose(observed, 0.512)
+
+
+def test_periodic_node_erk_uses_absolute_interval_midpoint():
+    observed = periodic_example._periodic_node_dynamics_time(
+        "ERK", acados_time=None, interval_start=0.5, interval_duration=1 / 30
+    )
+
+    np.testing.assert_allclose(observed, 0.5 + 1 / 60)
+
+
+def test_acados_rhs_is_converted_to_scaled_state_derivative():
+    rhs = SX.sym("rhs", 3)
+    scaled_rhs = periodic_example._scaled_acados_dynamics_rhs(
+        rhs, state_scaling=np.array([2.0, 10.0]), n_parameters=1
+    )
+    function = Function("scaled_rhs", [rhs], [scaled_rhs])
+
+    observed = np.asarray(function(np.array([0.0, 4.0, 30.0]))).reshape(-1)
+
+    np.testing.assert_allclose(observed, np.array([0.0, 2.0, 3.0]))
+
+
+def test_high_accuracy_integrator_diagnostic_handles_time_dependent_dynamics():
+    class Variables(dict):
+        def __init__(self, values, shape):
+            super().__init__(values)
+            self.shape = shape
+
+    state_variables = Variables({"x": SimpleNamespace(index=[0])}, shape=1)
+    control_variables = Variables({"u": SimpleNamespace(index=[0])}, shape=1)
+    nlp = SimpleNamespace(
+        states=state_variables,
+        controls=control_variables,
+        x_init={"x": SimpleNamespace(init=np.array([[0.0, 0.125, 0.5]]))},
+        u_init={"u": SimpleNamespace(init=np.zeros((1, 2)))},
+        numerical_data_timeseries=None,
+        dynamics_func=lambda time, state, control, parameters, algebraic, data: np.array(
+            [time[0]]
+        ),
+    )
+    nmpc = SimpleNamespace(nlp=[nlp], cycle_duration=1.0, cycle_len=2)
+
+    rows = periodic_example.high_accuracy_integrator_map_diagnostics(
+        nmpc, nodes=(0, 1), rk4_substeps=2
+    )
+
+    assert [row["node"] for row in rows] == [0, 1]
+    assert max(row["trajectory_vs_reference"] for row in rows) < 1e-12
+    assert max(row["rk4_vs_reference"] for row in rows) < 1e-12
+
+
+def test_solution_trace_comparisons_reports_scaled_differences():
+    reference = periodic_example._WarmupSolutionAdapter(
+        states={"x": np.array([[0.0, 1.0, 2.0]])},
+        controls={"u": np.array([[1.0, 2.0]])},
+    )
+    candidate = periodic_example._WarmupSolutionAdapter(
+        states={"x": np.array([[0.0, 1.5, 2.0]])},
+        controls={"u": np.array([[1.0, 3.0]])},
+    )
+
+    state_row = periodic_example.solution_trace_comparisons(
+        reference, candidate, controls=False
+    )[0]
+    control_row = periodic_example.solution_trace_comparisons(
+        reference, candidate, controls=True
+    )[0]
+
+    np.testing.assert_allclose(state_row["rmse"], 0.5 / np.sqrt(3))
+    np.testing.assert_allclose(state_row["normalized_rmse"], 0.25 / np.sqrt(3))
+    np.testing.assert_allclose(control_row["max_abs_error"], 1.0)
+
+
+def test_pulse_width_trust_region_keeps_nodewise_centers():
+    bounds = SimpleNamespace(
+        min=np.array([[0.1, 0.1, 0.1]]), max=np.array([[0.6, 0.6, 0.6]])
+    )
+    nmpc = SimpleNamespace(
+        nlp=[
+            SimpleNamespace(
+                u_init={
+                    "last_pulse_width_Biceps": SimpleNamespace(
+                        init=np.array([[0.2, 0.4, 0.5]])
+                    )
+                },
+                u_bounds={"last_pulse_width_Biceps": bounds},
+            )
+        ]
+    )
+
+    periodic_example.apply_pulse_width_control_trust_region(nmpc, radius=0.01)
+    lower, upper = nmpc._cocofest_nodewise_control_bounds["last_pulse_width_Biceps"]
+
+    np.testing.assert_allclose(lower, np.array([[0.19, 0.39, 0.49]]))
+    np.testing.assert_allclose(upper, np.array([[0.21, 0.41, 0.51]]))
+
+
 def test_continuation_source_inherits_requested_acados_tolerances(
     monkeypatch, tmp_path
 ):

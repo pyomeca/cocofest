@@ -102,6 +102,35 @@ def _periodic_node_interval_duration(ocp) -> float:
     return intervals.pop()
 
 
+def _periodic_node_dynamics_time(
+    integrator_type: str, acados_time, interval_start, interval_duration: float
+):
+    """Return the absolute time used by the periodic-node Ding dynamics."""
+
+    if integrator_type == "ERK":
+        # The bundled explicit-ODE generator does not expose the stage time.
+        return interval_start + interval_duration / 2
+    if integrator_type == "IRK":
+        # OCP shooting intervals initialize the IRK simulator at t0=0.
+        return acados_time + interval_start
+    raise ValueError(f"Unsupported time-dependent integrator: {integrator_type}")
+
+
+def _scaled_acados_dynamics_rhs(rhs, state_scaling: np.ndarray, n_parameters: int):
+    """Convert a physical derivative to the derivative of ACADOS scaled states."""
+
+    from casadi import DM, vertcat
+
+    state_scaling = np.asarray(state_scaling, dtype=float).reshape(-1)
+    complete_scaling = np.concatenate((np.ones(n_parameters), state_scaling))
+    if rhs.shape[0] != complete_scaling.size:
+        raise ValueError(
+            "ACADOS dynamics and scaling dimensions differ "
+            f"({rhs.shape[0]} != {complete_scaling.size})."
+        )
+    return rhs / vertcat(*DM(complete_scaling).elements())
+
+
 def patch_bioptim_acados_interface() -> None:
     """
     Patch the Bioptim 3.4 ACADOS interface for this example.
@@ -128,6 +157,19 @@ def patch_bioptim_acados_interface() -> None:
 
     def patched_export_model(self, ocp):
         original_export_model(self, ocp)
+        state_scaling = np.ones(ocp.nlp[0].states.shape)
+        for key in ocp.nlp[0].states.keys():
+            state_scaling[ocp.nlp[0].states[key].index] = np.asarray(
+                ocp.nlp[0].x_scaling[key].scaling[:, 0], dtype=float
+            )
+        self.acados_model.f_expl_expr = _scaled_acados_dynamics_rhs(
+            self.acados_model.f_expl_expr,
+            state_scaling,
+            ocp.nlp[0].parameters.shape,
+        )
+        self.acados_model.f_impl_expr = (
+            self.acados_model.xdot - self.acados_model.f_expl_expr
+        )
         numerical_timeseries = ocp.nlp[0].numerical_timeseries.cx_start
         if numerical_timeseries.shape[0] == 0:
             return
@@ -158,12 +200,17 @@ def patch_bioptim_acados_interface() -> None:
                 n_substeps=getattr(ocp, "_cocofest_discrete_substeps", 5),
             )
         else:
-            if is_periodic_node and self.opts.integrator_type == "ERK":
-                # The bundled explicit-ODE generator has no time input. Use the
-                # interval midpoint as a documented approximation for ERK.
-                dynamics_time = numerical_timeseries[-1] + interval_duration / 2
+            if is_periodic_node and self.opts.integrator_type in ("ERK", "IRK"):
+                dynamics_time = _periodic_node_dynamics_time(
+                    self.opts.integrator_type,
+                    local_time,
+                    numerical_timeseries[-1],
+                    interval_duration,
+                )
+                if self.opts.integrator_type == "IRK":
+                    self.acados_model.t = local_time
             elif is_periodic_node:
-                dynamics_time = local_time + numerical_timeseries[-1]
+                dynamics_time = local_time
                 self.acados_model.t = local_time
             else:
                 dynamics_time = original_time
@@ -242,6 +289,7 @@ def patch_bioptim_acados_interface() -> None:
         )
 
         lower, upper = scaled_control_bounds(self)
+        nodewise_bounds = getattr(self.ocp, "_cocofest_nodewise_control_bounds", {})
         for stage in range(self.acados_ocp.solver_options.N_horizon):
             if getattr(self.ocp, "_cocofest_fix_controls_to_warmup", False):
                 stage_control = np.empty(self.ocp.nlp[0].controls.shape)
@@ -251,12 +299,19 @@ def patch_bioptim_acados_interface() -> None:
                         self.ocp.nlp[0].u_init[key].init.evaluate_at(stage)
                         / self.ocp.nlp[0].u_scaling[key].scaling[:, 0]
                     )
-                tolerance = 1e-10
+                tolerance = getattr(self.ocp, "_cocofest_fixed_control_tolerance", 1e-5)
                 self.ocp_solver.constraints_set(stage, "lbu", stage_control - tolerance)
                 self.ocp_solver.constraints_set(stage, "ubu", stage_control + tolerance)
             else:
-                self.ocp_solver.constraints_set(stage, "lbu", lower)
-                self.ocp_solver.constraints_set(stage, "ubu", upper)
+                stage_lower = lower.copy()
+                stage_upper = upper.copy()
+                for key, (key_lower, key_upper) in nodewise_bounds.items():
+                    index = self.ocp.nlp[0].controls[key].index
+                    scaling = self.ocp.nlp[0].u_scaling[key].scaling[:, 0]
+                    stage_lower[index] = key_lower[:, stage] / scaling
+                    stage_upper[index] = key_upper[:, stage] / scaling
+                self.ocp_solver.constraints_set(stage, "lbu", stage_lower)
+                self.ocp_solver.constraints_set(stage, "ubu", stage_upper)
 
     AcadosInterface._AcadosInterface__acados_export_model = patched_export_model
     AcadosInterface._AcadosInterface__set_constraints = patched_set_constraints
@@ -756,9 +811,23 @@ def build_argument_parser() -> argparse.ArgumentParser:
         help="Compare the complete dynamics at q_crank and q_crank + 2*pi before solving.",
     )
     parser.add_argument(
+        "--validate-integrator-maps",
+        action="store_true",
+        help=(
+            "Compare selected shooting intervals with a high-accuracy DOP853 integration "
+            "before solving."
+        ),
+    )
+    parser.add_argument(
         "--acados-fix-controls-to-warmup",
         action="store_true",
         help="Fix every ACADOS pulse-width control to its node-wise IPOPT warmup value.",
+    )
+    parser.add_argument(
+        "--acados-fixed-control-tolerance",
+        type=float,
+        default=1e-5,
+        help="Half-width of fixed ACADOS control bounds in scaled control units.",
     )
     parser.add_argument(
         "--ipopt-linear-solver",
@@ -777,6 +846,15 @@ def build_argument_parser() -> argparse.ArgumentParser:
         type=str,
         default=None,
         help="Optional suffix added to the generated ACADOS code folder and model name.",
+    )
+    parser.add_argument(
+        "--acados-seed-cache-tag",
+        type=str,
+        default=None,
+        help=(
+            "Load a successful ACADOS solution with this tag before solving and overwrite "
+            "the cache when the current single-shot solve succeeds."
+        ),
     )
     parser.add_argument(
         "--disable-standard-ipopt-warmup",
@@ -1083,6 +1161,78 @@ def _warmup_cache_path(
         _cache_root()
         / f"warmup_{_warmup_cache_signature(args, model_path, simulation_conditions, cycling_info)}.npz"
     )
+
+
+def _periodic_ipopt_refinement_cache_path(
+    args: argparse.Namespace, model_path: Path
+) -> Path:
+    repository_root = Path(__file__).resolve().parents[3]
+    payload = {
+        "kind": "periodic_ipopt_refinement",
+        "cache_version": 1,
+        "model_formulation": args.model_formulation,
+        "cycles_per_window": args.cycles_per_window,
+        "stimulations_per_cycle": args.stimulations_per_cycle,
+        "objective": args.objective,
+        "objective_shape": args.objective_shape,
+        "constant_crank_torque": args.constant_crank_torque,
+        "torque_application": args.torque_application,
+        "state_scaling": args.state_scaling,
+        "pulse_width_scaling": args.pulse_width_scaling,
+        "standard_warmup_transfer": args.acados_standard_warmup_transfer,
+        "fatigue_warmstart_mode": args.acados_fatigue_warmstart_mode,
+        "use_sx": args.periodic_ipopt_refinement_use_sx,
+        "ipopt_linear_solver": args.ipopt_linear_solver,
+        "sources": [
+            _source_stamp(model_path),
+            _source_stamp(
+                repository_root
+                / "cocofest"
+                / "models"
+                / "ding2007"
+                / "ding2007_with_fatigue_periodic_node.py"
+            ),
+            _source_stamp(
+                repository_root / "cocofest" / "models" / "dynamical_model.py"
+            ),
+        ],
+    }
+    return _cache_root() / f"periodic_ipopt_{_short_hash(payload)}.npz"
+
+
+def _acados_seed_cache_path(args: argparse.Namespace, model_path: Path) -> Path | None:
+    if not args.acados_seed_cache_tag:
+        return None
+    safe_tag = "".join(
+        character if character.isalnum() or character in ("-", "_") else "_"
+        for character in args.acados_seed_cache_tag
+    )
+    payload = {
+        "kind": "acados_seed",
+        "cache_version": 2,
+        "model_formulation": args.model_formulation,
+        "cycles_per_window": args.cycles_per_window,
+        "stimulations_per_cycle": args.stimulations_per_cycle,
+        "objective": args.objective,
+        "objective_shape": args.objective_shape,
+        "constant_crank_torque": args.constant_crank_torque,
+        "torque_application": args.torque_application,
+        "state_scaling": args.state_scaling,
+        "pulse_width_scaling": args.pulse_width_scaling,
+        "integrator_type": args.acados_integrator_type,
+        "sim_stages": args.acados_sim_stages,
+        "sim_steps": args.acados_sim_steps,
+        "newton_iter": args.acados_newton_iter,
+        "model_source": _source_stamp(
+            Path(__file__).resolve().parents[3]
+            / "cocofest"
+            / "models"
+            / "ding2007"
+            / "ding2007_with_fatigue_periodic_node.py"
+        ),
+        "model_path": _source_stamp(model_path),
+    }
+    return _cache_root() / f"acados_seed_{safe_tag}_{_short_hash(payload)}.npz"
 
 
 def _save_warmup_cache(cache_path: Path, solution) -> None:
@@ -2621,6 +2771,142 @@ def _full_dynamics_rollout_defect_details(
         "qdot_by_dof": defects_by_dof("qdot"),
         "worst_qdot_nodes": worst_qdot_nodes(),
     }
+
+
+def high_accuracy_integrator_map_diagnostics(
+    nmpc, nodes: tuple[int, ...] = (0, 1, 15, 29), rk4_substeps: int = 5
+) -> list[dict]:
+    """Compare the shooting trajectory and RK4 map with a DOP853 reference."""
+
+    from scipy.integrate import solve_ivp
+
+    nlp = nmpc.nlp[0]
+    first_state_key = next(iter(nlp.x_init.keys()))
+    first_control_key = next(iter(nlp.u_init.keys()))
+    n_state_nodes = nlp.x_init[first_state_key].init.shape[1]
+    n_control_nodes = nlp.u_init[first_control_key].init.shape[1]
+    states = _stack_initial_guess_values(nlp.x_init, nlp.states, n_state_nodes)
+    controls = _stack_initial_guess_values(nlp.u_init, nlp.controls, n_control_nodes)
+    dt = nmpc.cycle_duration / nmpc.cycle_len
+    rows = []
+    for node in sorted(set(nodes)):
+        if node < 0 or node >= n_control_nodes:
+            continue
+        data = _numerical_timeseries_at_node(nlp, node)
+        start_time = node * dt
+        initial_state = states[:, node]
+        control = controls[:, node]
+        reference = solve_ivp(
+            lambda time, state: _full_dynamics_rhs(nlp, time, dt, state, control, data),
+            (start_time, start_time + dt),
+            initial_state,
+            method="DOP853",
+            rtol=1e-11,
+            atol=1e-13,
+        )
+        if not reference.success:
+            raise RuntimeError(
+                f"High-accuracy integration failed at node {node}: {reference.message}"
+            )
+        reference_next = reference.y[:, -1]
+        rk4_next = _rk4_full_dynamics_step(
+            nlp,
+            initial_state,
+            control,
+            start_time,
+            dt,
+            n_substeps=rk4_substeps,
+            numerical_timeseries=data,
+        )
+        trajectory_next = states[:, node + 1]
+        rows.append(
+            {
+                "node": node,
+                "trajectory_vs_reference": float(
+                    np.max(np.abs(trajectory_next - reference_next))
+                ),
+                "rk4_vs_reference": float(np.max(np.abs(rk4_next - reference_next))),
+                "trajectory_vs_rk4": float(np.max(np.abs(trajectory_next - rk4_next))),
+                "reference_evaluations": int(reference.nfev),
+            }
+        )
+    return rows
+
+
+def solution_trace_comparisons(
+    reference_solution, candidate_solution, *, controls: bool
+) -> list[dict]:
+    """Compare node-wise traces from two solutions of the same formulation."""
+
+    accessor = "decision_controls" if controls else "decision_states"
+    reference = getattr(reference_solution, accessor)(to_merge=SolutionMerge.NODES)
+    candidate = getattr(candidate_solution, accessor)(to_merge=SolutionMerge.NODES)
+    rows = []
+    for key in sorted(set(reference).intersection(candidate)):
+        reference_values = np.atleast_2d(np.asarray(reference[key], dtype=float))
+        candidate_values = np.atleast_2d(np.asarray(candidate[key], dtype=float))
+        for index in range(min(reference_values.shape[0], candidate_values.shape[0])):
+            common_len = max(reference_values.shape[1], candidate_values.shape[1])
+            reference_trace = _resample_trace(reference_values[index], common_len)
+            candidate_trace = _resample_trace(candidate_values[index], common_len)
+            difference = candidate_trace - reference_trace
+            reference_scale = max(
+                float(np.ptp(reference_trace)),
+                float(np.max(np.abs(reference_trace))),
+                np.finfo(float).eps,
+            )
+            rows.append(
+                {
+                    "key": key if reference_values.shape[0] == 1 else f"{key}[{index}]",
+                    "common_len": common_len,
+                    "rmse": float(np.sqrt(np.mean(difference**2))),
+                    "normalized_rmse": float(
+                        np.sqrt(np.mean(difference**2)) / reference_scale
+                    ),
+                    "max_abs_error": float(np.max(np.abs(difference))),
+                    "final_error": float(difference[-1]),
+                    "reference_mean": float(np.mean(reference_trace)),
+                    "candidate_mean": float(np.mean(candidate_trace)),
+                    "reference_range": (
+                        float(np.min(reference_trace)),
+                        float(np.max(reference_trace)),
+                    ),
+                    "candidate_range": (
+                        float(np.min(candidate_trace)),
+                        float(np.max(candidate_trace)),
+                    ),
+                }
+            )
+    return sorted(rows, key=lambda item: item["normalized_rmse"], reverse=True)
+
+
+def print_solution_trace_comparison(
+    label: str,
+    reference_solution,
+    candidate_solution,
+    *,
+    controls: bool,
+    limit: int,
+) -> list[dict]:
+    rows = solution_trace_comparisons(
+        reference_solution, candidate_solution, controls=controls
+    )
+    print(
+        f"{label} | key | common_len | rmse | normalized_rmse | max_abs_error | "
+        "final_error | reference_mean | candidate_mean | reference_range | candidate_range"
+    )
+    for row in rows[:limit]:
+        reference_min, reference_max = row["reference_range"]
+        candidate_min, candidate_max = row["candidate_range"]
+        print(
+            f"{label} | {row['key']} | {row['common_len']} | {row['rmse']:.6g} | "
+            f"{row['normalized_rmse']:.6g} | {row['max_abs_error']:.6g} | "
+            f"{row['final_error']:.6g} | {row['reference_mean']:.6g} | "
+            f"{row['candidate_mean']:.6g} | "
+            f"[{reference_min:.6g}, {reference_max:.6g}] | "
+            f"[{candidate_min:.6g}, {candidate_max:.6g}]"
+        )
+    return rows
 
 
 def _proximal_phase_one_update(
@@ -4202,6 +4488,7 @@ def run_periodic_ipopt_refinement(
     target_nmpc,
     max_iterations: int,
     linear_solver: str,
+    cache_path: Path | None = None,
     echo: bool = False,
 ):
     solver = configure_ipopt_solver(
@@ -4239,6 +4526,10 @@ def run_periodic_ipopt_refinement(
         )
 
     if success:
+        if cache_path is not None:
+            _save_warmup_cache(cache_path, refinement_sol)
+            if echo:
+                print(f"periodic_ipopt_refinement_cache: saved ({cache_path.name})")
         apply_solution_directly_to_periodic_nmpc_initial_guess(
             target_nmpc, refinement_sol
         )
@@ -4288,6 +4579,7 @@ def apply_pulse_width_control_trust_region(
         raise ValueError("--acados-pulse-width-trust-radius must be non-negative.")
 
     summary = {}
+    nodewise_bounds = {}
     for key in periodic_nmpc.nlp[0].u_init.keys():
         if not key.startswith("last_pulse_width_"):
             continue
@@ -4298,25 +4590,25 @@ def apply_pulse_width_control_trust_region(
         original_upper = float(np.max(np.asarray(bounds.max, dtype=float)))
         center_min = float(np.min(center))
         center_max = float(np.max(center))
-        lower = max(original_lower, center_min - radius)
-        upper = min(original_upper, center_max + radius)
-        if lower > upper:
-            raise RuntimeError(
-                f"Pulse-width trust region is empty for {key}: lower={lower}, upper={upper}."
-            )
+        lower = np.maximum(original_lower, center - radius)
+        upper = np.minimum(original_upper, center + radius)
+        if np.any(lower > upper):
+            raise RuntimeError(f"Pulse-width trust region is empty for {key}.")
 
-        bounds.min[:, :] = lower
-        bounds.max[:, :] = upper
+        bounds.min[:, :] = float(np.min(lower))
+        bounds.max[:, :] = float(np.max(upper))
         periodic_nmpc.nlp[0].u_init[key].init[:, :] = np.minimum(
             np.maximum(center, lower), upper
         )
+        nodewise_bounds[key] = (lower, upper)
         summary[key] = {
             "center_min": center_min,
             "center_max": center_max,
-            "lower": lower,
-            "upper": upper,
+            "lower": float(np.min(lower)),
+            "upper": float(np.max(upper)),
         }
 
+    periodic_nmpc._cocofest_nodewise_control_bounds = nodewise_bounds
     return summary
 
 
@@ -4538,10 +4830,13 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
         raise ValueError(
             "--acados-transfer-rollout-max-bound-violation must be non-negative."
         )
+    if args.acados_fixed_control_tolerance <= 0:
+        raise ValueError("--acados-fixed-control-tolerance must be strictly positive.")
 
     periodic_ipopt_refinement_enabled = (
         args.periodic_ipopt_refinement and not args.disable_periodic_ipopt_refinement
     )
+    periodic_ipopt_reference_solution = None
 
     continuation_source = None
     horizon_seed = None
@@ -4562,6 +4857,9 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
     example_dir = Path(__file__).resolve().parent
     model_path = (
         example_dir / "../../msk_models/Wu/Modified_Wu_Shoulder_Model_Cycling.bioMod"
+    )
+    acados_seed_cache_path = (
+        _acados_seed_cache_path(args, model_path) if args.solver == "acados" else None
     )
     cycle_duration = 1.0
     total_window_duration = cycle_duration * args.cycles_per_window
@@ -4950,25 +5248,40 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
             if args.acados_diagnostics:
                 print("periodic_ipopt_refinement_initial_defects:")
                 print_initial_guess_diagnostics(nmpc)
-        refinement_nmpc = build_periodic_ipopt_refinement_nmpc(
-            source_nmpc=nmpc,
-            model_path=model_path,
-            stim_time=stim_time,
-            mhe_info={
-                **mhe_info,
-                "use_sx": args.periodic_ipopt_refinement_use_sx,
-            },
-            cycling_info=cycling_info,
-            simulation_conditions=nmpc_simulation_conditions,
-            model_formulation=args.model_formulation,
-        )
-        run_periodic_ipopt_refinement(
-            refinement_nmpc,
-            target_nmpc=nmpc,
-            max_iterations=args.periodic_ipopt_refinement_iterations,
-            linear_solver=args.ipopt_linear_solver,
-            echo=echo,
-        )
+        refinement_cache_path = _periodic_ipopt_refinement_cache_path(args, model_path)
+        if refinement_cache_path.exists():
+            refinement_solution = _load_warmup_cache(refinement_cache_path)
+            periodic_ipopt_reference_solution = refinement_solution
+            apply_solution_directly_to_periodic_nmpc_initial_guess(
+                nmpc, refinement_solution
+            )
+            if echo:
+                print(
+                    "periodic_ipopt_refinement_cache: "
+                    f"hit ({refinement_cache_path.name})"
+                )
+                print("periodic_ipopt_refinement_applied: True")
+        else:
+            refinement_nmpc = build_periodic_ipopt_refinement_nmpc(
+                source_nmpc=nmpc,
+                model_path=model_path,
+                stim_time=stim_time,
+                mhe_info={
+                    **mhe_info,
+                    "use_sx": args.periodic_ipopt_refinement_use_sx,
+                },
+                cycling_info=cycling_info,
+                simulation_conditions=nmpc_simulation_conditions,
+                model_formulation=args.model_formulation,
+            )
+            periodic_ipopt_reference_solution = run_periodic_ipopt_refinement(
+                refinement_nmpc,
+                target_nmpc=nmpc,
+                max_iterations=args.periodic_ipopt_refinement_iterations,
+                linear_solver=args.ipopt_linear_solver,
+                cache_path=refinement_cache_path,
+                echo=echo,
+            )
         if echo and args.acados_diagnostics and adapted_warmup_solution is not None:
             print_warmup_state_comparison(
                 "after_periodic_ipopt_refinement",
@@ -5019,6 +5332,12 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
                     f"span={summary['span']:.9g}"
                 )
 
+    if acados_seed_cache_path is not None and acados_seed_cache_path.exists():
+        cached_acados_seed = _load_warmup_cache(acados_seed_cache_path)
+        apply_solution_directly_to_periodic_nmpc_initial_guess(nmpc, cached_acados_seed)
+        if echo:
+            print(f"acados_seed_cache: hit ({acados_seed_cache_path.name})")
+
     if args.solver == "acados" and args.acados_project_qdot_from_q:
         project_qdot_initial_guess_from_q(nmpc)
         if echo:
@@ -5065,6 +5384,19 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
                     "acados_pulse_width_trust_region: "
                     f"{key} center=[{item['center_min']:.6g}, {item['center_max']:.6g}] "
                     f"bounds=[{item['lower']:.6g}, {item['upper']:.6g}]"
+                )
+
+    if args.validate_integrator_maps:
+        for row in high_accuracy_integrator_map_diagnostics(nmpc):
+            if echo:
+                print(
+                    "integrator_map_validation: "
+                    f"node={row['node']} "
+                    "trajectory_vs_dop853="
+                    f"{row['trajectory_vs_reference']:.6g} "
+                    f"rk4_vs_dop853={row['rk4_vs_reference']:.6g} "
+                    f"trajectory_vs_rk4={row['trajectory_vs_rk4']:.6g} "
+                    f"dop853_nfev={row['reference_evaluations']}"
                 )
 
     if args.solver == "acados" and args.acados_diagnostics:
@@ -5167,6 +5499,7 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
     solver_first_iter = None
     if args.solver == "acados":
         nmpc._cocofest_fix_controls_to_warmup = args.acados_fix_controls_to_warmup
+        nmpc._cocofest_fixed_control_tolerance = args.acados_fixed_control_tolerance
         nmpc._cocofest_discrete_substeps = (
             args.acados_sim_steps
             if args.acados_sim_steps is not None
@@ -5250,6 +5583,40 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
             summarize_single_shot(sol)
             if args.solver == "acados" and args.acados_diagnostics:
                 print_acados_diagnostics("single_shot", collect_acados_diagnostics(sol))
+            if (
+                args.solver == "acados"
+                and periodic_ipopt_reference_solution is not None
+            ):
+                print_solution_trace_comparison(
+                    "ipopt_acados_control_comparison",
+                    periodic_ipopt_reference_solution,
+                    sol,
+                    controls=True,
+                    limit=len(nmpc.nlp[0].controls.keys()),
+                )
+                print_solution_trace_comparison(
+                    "ipopt_acados_state_comparison",
+                    periodic_ipopt_reference_solution,
+                    sol,
+                    controls=False,
+                    limit=args.warmup_state_comparison_limit,
+                )
+            if args.validate_integrator_maps:
+                apply_solution_directly_to_periodic_nmpc_initial_guess(nmpc, sol)
+                for row in high_accuracy_integrator_map_diagnostics(nmpc):
+                    print(
+                        "final_integrator_map_validation: "
+                        f"node={row['node']} "
+                        "trajectory_vs_dop853="
+                        f"{row['trajectory_vs_reference']:.6g} "
+                        f"rk4_vs_dop853={row['rk4_vs_reference']:.6g} "
+                        f"trajectory_vs_rk4={row['trajectory_vs_rk4']:.6g} "
+                        f"dop853_nfev={row['reference_evaluations']}"
+                    )
+        if acados_seed_cache_path is not None and _status_is_success(sol.status):
+            _save_warmup_cache(acados_seed_cache_path, sol)
+            if echo:
+                print(f"acados_seed_cache: saved ({acados_seed_cache_path.name})")
         summary = build_single_shot_summary(sol)
         if args.solver == "acados" and args.acados_diagnostics:
             summary["acados_diagnostics"] = collect_acados_diagnostics(sol)
