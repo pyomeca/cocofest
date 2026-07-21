@@ -137,19 +137,89 @@ def _validated_cycle_count(result: dict) -> int:
     return prefix
 
 
-def _truncate_result_to_cycles(result: dict, cycle_count: int) -> dict:
+def _configured_state_node_stride(result: dict) -> int:
+    args = result["args"]
+    ode_solver = str(getattr(args, "ode_solver", "")).lower()
+    if ode_solver in {"collocation", "irk"}:
+        return int(getattr(args, "collocation_degree", 3)) + 1
+    return 1
+
+
+def _exported_cycle_count(result: dict) -> int:
+    if result.get("exported_cycles") is not None:
+        return int(result["exported_cycles"])
+
     shooting_per_cycle = int(result["args"].stimulations_per_cycle)
-    state_nodes = cycle_count * shooting_per_cycle + 1
-    control_nodes = cycle_count * shooting_per_cycle
+    state_stride = _configured_state_node_stride(result)
+    state_node_count = np.asarray(result["wheel_angle_trace"]).size
+    interval_count, remainder = divmod(state_node_count - 1, state_stride)
+    cycle_count, cycle_remainder = divmod(interval_count, shooting_per_cycle)
+    if remainder or cycle_remainder:
+        raise ValueError(
+            "Cannot infer the number of exported cycles from the state trace."
+        )
+    return cycle_count
+
+
+def _shooting_node_state_trace(
+    values: np.ndarray, result: dict, cycle_count: int
+) -> np.ndarray:
+    values = np.asarray(values)
+    shooting_per_cycle = int(result["args"].stimulations_per_cycle)
+    exported_cycles = _exported_cycle_count(result)
+    exported_intervals = exported_cycles * shooting_per_cycle
+    if exported_intervals <= 0:
+        return values[..., :0]
+
+    available_intervals, remainder = divmod(values.shape[-1] - 1, exported_intervals)
+    if remainder:
+        raise ValueError(
+            "State trace cannot be mapped exactly to the shooting-node grid: "
+            f"{values.shape[-1]} values for {exported_intervals} intervals."
+        )
+    stride = available_intervals
+    expected_stride = _configured_state_node_stride(result)
+    if stride != expected_stride:
+        raise ValueError(
+            "Unexpected number of state points per shooting interval: "
+            f"observed {stride}, expected {expected_stride}."
+        )
+
+    requested_intervals = cycle_count * shooting_per_cycle
+    return values[..., : requested_intervals * stride + 1 : stride]
+
+
+def _shooting_node_control_trace(
+    values: np.ndarray, result: dict, cycle_count: int
+) -> np.ndarray:
+    values = np.asarray(values)
+    shooting_per_cycle = int(result["args"].stimulations_per_cycle)
+    exported_intervals = _exported_cycle_count(result) * shooting_per_cycle
+    if exported_intervals <= 0:
+        return values[..., :0]
+
+    stride, remainder = divmod(values.shape[-1], exported_intervals)
+    if remainder or stride <= 0:
+        raise ValueError(
+            "Control trace cannot be mapped exactly to the shooting-node grid: "
+            f"{values.shape[-1]} values for {exported_intervals} intervals."
+        )
+    requested_intervals = cycle_count * shooting_per_cycle
+    return values[..., : requested_intervals * stride : stride]
+
+
+def _truncate_result_to_cycles(result: dict, cycle_count: int) -> dict:
     return {
         **result,
-        "wheel_angle_trace": np.asarray(result["wheel_angle_trace"])[:state_nodes],
+        "wheel_angle_trace": _shooting_node_state_trace(
+            result["wheel_angle_trace"], result, cycle_count
+        ),
         "state_traces": {
-            key: np.asarray(values)[..., :state_nodes]
+            key: _shooting_node_state_trace(values, result, cycle_count)
             for key, values in result.get("state_traces", {}).items()
         },
         "control_traces": {
-            key: np.asarray(values)[..., :control_nodes]
+            key: _shooting_node_control_trace(values, result, cycle_count)
             for key, values in result.get("control_traces", {}).items()
         },
     }
@@ -296,15 +366,6 @@ def _shared_stop_classification(ipopt_result: dict, acados_result: dict) -> dict
     return {"label": label, "evidence": evidence}
 
 
-def _resample_trace(trace: np.ndarray, target_len: int) -> np.ndarray:
-    trace = np.asarray(trace, dtype=float).squeeze()
-    if trace.size == target_len:
-        return trace
-    current_grid = np.linspace(0.0, 1.0, trace.size)
-    target_grid = np.linspace(0.0, 1.0, target_len)
-    return np.interp(target_grid, current_grid, trace)
-
-
 def _wrap_to_pi(values: np.ndarray) -> np.ndarray:
     return (values + np.pi) % (2 * np.pi) - np.pi
 
@@ -312,9 +373,11 @@ def _wrap_to_pi(values: np.ndarray) -> np.ndarray:
 def _trace_comparison(ipopt_result: dict, acados_result: dict) -> dict:
     ipopt_trace = np.asarray(ipopt_result["wheel_angle_trace"], dtype=float).squeeze()
     acados_trace = np.asarray(acados_result["wheel_angle_trace"], dtype=float).squeeze()
-    common_len = max(ipopt_trace.size, acados_trace.size)
-    ipopt_common = _resample_trace(np.unwrap(ipopt_trace), common_len)
-    acados_common = _resample_trace(np.unwrap(acados_trace), common_len)
+    if ipopt_trace.size != acados_trace.size:
+        raise ValueError("Shooting-node wheel traces must have the same length.")
+    common_len = ipopt_trace.size
+    ipopt_common = np.unwrap(ipopt_trace)
+    acados_common = np.unwrap(acados_trace)
     unwrapped_diff = acados_common - ipopt_common
     unwrapped_turn_offset = int(np.rint(np.median(unwrapped_diff / (2 * np.pi))))
     turn_aligned_unwrapped_diff = unwrapped_diff - unwrapped_turn_offset * 2 * np.pi
@@ -352,9 +415,13 @@ def _control_comparisons(ipopt_result: dict, acados_result: dict) -> list[dict]:
         acados_values = np.asarray(acados_controls[key], dtype=float).reshape(-1)
         if ipopt_values.size == 0 or acados_values.size == 0:
             continue
-        common_len = max(ipopt_values.size, acados_values.size)
-        ipopt_common = _resample_trace(ipopt_values, common_len)
-        acados_common = _resample_trace(acados_values, common_len)
+        if ipopt_values.size != acados_values.size:
+            raise ValueError(
+                f"Shooting-node control traces for '{key}' must have the same length."
+            )
+        common_len = ipopt_values.size
+        ipopt_common = ipopt_values
+        acados_common = acados_values
         diff = acados_common - ipopt_common
         comparisons.append(
             {
@@ -404,9 +471,9 @@ def _state_trace_comparisons(
             continue
 
         for row in range(min(reference_values.shape[0], compared_values.shape[0])):
-            common_len = max(reference_values.shape[1], compared_values.shape[1])
-            reference_common = _resample_trace(reference_values[row, :], common_len)
-            compared_common = _resample_trace(compared_values[row, :], common_len)
+            common_len = min(reference_values.shape[1], compared_values.shape[1])
+            reference_common = reference_values[row, :common_len]
+            compared_common = compared_values[row, :common_len]
             diff = compared_common - reference_common
             comparisons.append(
                 {
@@ -822,6 +889,7 @@ def print_comparison(
         acados_result, common_validated_cycles
     )
     print(f"solution comparison validated cycles: {common_validated_cycles}")
+    print("solution comparison grid: shooting_nodes_only")
     trace_metrics = _trace_comparison(comparison_ipopt, comparison_acados)
     print(
         "wheel trace comparison | "
