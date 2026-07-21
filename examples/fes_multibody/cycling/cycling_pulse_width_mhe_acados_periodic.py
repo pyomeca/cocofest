@@ -376,6 +376,68 @@ def apply_acados_dual_warm_start(
     }
 
 
+def apply_ipopt_dual_warm_start(nmpc, solution, mode: str) -> dict:
+    """Transfer IPOPT duals without replacing the shifted primal initial guess."""
+    if mode not in {"off", "constraints", "bounds", "all"}:
+        raise ValueError(f"Unsupported IPOPT dual warm-start mode '{mode}'.")
+
+    summary = {
+        "mode": mode,
+        "applied": False,
+        "lam_g_size": 0,
+        "lam_x_size": 0,
+        "reason": None,
+    }
+    if mode == "off":
+        summary["reason"] = "disabled"
+        return summary
+    if solution is None:
+        summary["reason"] = "no_previous_solution"
+        return summary
+
+    interface = getattr(nmpc, "ocp_solver", None)
+    if interface is None or not hasattr(interface, "lam_g"):
+        summary["reason"] = "ipopt_interface_unavailable"
+        return summary
+
+    limits = getattr(interface, "limits", {})
+
+    def validated_multiplier(name: str, expected_key: str):
+        values = getattr(solution, name, None)
+        if values is None:
+            return None
+        values = np.asarray(values, dtype=float).reshape(-1)
+        expected = limits.get(expected_key)
+        if expected is not None and values.size != np.asarray(expected).size:
+            return None
+        if not np.all(np.isfinite(values)):
+            return None
+        return values.copy()
+
+    lam_g = None
+    if mode in {"constraints", "all"}:
+        lam_g = validated_multiplier("lam_g", "lbg")
+        if lam_g is None:
+            summary["reason"] = "invalid_constraint_multipliers"
+            return summary
+
+    lam_x = None
+    if mode in {"bounds", "all"}:
+        lam_x = validated_multiplier("lam_x", "x0")
+        if lam_x is None:
+            summary["reason"] = "invalid_bound_multipliers"
+            return summary
+
+    interface.lam_g = lam_g
+    interface.lam_x = lam_x
+    summary.update(
+        applied=True,
+        lam_g_size=0 if lam_g is None else lam_g.size,
+        lam_x_size=0 if lam_x is None else lam_x.size,
+    )
+    return summary
+
+
 def parse_objectives(raw_objective: str) -> set[str]:
     values = {item.strip().lower() for item in raw_objective.split(",") if item.strip()}
     allowed = set(OBJECTIVE_TO_WEIGHT_INDEX) | {"none"}
@@ -861,6 +923,15 @@ def build_argument_parser() -> argparse.ArgumentParser:
         type=int,
         default=2000,
         help="Maximum number of IPOPT iterations per window.",
+    )
+    parser.add_argument(
+        "--ipopt-dual-warm-start-mode",
+        choices=("off", "constraints", "bounds", "all"),
+        default="bounds",
+        help=(
+            "Reuse no duals, constraint multipliers, bound multipliers, or both "
+            "from the previous IPOPT MHE window."
+        ),
     )
     parser.add_argument(
         "--full-dynamics-phase-one",
@@ -2416,6 +2487,7 @@ def summarize_windows(sol, requested_windows: int, cycles_per_window: int) -> No
         for idx, window_solution in enumerate(source_window_solutions):
             print(
                 f"window[{idx}] status={window_solution.status} "
+                f"iterations={getattr(window_solution, 'iterations', None)} "
                 f"solver_time_s={_fmt(window_solution.solver_time_to_optimize)} "
                 f"wall_time_s={_fmt(window_solution.real_time_to_optimize)}"
             )
@@ -2466,6 +2538,10 @@ def build_window_summary(sol, requested_windows: int, cycles_per_window: int) ->
         "exported_cycles": accounting["exported_cycles"],
         "covered_cycles": accounting["covered_cycles"],
         "window_statuses": accounting["window_statuses"],
+        "window_iterations": [
+            getattr(window_solution, "iterations", None)
+            for window_solution in source_window_solutions
+        ],
         "solver_success": solver_success,
         "physical_success": physical_success,
         "window_count": accounting["attempted_windows"],
@@ -5461,6 +5537,7 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
         ):
             print(f"ipopt_linear_solver: {args.ipopt_linear_solver}")
         if args.solver == "ipopt":
+            print("ipopt_dual_warm_start_mode: " f"{args.ipopt_dual_warm_start_mode}")
             print(
                 "historical_initial_guess: "
                 f"{historical_init_guess_path if historical_init_guess_path else 'None'}"
@@ -5720,6 +5797,7 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
         initial_guess_control_traces = _initial_guess_traces(nmpc.nlp[0].u_init)
 
     acados_window_diagnostics = []
+    ipopt_dual_warm_start_summaries = []
     transfer_rollout_summaries = []
 
     def cache_first_successful_window(_nmpc, solution):
@@ -5755,6 +5833,19 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
                 f"window {cycle_idx} terminal wheel q={states['q'][2, -1]:.6f} "
                 f"qdot={states['qdot'][2, -1]:.6f}"
             )
+        if args.solver == "ipopt" and _sol is not None:
+            dual_summary = apply_ipopt_dual_warm_start(
+                _nmpc, _sol, args.ipopt_dual_warm_start_mode
+            )
+            ipopt_dual_warm_start_summaries.append(dual_summary)
+            if echo:
+                print(
+                    "ipopt_dual_warm_start: "
+                    f"mode={dual_summary['mode']} applied={dual_summary['applied']} "
+                    f"lam_g={dual_summary['lam_g_size']} "
+                    f"lam_x={dual_summary['lam_x_size']} "
+                    f"reason={dual_summary['reason']}"
+                )
         continue_solving = cycle_idx + 1 < args.n_windows
         if (
             continue_solving
@@ -6002,6 +6093,8 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
     )
     if args.solver == "acados" and args.acados_diagnostics:
         summary["acados_diagnostics"] = acados_window_diagnostics
+    if ipopt_dual_warm_start_summaries:
+        summary["ipopt_dual_warm_start_summaries"] = ipopt_dual_warm_start_summaries
     if transfer_rollout_summaries:
         summary["transfer_rollout_summaries"] = transfer_rollout_summaries
     if initial_guess_state_traces is not None:

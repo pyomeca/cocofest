@@ -526,6 +526,7 @@ def _solver_config(
     codegen_tag: str | None,
     ipopt_max_iter: int,
     ipopt_linear_solver: str,
+    ipopt_dual_warm_start_mode: str,
     acados_max_iter: int,
     control_regularization_weight: float,
     control_regularization_target: float | None,
@@ -613,6 +614,7 @@ def _solver_config(
             constant_crank_torque=resistive_torque,
             max_ipopt_iterations=ipopt_max_iter,
             ipopt_linear_solver=ipopt_linear_solver,
+            ipopt_dual_warm_start_mode=ipopt_dual_warm_start_mode,
             n_windows=n_windows,
             ode_solver=_pick(ipopt_ode_solver, defaults["ode_solver"]),
             collocation_degree=_pick(
@@ -716,6 +718,7 @@ def _solver_config(
             constant_crank_torque=resistive_torque,
             max_acados_iterations=acados_max_iter,
             ipopt_linear_solver=ipopt_linear_solver,
+            ipopt_dual_warm_start_mode=ipopt_dual_warm_start_mode,
             n_windows=n_windows,
             ode_solver="rk4",
             rk_steps=5,
@@ -841,6 +844,14 @@ def print_comparison(
             f"max_step={_format_metric(diagnostics.get('max_step'))} "
             f"window_statuses={result.get('window_statuses')}"
         )
+        if result.get("window_iterations"):
+            iterations = [
+                value for value in result["window_iterations"] if value is not None
+            ]
+            print(
+                f"{label} window_iterations={result['window_iterations']} "
+                f"total_iterations={sum(iterations)}"
+            )
         solver_per_cycle = performance[label]["solver_time_per_cycle_s"]
         wall_per_cycle = performance[label]["wall_time_per_cycle_s"]
         print(
@@ -1042,6 +1053,7 @@ def main(
     codegen_tag: str | None = None,
     ipopt_max_iter: int = 2000,
     ipopt_linear_solver: str = "ma57",
+    ipopt_dual_warm_start_mode: str = "bounds",
     acados_max_iter: int = 100,
     control_regularization_weight: float = 0.0,
     acados_control_regularization_weight: float | None = None,
@@ -1129,6 +1141,7 @@ def main(
         codegen_tag=codegen_tag,
         ipopt_max_iter=ipopt_max_iter,
         ipopt_linear_solver=ipopt_linear_solver,
+        ipopt_dual_warm_start_mode=ipopt_dual_warm_start_mode,
         acados_max_iter=acados_max_iter,
         control_regularization_weight=control_regularization_weight,
         control_regularization_target=control_regularization_target,
@@ -1213,6 +1226,7 @@ def main(
         codegen_tag=codegen_tag,
         ipopt_max_iter=ipopt_max_iter,
         ipopt_linear_solver=ipopt_linear_solver,
+        ipopt_dual_warm_start_mode=ipopt_dual_warm_start_mode,
         acados_max_iter=acados_max_iter,
         control_regularization_weight=(
             acados_control_regularization_weight
@@ -1352,6 +1366,15 @@ def build_cli() -> argparse.ArgumentParser:
     parser.add_argument("--codegen-tag", default="fes_compare")
     parser.add_argument("--ipopt-max-iter", type=int, default=2000)
     parser.add_argument("--ipopt-linear-solver", default="ma57")
+    parser.add_argument(
+        "--ipopt-dual-warm-start-mode",
+        choices=("off", "constraints", "bounds", "all"),
+        default="bounds",
+        help=(
+            "Reuse no IPOPT duals, constraint multipliers, bound multipliers, "
+            "or both between receding-horizon windows."
+        ),
+    )
     parser.add_argument(
         "--ipopt-profile",
         choices=("historical", "acados_like", "acados-like"),
@@ -1681,6 +1704,7 @@ if __name__ == "__main__":
         codegen_tag=args.codegen_tag,
         ipopt_max_iter=args.ipopt_max_iter,
         ipopt_linear_solver=args.ipopt_linear_solver,
+        ipopt_dual_warm_start_mode=args.ipopt_dual_warm_start_mode,
         acados_max_iter=args.acados_max_iter,
         control_regularization_weight=args.control_regularization_weight,
         acados_control_regularization_weight=args.acados_control_regularization_weight,

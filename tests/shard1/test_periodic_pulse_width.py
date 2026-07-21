@@ -415,6 +415,91 @@ def test_acados_dual_shift_zeros_structurally_incompatible_terminal_multipliers(
     np.testing.assert_array_equal(solver.values[(2, "lam")], [0.0])
 
 
+def _ipopt_dual_warm_start_fixture():
+    interface = SimpleNamespace(
+        lam_g=None,
+        lam_x=None,
+        limits={"lbg": np.zeros(3), "x0": np.zeros(4)},
+    )
+    nmpc = SimpleNamespace(ocp_solver=interface, _is_warm_starting=False)
+    solution = SimpleNamespace(
+        lam_g=np.array([1.0, 2.0, 3.0]),
+        lam_x=np.array([4.0, 5.0, 6.0, 7.0]),
+    )
+    return nmpc, solution
+
+
+def test_ipopt_dual_warm_start_can_transfer_constraint_multipliers_only():
+    nmpc, solution = _ipopt_dual_warm_start_fixture()
+
+    summary = periodic_example.apply_ipopt_dual_warm_start(
+        nmpc, solution, mode="constraints"
+    )
+
+    assert summary == {
+        "mode": "constraints",
+        "applied": True,
+        "lam_g_size": 3,
+        "lam_x_size": 0,
+        "reason": None,
+    }
+    np.testing.assert_array_equal(nmpc.ocp_solver.lam_g, solution.lam_g)
+    assert nmpc.ocp_solver.lam_x is None
+    # Avoid Bioptim's aggressive set_warm_start_options(1e-10): the configured
+    # IPOPT solver already accepts lam_g0 while retaining its robust mu_init.
+    assert nmpc._is_warm_starting is False
+
+
+def test_ipopt_dual_warm_start_can_include_bound_multipliers():
+    nmpc, solution = _ipopt_dual_warm_start_fixture()
+
+    summary = periodic_example.apply_ipopt_dual_warm_start(nmpc, solution, mode="all")
+
+    assert summary["applied"] is True
+    assert summary["lam_x_size"] == 4
+    np.testing.assert_array_equal(nmpc.ocp_solver.lam_x, solution.lam_x)
+
+
+def test_ipopt_dual_warm_start_can_transfer_bound_multipliers_only():
+    nmpc, solution = _ipopt_dual_warm_start_fixture()
+
+    summary = periodic_example.apply_ipopt_dual_warm_start(
+        nmpc, solution, mode="bounds"
+    )
+
+    assert summary["applied"] is True
+    assert summary["lam_g_size"] == 0
+    assert summary["lam_x_size"] == 4
+    assert nmpc.ocp_solver.lam_g is None
+    np.testing.assert_array_equal(nmpc.ocp_solver.lam_x, solution.lam_x)
+
+
+def test_ipopt_dual_warm_start_rejects_nonfinite_or_wrong_sized_duals():
+    nmpc, solution = _ipopt_dual_warm_start_fixture()
+    solution.lam_g = np.array([1.0, np.nan, 3.0])
+
+    nonfinite = periodic_example.apply_ipopt_dual_warm_start(
+        nmpc, solution, mode="constraints"
+    )
+    assert nonfinite["applied"] is False
+    assert nonfinite["reason"] == "invalid_constraint_multipliers"
+
+    solution.lam_g = np.ones(2)
+    wrong_size = periodic_example.apply_ipopt_dual_warm_start(
+        nmpc, solution, mode="constraints"
+    )
+    assert wrong_size["applied"] is False
+    assert wrong_size["reason"] == "invalid_constraint_multipliers"
+
+
+def test_ipopt_dual_warm_start_cli_defaults_to_bound_multipliers():
+    periodic_args = periodic_example.build_argument_parser().parse_args([])
+    comparison_args = comparison_example.build_cli().parse_args([])
+
+    assert periodic_args.ipopt_dual_warm_start_mode == "bounds"
+    assert comparison_args.ipopt_dual_warm_start_mode == "bounds"
+
+
 class _BoundComplementaritySolver:
     def get(self, stage, field):
         values = {
