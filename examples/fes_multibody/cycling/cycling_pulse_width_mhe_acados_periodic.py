@@ -257,6 +257,14 @@ def patch_bioptim_acados_interface() -> None:
         if self.ocp_solver is None:
             return
 
+        dual_summary = apply_acados_dual_warm_start(
+            self.ocp_solver,
+            horizon=self.acados_ocp.solver_options.N_horizon,
+            mode=getattr(self.ocp, "_cocofest_dual_warm_start_mode", "preserve"),
+            shift_stages=getattr(self.ocp, "_cocofest_dual_shift_stages", 0),
+        )
+        self.ocp._cocofest_last_dual_warm_start_summary = dual_summary
+
         if self.ocp.nlp[0].numerical_timeseries.shape:
             terminal_node = self.acados_ocp.solver_options.N_horizon
             for stage in range(terminal_node + 1):
@@ -317,6 +325,55 @@ def patch_bioptim_acados_interface() -> None:
     AcadosInterface._AcadosInterface__set_constraints = patched_set_constraints
     AcadosInterface._AcadosInterface__update_solver = patched_update_solver
     AcadosInterface._cocofest_interface_patch = True
+
+
+def apply_acados_dual_warm_start(
+    acados_solver, horizon: int, mode: str, shift_stages: int
+) -> dict[str, int | str]:
+    if mode not in {"preserve", "reset", "shift"}:
+        raise ValueError(f"Unsupported ACADOS dual warm-start mode '{mode}'.")
+    if shift_stages < 0:
+        raise ValueError("ACADOS dual shift must be non-negative.")
+    if mode == "preserve":
+        return {"mode": mode, "shift_stages": 0, "zeroed_tail_stages": 0}
+
+    lam = [
+        np.asarray(acados_solver.get(stage, "lam"), dtype=float)
+        for stage in range(horizon + 1)
+    ]
+    pi = [
+        np.asarray(acados_solver.get(stage, "pi"), dtype=float)
+        for stage in range(horizon)
+    ]
+    if mode == "reset":
+        for stage, values in enumerate(lam):
+            acados_solver.set(stage, "lam", np.zeros_like(values))
+        for stage, values in enumerate(pi):
+            acados_solver.set(stage, "pi", np.zeros_like(values))
+        return {
+            "mode": mode,
+            "shift_stages": 0,
+            "zeroed_tail_stages": horizon + 1,
+        }
+
+    shift = min(shift_stages, horizon)
+    for stage in range(horizon + 1):
+        source = stage + shift
+        values = (
+            lam[source]
+            if source <= horizon and lam[source].shape == lam[stage].shape
+            else np.zeros_like(lam[stage])
+        )
+        acados_solver.set(stage, "lam", values)
+    for stage in range(horizon):
+        source = stage + shift
+        values = pi[source] if source < horizon else np.zeros_like(pi[stage])
+        acados_solver.set(stage, "pi", values)
+    return {
+        "mode": mode,
+        "shift_stages": shift,
+        "zeroed_tail_stages": shift,
+    }
 
 
 def parse_objectives(raw_objective: str) -> set[str]:
@@ -709,6 +766,15 @@ def build_argument_parser() -> argparse.ArgumentParser:
         help="Initialize the first QP warm start from the current NLP iterate.",
     )
     parser.add_argument(
+        "--acados-dual-warm-start-mode",
+        choices=("preserve", "reset", "shift"),
+        default="reset",
+        help=(
+            "Treatment of ACADOS inequality and dynamics multipliers between MHE windows. "
+            "Reset is the robust default; shift is experimental."
+        ),
+    )
+    parser.add_argument(
         "--acados-qpscaling-scale-objective",
         choices=("NO_OBJECTIVE_SCALING", "OBJECTIVE_GERSHGORIN"),
         default="OBJECTIVE_GERSHGORIN",
@@ -763,6 +829,14 @@ def build_argument_parser() -> argparse.ArgumentParser:
         "--acados-transfer-full-dynamics-rollout",
         action="store_true",
         help="Reintegrate the appended cycle with the complete dynamics after each window transfer.",
+    )
+    parser.add_argument(
+        "--acados-transfer-phase-one",
+        action="store_true",
+        help=(
+            "Apply the bounded proximal complete-dynamics phase I after each MHE window "
+            "transfer. Uses the --full-dynamics-phase-one-* settings."
+        ),
     )
     parser.add_argument(
         "--acados-transfer-rollout-substeps",
@@ -1811,6 +1885,103 @@ def _safe_acados_stage_field(acados_solver, stage: int, field: str):
         return {"error": str(exc)}
 
 
+def _variable_row_labels(values_by_key: dict) -> list[str]:
+    labels = []
+    for key, values in values_by_key.items():
+        array = np.asarray(values)
+        row_count = 1 if array.ndim <= 1 else array.shape[0]
+        labels.extend(
+            [key]
+            if row_count == 1
+            else [f"{key}[{index}]" for index in range(row_count)]
+        )
+    return labels
+
+
+def _acados_bound_complementarity_rows(
+    acados_solver,
+    n_stages: int,
+    state_labels: list[str] | None = None,
+    control_labels: list[str] | None = None,
+    limit: int = 8,
+) -> list[dict]:
+    """Locate the box bounds that dominate Acados' complementarity residual."""
+    rows = []
+    state_labels = state_labels or []
+    control_labels = control_labels or []
+    for stage in range(n_stages):
+        x = _safe_acados_stage_field(acados_solver, stage, "x")
+        u = _safe_acados_stage_field(acados_solver, stage, "u")
+        lam = _safe_acados_stage_field(acados_solver, stage, "lam")
+        if any(isinstance(values, dict) for values in (x, u, lam)):
+            continue
+
+        try:
+            lower_u = np.asarray(
+                acados_solver.constraints_get(stage, "lbu"), dtype=float
+            ).reshape(-1)
+            upper_u = np.asarray(
+                acados_solver.constraints_get(stage, "ubu"), dtype=float
+            ).reshape(-1)
+            lower_x = np.asarray(
+                acados_solver.constraints_get(stage, "lbx"), dtype=float
+            ).reshape(-1)
+            upper_x = np.asarray(
+                acados_solver.constraints_get(stage, "ubx"), dtype=float
+            ).reshape(-1)
+        except Exception:  # noqa: BLE001 - diagnostics should not mask a solve.
+            continue
+
+        x = np.asarray(x, dtype=float).reshape(-1)
+        u = np.asarray(u, dtype=float).reshape(-1)
+        lam = np.asarray(lam, dtype=float).reshape(-1)
+        one_sided_count = lam.size // 2
+        bound_count = lower_u.size + lower_x.size
+        if lam.size % 2 or one_sided_count < bound_count:
+            continue
+
+        blocks = (
+            ("u", u, lower_u, upper_u, control_labels, 0),
+            ("x", x, lower_x, upper_x, state_labels, lower_u.size),
+        )
+        for block_name, values, lower, upper, labels, offset in blocks:
+            count = min(values.size, lower.size, upper.size)
+            for index in range(count):
+                variable = (
+                    labels[index] if index < len(labels) else f"{block_name}[{index}]"
+                )
+                for side, bound, distance, multiplier_index in (
+                    (
+                        "lower",
+                        lower[index],
+                        values[index] - lower[index],
+                        offset + index,
+                    ),
+                    (
+                        "upper",
+                        upper[index],
+                        upper[index] - values[index],
+                        one_sided_count + offset + index,
+                    ),
+                ):
+                    multiplier = lam[multiplier_index]
+                    rows.append(
+                        {
+                            "stage": stage,
+                            "variable": variable,
+                            "side": side,
+                            "value": float(values[index]),
+                            "bound": float(bound),
+                            "distance": float(distance),
+                            "multiplier": float(multiplier),
+                            "product": float(abs(multiplier * distance)),
+                        }
+                    )
+
+    rows.sort(key=lambda row: row["product"], reverse=True)
+    return rows[:limit]
+
+
 def collect_acados_diagnostics(solution) -> dict:
     diagnostics = {
         "status": solution.status,
@@ -1820,12 +1991,14 @@ def collect_acados_diagnostics(solution) -> dict:
         "solver_available": False,
     }
 
+    states = {}
     try:
         states = solution.decision_states(to_merge=SolutionMerge.NODES)
         diagnostics["state_nonfinite"] = _dict_finite_summary(states)
     except Exception as exc:  # noqa: BLE001 - diagnostics should not mask a solve.
         diagnostics["state_error"] = str(exc)
 
+    controls = {}
     try:
         controls = solution.decision_controls(to_merge=SolutionMerge.NODES)
         diagnostics["control_nonfinite"] = _dict_finite_summary(controls)
@@ -1847,6 +2020,10 @@ def collect_acados_diagnostics(solution) -> dict:
         "qp_stat",
         "alpha",
         "residuals",
+        "res_stat_all",
+        "res_eq_all",
+        "res_ineq_all",
+        "res_comp_all",
         "qpscaling_status",
         "time_tot",
         "time_qp",
@@ -1890,6 +2067,22 @@ def collect_acados_diagnostics(solution) -> dict:
 
     diagnostics["stage_nonfinite"] = stage_nonfinite
     diagnostics["n_stages_scanned"] = stage
+    diagnostics["bound_complementarity_top"] = _acados_bound_complementarity_rows(
+        acados_solver,
+        n_stages=stage,
+        state_labels=_variable_row_labels(states),
+        control_labels=_variable_row_labels(controls),
+    )
+    residuals = diagnostics.get("residuals")
+    if not isinstance(residuals, dict) and residuals is not None:
+        values = np.asarray(residuals, dtype=float).reshape(-1)
+        if values.size >= 4:
+            diagnostics["named_residuals"] = dict(
+                zip(
+                    ("stationarity", "dynamics", "inequality", "complementarity"),
+                    values[:4],
+                )
+            )
     return diagnostics
 
 
@@ -1965,6 +2158,34 @@ def print_acados_diagnostics(label: str, diagnostics: dict) -> None:
             f"{_format_array(diagnostics['first_stage_parameters'])}"
         )
     print(f"{label} residuals={_format_array(diagnostics.get('residuals'))}")
+    if diagnostics.get("named_residuals"):
+        print(
+            f"{label} residuals_named="
+            f"{_format_compact_named_values(diagnostics['named_residuals'])}"
+        )
+    for row in diagnostics.get("bound_complementarity_top", []):
+        print(
+            f"{label} bound_complementarity "
+            f"stage={row['stage']} variable={row['variable']} side={row['side']} "
+            f"product={row['product']:.6g} multiplier={row['multiplier']:.6g} "
+            f"distance={row['distance']:.6g} value={row['value']:.6g} "
+            f"bound={row['bound']:.6g}"
+        )
+    residual_history = []
+    for key in ("res_stat_all", "res_eq_all", "res_ineq_all", "res_comp_all"):
+        values = diagnostics.get(key)
+        if isinstance(values, dict) or values is None:
+            residual_history = []
+            break
+        residual_history.append(np.asarray(values, dtype=float).reshape(-1))
+    if residual_history and all(values.size for values in residual_history):
+        common_size = min(values.size for values in residual_history)
+        history = np.vstack([values[:common_size] for values in residual_history])
+        print(
+            f"{label} residual_history_initial={_format_array(history[:, 0])} "
+            f"best={_format_array(np.min(np.abs(history), axis=1))} "
+            f"final={_format_array(history[:, -1])}"
+        )
     print(f"{label} sqp_iter={_format_array(diagnostics.get('sqp_iter'))}")
     print(f"{label} qp_iter={_format_array(diagnostics.get('qp_iter'))}")
     print(f"{label} qp_stat={_format_array(diagnostics.get('qp_stat'))}")
@@ -5022,6 +5243,8 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
         nmpc.use_signed_wheel_shift = True
         nmpc.transfer_initial_guess_mode = "anchored"
         nmpc.transfer_debug = echo
+        nmpc._cocofest_dual_warm_start_mode = args.acados_dual_warm_start_mode
+        nmpc._cocofest_dual_shift_stages = args.stimulations_per_cycle
         relaxed_fes_bounds = []
         if not nmpc.bound_first_node_all_states:
             relaxed_fes_bounds = relax_acados_first_node_fes_bounds(nmpc)
@@ -5077,6 +5300,7 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
                 "acados_fatigue_warmstart_mode: "
                 f"{args.acados_fatigue_warmstart_mode}"
             )
+            print("acados_dual_warm_start_mode: " f"{args.acados_dual_warm_start_mode}")
             print(
                 "acados_standard_warmup_transfer: "
                 f"{args.acados_standard_warmup_transfer}"
@@ -5215,6 +5439,7 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
                 "acados_transfer_full_dynamics_rollout: "
                 f"{args.acados_transfer_full_dynamics_rollout}"
             )
+            print(f"acados_transfer_phase_one: {args.acados_transfer_phase_one}")
             print(
                 "acados_transfer_rollout_substeps: "
                 f"{args.acados_transfer_rollout_substeps}"
@@ -5572,6 +5797,25 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
                         "acados_transfer_rollout_nonfinite_node: "
                         f"{rollout_summary.get('nonfinite_node')}"
                     )
+        if (
+            continue_solving
+            and _sol is not None
+            and args.solver == "acados"
+            and args.acados_transfer_phase_one
+        ):
+            phase_one_summary = project_full_dynamics_initial_guess(
+                _nmpc,
+                proximity_weight=args.full_dynamics_phase_one_proximity_weight,
+                defect_weight=args.full_dynamics_phase_one_defect_weight,
+                n_substeps=args.full_dynamics_phase_one_substeps,
+            )
+            if echo:
+                print(
+                    "acados_transfer_phase_one: "
+                    f"scaled_defect_before={phase_one_summary['scaled_defect_before']:.6g} "
+                    f"scaled_defect_after={phase_one_summary['scaled_defect_after']:.6g} "
+                    f"max_state_change={phase_one_summary['max_state_change']:.6g}"
+                )
         if args.solver == "acados" and _sol is not None:
             diagnostics = snapshot_acados_diagnostics(_sol)
             acados_window_diagnostics.append(diagnostics)

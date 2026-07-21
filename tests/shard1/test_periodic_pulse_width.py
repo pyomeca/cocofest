@@ -356,8 +356,102 @@ def test_endurance_cli_stops_on_failure_and_keeps_robust_irk_defaults():
     assert args.acados_integrator_type == "IRK"
     assert args.acados_sim_stages == 4
     assert args.acados_sim_steps == 5
+    assert args.acados_dual_warm_start_mode == "reset"
     assert args.acados_transfer_pulse_width_trust_radius is None
     assert args.periodic_ipopt_refinement_ode_solver == "target"
+
+
+class _DualWarmStartSolver:
+    def __init__(self, horizon, terminal_lam_size=1):
+        self.values = {
+            (stage, "lam"): np.array([stage + 1.0]) for stage in range(horizon + 1)
+        }
+        self.values[(horizon, "lam")] = np.full(terminal_lam_size, horizon + 1.0)
+        self.values.update(
+            {(stage, "pi"): np.array([10.0 + stage]) for stage in range(horizon)}
+        )
+
+    def get(self, stage, field):
+        return self.values[(stage, field)].copy()
+
+    def set(self, stage, field, values):
+        self.values[(stage, field)] = np.asarray(values, dtype=float).copy()
+
+
+def test_acados_dual_warm_start_can_reset_all_multipliers():
+    solver = _DualWarmStartSolver(horizon=3)
+
+    summary = periodic_example.apply_acados_dual_warm_start(
+        solver, horizon=3, mode="reset", shift_stages=1
+    )
+
+    assert summary == {"mode": "reset", "shift_stages": 0, "zeroed_tail_stages": 4}
+    assert all(not np.any(values) for values in solver.values.values())
+
+
+def test_acados_dual_warm_start_can_shift_one_cycle_and_zero_tail():
+    solver = _DualWarmStartSolver(horizon=3)
+
+    summary = periodic_example.apply_acados_dual_warm_start(
+        solver, horizon=3, mode="shift", shift_stages=1
+    )
+
+    assert summary == {"mode": "shift", "shift_stages": 1, "zeroed_tail_stages": 1}
+    np.testing.assert_array_equal(
+        [solver.values[(stage, "lam")][0] for stage in range(4)], [2, 3, 4, 0]
+    )
+    np.testing.assert_array_equal(
+        [solver.values[(stage, "pi")][0] for stage in range(3)], [11, 12, 0]
+    )
+
+
+def test_acados_dual_shift_zeros_structurally_incompatible_terminal_multipliers():
+    solver = _DualWarmStartSolver(horizon=3, terminal_lam_size=2)
+
+    periodic_example.apply_acados_dual_warm_start(
+        solver, horizon=3, mode="shift", shift_stages=1
+    )
+
+    np.testing.assert_array_equal(solver.values[(2, "lam")], [0.0])
+
+
+class _BoundComplementaritySolver:
+    def get(self, stage, field):
+        values = {
+            "x": np.array([3.0]),
+            "u": np.array([2.0]),
+            "lam": np.array([0.1, 0.2, 0.3, 0.4]),
+        }
+        return values[field]
+
+    def constraints_get(self, stage, field):
+        values = {
+            "lbu": np.array([0.0]),
+            "ubu": np.array([4.0]),
+            "lbx": np.array([1.0]),
+            "ubx": np.array([5.0]),
+        }
+        return values[field]
+
+
+def test_acados_bound_complementarity_identifies_largest_product():
+    rows = periodic_example._acados_bound_complementarity_rows(
+        _BoundComplementaritySolver(),
+        n_stages=1,
+        state_labels=["force"],
+        control_labels=["pulse_width"],
+    )
+
+    assert rows[0] == {
+        "stage": 0,
+        "variable": "force",
+        "side": "upper",
+        "value": 3.0,
+        "bound": 5.0,
+        "distance": 2.0,
+        "multiplier": 0.4,
+        "product": 0.8,
+    }
 
 
 def test_control_bounds_summary_preserves_physical_units():

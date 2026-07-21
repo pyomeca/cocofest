@@ -1062,6 +1062,7 @@ def main(
     acados_tolerance: float | None = None,
     acados_stationarity_tolerance: float | None = None,
     acados_qp_iter_max: int = 50,
+    acados_dual_warm_start_mode: str = "reset",
     acados_levenberg_marquardt: float = 0.0,
     acados_regularize_method: str = "GERSHGORIN_LEVENBERG_MARQUARDT",
     acados_hessian_approx: str = "GAUSS_NEWTON",
@@ -1300,6 +1301,7 @@ def main(
         periodic_ipopt_refinement_ode_solver
     )
     acados_args.acados_stationarity_tolerance = acados_stationarity_tolerance
+    acados_args.acados_dual_warm_start_mode = acados_dual_warm_start_mode
 
     normalized_ipopt_profile = _normalize_ipopt_profile(ipopt_profile)
     ipopt_label = (
@@ -1531,6 +1533,12 @@ def build_cli() -> argparse.ArgumentParser:
         help="Stationarity tolerance applied independently from ACADOS feasibility.",
     )
     parser.add_argument("--acados-qp-iter-max", type=int, default=50)
+    parser.add_argument(
+        "--acados-dual-warm-start-mode",
+        choices=("preserve", "reset", "shift"),
+        default="reset",
+        help="Preserve, reset, or cycle-shift ACADOS dual variables between MHE windows.",
+    )
     parser.add_argument("--acados-levenberg-marquardt", type=float, default=0.0)
     parser.add_argument(
         "--acados-regularize-method",
@@ -1695,6 +1703,7 @@ if __name__ == "__main__":
         acados_tolerance=args.acados_tolerance,
         acados_stationarity_tolerance=args.acados_stationarity_tolerance,
         acados_qp_iter_max=args.acados_qp_iter_max,
+        acados_dual_warm_start_mode=args.acados_dual_warm_start_mode,
         acados_levenberg_marquardt=args.acados_levenberg_marquardt,
         acados_regularize_method=args.acados_regularize_method,
         acados_hessian_approx=args.acados_hessian_approx,
