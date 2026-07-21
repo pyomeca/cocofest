@@ -18,7 +18,7 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from bioptim import MultiCyclicCycleSolutions, OdeSolver, SolutionMerge, Solver
+from bioptim import MultiCyclicCycleSolutions, Node, OdeSolver, SolutionMerge, Solver
 from bioptim.optimization.receding_horizon_optimization import (
     RecedingHorizonOptimization,
 )
@@ -558,9 +558,12 @@ def build_argument_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--control-regularization-target-source",
-        choices=("constant", "warmup"),
+        choices=("constant", "warmup", "previous"),
         default="constant",
-        help="Use a constant pulse-width target or the standard IPOPT warmup controls as the target.",
+        help=(
+            "Use a constant target, the standard IPOPT warmup controls, or the "
+            "shifted controls from the previous MHE window."
+        ),
     )
     parser.add_argument(
         "--wheel-qdot-regularization-weight",
@@ -573,6 +576,24 @@ def build_argument_parser() -> argparse.ArgumentParser:
         type=float,
         default=-float(2 * np.pi),
         help="Target wheel angular velocity, in rad/s, for qdot regularization.",
+    )
+    parser.add_argument(
+        "--wheel-qdot-bound-margin",
+        type=float,
+        default=3.0,
+        help="Symmetric wheel-speed bound around -2*pi, in rad/s.",
+    )
+    parser.add_argument(
+        "--terminal-qdot-regularization-weight",
+        type=float,
+        default=0.0,
+        help="Quadratic Mayer weight retaining terminal joint velocities near their shifted reference.",
+    )
+    parser.add_argument(
+        "--terminal-qdot-regularization-target-source",
+        choices=("initial", "previous"),
+        default="previous",
+        help="Keep the initial terminal-velocity target or update it from the previous MHE window.",
     )
     parser.add_argument(
         "--state-scaling",
@@ -789,7 +810,7 @@ def build_argument_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--acados-globalization",
         choices=("FIXED_STEP", "MERIT_BACKTRACKING", "FUNNEL_L1PEN_LINESEARCH"),
-        default="MERIT_BACKTRACKING",
+        default="FUNNEL_L1PEN_LINESEARCH",
         help="ACADOS globalization strategy.",
     )
     parser.add_argument(
@@ -868,7 +889,13 @@ def build_argument_parser() -> argparse.ArgumentParser:
         "--acados-wheel-q-slack",
         type=float,
         default=0.02,
-        help="First and terminal node slack, in rad, for the ACADOS wheel/crank angle transfer bounds.",
+        help="First-node slack, in rad, for the ACADOS wheel/crank angle transfer bound.",
+    )
+    parser.add_argument(
+        "--acados-terminal-wheel-q-slack",
+        type=float,
+        default=0.2,
+        help="Terminal crank-angle slack in rad; independent from the first-node transfer slack.",
     )
     parser.add_argument(
         "--acados-wheel-qdot-slack",
@@ -1444,8 +1471,17 @@ def _continuation_cache_signature(args: argparse.Namespace) -> str:
         "pulse_width_scaling": args.pulse_width_scaling,
         "control_regularization_weight": args.control_regularization_weight,
         "control_regularization_target": args.control_regularization_target,
+        "control_regularization_target_source": args.control_regularization_target_source,
         "wheel_qdot_regularization_weight": args.wheel_qdot_regularization_weight,
         "wheel_qdot_regularization_target": args.wheel_qdot_regularization_target,
+        "wheel_qdot_bound_margin": args.wheel_qdot_bound_margin,
+        "terminal_qdot_regularization_weight": (
+            args.terminal_qdot_regularization_weight
+        ),
+        "terminal_qdot_regularization_target_source": (
+            args.terminal_qdot_regularization_target_source
+        ),
+        "terminal_wheel_q_slack": args.acados_terminal_wheel_q_slack,
         "integrator_type": args.acados_integrator_type,
         "collocation_type": args.acados_collocation_type,
         "sim_stages": args.acados_sim_stages,
@@ -1525,9 +1561,17 @@ def _horizon_seed_cache_signature(args: argparse.Namespace) -> str:
         "control_regularization_target_source": args.control_regularization_target_source,
         "wheel_qdot_regularization_weight": args.wheel_qdot_regularization_weight,
         "wheel_qdot_regularization_target": args.wheel_qdot_regularization_target,
+        "wheel_qdot_bound_margin": args.wheel_qdot_bound_margin,
+        "terminal_qdot_regularization_weight": (
+            args.terminal_qdot_regularization_weight
+        ),
+        "terminal_qdot_regularization_target_source": (
+            args.terminal_qdot_regularization_target_source
+        ),
         "pulse_width_trust_radius": args.acados_pulse_width_trust_radius,
         "fes_state_trust_radius": args.acados_fes_state_trust_radius,
         "wheel_q_slack": args.acados_wheel_q_slack,
+        "terminal_wheel_q_slack": args.acados_terminal_wheel_q_slack,
         "wheel_qdot_slack": args.acados_wheel_qdot_slack,
         "wheel_q_path_margin": args.acados_wheel_q_path_margin,
         "project_qdot_from_q": args.acados_project_qdot_from_q,
@@ -1587,6 +1631,14 @@ def _codegen_signature(args: argparse.Namespace) -> str:
         "control_regularization_target_source": args.control_regularization_target_source,
         "wheel_qdot_regularization_weight": args.wheel_qdot_regularization_weight,
         "wheel_qdot_regularization_target": args.wheel_qdot_regularization_target,
+        "wheel_qdot_bound_margin": args.wheel_qdot_bound_margin,
+        "terminal_qdot_regularization_weight": (
+            args.terminal_qdot_regularization_weight
+        ),
+        "terminal_qdot_regularization_target_source": (
+            args.terminal_qdot_regularization_target_source
+        ),
+        "acados_terminal_wheel_q_slack": args.acados_terminal_wheel_q_slack,
         "state_scaling": args.state_scaling,
         "pulse_width_scaling": args.pulse_width_scaling,
         "acados_pulse_width_trust_radius": args.acados_pulse_width_trust_radius,
@@ -4879,22 +4931,17 @@ def run_periodic_ipopt_refinement(
     return refinement_sol
 
 
-def apply_warmup_control_regularization_targets(
-    periodic_nmpc, adapted_warmup_solution
-) -> list[str]:
-    warmup_controls = adapted_warmup_solution.decision_controls(
-        to_merge=SolutionMerge.NODES
-    )
+def apply_control_regularization_targets(periodic_nmpc, controls) -> list[str]:
     updated_keys = []
     for penalty in periodic_nmpc.nlp[0].J:
         if not penalty:
             continue
 
         key = getattr(penalty, "extra_parameters", {}).get("key")
-        if key not in warmup_controls:
+        if key not in controls:
             continue
 
-        target = np.asarray(warmup_controls[key], dtype=float)
+        target = np.asarray(controls[key], dtype=float)
         if target.ndim == 1:
             target = target[np.newaxis, :]
 
@@ -4908,6 +4955,85 @@ def apply_warmup_control_regularization_targets(
         updated_keys.append(key)
 
     return updated_keys
+
+
+def apply_warmup_control_regularization_targets(
+    periodic_nmpc, adapted_warmup_solution
+) -> list[str]:
+    warmup_controls = adapted_warmup_solution.decision_controls(
+        to_merge=SolutionMerge.NODES
+    )
+    return apply_control_regularization_targets(periodic_nmpc, warmup_controls)
+
+
+def apply_initial_guess_control_regularization_targets(periodic_nmpc) -> list[str]:
+    controls = {
+        key: np.asarray(periodic_nmpc.nlp[0].u_init[key].init, dtype=float)
+        for key in periodic_nmpc.nlp[0].u_init.keys()
+    }
+    return apply_control_regularization_targets(periodic_nmpc, controls)
+
+
+def apply_terminal_qdot_regularization_target(periodic_nmpc, target) -> bool:
+    target = np.asarray(target, dtype=float).reshape((-1, 1))
+    for penalty in periodic_nmpc.nlp[0].J:
+        if not penalty:
+            continue
+        key = getattr(penalty, "extra_parameters", {}).get("key")
+        if key != "qdot" or not penalty.node or penalty.node[0] != Node.END:
+            continue
+        penalty.target = target
+        return True
+    return False
+
+
+def refresh_acados_cached_objective_targets(periodic_nmpc) -> None:
+    """Copy updated Bioptim targets into the yref arrays cached by Acados."""
+    interface = getattr(periodic_nmpc, "ocp_solver", None)
+    if interface is None or not hasattr(interface, "y_ref"):
+        return
+
+    nlp = periodic_nmpc.nlp[0]
+    lagrange_index = 0
+    end_index = 0
+    for penalty in nlp.J:
+        if not penalty:
+            continue
+        is_terminal = bool(penalty.node) and penalty.node[0] == Node.END
+        references = interface.y_ref_end if is_terminal else interface.y_ref
+        reference_index = end_index if is_terminal else lagrange_index
+        if is_terminal:
+            end_index += 1
+        else:
+            lagrange_index += 1
+        if reference_index >= len(references) or penalty.target is None:
+            continue
+
+        key = getattr(penalty, "extra_parameters", {}).get("key")
+        if key not in nlp.states and key not in nlp.controls:
+            continue
+
+        target = np.asarray(penalty.target, dtype=float)
+        if is_terminal:
+            column = target[..., -1].reshape(-1)
+            references[reference_index][: column.size, 0] = column
+            continue
+
+        for node, reference in enumerate(references[reference_index]):
+            target_node = min(node, target.shape[-1] - 1)
+            column = target[..., target_node].reshape(-1)
+            reference[: column.size, 0] = column
+
+
+def set_terminal_wheel_q_bound_slack(periodic_nmpc, slack: float) -> None:
+    if slack < 0:
+        raise ValueError("Terminal wheel q slack must be non-negative.")
+    q_init = np.asarray(periodic_nmpc.nlp[0].x_init["q"].init, dtype=float)
+    bounds = periodic_nmpc.nlp[0].x_bounds["q"]
+    center = float(q_init[2, -1])
+    bounds.min[2, 2] = center - slack
+    bounds.max[2, 2] = center + slack
+    periodic_nmpc._sync_acados_state_bounds()
 
 
 def apply_pulse_width_control_trust_region(
@@ -5194,6 +5320,12 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
         )
     if args.acados_fixed_control_tolerance <= 0:
         raise ValueError("--acados-fixed-control-tolerance must be strictly positive.")
+    if args.acados_terminal_wheel_q_slack < 0:
+        raise ValueError("--acados-terminal-wheel-q-slack must be non-negative.")
+    if args.terminal_qdot_regularization_weight < 0:
+        raise ValueError("--terminal-qdot-regularization-weight must be non-negative.")
+    if args.wheel_qdot_bound_margin <= 0:
+        raise ValueError("--wheel-qdot-bound-margin must be strictly positive.")
 
     periodic_ipopt_refinement_enabled = (
         args.periodic_ipopt_refinement and not args.disable_periodic_ipopt_refinement
@@ -5279,6 +5411,10 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
         "control_regularization_target": args.control_regularization_target,
         "wheel_qdot_regularization_weight": args.wheel_qdot_regularization_weight,
         "wheel_qdot_regularization_target": args.wheel_qdot_regularization_target,
+        "wheel_qdot_bound_margin": args.wheel_qdot_bound_margin,
+        "terminal_qdot_regularization_weight": (
+            args.terminal_qdot_regularization_weight
+        ),
         "state_scaling": args.state_scaling,
         "pulse_width_scaling": args.pulse_width_scaling,
         "init_guess_file_path": (
@@ -5288,10 +5424,7 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
         ),
     }
     nmpc_simulation_conditions = dict(simulation_conditions)
-    if (
-        args.solver == "acados"
-        and args.control_regularization_target_source == "warmup"
-    ):
+    if args.control_regularization_target_source in {"warmup", "previous"}:
         nmpc_simulation_conditions["control_regularization_target"] = None
 
     nmpc = prepare_nmpc(model, mhe_info, cycling_info, nmpc_simulation_conditions)
@@ -5308,6 +5441,10 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
             "Tau1_": 5e-3,
             "Km_": 5e-3,
         }
+        nmpc.terminal_state_slack = {
+            "q": [0.0, 0.0, args.acados_terminal_wheel_q_slack],
+        }
+        set_terminal_wheel_q_bound_slack(nmpc, args.acados_terminal_wheel_q_slack)
         # The periodic-node states have the same physical meaning as the
         # historical Ding states. Keep their initial value near the IPOPT
         # warmup; otherwise ACADOS can manufacture a low-cost but nonphysical
@@ -5318,6 +5455,7 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
         nmpc.wheel_q_path_margin = args.acados_wheel_q_path_margin
         nmpc.use_signed_wheel_shift = True
         nmpc.transfer_initial_guess_mode = "anchored"
+        nmpc.repeat_cyclical_state_initial_guess = True
         nmpc.transfer_debug = echo
         nmpc._cocofest_dual_warm_start_mode = args.acados_dual_warm_start_mode
         nmpc._cocofest_dual_shift_stages = args.stimulations_per_cycle
@@ -5354,6 +5492,15 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
         )
         print(
             f"wheel_qdot_regularization_target: {args.wheel_qdot_regularization_target}"
+        )
+        print(f"wheel_qdot_bound_margin: {args.wheel_qdot_bound_margin}")
+        print(
+            "terminal_qdot_regularization_weight: "
+            f"{args.terminal_qdot_regularization_weight}"
+        )
+        print(
+            "terminal_qdot_regularization_target_source: "
+            f"{args.terminal_qdot_regularization_target_source}"
         )
         print(f"state_scaling: {args.state_scaling}")
         print(f"pulse_width_scaling: {args.pulse_width_scaling}")
@@ -5509,6 +5656,10 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
             print(f"acados_qp_solver: {args.acados_qp_solver}")
             print(f"acados_integrator_type: {args.acados_integrator_type}")
             print(f"acados_wheel_q_slack: {args.acados_wheel_q_slack}")
+            print(
+                "acados_terminal_wheel_q_slack: "
+                f"{args.acados_terminal_wheel_q_slack}"
+            )
             print(f"acados_wheel_qdot_slack: {args.acados_wheel_qdot_slack}")
             print(f"acados_wheel_q_path_margin: {args.acados_wheel_q_path_margin}")
             print(
@@ -5548,10 +5699,7 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
         if echo:
             print("running_standard_ipopt_warmup: True")
         warmup_simulation_conditions = dict(simulation_conditions)
-        if (
-            args.solver == "acados"
-            and args.control_regularization_target_source == "warmup"
-        ):
+        if args.control_regularization_target_source in {"warmup", "previous"}:
             warmup_simulation_conditions["control_regularization_weight"] = 0.0
             warmup_simulation_conditions["control_regularization_target"] = None
         warmup_solution = run_standard_ipopt_warmup(
@@ -5731,6 +5879,21 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
         if echo:
             print("acados_project_qdot_from_q: True")
 
+    if (
+        args.control_regularization_target_source == "previous"
+        and args.control_regularization_weight
+    ):
+        target_keys = apply_initial_guess_control_regularization_targets(nmpc)
+        if echo:
+            print(
+                "previous_control_regularization_targets: "
+                f"{', '.join(target_keys) if target_keys else 'None'}"
+            )
+
+    if args.terminal_qdot_regularization_weight:
+        terminal_qdot = np.asarray(nmpc.nlp[0].x_init["qdot"].init, dtype=float)[:, -1]
+        apply_terminal_qdot_regularization_target(nmpc, terminal_qdot)
+
     if args.full_dynamics_phase_one:
         phase_one_summary = project_full_dynamics_initial_guess(
             nmpc,
@@ -5847,6 +6010,32 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
                     f"reason={dual_summary['reason']}"
                 )
         continue_solving = cycle_idx + 1 < args.n_windows
+        targets_updated = False
+        if continue_solving and _sol is not None:
+            if (
+                args.control_regularization_target_source == "previous"
+                and args.control_regularization_weight
+            ):
+                target_keys = apply_initial_guess_control_regularization_targets(_nmpc)
+                targets_updated = bool(target_keys)
+                if echo:
+                    print(
+                        "previous_control_regularization_targets_recentered: "
+                        f"window={cycle_idx} keys={len(target_keys)}"
+                    )
+            if (
+                args.terminal_qdot_regularization_weight
+                and args.terminal_qdot_regularization_target_source == "previous"
+            ):
+                previous_states = _sol.decision_states(to_merge=SolutionMerge.NODES)
+                targets_updated = (
+                    apply_terminal_qdot_regularization_target(
+                        _nmpc, previous_states["qdot"][:, -1]
+                    )
+                    or targets_updated
+                )
+            if targets_updated and args.solver == "acados":
+                refresh_acados_cached_objective_targets(_nmpc)
         if (
             continue_solving
             and _sol is not None

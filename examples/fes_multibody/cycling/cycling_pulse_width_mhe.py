@@ -64,6 +64,7 @@ class MyCyclicNMPC(FesNmpcMsk):
         self.debugg_bounds = False
         self.previous_bounds = None
         self.first_node_state_slack = {}
+        self.terminal_state_slack = {}
         self.transfer_debug = False
         self.bound_first_node_all_states = True
         self.bound_first_node_wheel_qdot = True
@@ -72,6 +73,7 @@ class MyCyclicNMPC(FesNmpcMsk):
         self.use_signed_wheel_shift = False
         self.continuous_state_initial_guess_mode = "continuous"
         self.transfer_initial_guess_mode = "historical"
+        self.repeat_cyclical_state_initial_guess = False
         self.before_window_advance = None
 
     def _state_slack_for(self, key: str, index: int) -> float:
@@ -85,6 +87,24 @@ class MyCyclicNMPC(FesNmpcMsk):
             )
         else:
             configured = 0.0
+
+        if isinstance(configured, (list, tuple, np.ndarray)):
+            return float(configured[index])
+        return float(configured)
+
+    def _terminal_state_slack_for(self, key: str, index: int) -> float:
+        if not self.terminal_state_slack:
+            return self._state_slack_for(key, index)
+        if key in self.terminal_state_slack:
+            configured = self.terminal_state_slack[key]
+        elif any(key.startswith(prefix) for prefix in self.terminal_state_slack):
+            configured = next(
+                self.terminal_state_slack[prefix]
+                for prefix in self.terminal_state_slack
+                if key.startswith(prefix)
+            )
+        else:
+            return self._state_slack_for(key, index)
 
         if isinstance(configured, (list, tuple, np.ndarray)):
             return float(configured[index])
@@ -142,11 +162,12 @@ class MyCyclicNMPC(FesNmpcMsk):
                             )
                             self.nlp[0].x_bounds[key].min[i, 1] = path_min
                             self.nlp[0].x_bounds[key].max[i, 1] = path_max
+                            terminal_slack = self._terminal_state_slack_for(key, i)
                             self.nlp[0].x_bounds[key].min[i, 2] = (
-                                terminal_center - slack
+                                terminal_center - terminal_slack
                             )
                             self.nlp[0].x_bounds[key].max[i, 2] = (
-                                terminal_center + slack
+                                terminal_center + terminal_slack
                             )
                         elif key == "q" and not self.use_signed_wheel_shift:
                             self.nlp[0].x_bounds[key].min[
@@ -329,8 +350,11 @@ class MyCyclicNMPC(FesNmpcMsk):
         source = data[key][i]
         if state:
             retained_cycle = source[self.nodes_per_cycle :]
-            cycle_delta = source[-1] - source[self.nodes_per_cycle]
-            appended_cycle = source[self.nodes_per_cycle + 1 :] + cycle_delta
+            if getattr(self, "repeat_cyclical_state_initial_guess", False):
+                appended_cycle = source[self.nodes_per_cycle + 1 :]
+            else:
+                cycle_delta = source[-1] - source[self.nodes_per_cycle]
+                appended_cycle = source[self.nodes_per_cycle + 1 :] + cycle_delta
         else:
             retained_cycle = source[self.nodes_per_cycle :]
             appended_cycle = source[-self.nodes_per_cycle :]
@@ -609,6 +633,10 @@ def prepare_nmpc(
     wheel_qdot_regularization_target = simulation_conditions.get(
         "wheel_qdot_regularization_target", -float(2 * np.pi)
     )
+    wheel_qdot_bound_margin = simulation_conditions.get("wheel_qdot_bound_margin", 3.0)
+    terminal_qdot_regularization_weight = simulation_conditions.get(
+        "terminal_qdot_regularization_weight", 0.0
+    )
     state_scaling = simulation_conditions.get("state_scaling", "none")
     pulse_width_scaling = simulation_conditions.get("pulse_width_scaling", 1 / 400)
     # --- Pickle file info --- #
@@ -652,6 +680,7 @@ def prepare_nmpc(
         n_shooting=window_n_shooting,
         ode_solver=ode_solver,
         init_file_path=initial_guess_path,
+        wheel_qdot_bound_margin=wheel_qdot_bound_margin,
     )
 
     # --- Set states scaling --- #
@@ -683,6 +712,8 @@ def prepare_nmpc(
         control_regularization_target=control_regularization_target,
         wheel_qdot_regularization_weight=wheel_qdot_regularization_weight,
         wheel_qdot_regularization_target=wheel_qdot_regularization_target,
+        terminal_qdot_regularization_weight=terminal_qdot_regularization_weight,
+        terminal_qdot_regularization_target=x_init["qdot"].init[:, -1],
     )
 
     # --- Update model for resistive torque --- #
@@ -796,7 +827,10 @@ def set_x_bounds(
     n_shooting: int,
     ode_solver: OdeSolver,
     init_file_path: str,
+    wheel_qdot_bound_margin: float = 3.0,
 ) -> tuple[BoundsList, InitialGuessList]:
+    if wheel_qdot_bound_margin <= 0:
+        raise ValueError("wheel_qdot_bound_margin must be strictly positive.")
     # --- Set interpolation type according to ode_solver type --- #
     interpolation_type = InterpolationType.EACH_FRAME
     if ode_solver.is_direct_collocation:
@@ -867,7 +901,10 @@ def set_x_bounds(
     # --- First: enter general bound values in radiant --- #
     arm_qdot = [-10, 10]  # Arm min_max qdot bound in radiant
     forearm_qdot = [-14, 10]  # Forearm min_max qdot bound in radiant
-    wheel_qdot = [-2 * np.pi - 3, -2 * np.pi + 3]  # Wheel min_max qdot bound in radiant
+    wheel_qdot = [
+        -2 * np.pi - wheel_qdot_bound_margin,
+        -2 * np.pi + wheel_qdot_bound_margin,
+    ]  # Wheel min_max qdot bound in radiant
 
     # --- Second: set general bound values in radiant, CONSTANT_WITH_FIRST_AND_LAST_DIFFERENT mandatory for qdot --- #
     qdot_x_bounds.min[0] = [arm_qdot[0], arm_qdot[0], arm_qdot[0]]
@@ -989,6 +1026,8 @@ def set_objective_functions(
     control_regularization_target: float | None = None,
     wheel_qdot_regularization_weight: float = 0.0,
     wheel_qdot_regularization_target: float = -float(2 * np.pi),
+    terminal_qdot_regularization_weight: float = 0.0,
+    terminal_qdot_regularization_target: np.ndarray | None = None,
 ):
     objective_functions = ObjectiveList()
     is_quadratic = objective_shape == "quadratic"
@@ -1042,6 +1081,23 @@ def set_objective_functions(
             index=2,
             weight=wheel_qdot_regularization_weight,
             target=np.array([[wheel_qdot_regularization_target]]),
+            quadratic=True,
+            multi_thread=False,
+        )
+
+    if terminal_qdot_regularization_weight:
+        if terminal_qdot_regularization_target is None:
+            raise ValueError(
+                "A terminal qdot regularization target is required when its weight is non-zero."
+            )
+        objective_functions.add(
+            ObjectiveFcn.Mayer.MINIMIZE_STATE,
+            key="qdot",
+            node=Node.END,
+            weight=terminal_qdot_regularization_weight,
+            target=np.asarray(terminal_qdot_regularization_target, dtype=float).reshape(
+                (-1, 1)
+            ),
             quadratic=True,
             multi_thread=False,
         )

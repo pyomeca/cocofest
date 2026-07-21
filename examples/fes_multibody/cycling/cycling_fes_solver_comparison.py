@@ -533,6 +533,10 @@ def _solver_config(
     control_regularization_target_source: str,
     wheel_qdot_regularization_weight: float,
     wheel_qdot_regularization_target: float,
+    wheel_qdot_bound_margin: float,
+    terminal_qdot_regularization_weight: float,
+    terminal_qdot_regularization_target_source: str,
+    acados_terminal_wheel_q_slack: float,
     state_scaling: str,
     pulse_width_scaling: float,
     acados_pulse_width_trust_radius: float | None,
@@ -640,6 +644,12 @@ def _solver_config(
             control_regularization_target_source=control_regularization_target_source,
             wheel_qdot_regularization_weight=wheel_qdot_regularization_weight,
             wheel_qdot_regularization_target=wheel_qdot_regularization_target,
+            wheel_qdot_bound_margin=wheel_qdot_bound_margin,
+            terminal_qdot_regularization_weight=(terminal_qdot_regularization_weight),
+            terminal_qdot_regularization_target_source=(
+                terminal_qdot_regularization_target_source
+            ),
+            acados_terminal_wheel_q_slack=acados_terminal_wheel_q_slack,
             state_scaling=state_scaling,
             pulse_width_scaling=pulse_width_scaling,
             acados_pulse_width_trust_radius=None,
@@ -734,6 +744,12 @@ def _solver_config(
             control_regularization_target_source=control_regularization_target_source,
             wheel_qdot_regularization_weight=wheel_qdot_regularization_weight,
             wheel_qdot_regularization_target=wheel_qdot_regularization_target,
+            wheel_qdot_bound_margin=wheel_qdot_bound_margin,
+            terminal_qdot_regularization_weight=(terminal_qdot_regularization_weight),
+            terminal_qdot_regularization_target_source=(
+                terminal_qdot_regularization_target_source
+            ),
+            acados_terminal_wheel_q_slack=acados_terminal_wheel_q_slack,
             state_scaling=state_scaling,
             pulse_width_scaling=pulse_width_scaling,
             acados_pulse_width_trust_radius=acados_pulse_width_trust_radius,
@@ -1063,6 +1079,10 @@ def main(
     wheel_qdot_regularization_weight: float = 0.0,
     acados_wheel_qdot_regularization_weight: float | None = None,
     wheel_qdot_regularization_target: float = -float(2 * np.pi),
+    wheel_qdot_bound_margin: float = 3.0,
+    terminal_qdot_regularization_weight: float = 0.0,
+    terminal_qdot_regularization_target_source: str = "previous",
+    acados_terminal_wheel_q_slack: float = 0.2,
     state_scaling: str = "none",
     acados_state_scaling: str | None = None,
     pulse_width_scaling: float = 1 / 400,
@@ -1080,7 +1100,7 @@ def main(
     acados_hessian_approx: str = "GAUSS_NEWTON",
     acados_nlp_solver_type: str = "SQP",
     acados_search_direction_mode: str = "NOMINAL_QP",
-    acados_globalization: str = "MERIT_BACKTRACKING",
+    acados_globalization: str = "FUNNEL_L1PEN_LINESEARCH",
     acados_fixed_step_length: float = 1.0,
     acados_nlp_qp_tol_strategy: str = "ADAPTIVE_QPSCALING",
     acados_qpscaling_scale_objective: str = "OBJECTIVE_GERSHGORIN",
@@ -1148,6 +1168,12 @@ def main(
         control_regularization_target_source=control_regularization_target_source,
         wheel_qdot_regularization_weight=wheel_qdot_regularization_weight,
         wheel_qdot_regularization_target=wheel_qdot_regularization_target,
+        wheel_qdot_bound_margin=wheel_qdot_bound_margin,
+        terminal_qdot_regularization_weight=terminal_qdot_regularization_weight,
+        terminal_qdot_regularization_target_source=(
+            terminal_qdot_regularization_target_source
+        ),
+        acados_terminal_wheel_q_slack=acados_terminal_wheel_q_slack,
         state_scaling=state_scaling,
         pulse_width_scaling=pulse_width_scaling,
         acados_pulse_width_trust_radius=None,
@@ -1245,6 +1271,12 @@ def main(
             else wheel_qdot_regularization_weight
         ),
         wheel_qdot_regularization_target=wheel_qdot_regularization_target,
+        wheel_qdot_bound_margin=wheel_qdot_bound_margin,
+        terminal_qdot_regularization_weight=terminal_qdot_regularization_weight,
+        terminal_qdot_regularization_target_source=(
+            terminal_qdot_regularization_target_source
+        ),
+        acados_terminal_wheel_q_slack=acados_terminal_wheel_q_slack,
         state_scaling=(
             acados_state_scaling if acados_state_scaling is not None else state_scaling
         ),
@@ -1513,13 +1545,13 @@ def build_cli() -> argparse.ArgumentParser:
     parser.add_argument("--control-regularization-target", type=float, default=None)
     parser.add_argument(
         "--control-regularization-target-source",
-        choices=("constant", "warmup"),
+        choices=("constant", "warmup", "previous"),
         default="constant",
         help="Use a constant pulse-width target or the IPOPT warmup control trajectory.",
     )
     parser.add_argument(
         "--acados-control-regularization-target-source",
-        choices=("constant", "warmup"),
+        choices=("constant", "warmup", "previous"),
         default=None,
         help="Override --control-regularization-target-source for ACADOS only.",
     )
@@ -1530,6 +1562,16 @@ def build_cli() -> argparse.ArgumentParser:
     parser.add_argument(
         "--wheel-qdot-regularization-target", type=float, default=-float(2 * np.pi)
     )
+    parser.add_argument("--wheel-qdot-bound-margin", type=float, default=3.0)
+    parser.add_argument(
+        "--terminal-qdot-regularization-weight", type=float, default=0.0
+    )
+    parser.add_argument(
+        "--terminal-qdot-regularization-target-source",
+        choices=("initial", "previous"),
+        default="previous",
+    )
+    parser.add_argument("--acados-terminal-wheel-q-slack", type=float, default=0.2)
     parser.add_argument(
         "--state-scaling", choices=("none", "fes", "full"), default="none"
     )
@@ -1593,7 +1635,7 @@ def build_cli() -> argparse.ArgumentParser:
     parser.add_argument(
         "--acados-globalization",
         choices=("FIXED_STEP", "MERIT_BACKTRACKING", "FUNNEL_L1PEN_LINESEARCH"),
-        default="MERIT_BACKTRACKING",
+        default="FUNNEL_L1PEN_LINESEARCH",
     )
     parser.add_argument("--acados-fixed-step-length", type=float, default=1.0)
     parser.add_argument(
@@ -1714,6 +1756,12 @@ if __name__ == "__main__":
         wheel_qdot_regularization_weight=args.wheel_qdot_regularization_weight,
         acados_wheel_qdot_regularization_weight=args.acados_wheel_qdot_regularization_weight,
         wheel_qdot_regularization_target=args.wheel_qdot_regularization_target,
+        wheel_qdot_bound_margin=args.wheel_qdot_bound_margin,
+        terminal_qdot_regularization_weight=(args.terminal_qdot_regularization_weight),
+        terminal_qdot_regularization_target_source=(
+            args.terminal_qdot_regularization_target_source
+        ),
+        acados_terminal_wheel_q_slack=args.acados_terminal_wheel_q_slack,
         state_scaling=args.state_scaling,
         acados_state_scaling=args.acados_state_scaling,
         pulse_width_scaling=args.pulse_width_scaling,

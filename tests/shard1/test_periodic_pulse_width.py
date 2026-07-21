@@ -1,7 +1,7 @@
 import numpy as np
 from casadi import Function, SX
 from types import SimpleNamespace
-from bioptim import Solver
+from bioptim import Node, Solver
 
 import examples.fes_multibody.cycling.cycling_pulse_width_mhe_acados_periodic as periodic_example
 import examples.fes_multibody.cycling.cycling_fes_solver_comparison as comparison_example
@@ -500,6 +500,124 @@ def test_ipopt_dual_warm_start_cli_defaults_to_bound_multipliers():
     assert comparison_args.ipopt_dual_warm_start_mode == "bounds"
 
 
+def test_regularized_mhe_cli_exposes_previous_window_targets_and_terminal_slack():
+    args = periodic_example.build_argument_parser().parse_args(
+        [
+            "--control-regularization-target-source",
+            "previous",
+            "--terminal-qdot-regularization-weight",
+            "0.1",
+        ]
+    )
+
+    assert args.control_regularization_target_source == "previous"
+    assert args.terminal_qdot_regularization_weight == 0.1
+    assert args.terminal_qdot_regularization_target_source == "previous"
+    assert args.acados_terminal_wheel_q_slack == 0.2
+    assert args.wheel_qdot_bound_margin == 3.0
+    assert args.acados_globalization == "FUNNEL_L1PEN_LINESEARCH"
+
+
+def test_previous_control_and_terminal_velocity_targets_are_recentered():
+    control_penalty = SimpleNamespace(
+        extra_parameters={"key": "last_pulse_width_Biceps"},
+        node_idx=[0, 1, 2],
+        node=[Node.ALL],
+        rows=np.array([7]),
+        target=None,
+    )
+    terminal_penalty = SimpleNamespace(
+        extra_parameters={"key": "qdot"},
+        node_idx=[2],
+        node=[Node.END],
+        rows=np.array([10, 11, 12]),
+        target=np.zeros((3, 1)),
+    )
+    nmpc = SimpleNamespace(
+        nlp=[
+            SimpleNamespace(
+                J=[control_penalty, terminal_penalty],
+                u_init={
+                    "last_pulse_width_Biceps": SimpleNamespace(
+                        init=np.array([[0.0002, 0.0004]])
+                    )
+                },
+            )
+        ]
+    )
+
+    keys = periodic_example.apply_initial_guess_control_regularization_targets(nmpc)
+    updated_terminal = periodic_example.apply_terminal_qdot_regularization_target(
+        nmpc, [-1.0, -2.0, -6.5]
+    )
+
+    assert keys == ["last_pulse_width_Biceps"]
+    np.testing.assert_allclose(control_penalty.target, [[0.0002, 0.0004, 0.0004]])
+    assert updated_terminal is True
+    np.testing.assert_allclose(terminal_penalty.target[:, 0], [-1.0, -2.0, -6.5])
+
+
+def test_updated_targets_are_copied_to_acados_cached_yrefs():
+    control_penalty = SimpleNamespace(
+        extra_parameters={"key": "last_pulse_width_Biceps"},
+        node_idx=[0, 1],
+        node=[Node.ALL],
+        rows=np.array([7]),
+        target=np.array([[0.0002, 0.0004]]),
+    )
+    terminal_penalty = SimpleNamespace(
+        extra_parameters={"key": "qdot"},
+        node_idx=[2],
+        node=[Node.END],
+        rows=np.array([10, 11, 12]),
+        target=np.array([[-1.0], [-2.0], [-6.5]]),
+    )
+    interface = SimpleNamespace(
+        y_ref=[[np.zeros((1, 1)), np.zeros((1, 1))]],
+        y_ref_end=[np.zeros((3, 1))],
+    )
+    nlp = SimpleNamespace(
+        J=[control_penalty, terminal_penalty],
+        controls={"last_pulse_width_Biceps": SimpleNamespace(index=[7])},
+        states={"qdot": SimpleNamespace(index=[10, 11, 12])},
+    )
+    nmpc = SimpleNamespace(nlp=[nlp], ocp_solver=interface)
+
+    periodic_example.refresh_acados_cached_objective_targets(nmpc)
+
+    np.testing.assert_allclose(
+        [item[0, 0] for item in interface.y_ref[0]], [0.0002, 0.0004]
+    )
+    np.testing.assert_allclose(interface.y_ref_end[0][:, 0], [-1.0, -2.0, -6.5])
+
+
+def test_terminal_wheel_slack_is_independent_from_first_node_slack():
+    q_bounds = SimpleNamespace(
+        min=np.zeros((3, 3)),
+        max=np.zeros((3, 3)),
+    )
+    nmpc = SimpleNamespace(
+        nlp=[
+            SimpleNamespace(
+                x_init={
+                    "q": SimpleNamespace(
+                        init=np.array([[0, 0, 0], [0, 0, 0], [-5, -6, -7]])
+                    )
+                },
+                x_bounds={"q": q_bounds},
+            )
+        ],
+        _sync_acados_state_bounds=lambda: None,
+    )
+
+    periodic_example.set_terminal_wheel_q_bound_slack(nmpc, 0.2)
+
+    assert q_bounds.min[2, 0] == 0.0
+    assert q_bounds.max[2, 0] == 0.0
+    np.testing.assert_allclose(q_bounds.min[2, 2], -7.2)
+    np.testing.assert_allclose(q_bounds.max[2, 2], -6.8)
+
+
 class _BoundComplementaritySolver:
     def get(self, stage, field):
         values = {
@@ -922,6 +1040,22 @@ def test_cyclical_transfer_keeps_complete_state_cycle_and_repeats_controls():
     )
     np.testing.assert_allclose(
         nmpc.nlp[0].u_init["control"].init[0], [3, 4, 5, 3, 4, 5]
+    )
+
+
+def test_cyclical_transfer_can_repeat_states_without_extrapolating_cycle_delta():
+    nmpc = SimpleNamespace(
+        nodes_per_cycle=3,
+        transfer_initial_guess_mode="anchored",
+        repeat_cyclical_state_initial_guess=True,
+        nlp=[SimpleNamespace(x_init={"state": SimpleNamespace(init=np.zeros((1, 7)))})],
+    )
+    states = {"state": np.arange(7, dtype=float)[None, :]}
+
+    MyCyclicNMPC.set_init_cyclical(nmpc, states, "state", 0)
+
+    np.testing.assert_allclose(
+        nmpc.nlp[0].x_init["state"].init[0], [3, 4, 5, 6, 4, 5, 6]
     )
 
 
