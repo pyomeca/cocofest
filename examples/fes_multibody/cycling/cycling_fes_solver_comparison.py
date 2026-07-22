@@ -1190,6 +1190,7 @@ def main(
     shared_transfer_ding_force_compensation: bool = False,
     shared_transfer_ding_force_compensation_substeps: int = 5,
     shared_transfer_ding_force_compensation_iterations: int = 20,
+    acados_transfer_ding_force_compensation: bool = False,
     acados_integrator_type: str = "IRK",
     acados_collocation_type: str = "GAUSS_LEGENDRE",
     acados_sim_stages: int = 4,
@@ -1467,6 +1468,10 @@ def main(
         solver_args.transfer_ding_force_compensation_iterations = (
             shared_transfer_ding_force_compensation_iterations
         )
+    acados_args.transfer_ding_force_compensation = bool(
+        shared_transfer_ding_force_compensation
+        or acados_transfer_ding_force_compensation
+    )
 
     normalized_ipopt_profile = _normalize_ipopt_profile(ipopt_profile)
     ipopt_label = (
@@ -1561,6 +1566,14 @@ def build_cli() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--shared-transfer-ding-force-compensation-iterations", type=int, default=20
+    )
+    parser.add_argument(
+        "--acados-transfer-ding-force-compensation",
+        action="store_true",
+        help=(
+            "Apply Ding pulse-width compensation only to the periodic ACADOS "
+            "transfer, leaving the historical IPOPT reference unchanged."
+        ),
     )
     parser.add_argument(
         "--ipopt-profile",
@@ -1996,6 +2009,9 @@ if __name__ == "__main__":
         ),
         shared_transfer_ding_force_compensation_iterations=(
             args.shared_transfer_ding_force_compensation_iterations
+        ),
+        acados_transfer_ding_force_compensation=(
+            args.acados_transfer_ding_force_compensation
         ),
         acados_integrator_type=args.acados_integrator_type,
         acados_collocation_type=args.acados_collocation_type,

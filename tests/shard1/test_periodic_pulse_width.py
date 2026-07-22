@@ -2648,6 +2648,7 @@ def test_shared_transfer_rollout_cli_is_available_to_ipopt():
             "--shared-transfer-ding-force-compensation",
             "--shared-transfer-ding-force-compensation-substeps",
             "6",
+            "--acados-transfer-ding-force-compensation",
             "--acados-proximal-control-weights",
             "1e6,1e5",
             "--acados-proximal-control-each-window",
@@ -2666,6 +2667,7 @@ def test_shared_transfer_rollout_cli_is_available_to_ipopt():
     assert comparison_args.shared_transfer_rollout_substeps == 7
     assert comparison_args.shared_transfer_ding_force_compensation is True
     assert comparison_args.shared_transfer_ding_force_compensation_substeps == 6
+    assert comparison_args.acados_transfer_ding_force_compensation is True
     assert comparison_args.acados_proximal_control_weights == (1e6, 1e5)
     assert comparison_args.acados_proximal_control_each_window is True
     assert comparison_args.acados_terminal_wheel_q_homotopy_slacks == (
