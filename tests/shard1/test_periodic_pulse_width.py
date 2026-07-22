@@ -290,6 +290,25 @@ def test_acados_cyclical_transfer_extrapolates_by_default():
     assert args.acados_cyclical_transfer_mode == "extrapolate"
 
 
+def test_periodic_ipopt_window_cache_paths_are_window_specific(tmp_path, monkeypatch):
+    args = periodic_example.build_argument_parser().parse_args([])
+    model_path = tmp_path / "cycling.bioMod"
+    model_path.write_text("version 4\n")
+    monkeypatch.setattr(periodic_example, "_cache_root", lambda: tmp_path)
+
+    first = periodic_example._periodic_ipopt_window_refinement_cache_path(
+        args, model_path, 1
+    )
+    second = periodic_example._periodic_ipopt_window_refinement_cache_path(
+        args, model_path, 2
+    )
+
+    assert first.parent == tmp_path
+    assert first.name.endswith("_window_0001.npz")
+    assert second.name.endswith("_window_0002.npz")
+    assert first != second
+
+
 def test_control_homotopy_stops_on_failure_and_restores_bounds(monkeypatch):
     class FakeSolver:
         def set_maximum_iterations(self, value):
@@ -459,6 +478,62 @@ def test_control_homotopy_restarts_a_nearly_feasible_stage(monkeypatch):
     assert [item["accepted"] for item in summaries] == [False, True, True]
     assert summaries[0]["restartable"] is True
     assert applied_statuses == [2, 0, 0]
+
+
+def test_control_homotopy_reuses_compiled_acados_options(monkeypatch):
+    option_change_flags = []
+    runtime_options = []
+
+    class FakeAcadosSolver:
+        def options_set(self, key, value):
+            runtime_options.append((key, value))
+
+    class FakeSolver:
+        nlp_solver_max_iter = 100
+
+        def set_convergence_tolerance(self, value):
+            self.tolerance = value
+
+        def set_maximum_iterations(self, value):
+            self.nlp_solver_max_iter = value
+
+        def set_only_first_options_has_changed(self, value):
+            option_change_flags.append(value)
+
+    nmpc = SimpleNamespace(
+        ocp_solver=SimpleNamespace(ocp_solver=FakeAcadosSolver()),
+        nlp=[SimpleNamespace(u_init={}, u_bounds={})],
+    )
+    solution = SimpleNamespace(
+        status=0,
+        residuals=np.zeros(4),
+        solver_time_to_optimize=1.0,
+        real_time_to_optimize=1.1,
+    )
+    monkeypatch.setattr(
+        periodic_example,
+        "snapshot_acados_diagnostics",
+        lambda _solution: {"residuals": np.zeros(4)},
+    )
+    monkeypatch.setattr(
+        periodic_example,
+        "apply_solution_directly_to_periodic_nmpc_initial_guess",
+        lambda *_args: None,
+    )
+
+    periodic_example.run_acados_control_homotopy(
+        nmpc,
+        FakeSolver(),
+        radii=(),
+        convergence_tolerance=1e-3,
+        fixed_control_tolerance=1e-8,
+        stage_iterations=50,
+        echo=False,
+        solve_stage=lambda: solution,
+    )
+
+    assert option_change_flags == [False]
+    assert runtime_options == [("nlp_solver_max_iter", 50)]
 
 
 def _benchmark_result(statuses, solver_success=False, success=False):

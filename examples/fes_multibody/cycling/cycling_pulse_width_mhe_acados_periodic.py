@@ -1165,6 +1165,14 @@ def build_argument_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--periodic-ipopt-refinement-window-cache",
+        action="store_true",
+        help=(
+            "Cache successful diagnostic IPOPT refinements by window so repeated "
+            "ACADOS transfer experiments reuse the same feasible seed."
+        ),
+    )
+    parser.add_argument(
         "--periodic-ipopt-refinement-use-sx",
         action="store_true",
         help=(
@@ -1490,6 +1498,15 @@ def _periodic_ipopt_refinement_cache_path(
         ],
     }
     return _cache_root() / f"periodic_ipopt_{_short_hash(payload)}.npz"
+
+
+def _periodic_ipopt_window_refinement_cache_path(
+    args: argparse.Namespace, model_path: Path, window: int
+) -> Path:
+    if window < 0:
+        raise ValueError("The IPOPT refinement cache window must be non-negative.")
+    base_path = _periodic_ipopt_refinement_cache_path(args, model_path)
+    return base_path.with_name(f"{base_path.stem}_window_{window:04d}.npz")
 
 
 def _acados_seed_cache_path(args: argparse.Namespace, model_path: Path) -> Path | None:
@@ -2356,6 +2373,18 @@ def acados_homotopy_stage_is_restartable(
     )
 
 
+def set_acados_runtime_max_iterations(periodic_nmpc, max_iterations: int) -> bool:
+    """Update the generated capsule when Bioptim reuses an existing Acados solver."""
+
+    acados_interface = getattr(periodic_nmpc, "ocp_solver", None)
+    acados_solver = getattr(acados_interface, "ocp_solver", None)
+    options_set = getattr(acados_solver, "options_set", None)
+    if options_set is None:
+        return False
+    options_set("nlp_solver_max_iter", int(max_iterations))
+    return True
+
+
 def run_acados_control_homotopy(
     periodic_nmpc,
     solver,
@@ -2371,8 +2400,17 @@ def run_acados_control_homotopy(
 
     stage_solver = deepcopy(solver)
     stage_solver.set_convergence_tolerance(convergence_tolerance)
-    if stage_iterations is not None:
+    if (
+        stage_iterations is not None
+        and getattr(stage_solver, "nlp_solver_max_iter", None) != stage_iterations
+    ):
         stage_solver.set_maximum_iterations(stage_iterations)
+    acados_interface = getattr(periodic_nmpc, "ocp_solver", None)
+    if getattr(acados_interface, "ocp_solver", None) is not None:
+        # The generated solver already owns this immutable maximum. The initial
+        # homotopy compiles it with stage_iterations; subsequent windows must not
+        # ask Bioptim to reconfigure the same Acados capsule.
+        stage_solver.set_only_first_options_has_changed(False)
     summaries = []
 
     if solve_stage is None:
@@ -2394,6 +2432,8 @@ def run_acados_control_homotopy(
 
             stage_accepted = False
             for attempt in range(max_restarts + 1):
+                if stage_iterations is not None:
+                    set_acados_runtime_max_iterations(periodic_nmpc, stage_iterations)
                 solution = solve_stage()
                 diagnostics = snapshot_acados_diagnostics(solution)
                 accepted = _status_is_success(
@@ -6121,6 +6161,10 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
                 f"{args.periodic_ipopt_refinement_each_window}"
             )
             print(
+                "periodic_ipopt_refinement_window_cache: "
+                f"{args.periodic_ipopt_refinement_window_cache}"
+            )
+            print(
                 "periodic_ipopt_refinement_iterations: "
                 f"{args.periodic_ipopt_refinement_iterations}"
             )
@@ -6607,38 +6651,67 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
             refinement_nmpc.update_stim()
             _copy_initial_guesses_and_bounds(_nmpc, refinement_nmpc)
             _copy_objective_targets(_nmpc, refinement_nmpc)
+            window_refinement_cache_path = (
+                _periodic_ipopt_window_refinement_cache_path(
+                    args, model_path, cycle_idx
+                )
+                if args.periodic_ipopt_refinement_window_cache
+                else None
+            )
             if echo:
                 print(f"running_periodic_ipopt_refinement_window: {cycle_idx}")
-            refinement_solution = run_periodic_ipopt_refinement(
-                refinement_nmpc,
-                target_nmpc=_nmpc,
-                max_iterations=args.periodic_ipopt_refinement_iterations,
-                linear_solver=args.ipopt_linear_solver,
-                echo=echo,
+            refinement_cache_hit = bool(
+                window_refinement_cache_path is not None
+                and window_refinement_cache_path.exists()
             )
-            refinement_success = bool(
-                refinement_solution is not None
-                and _status_is_success(refinement_solution.status)
-            )
+            if refinement_cache_hit:
+                refinement_solution = _load_warmup_cache(window_refinement_cache_path)
+                apply_solution_directly_to_periodic_nmpc_initial_guess(
+                    _nmpc, refinement_solution
+                )
+                refinement_success = True
+                refinement_status = 0
+                refinement_solver_time = 0.0
+                refinement_wall_time = 0.0
+                if echo:
+                    print(
+                        "periodic_ipopt_refinement_window_cache: "
+                        f"hit ({window_refinement_cache_path.name})"
+                    )
+            else:
+                refinement_solution = run_periodic_ipopt_refinement(
+                    refinement_nmpc,
+                    target_nmpc=_nmpc,
+                    max_iterations=args.periodic_ipopt_refinement_iterations,
+                    linear_solver=args.ipopt_linear_solver,
+                    cache_path=window_refinement_cache_path,
+                    echo=echo,
+                )
+                refinement_success = bool(
+                    refinement_solution is not None
+                    and _status_is_success(refinement_solution.status)
+                )
+                refinement_status = (
+                    None if refinement_solution is None else refinement_solution.status
+                )
+                refinement_solver_time = (
+                    None
+                    if refinement_solution is None
+                    else refinement_solution.solver_time_to_optimize
+                )
+                refinement_wall_time = (
+                    None
+                    if refinement_solution is None
+                    else refinement_solution.real_time_to_optimize
+                )
             inter_window_refinement_summaries.append(
                 {
                     "window": cycle_idx,
                     "success": refinement_success,
-                    "status": (
-                        None
-                        if refinement_solution is None
-                        else refinement_solution.status
-                    ),
-                    "solver_time_s": (
-                        None
-                        if refinement_solution is None
-                        else refinement_solution.solver_time_to_optimize
-                    ),
-                    "wall_time_s": (
-                        None
-                        if refinement_solution is None
-                        else refinement_solution.real_time_to_optimize
-                    ),
+                    "status": refinement_status,
+                    "solver_time_s": refinement_solver_time,
+                    "wall_time_s": refinement_wall_time,
+                    "cache_hit": refinement_cache_hit,
                 }
             )
         if (
@@ -6914,6 +6987,8 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
             stage_iterations=args.acados_control_homotopy_stage_iterations,
             echo=echo,
         )
+        if solver.nlp_solver_max_iter != args.acados_control_homotopy_stage_iterations:
+            solver.set_maximum_iterations(args.acados_control_homotopy_stage_iterations)
         solver.set_only_first_options_has_changed(False)
         solver.set_nlp_solver_tol_eq(solver.nlp_solver_tol_eq)
         solver.set_nlp_solver_tol_ineq(solver.nlp_solver_tol_ineq)
