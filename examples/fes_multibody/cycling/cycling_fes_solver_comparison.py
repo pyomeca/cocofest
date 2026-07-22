@@ -65,6 +65,19 @@ IPOPT_PROFILE_DEFAULTS = {
         "disable_periodic_fes_warmup_projection": False,
         "fatigue_warmstart_mode": None,
     },
+    "periodic_collocation": {
+        "model_formulation": "periodic_node",
+        "torque_application": "constant",
+        "ode_solver": "collocation",
+        "rk_steps": 1,
+        "collocation_degree": 3,
+        "collocation_method": "radau",
+        "use_sx": False,
+        "enforce_start_constraints": False,
+        "disable_standard_ipopt_warmup": False,
+        "disable_periodic_fes_warmup_projection": False,
+        "fatigue_warmstart_mode": None,
+    },
 }
 
 
@@ -639,7 +652,10 @@ def _solver_config(
     if solver_name == "ipopt":
         normalized_profile = _normalize_ipopt_profile(ipopt_profile)
         if normalized_profile not in IPOPT_PROFILE_DEFAULTS:
-            raise ValueError("--ipopt-profile must be 'historical' or 'acados_like'.")
+            raise ValueError(
+                "--ipopt-profile must be 'historical', 'periodic_collocation', "
+                "or 'acados_like'."
+            )
 
         defaults = IPOPT_PROFILE_DEFAULTS[normalized_profile]
         disable_projection_default = defaults["disable_periodic_fes_warmup_projection"]
@@ -1474,11 +1490,11 @@ def main(
     )
 
     normalized_ipopt_profile = _normalize_ipopt_profile(ipopt_profile)
-    ipopt_label = (
-        "historical reference"
-        if normalized_ipopt_profile == "historical"
-        else "ACADOS-like diagnostic"
-    )
+    ipopt_label = {
+        "historical": "historical reference",
+        "periodic_collocation": "periodic-collocation bridge",
+        "acados_like": "ACADOS-like diagnostic",
+    }[normalized_ipopt_profile]
     print(f"Running IPOPT configuration ({ipopt_label})...")
     start = perf_counter()
     ipopt_result = solve_case(ipopt_args, echo=True)
@@ -1577,12 +1593,19 @@ def build_cli() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--ipopt-profile",
-        choices=("historical", "acados_like", "acados-like"),
+        choices=(
+            "historical",
+            "periodic_collocation",
+            "periodic-collocation",
+            "acados_like",
+            "acados-like",
+        ),
         default="historical",
         help=(
             "Base IPOPT configuration. 'historical' keeps the robust reference "
-            "problem; 'acados_like' switches IPOPT to the periodic, constant-torque, "
-            "RK setup used to diagnose ACADOS."
+            "problem; 'periodic_collocation' isolates the periodic dynamics and "
+            "constant torque with robust collocation; 'acados_like' additionally "
+            "switches IPOPT to the explicit RK setup used to diagnose ACADOS."
         ),
     )
     parser.add_argument(

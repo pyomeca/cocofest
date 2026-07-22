@@ -9,6 +9,7 @@ from cocofest.optimization.receding_horizon_initial_guess import (
     audit_initial_guess,
     copy_container_values,
 )
+from cocofest.optimization.fes_nmpc_multibody import FesNmpcMsk
 from cocofest.models.ding2007.ding2007_with_fatigue_periodic import (
     DingModelPulseWidthFrequencyWithFatiguePeriodic,
 )
@@ -2686,6 +2687,39 @@ def test_shared_transfer_rollout_cli_is_available_to_ipopt():
         ]
         is False
     )
+
+
+def test_periodic_collocation_ipopt_profile_is_available():
+    args = comparison_example.build_cli().parse_args(
+        ["--ipopt-profile", "periodic-collocation"]
+    )
+    defaults = comparison_example.IPOPT_PROFILE_DEFAULTS["periodic_collocation"]
+
+    assert comparison_example._normalize_ipopt_profile(args.ipopt_profile) == (
+        "periodic_collocation"
+    )
+    assert defaults["model_formulation"] == "periodic_node"
+    assert defaults["torque_application"] == "constant"
+    assert defaults["ode_solver"] == "collocation"
+    assert defaults["use_sx"] is False
+
+
+def test_fes_nmpc_reports_incomplete_export_as_solver_failure():
+    nmpc = object.__new__(FesNmpcMsk)
+    nmpc.n_cycles_simultaneous = 1
+
+    def fail_while_assembling_window(*_args, **_kwargs):
+        raise IndexError("index 31 is out of bounds for axis 1 with size 31")
+
+    nmpc.solve = fail_while_assembling_window
+    with np.testing.assert_raises_regex(RuntimeError, "exported window"):
+        nmpc.solve_fes_nmpc(
+            update_functions=None,
+            solver=SimpleNamespace(),
+            total_cycles=1,
+            external_force=None,
+            cycle_solutions=SimpleNamespace(),
+        )
 
 
 def test_shared_initial_guess_comparison_detects_exact_and_biased_seeds():

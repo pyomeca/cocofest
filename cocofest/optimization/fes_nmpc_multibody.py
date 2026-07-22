@@ -292,11 +292,14 @@ class FesNmpcMsk(FesNmpc):
                 n_cycles_simultaneous=self.n_cycles_simultaneous,
                 max_consecutive_failing=max_consecutive_failing,
             )
-        except AttributeError as exc:
-            if "decision_states" in str(exc):
+        except (AttributeError, IndexError) as exc:
+            incomplete_solution = isinstance(
+                exc, IndexError
+            ) or "decision_states" in str(exc)
+            if incomplete_solution:
                 raise RuntimeError(
                     "The receding-horizon solve did not produce a valid solution for at least one window. "
-                    "This usually means the solver failed before returning the first feasible iterate."
+                    "The solver failed before the exported window could be assembled."
                 ) from exc
             raise
 
