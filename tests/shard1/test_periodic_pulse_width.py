@@ -288,6 +288,7 @@ def test_acados_cyclical_transfer_extrapolates_by_default():
     args = periodic_example.build_argument_parser().parse_args([])
 
     assert args.acados_cyclical_transfer_mode == "extrapolate"
+    assert args.acados_control_homotopy_stage_iterations == 54
 
 
 def test_periodic_ipopt_window_cache_paths_are_window_specific(tmp_path, monkeypatch):
@@ -478,6 +479,59 @@ def test_control_homotopy_restarts_a_nearly_feasible_stage(monkeypatch):
     assert [item["accepted"] for item in summaries] == [False, True, True]
     assert summaries[0]["restartable"] is True
     assert applied_statuses == [2, 0, 0]
+
+
+def test_control_homotopy_does_not_restart_a_linesearch_failure(monkeypatch):
+    reset_calls = []
+
+    class FakeAcadosSolver:
+        def reset(self, reset_qp_solver_mem):
+            reset_calls.append(reset_qp_solver_mem)
+
+    class FakeSolver:
+        nlp_solver_max_iter = 50
+
+        def set_convergence_tolerance(self, value):
+            self.tolerance = value
+
+    nmpc = SimpleNamespace(
+        ocp_solver=SimpleNamespace(ocp_solver=FakeAcadosSolver()),
+        nlp=[SimpleNamespace(u_init={}, u_bounds={})],
+    )
+    solution = SimpleNamespace(
+        status=3,
+        residuals=np.array([1.0, 1e-6, 0.0, 1e-6]),
+        solver_time_to_optimize=1.0,
+        real_time_to_optimize=1.1,
+    )
+    applied_statuses = []
+    monkeypatch.setattr(
+        periodic_example,
+        "snapshot_acados_diagnostics",
+        lambda result: {"residuals": result.residuals},
+    )
+    monkeypatch.setattr(
+        periodic_example,
+        "apply_solution_directly_to_periodic_nmpc_initial_guess",
+        lambda _nmpc, result: applied_statuses.append(result.status),
+    )
+
+    summaries = periodic_example.run_acados_control_homotopy(
+        nmpc,
+        FakeSolver(),
+        radii=(),
+        convergence_tolerance=1e-3,
+        fixed_control_tolerance=1e-8,
+        max_restarts=3,
+        stage_iterations=50,
+        echo=False,
+        solve_stage=lambda: solution,
+    )
+
+    assert summaries[0]["restartable"] is False
+    assert summaries[0]["solver_reset"] is True
+    assert applied_statuses == []
+    assert reset_calls == [1]
 
 
 def test_control_homotopy_reuses_compiled_acados_options(monkeypatch):

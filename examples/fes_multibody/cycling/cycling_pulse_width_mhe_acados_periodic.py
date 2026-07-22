@@ -1072,7 +1072,7 @@ def build_argument_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--acados-control-homotopy-stage-iterations",
         type=int,
-        default=50,
+        default=54,
         help=(
             "Maximum SQP iterations per homotopy attempt. Short attempts preserve "
             "a usable iterate for restart before a late QP failure."
@@ -2385,6 +2385,18 @@ def set_acados_runtime_max_iterations(periodic_nmpc, max_iterations: int) -> boo
     return True
 
 
+def reset_acados_solver_memory(periodic_nmpc) -> bool:
+    """Clear a failed Acados iterate before Bioptim reloads the primal guess."""
+
+    acados_interface = getattr(periodic_nmpc, "ocp_solver", None)
+    acados_solver = getattr(acados_interface, "ocp_solver", None)
+    reset = getattr(acados_solver, "reset", None)
+    if reset is None:
+        return False
+    reset(reset_qp_solver_mem=1)
+    return True
+
+
 def run_acados_control_homotopy(
     periodic_nmpc,
     solver,
@@ -2392,7 +2404,7 @@ def run_acados_control_homotopy(
     convergence_tolerance: float,
     fixed_control_tolerance: float,
     max_restarts: int = 2,
-    stage_iterations: int | None = 50,
+    stage_iterations: int | None = 54,
     echo: bool = True,
     solve_stage=None,
 ) -> list[dict]:
@@ -2410,7 +2422,11 @@ def run_acados_control_homotopy(
         # The generated solver already owns this immutable maximum. The initial
         # homotopy compiles it with stage_iterations; subsequent windows must not
         # ask Bioptim to reconfigure the same Acados capsule.
-        stage_solver.set_only_first_options_has_changed(False)
+        mark_options_unchanged = getattr(
+            stage_solver, "set_only_first_options_has_changed", None
+        )
+        if mark_options_unchanged is not None:
+            mark_options_unchanged(False)
     summaries = []
 
     if solve_stage is None:
@@ -2445,6 +2461,7 @@ def run_acados_control_homotopy(
                 )
                 restartable = (
                     not accepted
+                    and solution.status == 2
                     and attempt < max_restarts
                     and acados_homotopy_stage_is_restartable(
                         diagnostics, convergence_tolerance
@@ -2483,6 +2500,7 @@ def run_acados_control_homotopy(
                     stage_accepted = True
                     break
                 if not restartable:
+                    summary["solver_reset"] = reset_acados_solver_memory(periodic_nmpc)
                     break
                 apply_solution_directly_to_periodic_nmpc_initial_guess(
                     periodic_nmpc, solution
