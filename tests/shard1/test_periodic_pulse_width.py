@@ -284,6 +284,47 @@ def test_control_homotopy_radii_are_parsed_as_an_increasing_sequence():
     assert args.acados_control_homotopy_stage_iterations == 40
 
 
+def test_transfer_bound_homotopy_fractions_are_parsed():
+    args = periodic_example.build_argument_parser().parse_args(
+        [
+            "--acados-transfer-irk-rollout",
+            "--acados-transfer-bound-homotopy",
+            "--acados-transfer-bound-homotopy-fractions",
+            "0,0.5,1",
+            "--acados-transfer-bound-homotopy-padding",
+            "0.1",
+            "--acados-transfer-bound-homotopy-iterations",
+            "12",
+        ]
+    )
+
+    assert args.acados_transfer_bound_homotopy is True
+    assert args.acados_transfer_bound_homotopy_fractions == (0.0, 0.5, 1.0)
+    assert args.acados_transfer_bound_homotopy_padding == 0.1
+    assert args.acados_transfer_bound_homotopy_iterations == 12
+
+
+def test_transfer_sqp_restart_options_are_parsed():
+    parser = periodic_example.build_argument_parser()
+    args = parser.parse_args(
+        [
+            "--acados-transfer-sqp-restarts",
+            "4",
+            "--acados-transfer-sqp-restart-iterations",
+            "2",
+            "--acados-transfer-sqp-restart-feasibility-tolerance",
+            "0.02",
+        ]
+    )
+
+    assert args.acados_transfer_sqp_restarts == 4
+    assert args.acados_transfer_sqp_restart_iterations == 2
+    assert args.acados_transfer_sqp_restart_feasibility_tolerance == 0.02
+    assert periodic_example._codegen_signature(
+        parser.parse_args([])
+    ) != periodic_example._codegen_signature(args)
+
+
 def test_acados_cyclical_transfer_extrapolates_by_default():
     args = periodic_example.build_argument_parser().parse_args([])
 
@@ -1549,6 +1590,29 @@ def test_full_dynamics_transfer_rollout_reintegrates_appended_cycle():
     np.testing.assert_allclose(x_init["q"].init[:, 3:], 9.0)
 
 
+def test_appended_pulse_width_scaling_preserves_retained_cycle_and_clips():
+    values = np.array([[0.1, 0.2, 0.2, 0.3]])
+    nmpc = SimpleNamespace(
+        nodes_per_cycle=2,
+        nlp=[
+            SimpleNamespace(
+                u_init={"last_pulse_width_Biceps": SimpleNamespace(init=values)},
+                u_bounds={
+                    "last_pulse_width_Biceps": SimpleNamespace(
+                        min=np.zeros((1, 3)), max=np.full((1, 3), 0.6)
+                    )
+                },
+            )
+        ],
+    )
+
+    summary = periodic_example.scale_appended_pulse_width_controls(nmpc, 2.5)
+
+    np.testing.assert_allclose(values, [[0.1, 0.2, 0.5, 0.6]])
+    assert summary["start_node"] == 2
+    assert summary["controls"]["last_pulse_width_Biceps"]["clipped_count"] == 1
+
+
 def test_acados_irk_transfer_rollout_uses_scaled_variables_and_stage_data():
     class Variables(dict):
         def __init__(self, *args, shape, **kwargs):
@@ -1559,10 +1623,11 @@ def test_acados_irk_transfer_rollout_uses_scaled_variables_and_stage_data():
         def __init__(self):
             self.acados_sim = SimpleNamespace(dims=SimpleNamespace(nx=2, nu=1))
             self.calls = []
+            self.settings = []
 
         def set(self, field, value):
-            assert field == "t0"
-            np.testing.assert_allclose(value, [0.0])
+            assert field in ("T", "t0")
+            self.settings.append((field, value.copy()))
 
         def simulate(self, x, u, p):
             self.calls.append((x.copy(), u.copy(), p.copy()))
@@ -1602,6 +1667,8 @@ def test_acados_irk_transfer_rollout_uses_scaled_variables_and_stage_data():
     nmpc = SimpleNamespace(
         nlp=[nlp],
         nodes_per_cycle=2,
+        cycle_duration=1.0,
+        cycle_len=2,
         _cocofest_acados_sim_solver=simulator,
     )
 
@@ -1615,6 +1682,9 @@ def test_acados_irk_transfer_rollout_uses_scaled_variables_and_stage_data():
     np.testing.assert_allclose(simulator.calls[0][0], [1.0, 0.5])
     np.testing.assert_allclose(simulator.calls[0][1], [2.0])
     np.testing.assert_allclose(simulator.calls[0][2], [3.0])
+    assert [field for field, _ in simulator.settings] == ["T", "t0", "T", "t0"]
+    np.testing.assert_allclose(simulator.settings[0][1], [0.5])
+    np.testing.assert_allclose(simulator.settings[1][1], [1.0])
 
 
 def test_acados_irk_transfer_rejects_dimension_mismatch_without_mutating_guess():
@@ -1646,6 +1716,246 @@ def test_acados_irk_transfer_rejects_dimension_mismatch_without_mutating_guess()
         periodic_example.rollout_transferred_cycle_acados_irk(nmpc)
 
     np.testing.assert_allclose(guess, 0.0)
+
+
+def test_transfer_bound_homotopy_never_relaxes_first_node():
+    bounds = SimpleNamespace(
+        min=np.array([[-0.1, -1.0, -2.1]]),
+        max=np.array([[0.1, 1.0, -1.9]]),
+    )
+    nmpc = SimpleNamespace(
+        nlp=[
+            SimpleNamespace(
+                x_init={"qdot": SimpleNamespace(init=np.array([[0.0, -4.0, -5.0]]))},
+                x_bounds={"qdot": bounds},
+            )
+        ],
+        _sync_acados_state_bounds=lambda: None,
+    )
+    original = periodic_example._copy_state_bounds(nmpc)
+    relaxed, expansion = periodic_example.build_relaxed_transfer_state_bounds(
+        nmpc, padding=0.1
+    )
+
+    np.testing.assert_allclose(relaxed["qdot"][0][:, 0], [-0.1])
+    np.testing.assert_allclose(relaxed["qdot"][1][:, 0], [0.1])
+    assert relaxed["qdot"][0][0, 1] < -4.0
+    assert relaxed["qdot"][0][0, 2] < -5.0
+    assert expansion["qdot"] > 0.0
+
+    periodic_example.apply_transfer_state_bound_fraction(
+        nmpc, original, relaxed, fraction=0.5
+    )
+    np.testing.assert_allclose(bounds.min[:, 0], [-0.1])
+    np.testing.assert_allclose(bounds.max[:, 0], [0.1])
+    assert relaxed["qdot"][0][0, 1] < bounds.min[0, 1] < -1.0
+
+
+def test_transfer_bound_homotopy_restores_physical_bounds(monkeypatch):
+    class FakeSolver:
+        def __init__(self):
+            self.nlp_solver_max_iter = 100
+
+        def set_convergence_tolerance(self, value):
+            self.tolerance = value
+
+        def set_maximum_iterations(self, value):
+            self.nlp_solver_max_iter = value
+
+    bounds = SimpleNamespace(
+        min=np.array([[-0.1, -1.0, -2.1]]),
+        max=np.array([[0.1, 1.0, -1.9]]),
+    )
+    original_min = bounds.min.copy()
+    original_max = bounds.max.copy()
+    nlp = SimpleNamespace(
+        x_init={"qdot": SimpleNamespace(init=np.array([[0.0, -4.0, -5.0]]))},
+        u_init={"u": SimpleNamespace(init=np.zeros((1, 2)))},
+        x_bounds={"qdot": bounds},
+    )
+    nmpc = SimpleNamespace(
+        nlp=[nlp],
+        ocp_solver=None,
+        _cocofest_fix_controls_to_warmup=True,
+        _correct_init_guess_to_fit_bounds=lambda corrected_input: None,
+        _sync_acados_state_bounds=lambda: None,
+    )
+    solutions = [
+        SimpleNamespace(
+            status=0, solver_time_to_optimize=0.1, real_time_to_optimize=0.2
+        ),
+        SimpleNamespace(
+            status=0, solver_time_to_optimize=0.1, real_time_to_optimize=0.2
+        ),
+    ]
+    monkeypatch.setattr(
+        periodic_example,
+        "snapshot_acados_diagnostics",
+        lambda solution: {"residuals": np.zeros(4)},
+    )
+    monkeypatch.setattr(
+        periodic_example,
+        "apply_solution_directly_to_periodic_nmpc_initial_guess",
+        lambda periodic_nmpc, solution: None,
+    )
+
+    summary = periodic_example.run_acados_transfer_bound_homotopy(
+        nmpc,
+        FakeSolver(),
+        fractions=(0.0, 1.0),
+        padding=0.1,
+        convergence_tolerance=1e-4,
+        stage_iterations=10,
+        echo=False,
+        solve_stage=lambda: solutions.pop(0),
+    )
+
+    assert summary["completed"] is True
+    assert [stage["accepted"] for stage in summary["stages"]] == [True, True]
+    np.testing.assert_allclose(bounds.min, original_min)
+    np.testing.assert_allclose(bounds.max, original_max)
+    assert nmpc._cocofest_fix_controls_to_warmup is True
+
+
+def test_transfer_sqp_restarts_from_nearly_feasible_iterate(monkeypatch):
+    runtime_options = []
+    reset_calls = []
+
+    class FakeAcadosSolver:
+        def options_set(self, key, value):
+            runtime_options.append((key, value))
+
+        def reset(self, reset_qp_solver_mem):
+            reset_calls.append(reset_qp_solver_mem)
+
+    class FakeSolver:
+        nlp_solver_max_iter = 100
+
+        def set_maximum_iterations(self, value):
+            self.nlp_solver_max_iter = value
+
+        def set_only_first_options_has_changed(self, value):
+            self.options_changed = value
+
+    nmpc = SimpleNamespace(
+        nlp=[
+            SimpleNamespace(
+                x_init={"q": SimpleNamespace(init=np.zeros((1, 2)))},
+                u_init={"u": SimpleNamespace(init=np.zeros((1, 1)))},
+            )
+        ],
+        ocp_solver=SimpleNamespace(ocp_solver=FakeAcadosSolver()),
+    )
+    solutions = iter(
+        [
+            SimpleNamespace(
+                status=4,
+                residuals=np.array([0.7, 2.0, 0.0, 0.0]),
+                solver_time_to_optimize=0.1,
+                real_time_to_optimize=0.2,
+            ),
+            SimpleNamespace(
+                status=0,
+                residuals=np.array([1e-6, 1e-8, 0.0, 1e-7]),
+                solver_time_to_optimize=0.3,
+                real_time_to_optimize=0.4,
+            ),
+        ]
+    )
+    applied_statuses = []
+    monkeypatch.setattr(
+        periodic_example,
+        "snapshot_acados_diagnostics",
+        lambda solution: (
+            {
+                "residuals": solution.residuals,
+                "res_stat_all": np.array([0.7, 0.6]),
+                "res_eq_all": np.array([2.0, 3e-4]),
+                "res_ineq_all": np.zeros(2),
+                "res_comp_all": np.array([0.0, 1.4e-3]),
+            }
+            if solution.status == 4
+            else {"residuals": solution.residuals}
+        ),
+    )
+    monkeypatch.setattr(
+        periodic_example,
+        "apply_solution_directly_to_periodic_nmpc_initial_guess",
+        lambda _nmpc, solution: applied_statuses.append(solution.status),
+    )
+
+    summary = periodic_example.run_acados_transfer_sqp_restarts(
+        nmpc,
+        FakeSolver(),
+        max_restarts=3,
+        stage_iterations=1,
+        feasibility_tolerance=1e-2,
+        echo=False,
+        solve_stage=lambda: next(solutions),
+    )
+
+    assert summary["completed"] is True
+    assert [item["status"] for item in summary["attempts"]] == [4, 0]
+    np.testing.assert_allclose(
+        summary["attempts"][0]["reported_residuals"], [0.7, 2.0, 0.0, 0.0]
+    )
+    np.testing.assert_allclose(
+        summary["attempts"][0]["residuals"], [0.6, 3e-4, 0.0, 1.4e-3]
+    )
+    assert applied_statuses == [4, 0]
+    assert reset_calls == [1]
+    assert runtime_options == [
+        ("nlp_solver_max_iter", 1),
+        ("nlp_solver_max_iter", 1),
+        ("nlp_solver_max_iter", 100),
+    ]
+
+
+def test_failed_acados_capsule_primal_is_unscaled_into_initial_guess():
+    class Variables(dict):
+        def __init__(self, values, shape):
+            super().__init__(values)
+            self.shape = shape
+
+    class FakeCapsule:
+        def get(self, stage, field):
+            values = {
+                (0, "x"): np.array([1.0, 2.0]),
+                (1, "x"): np.array([3.0, 4.0]),
+                (0, "u"): np.array([5.0]),
+            }
+            return values[(stage, field)]
+
+    states = Variables(
+        {"q": SimpleNamespace(index=[0]), "qdot": SimpleNamespace(index=[1])},
+        shape=2,
+    )
+    controls = Variables({"u": SimpleNamespace(index=[0])}, shape=1)
+    nlp = SimpleNamespace(
+        states=states,
+        controls=controls,
+        parameters=SimpleNamespace(shape=0),
+        x_init={
+            "q": SimpleNamespace(init=np.zeros((1, 2))),
+            "qdot": SimpleNamespace(init=np.zeros((1, 2))),
+        },
+        u_init={"u": SimpleNamespace(init=np.zeros((1, 1)))},
+        x_scaling={
+            "q": SimpleNamespace(scaling=np.array([[2.0]])),
+            "qdot": SimpleNamespace(scaling=np.array([[4.0]])),
+        },
+        u_scaling={"u": SimpleNamespace(scaling=np.array([[3.0]]))},
+    )
+    nmpc = SimpleNamespace(
+        nlp=[nlp], ocp_solver=SimpleNamespace(ocp_solver=FakeCapsule())
+    )
+
+    summary = periodic_example.apply_acados_capsule_primal_to_initial_guess(nmpc)
+
+    assert summary["applied"] is True
+    np.testing.assert_allclose(nlp.x_init["q"].init, [[2.0, 6.0]])
+    np.testing.assert_allclose(nlp.x_init["qdot"].init, [[8.0, 16.0]])
+    np.testing.assert_allclose(nlp.u_init["u"].init, [[15.0]])
 
 
 def test_transferred_guess_is_projected_after_bounds_move():

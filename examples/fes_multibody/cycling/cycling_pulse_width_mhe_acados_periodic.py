@@ -466,6 +466,37 @@ def parse_control_homotopy_radii(raw_radii: str) -> tuple[float, ...]:
     return radii
 
 
+def parse_transfer_bound_homotopy_fractions(
+    raw_fractions: str,
+) -> tuple[float, ...]:
+    fractions = tuple(
+        float(item.strip()) for item in raw_fractions.split(",") if item.strip()
+    )
+    if not fractions:
+        raise argparse.ArgumentTypeError(
+            "The transfer-bound homotopy requires at least one fraction."
+        )
+    if any(
+        not np.isfinite(fraction) or fraction < 0.0 or fraction > 1.0
+        for fraction in fractions
+    ):
+        raise argparse.ArgumentTypeError(
+            "Transfer-bound homotopy fractions must be finite and between 0 and 1."
+        )
+    if any(
+        next_fraction <= fraction
+        for fraction, next_fraction in zip(fractions, fractions[1:])
+    ):
+        raise argparse.ArgumentTypeError(
+            "Transfer-bound homotopy fractions must be strictly increasing."
+        )
+    if not np.isclose(fractions[-1], 1.0):
+        raise argparse.ArgumentTypeError(
+            "Transfer-bound homotopy fractions must end at 1."
+        )
+    return fractions
+
+
 def build_cost_fun_weight(objectives: set[str]) -> list[int]:
     weights = [0, 0, 0]
     for objective in objectives:
@@ -962,6 +993,68 @@ def build_argument_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--acados-transfer-bound-homotopy",
+        action="store_true",
+        help=(
+            "Temporarily enlarge path and terminal state bounds around the IRK "
+            "transfer, then tighten them back to the physical bounds with ACADOS."
+        ),
+    )
+    parser.add_argument(
+        "--acados-transfer-bound-homotopy-fractions",
+        type=parse_transfer_bound_homotopy_fractions,
+        default=(0.0, 0.25, 0.5, 0.75, 1.0),
+        help=(
+            "Strictly increasing interpolation fractions ending at 1 for the "
+            "transfer-bound homotopy."
+        ),
+    )
+    parser.add_argument(
+        "--acados-transfer-bound-homotopy-padding",
+        type=float,
+        default=0.05,
+        help=(
+            "Relative padding around the transferred state trajectory in the "
+            "fully relaxed bound stage."
+        ),
+    )
+    parser.add_argument(
+        "--acados-transfer-bound-homotopy-iterations",
+        type=int,
+        default=30,
+        help="Maximum SQP iterations for each transfer-bound homotopy stage.",
+    )
+    parser.add_argument(
+        "--acados-transfer-bound-homotopy-tolerance",
+        type=float,
+        default=1e-4,
+        help="KKT tolerance used by transfer-bound homotopy stages.",
+    )
+    parser.add_argument(
+        "--acados-transfer-sqp-restarts",
+        type=int,
+        default=0,
+        help=(
+            "Maximum number of short ACADOS restarts used to repair a transferred "
+            "initial guess before solving the next MHE window."
+        ),
+    )
+    parser.add_argument(
+        "--acados-transfer-sqp-restart-iterations",
+        type=int,
+        default=1,
+        help="SQP iterations performed by each transfer-repair attempt.",
+    )
+    parser.add_argument(
+        "--acados-transfer-sqp-restart-feasibility-tolerance",
+        type=float,
+        default=1e-2,
+        help=(
+            "Largest dynamics, inequality, or complementarity residual accepted "
+            "as a restartable transferred iterate."
+        ),
+    )
+    parser.add_argument(
         "--acados-cyclical-transfer-mode",
         choices=("extrapolate", "repeat"),
         default="extrapolate",
@@ -975,6 +1068,15 @@ def build_argument_parser() -> argparse.ArgumentParser:
         type=int,
         default=5,
         help="RK4 substeps used by the full-dynamics inter-window rollout.",
+    )
+    parser.add_argument(
+        "--acados-transfer-pulse-width-scale",
+        type=float,
+        default=1.0,
+        help=(
+            "Scale pulse widths only in the newly appended cycle before its "
+            "dynamics rollout; values are clipped to the physical control bounds."
+        ),
     )
     parser.add_argument(
         "--acados-transfer-rollout-max-bound-violation",
@@ -1805,6 +1907,7 @@ def _codegen_signature(args: argparse.Namespace) -> str:
         "acados_qpscaling_scale_objective": args.acados_qpscaling_scale_objective,
         "acados_qpscaling_scale_constraints": args.acados_qpscaling_scale_constraints,
         "acados_ext_qp_res": args.acados_ext_qp_res,
+        "acados_store_iterates": bool(args.acados_transfer_sqp_restarts),
         "acados_print_level": args.acados_print_level,
         "sources": [
             _source_stamp(
@@ -1885,6 +1988,7 @@ def configure_acados_solver(
     qpscaling_scale_objective: str,
     qpscaling_scale_constraints: str,
     ext_qp_res: bool,
+    store_iterates: bool,
     print_level: int = 0,
 ) -> Solver.ACADOS:
     solver = Solver.ACADOS()
@@ -1948,6 +2052,7 @@ def configure_acados_solver(
     set_acados_unsafe_option(solver, qp_iter_max, "qp_solver_iter_max")
     set_acados_unsafe_option(solver, 1 if ext_qp_res else 0, "nlp_solver_ext_qp_res")
     set_acados_unsafe_option(solver, qp_warm_start_level, "qp_solver_warm_start")
+    set_acados_unsafe_option(solver, store_iterates, "store_iterates")
     set_acados_unsafe_option(solver, 0, "qp_solver_ric_alg")
     set_acados_unsafe_option(solver, 0, "qp_solver_cond_ric_alg")
     set_acados_unsafe_option(
@@ -2405,6 +2510,100 @@ def reset_acados_solver_memory(periodic_nmpc) -> bool:
         return False
     reset(reset_qp_solver_mem=1)
     return True
+
+
+def apply_acados_capsule_primal_to_initial_guess(periodic_nmpc) -> dict:
+    """Copy the current scaled ACADOS primal, including failed iterates, to Bioptim."""
+
+    interface = getattr(periodic_nmpc, "ocp_solver", None)
+    acados_solver = getattr(interface, "ocp_solver", None)
+    get_stage_value = getattr(acados_solver, "get", None)
+    if get_stage_value is None:
+        return {"applied": False, "reason": "solver_unavailable"}
+
+    stored_iterate = None
+    stored_iterate_error = None
+    get_iterate = getattr(acados_solver, "get_iterate", None)
+    if get_iterate is not None:
+        try:
+            stored_iterate = get_iterate(-1)
+        except (RuntimeError, TypeError, ValueError) as exc:
+            stored_iterate_error = str(exc)
+
+    nlp = periodic_nmpc.nlp[0]
+    first_state_key = next(iter(nlp.x_init.keys()))
+    first_control_key = next(iter(nlp.u_init.keys()))
+    n_state_nodes = nlp.x_init[first_state_key].init.shape[1]
+    n_control_nodes = nlp.u_init[first_control_key].init.shape[1]
+    state_scaling = _acados_variable_scaling(nlp, nlp.states, nlp.x_scaling)
+    control_scaling = _acados_variable_scaling(nlp, nlp.controls, nlp.u_scaling)
+    parameter_count = int(getattr(nlp.parameters, "shape", 0))
+    states = np.empty((nlp.states.shape, n_state_nodes))
+    controls = np.empty((nlp.controls.shape, n_control_nodes))
+
+    for stage in range(n_state_nodes):
+        stage_state = np.asarray(
+            (
+                stored_iterate.x_traj[stage]
+                if stored_iterate is not None
+                else get_stage_value(stage, "x")
+            ),
+            dtype=float,
+        ).reshape(-1)
+        if stage_state.size < parameter_count + nlp.states.shape:
+            return {
+                "applied": False,
+                "reason": "state_dimension_mismatch",
+                "stage": stage,
+            }
+        states[:, stage] = (
+            stage_state[parameter_count : parameter_count + nlp.states.shape]
+            * state_scaling
+        )
+    for stage in range(n_control_nodes):
+        stage_control = np.asarray(
+            (
+                stored_iterate.u_traj[stage]
+                if stored_iterate is not None
+                else get_stage_value(stage, "u")
+            ),
+            dtype=float,
+        ).reshape(-1)
+        if stage_control.size < nlp.controls.shape:
+            return {
+                "applied": False,
+                "reason": "control_dimension_mismatch",
+                "stage": stage,
+            }
+        controls[:, stage] = stage_control[: nlp.controls.shape] * control_scaling
+
+    if not np.all(np.isfinite(states)) or not np.all(np.isfinite(controls)):
+        return {"applied": False, "reason": "nonfinite_primal"}
+
+    state_before = _stack_initial_guess_values(nlp.x_init, nlp.states, n_state_nodes)
+    control_before = _stack_initial_guess_values(
+        nlp.u_init, nlp.controls, n_control_nodes
+    )
+    for key in nlp.states.keys():
+        nlp.x_init[key].init[:, :] = states[nlp.states[key].index, :]
+    for key in nlp.controls.keys():
+        nlp.u_init[key].init[:, :] = controls[nlp.controls[key].index, :]
+    bound_projection = None
+    if hasattr(periodic_nmpc, "_correct_init_guess_to_fit_bounds"):
+        bound_projection = project_transferred_initial_guess_to_bounds(periodic_nmpc)
+    final_states = _stack_initial_guess_values(nlp.x_init, nlp.states, n_state_nodes)
+    final_controls = _stack_initial_guess_values(
+        nlp.u_init, nlp.controls, n_control_nodes
+    )
+    return {
+        "applied": True,
+        "reason": None,
+        "source": "stored_iterate" if stored_iterate is not None else "capsule",
+        "stored_iterate_error": stored_iterate_error,
+        "bound_projection": bound_projection,
+        "state_max_change": float(np.max(np.abs(final_states - state_before))),
+        "control_max_change": float(np.max(np.abs(final_controls - control_before))),
+    }
 
 
 def run_acados_control_homotopy(
@@ -3710,6 +3909,38 @@ def wheel_angle_periodicity_diagnostics(nmpc, node: int = 0) -> dict[str, float]
     }
 
 
+def scale_appended_pulse_width_controls(periodic_nmpc, scale: float) -> dict:
+    if not np.isfinite(scale) or scale <= 0.0:
+        raise ValueError("Appended pulse-width scale must be finite and positive.")
+
+    start_node = periodic_nmpc.nodes_per_cycle
+    summary = {}
+    for key in periodic_nmpc.nlp[0].u_init.keys():
+        if not key.startswith("last_pulse_width_"):
+            continue
+        values = periodic_nmpc.nlp[0].u_init[key].init
+        if start_node < 0 or start_node >= values.shape[1]:
+            raise ValueError("The appended control cycle starts outside the horizon.")
+        bounds = periodic_nmpc.nlp[0].u_bounds[key]
+        lower = float(np.min(np.asarray(bounds.min, dtype=float)))
+        upper = float(np.max(np.asarray(bounds.max, dtype=float)))
+        original = np.asarray(values[:, start_node:], dtype=float).copy()
+        scaled = np.minimum(np.maximum(scale * original, lower), upper)
+        values[:, start_node:] = scaled
+        summary[key] = {
+            "before_min": float(np.min(original)),
+            "before_max": float(np.max(original)),
+            "after_min": float(np.min(scaled)),
+            "after_max": float(np.max(scaled)),
+            "clipped_count": int(
+                np.count_nonzero(
+                    (scale * original < lower) | (scale * original > upper)
+                )
+            ),
+        }
+    return {"scale": scale, "start_node": start_node, "controls": summary}
+
+
 def rollout_transferred_cycle_full_dynamics(
     periodic_nmpc,
     n_substeps: int = 5,
@@ -3901,11 +4132,13 @@ def rollout_transferred_cycle_acados_irk(
             f"(x: {states.shape[0]} != {expected_states}, "
             f"u: {controls.shape[0]} != {expected_controls})."
         )
+    interval_duration = periodic_nmpc.cycle_duration / periodic_nmpc.cycle_len
 
     simulation_time_s = 0.0
     for node in range(start_node, n_control_nodes):
         stage_parameters = _numerical_timeseries_at_node(nlp, node)
-        simulator.set("t0", np.array([0.0]))
+        simulator.set("T", np.array([interval_duration]))
+        simulator.set("t0", np.array([node * interval_duration]))
         try:
             next_scaled_state = simulator.simulate(
                 x=states[:, node] / state_scaling,
@@ -3971,6 +4204,9 @@ def rollout_transferred_cycle_acados_irk(
     if applied:
         for key, values in state_values.items():
             nlp.x_init[key].init[:, :] = values
+    rk4_defects_after = (
+        _full_dynamics_rollout_defect_details(periodic_nmpc) if applied else None
+    )
 
     return {
         "applied": applied,
@@ -3981,6 +4217,460 @@ def rollout_transferred_cycle_acados_irk(
         "terminal_delta": terminal_delta,
         "simulator_built": simulator_built,
         "simulation_time_s": simulation_time_s,
+        "interval_duration": interval_duration,
+        "rk4_defects_after": rk4_defects_after,
+    }
+
+
+def _copy_state_bounds(periodic_nmpc) -> dict[str, tuple[np.ndarray, np.ndarray]]:
+    return {
+        key: (
+            np.asarray(periodic_nmpc.nlp[0].x_bounds[key].min, dtype=float).copy(),
+            np.asarray(periodic_nmpc.nlp[0].x_bounds[key].max, dtype=float).copy(),
+        )
+        for key in periodic_nmpc.nlp[0].x_bounds.keys()
+    }
+
+
+def build_relaxed_transfer_state_bounds(
+    periodic_nmpc,
+    padding: float,
+) -> tuple[dict[str, tuple[np.ndarray, np.ndarray]], dict[str, float]]:
+    """Enclose the transferred trajectory without relaxing its first node."""
+
+    if padding < 0.0:
+        raise ValueError("Transfer-bound homotopy padding must be non-negative.")
+
+    relaxed_bounds = _copy_state_bounds(periodic_nmpc)
+    expansion_by_key = {}
+    for key, (relaxed_min, relaxed_max) in relaxed_bounds.items():
+        values = np.asarray(periodic_nmpc.nlp[0].x_init[key].init, dtype=float)
+        if values.shape[1] < 2 or relaxed_min.shape[1] < 3:
+            raise ValueError(
+                "Transfer-bound homotopy requires path and terminal bound columns."
+            )
+
+        original_min = relaxed_min.copy()
+        original_max = relaxed_max.copy()
+        path_values = values[:, 1:-1]
+        if path_values.shape[1]:
+            path_range = np.ptp(path_values, axis=1)
+            path_bound_range = original_max[:, 1] - original_min[:, 1]
+            path_scale = np.maximum.reduce(
+                (
+                    path_range,
+                    np.where(np.isfinite(path_bound_range), path_bound_range, 0.0),
+                    np.full(path_range.shape, np.finfo(float).eps),
+                )
+            )
+            path_padding = padding * path_scale
+            relaxed_min[:, 1] = np.minimum(
+                original_min[:, 1], np.min(path_values, axis=1) - path_padding
+            )
+            relaxed_max[:, 1] = np.maximum(
+                original_max[:, 1], np.max(path_values, axis=1) + path_padding
+            )
+
+        terminal_values = values[:, -1]
+        trajectory_range = np.ptp(values, axis=1)
+        terminal_bound_range = original_max[:, 2] - original_min[:, 2]
+        terminal_scale = np.maximum.reduce(
+            (
+                trajectory_range,
+                np.where(np.isfinite(terminal_bound_range), terminal_bound_range, 0.0),
+                np.full(trajectory_range.shape, np.finfo(float).eps),
+            )
+        )
+        terminal_padding = padding * terminal_scale
+        relaxed_min[:, 2] = np.minimum(
+            original_min[:, 2], terminal_values - terminal_padding
+        )
+        relaxed_max[:, 2] = np.maximum(
+            original_max[:, 2], terminal_values + terminal_padding
+        )
+
+        # Inter-window continuity is never part of this homotopy.
+        relaxed_min[:, 0] = original_min[:, 0]
+        relaxed_max[:, 0] = original_max[:, 0]
+        expansion_by_key[key] = float(
+            max(
+                np.max(original_min - relaxed_min),
+                np.max(relaxed_max - original_max),
+            )
+        )
+
+    return relaxed_bounds, expansion_by_key
+
+
+def apply_transfer_state_bound_fraction(
+    periodic_nmpc,
+    original_bounds: dict[str, tuple[np.ndarray, np.ndarray]],
+    relaxed_bounds: dict[str, tuple[np.ndarray, np.ndarray]],
+    fraction: float,
+) -> None:
+    if fraction < 0.0 or fraction > 1.0:
+        raise ValueError("Transfer-bound homotopy fraction must be between 0 and 1.")
+
+    for key, (original_min, original_max) in original_bounds.items():
+        relaxed_min, relaxed_max = relaxed_bounds[key]
+        bounds = periodic_nmpc.nlp[0].x_bounds[key]
+        bounds.min[:, :] = relaxed_min + fraction * (original_min - relaxed_min)
+        bounds.max[:, :] = relaxed_max + fraction * (original_max - relaxed_max)
+        bounds.min[:, 0] = original_min[:, 0]
+        bounds.max[:, 0] = original_max[:, 0]
+    periodic_nmpc._sync_acados_state_bounds()
+
+
+def _acados_residual_history_summary(diagnostics: dict) -> dict:
+    rows = []
+    for key in ("res_stat_all", "res_eq_all", "res_ineq_all", "res_comp_all"):
+        values = diagnostics.get(key)
+        if values is None or isinstance(values, dict):
+            return {}
+        values = np.asarray(values, dtype=float).reshape(-1)
+        if not values.size:
+            return {}
+        rows.append(values)
+    common_size = min(values.size for values in rows)
+    history = np.vstack([values[:common_size] for values in rows])
+    return {
+        "initial": history[:, 0],
+        "best": np.min(np.abs(history), axis=1),
+        "final": history[:, -1],
+    }
+
+
+def run_acados_transfer_bound_homotopy(
+    periodic_nmpc,
+    solver,
+    fractions: tuple[float, ...],
+    padding: float,
+    convergence_tolerance: float,
+    stage_iterations: int,
+    max_restarts: int = 1,
+    echo: bool = True,
+    solve_stage=None,
+) -> dict:
+    """Recover a feasible transfer while tightening state bounds to their target."""
+
+    original_bounds = _copy_state_bounds(periodic_nmpc)
+    relaxed_bounds, expansion_by_key = build_relaxed_transfer_state_bounds(
+        periodic_nmpc, padding
+    )
+    original_fix_controls = getattr(
+        periodic_nmpc, "_cocofest_fix_controls_to_warmup", False
+    )
+    original_runtime_iterations = getattr(solver, "nlp_solver_max_iter", None)
+    control_spans = []
+    for key in periodic_nmpc.nlp[0].u_init.keys():
+        if not key.startswith("last_pulse_width_"):
+            continue
+        bounds = periodic_nmpc.nlp[0].u_bounds[key]
+        control_spans.append(
+            float(
+                np.max(np.asarray(bounds.max, dtype=float))
+                - np.min(np.asarray(bounds.min, dtype=float))
+            )
+        )
+    max_control_radius = max(control_spans, default=0.0)
+
+    stage_solver = deepcopy(solver)
+    stage_solver.set_convergence_tolerance(convergence_tolerance)
+    stage_solver.set_maximum_iterations(stage_iterations)
+    acados_interface = getattr(periodic_nmpc, "ocp_solver", None)
+    if getattr(acados_interface, "ocp_solver", None) is not None:
+        mark_options_unchanged = getattr(
+            stage_solver, "set_only_first_options_has_changed", None
+        )
+        if mark_options_unchanged is not None:
+            mark_options_unchanged(False)
+
+    if solve_stage is None:
+
+        def solve_stage():
+            return super(RecedingHorizonOptimization, periodic_nmpc).solve(
+                solver=stage_solver,
+                warm_start=None,
+            )
+
+    accepted_states = _initial_guess_traces(periodic_nmpc.nlp[0].x_init)
+    accepted_controls = _initial_guess_traces(periodic_nmpc.nlp[0].u_init)
+    summaries = []
+    completed = False
+    try:
+        for stage_index, fraction in enumerate(fractions):
+            apply_transfer_state_bound_fraction(
+                periodic_nmpc, original_bounds, relaxed_bounds, fraction
+            )
+            restore_pulse_width_control_bounds(periodic_nmpc)
+            control_radius = None
+            if np.isclose(fraction, 0.0):
+                periodic_nmpc._cocofest_fix_controls_to_warmup = True
+            else:
+                periodic_nmpc._cocofest_fix_controls_to_warmup = False
+                if fraction < 1.0 and max_control_radius > 0.0:
+                    control_radius = fraction * max_control_radius
+                    apply_pulse_width_control_trust_region(
+                        periodic_nmpc, control_radius
+                    )
+            periodic_nmpc._correct_init_guess_to_fit_bounds(corrected_input="states")
+            stage_accepted = False
+            for attempt in range(max_restarts + 1):
+                set_acados_runtime_max_iterations(periodic_nmpc, stage_iterations)
+                solution = solve_stage()
+                diagnostics = snapshot_acados_diagnostics(solution)
+                accepted = _status_is_success(
+                    solution.status
+                ) or acados_diagnostics_meet_tolerances(
+                    diagnostics,
+                    convergence_tolerance=convergence_tolerance,
+                    stationarity_tolerance=convergence_tolerance,
+                )
+                residuals = diagnostics.get("residuals")
+                residuals = (
+                    None
+                    if residuals is None
+                    else np.asarray(residuals, dtype=float).reshape(-1)
+                )
+                residual_history = _acados_residual_history_summary(diagnostics)
+                retryable = bool(
+                    not accepted
+                    and solution.status in (2, 4)
+                    and attempt < max_restarts
+                    and residuals is not None
+                    and residuals.size >= 4
+                    and np.all(np.isfinite(residuals[:4]))
+                    and np.max(np.abs(residuals[1:4])) <= 100.0 * convergence_tolerance
+                )
+                summary = {
+                    "stage": stage_index,
+                    "attempt": attempt,
+                    "fraction": fraction,
+                    "control_radius": control_radius,
+                    "status": solution.status,
+                    "accepted": accepted,
+                    "retryable": retryable,
+                    "residuals": None if residuals is None else residuals.copy(),
+                    "residual_history": residual_history,
+                    "solver_time_s": solution.solver_time_to_optimize,
+                    "wall_time_s": solution.real_time_to_optimize,
+                }
+                summaries.append(summary)
+                if echo:
+                    print(
+                        "acados_transfer_bound_homotopy: "
+                        f"stage={stage_index} attempt={attempt} "
+                        f"fraction={fraction:.6g} status={solution.status} "
+                        f"control_radius={control_radius} "
+                        f"accepted={accepted} retryable={retryable} "
+                        f"residuals={_format_array(residuals)}"
+                    )
+                    if residual_history:
+                        print(
+                            "acados_transfer_bound_homotopy_residual_history: "
+                            f"initial={_format_array(residual_history['initial'])} "
+                            f"best={_format_array(residual_history['best'])} "
+                            f"final={_format_array(residual_history['final'])}"
+                        )
+                if accepted:
+                    apply_solution_directly_to_periodic_nmpc_initial_guess(
+                        periodic_nmpc, solution
+                    )
+                    accepted_states = _initial_guess_traces(periodic_nmpc.nlp[0].x_init)
+                    accepted_controls = _initial_guess_traces(
+                        periodic_nmpc.nlp[0].u_init
+                    )
+                    stage_accepted = True
+                    break
+                if not retryable:
+                    summary["solver_reset"] = reset_acados_solver_memory(periodic_nmpc)
+                    break
+                apply_solution_directly_to_periodic_nmpc_initial_guess(
+                    periodic_nmpc, solution
+                )
+                reset_acados_solver_memory(periodic_nmpc)
+
+            if not stage_accepted:
+                break
+        completed = bool(
+            summaries and summaries[-1]["accepted"] and np.isclose(fractions[-1], 1.0)
+        )
+    finally:
+        for key, values in accepted_states.items():
+            periodic_nmpc.nlp[0].x_init[key].init[:, :] = values
+        for key, values in accepted_controls.items():
+            periodic_nmpc.nlp[0].u_init[key].init[:, :] = values
+        restore_pulse_width_control_bounds(periodic_nmpc)
+        for key, (lower, upper) in original_bounds.items():
+            periodic_nmpc.nlp[0].x_bounds[key].min[:, :] = lower
+            periodic_nmpc.nlp[0].x_bounds[key].max[:, :] = upper
+        periodic_nmpc._cocofest_fix_controls_to_warmup = original_fix_controls
+        periodic_nmpc._sync_acados_state_bounds()
+        if original_runtime_iterations is not None:
+            set_acados_runtime_max_iterations(
+                periodic_nmpc, int(original_runtime_iterations)
+            )
+
+    return {
+        "completed": completed,
+        "stages": summaries,
+        "expansion_by_key": expansion_by_key,
+        "max_expansion": max(expansion_by_key.values(), default=0.0),
+    }
+
+
+def run_acados_transfer_sqp_restarts(
+    periodic_nmpc,
+    solver,
+    max_restarts: int,
+    stage_iterations: int,
+    feasibility_tolerance: float,
+    echo: bool = True,
+    solve_stage=None,
+) -> dict:
+    """Restart short SQP attempts from the best nearly feasible transfer iterate."""
+
+    original_runtime_iterations = getattr(solver, "nlp_solver_max_iter", None)
+    stage_solver = deepcopy(solver)
+    stage_solver.set_maximum_iterations(stage_iterations)
+    acados_interface = getattr(periodic_nmpc, "ocp_solver", None)
+    if getattr(acados_interface, "ocp_solver", None) is not None:
+        mark_options_unchanged = getattr(
+            stage_solver, "set_only_first_options_has_changed", None
+        )
+        if mark_options_unchanged is not None:
+            mark_options_unchanged(False)
+
+    if solve_stage is None:
+
+        def solve_stage():
+            return super(RecedingHorizonOptimization, periodic_nmpc).solve(
+                solver=stage_solver,
+                warm_start=None,
+            )
+
+    summaries = []
+    best_feasibility = np.inf
+    best_stationarity = np.inf
+    best_states = _initial_guess_traces(periodic_nmpc.nlp[0].x_init)
+    best_controls = _initial_guess_traces(periodic_nmpc.nlp[0].u_init)
+    completed = False
+    try:
+        for attempt in range(max_restarts):
+            set_acados_runtime_max_iterations(periodic_nmpc, stage_iterations)
+            solution = solve_stage()
+            diagnostics = snapshot_acados_diagnostics(solution)
+            reported_residuals = diagnostics.get("residuals")
+            reported_residuals = (
+                None
+                if reported_residuals is None
+                else np.asarray(reported_residuals, dtype=float).reshape(-1)
+            )
+            residual_history = _acados_residual_history_summary(diagnostics)
+            residuals = (
+                np.asarray(residual_history["final"], dtype=float).reshape(-1)
+                if residual_history
+                else reported_residuals
+            )
+            finite = bool(
+                residuals is not None
+                and residuals.size >= 4
+                and np.all(np.isfinite(residuals[:4]))
+            )
+            feasibility = float(np.max(np.abs(residuals[1:4]))) if finite else np.inf
+            stationarity = float(abs(residuals[0])) if finite else np.inf
+            accepted_for_restart = bool(
+                finite
+                and feasibility <= feasibility_tolerance
+                and (
+                    stationarity < best_stationarity
+                    or (
+                        np.isclose(stationarity, best_stationarity)
+                        and feasibility < best_feasibility
+                    )
+                )
+            )
+            solver_success = _status_is_success(solution.status)
+            summary = {
+                "attempt": attempt,
+                "status": solution.status,
+                "solver_success": solver_success,
+                "accepted_for_restart": accepted_for_restart,
+                "residuals": None if residuals is None else residuals.copy(),
+                "reported_residuals": (
+                    None if reported_residuals is None else reported_residuals.copy()
+                ),
+                "residual_history": residual_history,
+                "solver_time_s": solution.solver_time_to_optimize,
+                "wall_time_s": solution.real_time_to_optimize,
+            }
+            summaries.append(summary)
+            if echo:
+                print(
+                    "acados_transfer_sqp_restart: "
+                    f"attempt={attempt} status={solution.status} "
+                    f"accepted={accepted_for_restart} "
+                    f"residuals={_format_array(residuals)}"
+                )
+
+            if solver_success:
+                apply_solution_directly_to_periodic_nmpc_initial_guess(
+                    periodic_nmpc, solution
+                )
+                summary["primal_source"] = "solution"
+            elif accepted_for_restart:
+                capsule_summary = apply_acados_capsule_primal_to_initial_guess(
+                    periodic_nmpc
+                )
+                summary["capsule_primal"] = capsule_summary
+                if capsule_summary["applied"]:
+                    summary["primal_source"] = "acados_capsule"
+                else:
+                    apply_solution_directly_to_periodic_nmpc_initial_guess(
+                        periodic_nmpc, solution
+                    )
+                    summary["primal_source"] = "solution_fallback"
+            if solver_success or accepted_for_restart:
+                best_states = _initial_guess_traces(periodic_nmpc.nlp[0].x_init)
+                best_controls = _initial_guess_traces(periodic_nmpc.nlp[0].u_init)
+                best_feasibility = feasibility
+                best_stationarity = stationarity
+            if echo and "capsule_primal" in summary:
+                capsule_summary = summary["capsule_primal"]
+                print(
+                    "acados_transfer_sqp_restart_primal: "
+                    f"source={summary['primal_source']} "
+                    f"capsule_source={capsule_summary.get('source')} "
+                    f"applied={capsule_summary['applied']} "
+                    f"reason={capsule_summary['reason']} "
+                    "state_max_change="
+                    f"{capsule_summary.get('state_max_change')} "
+                    "control_max_change="
+                    f"{capsule_summary.get('control_max_change')} "
+                    "projection="
+                    f"{capsule_summary.get('bound_projection')}"
+                )
+            if solver_success:
+                completed = True
+                break
+            if not accepted_for_restart:
+                break
+            summary["solver_reset"] = reset_acados_solver_memory(periodic_nmpc)
+    finally:
+        for key, values in best_states.items():
+            periodic_nmpc.nlp[0].x_init[key].init[:, :] = values
+        for key, values in best_controls.items():
+            periodic_nmpc.nlp[0].u_init[key].init[:, :] = values
+        if original_runtime_iterations is not None:
+            set_acados_runtime_max_iterations(
+                periodic_nmpc, int(original_runtime_iterations)
+            )
+
+    return {
+        "completed": completed,
+        "attempts": summaries,
+        "best_feasibility": best_feasibility,
+        "best_stationarity": best_stationarity,
     }
 
 
@@ -5833,11 +6523,49 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
         raise ValueError(
             "--acados-transfer-rollout-max-bound-violation must be non-negative."
         )
+    if (
+        not np.isfinite(args.acados_transfer_pulse_width_scale)
+        or args.acados_transfer_pulse_width_scale <= 0
+    ):
+        raise ValueError(
+            "--acados-transfer-pulse-width-scale must be finite and positive."
+        )
     if args.acados_transfer_full_dynamics_rollout and args.acados_transfer_irk_rollout:
         raise ValueError(
             "Choose only one of --acados-transfer-full-dynamics-rollout and "
             "--acados-transfer-irk-rollout."
         )
+    if args.acados_transfer_bound_homotopy and not args.acados_transfer_irk_rollout:
+        raise ValueError(
+            "--acados-transfer-bound-homotopy requires "
+            "--acados-transfer-irk-rollout."
+        )
+    if args.acados_transfer_bound_homotopy and args.solver != "acados":
+        raise ValueError("Transfer-bound homotopy is only available with ACADOS.")
+    if args.acados_transfer_bound_homotopy_padding < 0:
+        raise ValueError(
+            "--acados-transfer-bound-homotopy-padding must be non-negative."
+        )
+    if args.acados_transfer_bound_homotopy_iterations < 1:
+        raise ValueError(
+            "--acados-transfer-bound-homotopy-iterations must be strictly positive."
+        )
+    if args.acados_transfer_bound_homotopy_tolerance <= 0:
+        raise ValueError(
+            "--acados-transfer-bound-homotopy-tolerance must be strictly positive."
+        )
+    if args.acados_transfer_sqp_restarts < 0:
+        raise ValueError("--acados-transfer-sqp-restarts must be non-negative.")
+    if args.acados_transfer_sqp_restart_iterations < 1:
+        raise ValueError(
+            "--acados-transfer-sqp-restart-iterations must be strictly positive."
+        )
+    if args.acados_transfer_sqp_restart_feasibility_tolerance <= 0:
+        raise ValueError(
+            "--acados-transfer-sqp-restart-feasibility-tolerance must be strictly positive."
+        )
+    if args.acados_transfer_sqp_restarts and args.solver != "acados":
+        raise ValueError("Transfer SQP restarts are only available with ACADOS.")
     if args.acados_fixed_control_tolerance <= 0:
         raise ValueError("--acados-fixed-control-tolerance must be strictly positive.")
     if args.acados_control_homotopy_tolerance <= 0:
@@ -6282,6 +7010,37 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
             print(f"acados_transfer_irk_rollout: {args.acados_transfer_irk_rollout}")
             print(f"acados_transfer_phase_one: {args.acados_transfer_phase_one}")
             print(
+                "acados_transfer_bound_homotopy: "
+                f"{args.acados_transfer_bound_homotopy}"
+            )
+            if args.acados_transfer_bound_homotopy:
+                print(
+                    "acados_transfer_bound_homotopy_fractions: "
+                    f"{args.acados_transfer_bound_homotopy_fractions}"
+                )
+                print(
+                    "acados_transfer_bound_homotopy_padding: "
+                    f"{args.acados_transfer_bound_homotopy_padding}"
+                )
+                print(
+                    "acados_transfer_bound_homotopy_iterations: "
+                    f"{args.acados_transfer_bound_homotopy_iterations}"
+                )
+                print(
+                    "acados_transfer_bound_homotopy_tolerance: "
+                    f"{args.acados_transfer_bound_homotopy_tolerance}"
+                )
+            print(f"acados_transfer_sqp_restarts: {args.acados_transfer_sqp_restarts}")
+            if args.acados_transfer_sqp_restarts:
+                print(
+                    "acados_transfer_sqp_restart_iterations: "
+                    f"{args.acados_transfer_sqp_restart_iterations}"
+                )
+                print(
+                    "acados_transfer_sqp_restart_feasibility_tolerance: "
+                    f"{args.acados_transfer_sqp_restart_feasibility_tolerance}"
+                )
+            print(
                 "acados_cyclical_transfer_mode: "
                 f"{args.acados_cyclical_transfer_mode}"
             )
@@ -6292,6 +7051,10 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
             print(
                 "acados_transfer_rollout_max_bound_violation: "
                 f"{args.acados_transfer_rollout_max_bound_violation}"
+            )
+            print(
+                "acados_transfer_pulse_width_scale: "
+                f"{args.acados_transfer_pulse_width_scale}"
             )
         if (
             args.solver == "ipopt"
@@ -6585,6 +7348,9 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
     acados_window_diagnostics = []
     ipopt_dual_warm_start_summaries = []
     transfer_rollout_summaries = []
+    transfer_control_scaling_summaries = []
+    transfer_bound_homotopy_summaries = []
+    transfer_sqp_restart_summaries = []
     transfer_bound_projection_summaries = []
     inter_window_refinement_summaries = []
     inter_window_control_homotopy_summaries = []
@@ -6617,6 +7383,7 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
 
     def update_functions(_nmpc, cycle_idx, _sol):
         print(f"window {cycle_idx}")
+        transfer_rollout_applied = None
         completed_window_diagnostics = None
         if args.solver == "acados" and _sol is not None:
             # Auxiliary refinement and homotopy solves reuse the mutable Acados
@@ -6749,6 +7516,32 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
             continue_solving
             and _sol is not None
             and args.solver == "acados"
+            and not np.isclose(args.acados_transfer_pulse_width_scale, 1.0)
+            and (
+                args.acados_transfer_full_dynamics_rollout
+                or args.acados_transfer_irk_rollout
+            )
+        ):
+            control_scaling_summary = scale_appended_pulse_width_controls(
+                _nmpc, args.acados_transfer_pulse_width_scale
+            )
+            control_scaling_summary["window"] = cycle_idx
+            transfer_control_scaling_summaries.append(control_scaling_summary)
+            if echo:
+                clipped_count = sum(
+                    item["clipped_count"]
+                    for item in control_scaling_summary["controls"].values()
+                )
+                print(
+                    "acados_transfer_pulse_width_scaling: "
+                    f"scale={args.acados_transfer_pulse_width_scale:.6g} "
+                    f"start_node={control_scaling_summary['start_node']} "
+                    f"clipped_values={clipped_count}"
+                )
+        if (
+            continue_solving
+            and _sol is not None
+            and args.solver == "acados"
             and args.acados_transfer_full_dynamics_rollout
         ):
             rollout_summary = rollout_transferred_cycle_full_dynamics(
@@ -6795,9 +7588,12 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
             rollout_summary = rollout_transferred_cycle_acados_irk(
                 _nmpc,
                 max_allowed_bound_violation=(
-                    args.acados_transfer_rollout_max_bound_violation
+                    None
+                    if args.acados_transfer_bound_homotopy
+                    else args.acados_transfer_rollout_max_bound_violation
                 ),
             )
+            transfer_rollout_applied = rollout_summary["applied"]
             transfer_rollout_summaries.append(rollout_summary)
             if echo:
                 print(
@@ -6822,6 +7618,45 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
                         f"{worst_violation['upper']:.6g}] "
                         f"violation={worst_violation['violation']:.6g}"
                     )
+                rk4_defects = rollout_summary.get("rk4_defects_after") or {}
+                if rk4_defects:
+                    print(
+                        "acados_transfer_irk_rollout_rk4_defects: "
+                        f"absolute={rk4_defects.get('absolute_by_block')} "
+                        f"scaled={rk4_defects.get('scaled_by_block')}"
+                    )
+        if (
+            continue_solving
+            and _sol is not None
+            and args.solver == "acados"
+            and args.acados_transfer_bound_homotopy
+            and transfer_rollout_applied
+        ):
+            homotopy_summary = run_acados_transfer_bound_homotopy(
+                _nmpc,
+                solver,
+                fractions=args.acados_transfer_bound_homotopy_fractions,
+                padding=args.acados_transfer_bound_homotopy_padding,
+                convergence_tolerance=(args.acados_transfer_bound_homotopy_tolerance),
+                stage_iterations=args.acados_transfer_bound_homotopy_iterations,
+                echo=echo,
+            )
+            homotopy_summary["window"] = cycle_idx
+            transfer_bound_homotopy_summaries.append(homotopy_summary)
+            if echo:
+                expansion_by_key = homotopy_summary["expansion_by_key"]
+                worst_key = (
+                    max(expansion_by_key, key=expansion_by_key.get)
+                    if expansion_by_key
+                    else None
+                )
+                print(
+                    "acados_transfer_bound_homotopy_summary: "
+                    f"completed={homotopy_summary['completed']} "
+                    f"stages={len(homotopy_summary['stages'])} "
+                    f"max_expansion={homotopy_summary['max_expansion']:.6g} "
+                    f"worst_key={worst_key}"
+                )
         if (
             continue_solving
             and _sol is not None
@@ -6849,6 +7684,32 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
                     "acados_transfer_bound_projection: "
                     f"state_max_change={bound_projection['state_max_change']:.6g} "
                     f"control_max_change={bound_projection['control_max_change']:.6g}"
+                )
+        if (
+            continue_solving
+            and _sol is not None
+            and args.solver == "acados"
+            and args.acados_transfer_sqp_restarts
+        ):
+            restart_summary = run_acados_transfer_sqp_restarts(
+                _nmpc,
+                solver,
+                max_restarts=args.acados_transfer_sqp_restarts,
+                stage_iterations=args.acados_transfer_sqp_restart_iterations,
+                feasibility_tolerance=(
+                    args.acados_transfer_sqp_restart_feasibility_tolerance
+                ),
+                echo=echo,
+            )
+            restart_summary["window"] = cycle_idx
+            transfer_sqp_restart_summaries.append(restart_summary)
+            if echo:
+                print(
+                    "acados_transfer_sqp_restart_summary: "
+                    f"completed={restart_summary['completed']} "
+                    f"attempts={len(restart_summary['attempts'])} "
+                    f"best_feasibility={restart_summary['best_feasibility']:.6g} "
+                    f"best_stationarity={restart_summary['best_stationarity']:.6g}"
                 )
         if (
             continue_solving
@@ -6983,6 +7844,7 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
             qpscaling_scale_objective=args.acados_qpscaling_scale_objective,
             qpscaling_scale_constraints=args.acados_qpscaling_scale_constraints,
             ext_qp_res=args.acados_ext_qp_res,
+            store_iterates=bool(args.acados_transfer_sqp_restarts),
             print_level=args.acados_print_level,
         )
         if (
@@ -7018,8 +7880,7 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
             stage_iterations=args.acados_control_homotopy_stage_iterations,
             echo=echo,
         )
-        if solver.nlp_solver_max_iter != args.acados_control_homotopy_stage_iterations:
-            solver.set_maximum_iterations(args.acados_control_homotopy_stage_iterations)
+        set_acados_runtime_max_iterations(nmpc, args.max_acados_iterations)
         solver.set_only_first_options_has_changed(False)
         solver.set_nlp_solver_tol_eq(solver.nlp_solver_tol_eq)
         solver.set_nlp_solver_tol_ineq(solver.nlp_solver_tol_ineq)
@@ -7130,6 +7991,14 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
         summary["ipopt_dual_warm_start_summaries"] = ipopt_dual_warm_start_summaries
     if transfer_rollout_summaries:
         summary["transfer_rollout_summaries"] = transfer_rollout_summaries
+    if transfer_control_scaling_summaries:
+        summary["transfer_control_scaling_summaries"] = (
+            transfer_control_scaling_summaries
+        )
+    if transfer_bound_homotopy_summaries:
+        summary["transfer_bound_homotopy_summaries"] = transfer_bound_homotopy_summaries
+    if transfer_sqp_restart_summaries:
+        summary["transfer_sqp_restart_summaries"] = transfer_sqp_restart_summaries
     if inter_window_refinement_summaries:
         summary["inter_window_refinement_summaries"] = inter_window_refinement_summaries
     if inter_window_control_homotopy_summaries:
