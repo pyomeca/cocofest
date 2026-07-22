@@ -288,6 +288,38 @@ def test_control_homotopy_radii_are_parsed_as_an_increasing_sequence():
     assert args.acados_control_homotopy_stage_iterations == 40
 
 
+def test_proximal_control_weights_are_parsed_as_a_decreasing_sequence():
+    args = periodic_example.build_argument_parser().parse_args(
+        [
+            "--acados-proximal-control-weights",
+            "1e6,1e5,1e4",
+            "--acados-proximal-control-each-window",
+            "--acados-terminal-wheel-q-homotopy-slacks",
+            "0.2,0.1,0.02",
+            "--acados-terminal-wheel-q-homotopy-each-window",
+            "--acados-proximal-control-stage-iterations",
+            "30",
+        ]
+    )
+
+    assert args.acados_proximal_control_weights == (1e6, 1e5, 1e4)
+    assert args.acados_proximal_control_each_window is True
+    assert args.acados_proximal_control_stage_iterations == 30
+
+
+def test_terminal_wheel_bound_slacks_are_parsed_as_a_decreasing_sequence():
+    args = periodic_example.build_argument_parser().parse_args(
+        [
+            "--acados-terminal-wheel-q-homotopy-slacks",
+            "0.2,0.1,0.05,0.02",
+            "--acados-terminal-wheel-q-homotopy-each-window",
+        ]
+    )
+
+    assert args.acados_terminal_wheel_q_homotopy_slacks == (0.2, 0.1, 0.05, 0.02)
+    assert args.acados_terminal_wheel_q_homotopy_each_window is True
+
+
 def test_transfer_bound_homotopy_fractions_are_parsed():
     args = periodic_example.build_argument_parser().parse_args(
         [
@@ -546,6 +578,437 @@ def test_control_homotopy_restarts_a_nearly_feasible_stage(monkeypatch):
     assert applied_statuses == [2, 0, 0]
 
 
+def test_proximal_control_continuation_reduces_weight_without_changing_bounds(
+    monkeypatch,
+):
+    class FakeSolver:
+        def set_convergence_tolerance(self, value):
+            self.tolerance = value
+
+        def set_maximum_iterations(self, value):
+            self.max_iterations = value
+
+    solutions = iter(
+        [
+            SimpleNamespace(
+                status=0,
+                residuals=np.zeros(4),
+                solver_time_to_optimize=1.0,
+                real_time_to_optimize=1.1,
+            )
+            for _ in range(3)
+        ]
+    )
+    bounds = SimpleNamespace(
+        min=np.array([[0.1, 0.1]]),
+        max=np.array([[0.6, 0.6]]),
+    )
+    nmpc = SimpleNamespace(
+        nlp=[
+            SimpleNamespace(
+                u_bounds={"last_pulse_width_Biceps": bounds},
+            )
+        ]
+    )
+    applied_weights = []
+    applied_statuses = []
+    monkeypatch.setattr(
+        periodic_example,
+        "set_acados_runtime_control_regularization_weight",
+        lambda _nmpc, weight: (
+            applied_weights.append(weight)
+            or {"applied": True, "reason": None, "weight": weight}
+        ),
+    )
+    monkeypatch.setattr(
+        periodic_example,
+        "set_acados_runtime_max_iterations",
+        lambda _nmpc, _iterations: True,
+    )
+    monkeypatch.setattr(
+        periodic_example,
+        "snapshot_acados_diagnostics",
+        lambda solution: {"residuals": solution.residuals},
+    )
+    monkeypatch.setattr(
+        periodic_example,
+        "apply_solution_directly_to_periodic_nmpc_initial_guess",
+        lambda _nmpc, solution: applied_statuses.append(solution.status),
+    )
+
+    summaries = periodic_example.run_acados_proximal_control_continuation(
+        nmpc,
+        FakeSolver(),
+        weights=(1e6, 1e5, 1e4),
+        convergence_tolerance=5e-4,
+        max_restarts=0,
+        stage_iterations=20,
+        echo=False,
+        solve_stage=lambda: next(solutions),
+    )
+
+    assert [summary["accepted"] for summary in summaries] == [True, True, True]
+    assert applied_weights == [1e6, 1e5, 1e4, 1e4]
+    assert applied_statuses == [0, 0, 0]
+    assert nmpc._cocofest_dual_warm_start_mode == "preserve"
+    np.testing.assert_allclose(bounds.min, [[0.1, 0.1]])
+    np.testing.assert_allclose(bounds.max, [[0.6, 0.6]])
+
+
+def test_proximal_control_continuation_restarts_from_best_failed_qp_iterate(
+    monkeypatch,
+):
+    class FakeSolver:
+        def set_convergence_tolerance(self, value):
+            self.tolerance = value
+
+    solutions = iter(
+        [
+            SimpleNamespace(
+                status=4,
+                solver_time_to_optimize=1.0,
+                real_time_to_optimize=1.1,
+            ),
+            SimpleNamespace(
+                status=0,
+                solver_time_to_optimize=2.0,
+                real_time_to_optimize=2.1,
+            ),
+        ]
+    )
+    nmpc = SimpleNamespace(nlp=[SimpleNamespace(u_bounds={})])
+    restored_iterates = []
+    reset_calls = []
+    monkeypatch.setattr(
+        periodic_example,
+        "set_acados_runtime_control_regularization_weight",
+        lambda _nmpc, weight: {"applied": True, "weight": weight},
+    )
+    monkeypatch.setattr(
+        periodic_example,
+        "set_acados_runtime_max_iterations",
+        lambda _nmpc, _iterations: True,
+    )
+    monkeypatch.setattr(
+        periodic_example,
+        "snapshot_acados_diagnostics",
+        lambda solution: (
+            {
+                "residuals": np.array([1e8, 10.0, 0.0, 1e6]),
+                "res_stat_all": np.array([3.0, 0.2, 1e8]),
+                "res_eq_all": np.array([1.0, 2e-4, 10.0]),
+                "res_ineq_all": np.zeros(3),
+                "res_comp_all": np.array([0.1, 1e-5, 1e6]),
+            }
+            if solution.status == 4
+            else {"residuals": np.zeros(4)}
+        ),
+    )
+    monkeypatch.setattr(
+        periodic_example,
+        "apply_acados_capsule_primal_to_initial_guess",
+        lambda _nmpc, iterate_index=None: (
+            restored_iterates.append(iterate_index)
+            or {"applied": True, "iterate_index": iterate_index}
+        ),
+    )
+    monkeypatch.setattr(
+        periodic_example,
+        "reset_acados_solver_memory",
+        lambda _nmpc: reset_calls.append(True) or True,
+    )
+    monkeypatch.setattr(
+        periodic_example,
+        "apply_solution_directly_to_periodic_nmpc_initial_guess",
+        lambda _nmpc, _solution: None,
+    )
+
+    summaries = periodic_example.run_acados_proximal_control_continuation(
+        nmpc,
+        FakeSolver(),
+        weights=(1e6,),
+        convergence_tolerance=5e-4,
+        max_restarts=1,
+        stage_iterations=20,
+        echo=False,
+        solve_stage=lambda: next(solutions),
+    )
+
+    assert [summary["status"] for summary in summaries] == [4, 0]
+    assert summaries[0]["restartable"] is True
+    assert restored_iterates == [1]
+    assert reset_calls == [True]
+
+
+def test_ding_force_compensation_increases_width_when_capacity_drops():
+    class FakeDingModel:
+        muscle_name = "Biceps"
+
+        def system_dynamics(
+            self,
+            cn,
+            cn_sum,
+            f,
+            a,
+            tau1,
+            km,
+            pulse_width,
+        ):
+            return np.array([0.0, 0.0, a * pulse_width - f, 0.0, 0.0, 0.0])
+
+    state_values = {
+        "Cn_Biceps": [0.0, 0.0, 0.0, 0.0, 0.0],
+        "Cn_sum_Biceps": [0.0, 0.0, 0.0, 0.0, 0.0],
+        "F_Biceps": [2.0, 2.0, 2.0, 0.0, 0.0],
+        "A_Biceps": [10.0, 10.0, 5.0, 5.0, 5.0],
+        "Tau1_Biceps": [1.0, 1.0, 1.0, 1.0, 1.0],
+        "Km_Biceps": [1.0, 1.0, 1.0, 1.0, 1.0],
+    }
+    control_key = "last_pulse_width_Biceps"
+    controls = np.array([[0.2, 0.2, 0.2, 0.2]])
+    nlp = SimpleNamespace(
+        model=SimpleNamespace(muscles_dynamics_model=[FakeDingModel()]),
+        x_init={
+            key: SimpleNamespace(init=np.asarray([values], dtype=float))
+            for key, values in state_values.items()
+        },
+        u_init={control_key: SimpleNamespace(init=controls)},
+        u_bounds={
+            control_key: SimpleNamespace(
+                min=np.array([[0.1, 0.1, 0.1]]),
+                max=np.array([[0.6, 0.6, 0.6]]),
+            )
+        },
+    )
+    nmpc = SimpleNamespace(nlp=[nlp], cycle_len=2, cycle_duration=2.0)
+
+    summary = periodic_example.compensate_appended_pulse_widths_from_ding_force(
+        nmpc,
+        n_substeps=5,
+        bisection_iterations=25,
+    )
+
+    assert summary["applied"] is True
+    muscle_summary = summary["muscles"]["Biceps"]
+    assert muscle_summary["gain_mean"] > 1.5
+    assert (
+        muscle_summary["compensated_force_rmse"] < muscle_summary["baseline_force_rmse"]
+    )
+    np.testing.assert_allclose(controls[0, 2:], 0.4, atol=1e-6)
+
+
+def test_ding_force_compensation_uses_previous_solution_for_one_cycle_window():
+    class FakeDingModel:
+        muscle_name = "Biceps"
+
+        def system_dynamics(self, cn, cn_sum, f, a, tau1, km, pulse_width):
+            return np.array([0.0, 0.0, a * pulse_width - f, 0.0, 0.0, 0.0])
+
+    state_values = {
+        "Cn_Biceps": [0.0, 0.0, 0.0],
+        "Cn_sum_Biceps": [0.0, 0.0, 0.0],
+        "F_Biceps": [2.0, 0.0, 0.0],
+        "A_Biceps": [5.0, 5.0, 5.0],
+        "Tau1_Biceps": [1.0, 1.0, 1.0],
+        "Km_Biceps": [1.0, 1.0, 1.0],
+    }
+    control_key = "last_pulse_width_Biceps"
+    controls = np.array([[0.2, 0.2]])
+    nlp = SimpleNamespace(
+        model=SimpleNamespace(muscles_dynamics_model=[FakeDingModel()]),
+        x_init={
+            key: SimpleNamespace(init=np.asarray([values], dtype=float))
+            for key, values in state_values.items()
+        },
+        u_init={control_key: SimpleNamespace(init=controls)},
+        u_bounds={
+            control_key: SimpleNamespace(
+                min=np.array([[0.1, 0.1]]), max=np.array([[0.6, 0.6]])
+            )
+        },
+    )
+    previous_solution = SimpleNamespace(
+        decision_states=lambda to_merge=None: {"F_Biceps": np.array([[2.0, 2.0, 2.0]])},
+        decision_controls=lambda to_merge=None: {control_key: np.array([[0.2, 0.2]])},
+    )
+    nmpc = SimpleNamespace(nlp=[nlp], cycle_len=2, cycle_duration=2.0)
+
+    summary = periodic_example.compensate_appended_pulse_widths_from_ding_force(
+        nmpc,
+        n_substeps=5,
+        bisection_iterations=25,
+        previous_solution=previous_solution,
+    )
+
+    assert summary["applied"] is True
+    assert summary["previous_solution_used"] is True
+    assert summary["start_node"] == 0
+    np.testing.assert_allclose(controls, 0.4, atol=1e-6)
+
+
+def test_ding_force_compensation_supports_periodic_node_calcium_forcing():
+    class FakePeriodicNodeDingModel:
+        muscle_name = "Biceps"
+
+        @staticmethod
+        def post_stimulation_amplitude():
+            return 1.0
+
+        def system_dynamics(self, states, controls, time, numerical_timeseries):
+            cn, force, capacity, tau1, km = states
+            return np.array([0.0, capacity * controls[0] - force, 0.0, 0.0, 0.0])
+
+    state_values = {
+        "Cn_Biceps": [0.0, 0.0, 0.0],
+        "F_Biceps": [2.0, 0.0, 0.0],
+        "A_Biceps": [5.0, 5.0, 5.0],
+        "Tau1_Biceps": [1.0, 1.0, 1.0],
+        "Km_Biceps": [1.0, 1.0, 1.0],
+    }
+    control_key = "last_pulse_width_Biceps"
+    controls = np.array([[0.2, 0.2]])
+    nlp = SimpleNamespace(
+        model=SimpleNamespace(muscles_dynamics_model=[FakePeriodicNodeDingModel()]),
+        x_init={
+            key: SimpleNamespace(init=np.asarray([values], dtype=float))
+            for key, values in state_values.items()
+        },
+        u_init={control_key: SimpleNamespace(init=controls)},
+        u_bounds={
+            control_key: SimpleNamespace(
+                min=np.array([[0.1, 0.1]]), max=np.array([[0.6, 0.6]])
+            )
+        },
+    )
+    previous_solution = SimpleNamespace(
+        decision_states=lambda to_merge=None: {"F_Biceps": np.array([[2.0, 2.0, 2.0]])},
+        decision_controls=lambda to_merge=None: {control_key: np.array([[0.2, 0.2]])},
+    )
+    nmpc = SimpleNamespace(nlp=[nlp], cycle_len=2, cycle_duration=2.0)
+
+    summary = periodic_example.compensate_appended_pulse_widths_from_ding_force(
+        nmpc,
+        n_substeps=5,
+        bisection_iterations=25,
+        previous_solution=previous_solution,
+    )
+
+    assert summary["applied"] is True
+    np.testing.assert_allclose(controls, 0.4, atol=1e-6)
+
+
+def test_terminal_wheel_bound_continuation_tightens_accepted_stages(monkeypatch):
+    class FakeSolver:
+        def set_convergence_tolerance(self, value):
+            self.tolerance = value
+
+    solutions = iter(
+        [
+            SimpleNamespace(
+                status=0,
+                residuals=np.array([1e-4, 1e-6, 0.0, 1e-5]),
+                solver_time_to_optimize=0.1,
+                real_time_to_optimize=0.2,
+            )
+            for _ in range(3)
+        ]
+    )
+    applied_slacks = []
+    applied_solutions = []
+    nmpc = SimpleNamespace(
+        nlp=[
+            SimpleNamespace(
+                x_bounds={
+                    "q": SimpleNamespace(
+                        min=np.array(
+                            [[0.0, 0.0, 0.0], [0.0, 0.0, 0.0], [0.0, 0.0, -1.2]]
+                        ),
+                        max=np.array(
+                            [[0.0, 0.0, 0.0], [0.0, 0.0, 0.0], [0.0, 0.0, -0.8]]
+                        ),
+                    )
+                }
+            )
+        ]
+    )
+    monkeypatch.setattr(
+        periodic_example,
+        "set_terminal_wheel_q_bound_slack",
+        lambda _nmpc, slack: applied_slacks.append(slack),
+    )
+    monkeypatch.setattr(
+        periodic_example,
+        "set_acados_runtime_max_iterations",
+        lambda _nmpc, _iterations: True,
+    )
+    monkeypatch.setattr(
+        periodic_example,
+        "snapshot_acados_diagnostics",
+        lambda solution: {"residuals": solution.residuals},
+    )
+    monkeypatch.setattr(
+        periodic_example,
+        "apply_solution_directly_to_periodic_nmpc_initial_guess",
+        lambda _nmpc, solution: applied_solutions.append(solution.status),
+    )
+
+    summaries = periodic_example.run_acados_terminal_wheel_bound_continuation(
+        nmpc,
+        FakeSolver(),
+        slacks=(0.2, 0.1, 0.02),
+        convergence_tolerance=1e-3,
+        stage_iterations=20,
+        echo=False,
+        solve_stage=lambda: next(solutions),
+    )
+
+    assert [item["accepted"] for item in summaries] == [True, True, True]
+    assert applied_slacks == [0.2, 0.1, 0.02, 0.02]
+    assert applied_solutions == [0, 0, 0]
+    assert nmpc._cocofest_dual_warm_start_mode == "preserve"
+    assert nmpc._cocofest_terminal_wheel_q_center == -1.0
+
+
+def test_terminal_wheel_bound_is_recentered_before_a_new_continuation():
+    sync_calls = []
+    bounds = SimpleNamespace(
+        min=np.array([[0.0, 0.0, 0.0], [0.0, 0.0, 0.0], [0.0, 0.0, -7.0]]),
+        max=np.array([[0.0, 0.0, 0.0], [0.0, 0.0, 0.0], [0.0, 0.0, -6.8]]),
+    )
+    nmpc = SimpleNamespace(
+        nlp=[SimpleNamespace(x_bounds={"q": bounds})],
+        _sync_acados_state_bounds=lambda: sync_calls.append(True),
+    )
+
+    summary = periodic_example.recenter_terminal_wheel_q_bound_slack(nmpc, 0.2)
+
+    assert summary == {
+        "center": -6.9,
+        "slack": 0.2,
+        "lower": -7.1000000000000005,
+        "upper": -6.7,
+    }
+    assert nmpc._cocofest_terminal_wheel_q_center == -6.9
+    np.testing.assert_allclose(bounds.min[2, 2], -7.1)
+    np.testing.assert_allclose(bounds.max[2, 2], -6.7)
+    assert sync_calls == [True]
+
+
+def test_acados_residual_history_selects_one_feasible_iterate():
+    diagnostics = {
+        "res_stat_all": np.array([5.0, 0.2, 1e-4]),
+        "res_eq_all": np.array([1.0, 2e-4, 1e-2]),
+        "res_ineq_all": np.array([0.0, 0.0, 0.0]),
+        "res_comp_all": np.array([0.5, 1e-5, 1e-6]),
+    }
+
+    summary = periodic_example._acados_residual_history_summary(diagnostics)
+
+    assert summary["best_index"] == 1
+    np.testing.assert_allclose(summary["best"], [0.2, 2e-4, 0.0, 1e-5])
+    np.testing.assert_allclose(summary["componentwise_best"], [1e-4, 2e-4, 0.0, 1e-6])
+
+
 def test_control_homotopy_does_not_restart_a_linesearch_failure(monkeypatch):
     reset_calls = []
 
@@ -745,6 +1208,14 @@ def test_completed_endurance_horizon_uses_all_covered_cycles():
     )
 
 
+def test_receding_horizon_window_count_includes_single_cycle_horizons():
+    assert periodic_example.receding_horizon_window_count(3, 1) == 3
+    assert periodic_example.receding_horizon_window_count(30, 2) == 29
+
+    with np.testing.assert_raises_regex(ValueError, "at least"):
+        periodic_example.receding_horizon_window_count(1, 2)
+
+
 def test_endurance_cli_stops_on_failure_and_keeps_robust_irk_defaults():
     args = comparison_example.build_cli().parse_args([])
 
@@ -754,6 +1225,7 @@ def test_endurance_cli_stops_on_failure_and_keeps_robust_irk_defaults():
     assert args.acados_sim_steps == 5
     assert args.acados_dual_warm_start_mode == "reset"
     assert args.acados_transfer_pulse_width_trust_radius is None
+    assert args.acados_proximal_control_weights is None
     assert args.periodic_ipopt_refinement_ode_solver == "target"
 
 
@@ -903,12 +1375,14 @@ def test_regularized_mhe_cli_exposes_previous_window_targets_and_terminal_slack(
             "previous",
             "--terminal-qdot-regularization-weight",
             "0.1",
+            "--terminal-qdot-regularization-target-source",
+            "first_node",
         ]
     )
 
     assert args.control_regularization_target_source == "previous"
     assert args.terminal_qdot_regularization_weight == 0.1
-    assert args.terminal_qdot_regularization_target_source == "previous"
+    assert args.terminal_qdot_regularization_target_source == "first_node"
     assert args.acados_terminal_wheel_q_slack == 0.2
     assert args.wheel_qdot_bound_margin == 3.0
     assert args.acados_globalization == "FUNNEL_L1PEN_LINESEARCH"
@@ -986,6 +1460,102 @@ def test_updated_targets_are_copied_to_acados_cached_yrefs():
         [item[0, 0] for item in interface.y_ref[0]], [0.0002, 0.0004]
     )
     np.testing.assert_allclose(interface.y_ref_end[0][:, 0], [-1.0, -2.0, -6.5])
+
+
+def test_all_muscle_targets_are_copied_to_acados_cached_yrefs():
+    keys = [
+        "last_pulse_width_Biceps",
+        "last_pulse_width_Delt_ant",
+        "last_pulse_width_Delt_post",
+        "last_pulse_width_Triceps",
+    ]
+    penalties = [
+        SimpleNamespace(
+            extra_parameters={"key": key},
+            node_idx=[0, 1],
+            node=[Node.ALL],
+            rows=np.array([index]),
+            target=np.array([[index + 0.1, index + 0.2]]),
+        )
+        for index, key in enumerate(keys)
+    ]
+    interface = SimpleNamespace(
+        y_ref=[[np.zeros((1, 1)), np.zeros((1, 1))] for _ in penalties],
+        y_ref_end=[],
+    )
+    nlp = SimpleNamespace(
+        J=penalties,
+        controls={
+            key: SimpleNamespace(index=[index]) for index, key in enumerate(keys)
+        },
+        states={},
+    )
+
+    periodic_example.refresh_acados_cached_objective_targets(
+        SimpleNamespace(nlp=[nlp], ocp_solver=interface)
+    )
+
+    for index, references in enumerate(interface.y_ref):
+        np.testing.assert_allclose(
+            [reference[0, 0] for reference in references],
+            [index + 0.1, index + 0.2],
+        )
+
+
+def test_runtime_proximal_weight_updates_only_pulse_width_blocks():
+    class LagrangeFunction:
+        pass
+
+    class MayerFunction:
+        pass
+
+    class FakeGeneratedSolver:
+        def __init__(self):
+            self.calls = []
+
+        def cost_set(self, stage, field, value, api=None):
+            self.calls.append((stage, field, np.array(value, copy=True)))
+
+    def penalty(key, node, size, penalty_type):
+        return SimpleNamespace(
+            extra_parameters={"key": key},
+            node=[node],
+            function=[SimpleNamespace(numel_out=lambda: size)],
+            type=SimpleNamespace(get_type=lambda: penalty_type),
+        )
+
+    penalties = [
+        penalty(None, Node.ALL, 2, LagrangeFunction),
+        penalty("last_pulse_width_Biceps", Node.ALL, 1, LagrangeFunction),
+        penalty("last_pulse_width_Triceps", Node.ALL, 1, LagrangeFunction),
+        penalty("qdot", Node.END, 3, MayerFunction),
+    ]
+    generated_solver = FakeGeneratedSolver()
+    interface = SimpleNamespace(
+        ocp_solver=generated_solver,
+        acados_ocp=SimpleNamespace(solver_options=SimpleNamespace(N_horizon=3)),
+        W=np.diag([7.0, 8.0, 9.0, 10.0]),
+        W_0=np.diag([7.0, 8.0, 9.0, 10.0]),
+        W_e=np.diag([7.0, 8.0, 9.0, 10.0, 11.0, 12.0, 13.0]),
+    )
+    nmpc = SimpleNamespace(
+        nlp=[SimpleNamespace(J=penalties)],
+        ocp_solver=interface,
+    )
+
+    summary = periodic_example.set_acados_runtime_control_regularization_weight(
+        nmpc, 100.0
+    )
+
+    assert summary["applied"] is True
+    assert [call[0] for call in generated_solver.calls] == [0, 1, 2, 3]
+    for _, field, matrix in generated_solver.calls:
+        assert field == "W"
+        np.testing.assert_allclose(np.diag(matrix)[:2], [7.0, 8.0])
+        np.testing.assert_allclose(np.diag(matrix)[2:4], [100.0, 100.0])
+    np.testing.assert_allclose(
+        np.diag(generated_solver.calls[-1][2])[4:], [11.0, 12.0, 13.0]
+    )
 
 
 def test_terminal_wheel_slack_is_independent_from_first_node_slack():
@@ -1413,6 +1983,41 @@ def test_signed_wheel_transfer_preserves_seam_and_terminal_turn():
     np.testing.assert_allclose(transferred_seam_increment, source[4] - source[3])
     np.testing.assert_allclose(transferred[-1], source[-1] - 2 * np.pi)
     np.testing.assert_allclose(qdot_initial_guess[0], qdot_source)
+
+
+def test_one_cycle_transfer_preserves_profiles_instead_of_broadcasting_terminal_node():
+    nodes_per_cycle = 3
+    q_source = np.array([0.0, -1.0, -2.0, -2 * np.pi])
+    cyclical_source = np.array([1.0, 2.0, 3.0, 1.5])
+    fatigue_source = np.array([10.0, 10.5, 11.0, 12.0])
+    nmpc = SimpleNamespace(
+        nodes_per_cycle=nodes_per_cycle,
+        use_signed_wheel_shift=True,
+        transfer_initial_guess_mode="anchored",
+        nlp=[
+            SimpleNamespace(
+                x_init={
+                    "q": SimpleNamespace(init=np.zeros((1, nodes_per_cycle + 1))),
+                    "F": SimpleNamespace(init=np.zeros((1, nodes_per_cycle + 1))),
+                    "A": SimpleNamespace(init=np.zeros((1, nodes_per_cycle + 1))),
+                }
+            )
+        ],
+        _wheel_cycle_shift=lambda _states: -2 * np.pi,
+    )
+    states = {
+        "q": q_source[None, :],
+        "F": cyclical_source[None, :],
+        "A": fatigue_source[None, :],
+    }
+
+    MyCyclicNMPC.set_init_cyclical_wheel(nmpc, states, "q", 0)
+    MyCyclicNMPC.set_init_cyclical(nmpc, states, "F", 0)
+    MyCyclicNMPC.set_init_continuous(nmpc, states, "A", 0)
+
+    np.testing.assert_allclose(nmpc.nlp[0].x_init["q"].init[0], q_source - 2 * np.pi)
+    np.testing.assert_allclose(nmpc.nlp[0].x_init["F"].init[0], cyclical_source)
+    np.testing.assert_allclose(nmpc.nlp[0].x_init["A"].init[0], fatigue_source + 2.0)
 
 
 def test_cyclical_transfer_keeps_complete_state_cycle_and_repeats_controls():
@@ -2040,6 +2645,15 @@ def test_shared_transfer_rollout_cli_is_available_to_ipopt():
             "--shared-initial-phase-one",
             "--shared-transfer-rollout-substeps",
             "7",
+            "--shared-transfer-ding-force-compensation",
+            "--shared-transfer-ding-force-compensation-substeps",
+            "6",
+            "--acados-proximal-control-weights",
+            "1e6,1e5",
+            "--acados-proximal-control-each-window",
+            "--acados-terminal-wheel-q-homotopy-slacks",
+            "0.2,0.1,0.02",
+            "--acados-terminal-wheel-q-homotopy-each-window",
         ]
     )
 
@@ -2050,6 +2664,16 @@ def test_shared_transfer_rollout_cli_is_available_to_ipopt():
     assert comparison_args.shared_transfer_phase_one is True
     assert comparison_args.shared_initial_phase_one is True
     assert comparison_args.shared_transfer_rollout_substeps == 7
+    assert comparison_args.shared_transfer_ding_force_compensation is True
+    assert comparison_args.shared_transfer_ding_force_compensation_substeps == 6
+    assert comparison_args.acados_proximal_control_weights == (1e6, 1e5)
+    assert comparison_args.acados_proximal_control_each_window is True
+    assert comparison_args.acados_terminal_wheel_q_homotopy_slacks == (
+        0.2,
+        0.1,
+        0.02,
+    )
+    assert comparison_args.acados_terminal_wheel_q_homotopy_each_window is True
     assert (
         comparison_example.IPOPT_PROFILE_DEFAULTS["acados_like"]["model_formulation"]
         == "periodic_node"

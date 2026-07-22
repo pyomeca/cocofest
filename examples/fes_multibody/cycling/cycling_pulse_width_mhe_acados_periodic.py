@@ -474,6 +474,44 @@ def parse_control_homotopy_radii(raw_radii: str) -> tuple[float, ...]:
     return radii
 
 
+def parse_proximal_control_weights(raw_weights: str) -> tuple[float, ...]:
+    weights = tuple(
+        float(item.strip()) for item in raw_weights.split(",") if item.strip()
+    )
+    if not weights:
+        raise argparse.ArgumentTypeError(
+            "The proximal control continuation requires at least one weight."
+        )
+    if any(not np.isfinite(weight) or weight <= 0.0 for weight in weights):
+        raise argparse.ArgumentTypeError(
+            "Proximal control weights must be finite and strictly positive."
+        )
+    if any(next_weight >= weight for weight, next_weight in zip(weights, weights[1:])):
+        raise argparse.ArgumentTypeError(
+            "Proximal control weights must be strictly decreasing."
+        )
+    return weights
+
+
+def parse_terminal_wheel_q_slacks(raw_slacks: str) -> tuple[float, ...]:
+    slacks = tuple(
+        float(item.strip()) for item in raw_slacks.split(",") if item.strip()
+    )
+    if not slacks:
+        raise argparse.ArgumentTypeError(
+            "Terminal wheel-bound continuation requires at least one slack."
+        )
+    if any(not np.isfinite(slack) or slack < 0.0 for slack in slacks):
+        raise argparse.ArgumentTypeError(
+            "Terminal wheel-bound slacks must be finite and non-negative."
+        )
+    if any(next_slack >= slack for slack, next_slack in zip(slacks, slacks[1:])):
+        raise argparse.ArgumentTypeError(
+            "Terminal wheel-bound slacks must be strictly decreasing."
+        )
+    return slacks
+
+
 def parse_transfer_bound_homotopy_fractions(
     raw_fractions: str,
 ) -> tuple[float, ...]:
@@ -647,9 +685,12 @@ def build_argument_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--terminal-qdot-regularization-target-source",
-        choices=("initial", "previous"),
+        choices=("initial", "previous", "first_node"),
         default="previous",
-        help="Keep the initial terminal-velocity target or update it from the previous MHE window.",
+        help=(
+            "Keep the initial terminal-velocity target, update it from the previous "
+            "MHE window, or enforce cyclic velocity relative to the current first node."
+        ),
     )
     parser.add_argument(
         "--state-scaling",
@@ -954,6 +995,20 @@ def build_argument_parser() -> argparse.ArgumentParser:
         help="Terminal crank-angle slack in rad; independent from the first-node transfer slack.",
     )
     parser.add_argument(
+        "--acados-terminal-wheel-q-homotopy-slacks",
+        type=parse_terminal_wheel_q_slacks,
+        default=None,
+        help=(
+            "Comma-separated decreasing terminal crank-angle slacks. ACADOS "
+            "solves each bound stage around the same one-turn target."
+        ),
+    )
+    parser.add_argument(
+        "--acados-terminal-wheel-q-homotopy-each-window",
+        action="store_true",
+        help="Repeat terminal crank-bound tightening after every MHE transfer.",
+    )
+    parser.add_argument(
         "--acados-wheel-qdot-slack",
         type=float,
         default=0.5,
@@ -1099,6 +1154,26 @@ def build_argument_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--transfer-ding-force-compensation",
+        action="store_true",
+        help=(
+            "Choose each appended-cycle pulse width with a scalar Ding rollout "
+            "so its next-node force follows the preceding cycle."
+        ),
+    )
+    parser.add_argument(
+        "--transfer-ding-force-compensation-substeps",
+        type=int,
+        default=5,
+        help="RK4 substeps used by the per-muscle Ding force compensation.",
+    )
+    parser.add_argument(
+        "--transfer-ding-force-compensation-iterations",
+        type=int,
+        default=20,
+        help="Bisection iterations used for each compensated pulse width.",
+    )
+    parser.add_argument(
         "--transfer-rollout-max-bound-violation",
         "--acados-transfer-rollout-max-bound-violation",
         dest="acados_transfer_rollout_max_bound_violation",
@@ -1232,6 +1307,42 @@ def build_argument_parser() -> argparse.ArgumentParser:
         type=float,
         default=1.0,
         help=("Factor applied to the retained homotopy radius after each MHE window."),
+    )
+    parser.add_argument(
+        "--acados-proximal-control-weights",
+        type=parse_proximal_control_weights,
+        default=None,
+        help=(
+            "Comma-separated, strictly decreasing control-proximity weights. "
+            "The first weight is compiled into the Acados problem; later weights "
+            "are applied to the generated solver without changing physical bounds."
+        ),
+    )
+    parser.add_argument(
+        "--acados-proximal-control-each-window",
+        action="store_true",
+        help=(
+            "Repeat the proximal control continuation after every MHE transfer, "
+            "using the shifted previous-window controls as references."
+        ),
+    )
+    parser.add_argument(
+        "--acados-proximal-control-tolerance",
+        type=float,
+        default=5e-4,
+        help="KKT tolerance used by the proximal control continuation stages.",
+    )
+    parser.add_argument(
+        "--acados-proximal-control-stage-iterations",
+        type=int,
+        default=50,
+        help="Maximum SQP iterations for each proximal control continuation stage.",
+    )
+    parser.add_argument(
+        "--acados-proximal-control-max-restarts",
+        type=int,
+        default=1,
+        help="Maximum same-weight restarts for a nearly feasible proximal stage.",
     )
     parser.add_argument(
         "--ipopt-linear-solver",
@@ -2511,7 +2622,10 @@ def set_acados_runtime_max_iterations(periodic_nmpc, max_iterations: int) -> boo
     options_set = getattr(acados_solver, "options_set", None)
     if options_set is None:
         return False
-    options_set("nlp_solver_max_iter", int(max_iterations))
+    try:
+        options_set("nlp_solver_max_iter", int(max_iterations))
+    except (AttributeError, ValueError):
+        return False
     return True
 
 
@@ -2527,7 +2641,9 @@ def reset_acados_solver_memory(periodic_nmpc) -> bool:
     return True
 
 
-def apply_acados_capsule_primal_to_initial_guess(periodic_nmpc) -> dict:
+def apply_acados_capsule_primal_to_initial_guess(
+    periodic_nmpc, iterate_index: int | None = None
+) -> dict:
     """Copy the current scaled ACADOS primal, including failed iterates, to Bioptim."""
 
     interface = getattr(periodic_nmpc, "ocp_solver", None)
@@ -2541,8 +2657,8 @@ def apply_acados_capsule_primal_to_initial_guess(periodic_nmpc) -> dict:
     get_iterate = getattr(acados_solver, "get_iterate", None)
     if get_iterate is not None:
         try:
-            stored_iterate = get_iterate(-1)
-        except (RuntimeError, TypeError, ValueError) as exc:
+            stored_iterate = get_iterate(-1 if iterate_index is None else iterate_index)
+        except (IndexError, RuntimeError, TypeError, ValueError) as exc:
             stored_iterate_error = str(exc)
 
     nlp = periodic_nmpc.nlp[0]
@@ -2614,6 +2730,7 @@ def apply_acados_capsule_primal_to_initial_guess(periodic_nmpc) -> dict:
         "applied": True,
         "reason": None,
         "source": "stored_iterate" if stored_iterate is not None else "capsule",
+        "iterate_index": iterate_index,
         "stored_iterate_error": stored_iterate_error,
         "bound_projection": bound_projection,
         "state_max_change": float(np.max(np.abs(final_states - state_before))),
@@ -2636,11 +2753,6 @@ def run_acados_control_homotopy(
 
     stage_solver = deepcopy(solver)
     stage_solver.set_convergence_tolerance(convergence_tolerance)
-    if (
-        stage_iterations is not None
-        and getattr(stage_solver, "nlp_solver_max_iter", None) != stage_iterations
-    ):
-        stage_solver.set_maximum_iterations(stage_iterations)
     acados_interface = getattr(periodic_nmpc, "ocp_solver", None)
     if getattr(acados_interface, "ocp_solver", None) is not None:
         # The generated solver already owns this immutable maximum. The initial
@@ -2735,6 +2847,199 @@ def run_acados_control_homotopy(
         periodic_nmpc._cocofest_fix_controls_to_warmup = False
         restore_pulse_width_control_bounds(periodic_nmpc)
 
+    return summaries
+
+
+def run_acados_proximal_control_continuation(
+    periodic_nmpc,
+    solver,
+    weights: tuple[float, ...],
+    convergence_tolerance: float,
+    max_restarts: int = 1,
+    stage_iterations: int | None = 50,
+    echo: bool = True,
+    solve_stage=None,
+) -> list[dict]:
+    """Relax pulse-width proximity through W while retaining physical bounds."""
+
+    stage_solver = deepcopy(solver)
+    stage_solver.set_convergence_tolerance(convergence_tolerance)
+    acados_interface = getattr(periodic_nmpc, "ocp_solver", None)
+    if getattr(acados_interface, "ocp_solver", None) is not None:
+        mark_options_unchanged = getattr(
+            stage_solver, "set_only_first_options_has_changed", None
+        )
+        if mark_options_unchanged is not None:
+            mark_options_unchanged(False)
+
+    if solve_stage is None:
+
+        def solve_stage():
+            return super(RecedingHorizonOptimization, periodic_nmpc).solve(
+                solver=stage_solver,
+                warm_start=None,
+            )
+
+    summaries = []
+    accepted_weight = None
+    for stage_index, weight in enumerate(weights):
+        stage_accepted = False
+        for attempt in range(max_restarts + 1):
+            runtime_update = set_acados_runtime_control_regularization_weight(
+                periodic_nmpc, weight
+            )
+            if stage_iterations is not None:
+                set_acados_runtime_max_iterations(periodic_nmpc, stage_iterations)
+            solution = solve_stage()
+            diagnostics = snapshot_acados_diagnostics(solution)
+            residual_history = _acados_residual_history_summary(diagnostics)
+            accepted = _status_is_success(
+                solution.status
+            ) or acados_diagnostics_meet_tolerances(
+                diagnostics,
+                convergence_tolerance=convergence_tolerance,
+                stationarity_tolerance=convergence_tolerance,
+            )
+            restart_residuals = (
+                residual_history.get("best")
+                if residual_history
+                else diagnostics.get("residuals")
+            )
+            restartable = (
+                not accepted
+                and solution.status in (2, 4)
+                and attempt < max_restarts
+                and acados_homotopy_stage_is_restartable(
+                    {"residuals": restart_residuals}, convergence_tolerance
+                )
+            )
+            residuals = diagnostics.get("residuals")
+            summary = {
+                "stage": stage_index,
+                "attempt": attempt,
+                "weight": weight,
+                "status": solution.status,
+                "accepted": accepted,
+                "restartable": restartable,
+                "runtime_weight_update": runtime_update,
+                "residual_history": residual_history,
+                "residuals": (
+                    None
+                    if residuals is None
+                    else np.asarray(residuals, dtype=float).copy()
+                ),
+                "solver_time_s": solution.solver_time_to_optimize,
+                "wall_time_s": solution.real_time_to_optimize,
+            }
+            summaries.append(summary)
+            if echo:
+                print(
+                    "acados_proximal_control: "
+                    f"stage={stage_index} attempt={attempt} weight={weight:.6g} "
+                    f"status={solution.status} accepted={accepted} "
+                    f"restartable={restartable} "
+                    f"runtime_update={runtime_update['applied']} "
+                    f"residuals={_format_array(summary['residuals'])}"
+                )
+            if accepted:
+                apply_solution_directly_to_periodic_nmpc_initial_guess(
+                    periodic_nmpc, solution
+                )
+                accepted_weight = weight
+                stage_accepted = True
+                break
+            if not restartable:
+                summary["solver_reset"] = reset_acados_solver_memory(periodic_nmpc)
+                break
+            capsule_summary = apply_acados_capsule_primal_to_initial_guess(
+                periodic_nmpc,
+                iterate_index=(
+                    residual_history.get("best_index") if residual_history else None
+                ),
+            )
+            summary["restart_primal"] = capsule_summary
+            if not capsule_summary["applied"]:
+                apply_solution_directly_to_periodic_nmpc_initial_guess(
+                    periodic_nmpc, solution
+                )
+            summary["solver_reset"] = reset_acados_solver_memory(periodic_nmpc)
+        if not stage_accepted:
+            break
+
+    if accepted_weight is not None:
+        set_acados_runtime_control_regularization_weight(periodic_nmpc, accepted_weight)
+        periodic_nmpc._cocofest_dual_warm_start_mode = "preserve"
+    return summaries
+
+
+def run_acados_terminal_wheel_bound_continuation(
+    periodic_nmpc,
+    solver,
+    slacks: tuple[float, ...],
+    convergence_tolerance: float,
+    stage_iterations: int | None = 50,
+    echo: bool = True,
+    solve_stage=None,
+) -> list[dict]:
+    """Tighten the terminal crank-angle bound around one fixed target."""
+
+    recenter_terminal_wheel_q_bound_slack(periodic_nmpc, slacks[0])
+    stage_solver = deepcopy(solver)
+    stage_solver.set_convergence_tolerance(convergence_tolerance)
+    if solve_stage is None:
+
+        def solve_stage():
+            return super(RecedingHorizonOptimization, periodic_nmpc).solve(
+                solver=stage_solver,
+                warm_start=None,
+            )
+
+    summaries = []
+    accepted_slack = None
+    for stage_index, slack in enumerate(slacks):
+        if stage_index:
+            set_terminal_wheel_q_bound_slack(periodic_nmpc, slack)
+        if stage_iterations is not None:
+            set_acados_runtime_max_iterations(periodic_nmpc, stage_iterations)
+        solution = solve_stage()
+        diagnostics = snapshot_acados_diagnostics(solution)
+        accepted = _status_is_success(
+            solution.status
+        ) or acados_diagnostics_meet_tolerances(
+            diagnostics,
+            convergence_tolerance=convergence_tolerance,
+            stationarity_tolerance=convergence_tolerance,
+        )
+        residuals = diagnostics.get("residuals")
+        summary = {
+            "stage": stage_index,
+            "slack": slack,
+            "status": solution.status,
+            "accepted": accepted,
+            "residuals": (
+                None if residuals is None else np.asarray(residuals, dtype=float).copy()
+            ),
+            "solver_time_s": solution.solver_time_to_optimize,
+            "wall_time_s": solution.real_time_to_optimize,
+        }
+        summaries.append(summary)
+        if echo:
+            print(
+                "acados_terminal_wheel_bound: "
+                f"stage={stage_index} slack={slack:.6g} status={solution.status} "
+                f"accepted={accepted} residuals={_format_array(residuals)}"
+            )
+        if not accepted:
+            break
+        apply_solution_directly_to_periodic_nmpc_initial_guess(periodic_nmpc, solution)
+        accepted_slack = slack
+
+    if accepted_slack is not None:
+        set_terminal_wheel_q_bound_slack(periodic_nmpc, accepted_slack)
+        terminal_slack = getattr(periodic_nmpc, "terminal_state_slack", None)
+        if terminal_slack is not None and "q" in terminal_slack:
+            terminal_slack["q"][2] = accepted_slack
+        periodic_nmpc._cocofest_dual_warm_start_mode = "preserve"
     return summaries
 
 
@@ -3180,6 +3485,16 @@ def diagnose_wheel_trace(wheel_trace: np.ndarray, requested_windows: int) -> dic
     }
 
 
+def receding_horizon_window_count(requested_cycles: int, cycles_per_window: int) -> int:
+    """Number of overlapping windows required to export every requested cycle."""
+
+    if requested_cycles < 1 or cycles_per_window < 1:
+        raise ValueError("Cycle and window lengths must be strictly positive.")
+    if requested_cycles < cycles_per_window:
+        raise ValueError("Requested cycles must be at least the cycles per window.")
+    return requested_cycles - cycles_per_window + 1
+
+
 def _shift_cyclical_trajectory(values: np.ndarray, nodes_per_cycle: int) -> np.ndarray:
     n_plus_one_cycles = values[nodes_per_cycle:-1]
     last_cycle = values[-nodes_per_cycle - 1 :]
@@ -3273,23 +3588,28 @@ def _rk4_periodic_ding_step(
 
     sub_dt = dt / n_substeps
     next_state = np.array(state, dtype=float, copy=True)
-    for _ in range(n_substeps):
-        k1 = _periodic_ding_rhs(muscle_model, next_state, pulse_width)
-        k2 = _periodic_ding_rhs(
-            muscle_model,
-            next_state + 0.5 * sub_dt * k1,
-            pulse_width,
+    periodic_node = next_state.size == 5
+
+    def rhs(values, local_time):
+        if not periodic_node:
+            return _periodic_ding_rhs(muscle_model, values, pulse_width)
+        return _to_numpy_vector(
+            muscle_model.system_dynamics(
+                states=values,
+                controls=np.array([pulse_width]),
+                time=np.array([local_time]),
+                numerical_timeseries=np.array(
+                    [muscle_model.post_stimulation_amplitude(), 0.0]
+                ),
+            )
         )
-        k3 = _periodic_ding_rhs(
-            muscle_model,
-            next_state + 0.5 * sub_dt * k2,
-            pulse_width,
-        )
-        k4 = _periodic_ding_rhs(
-            muscle_model,
-            next_state + sub_dt * k3,
-            pulse_width,
-        )
+
+    for substep in range(n_substeps):
+        local_time = substep * sub_dt
+        k1 = rhs(next_state, local_time)
+        k2 = rhs(next_state + 0.5 * sub_dt * k1, local_time + 0.5 * sub_dt)
+        k3 = rhs(next_state + 0.5 * sub_dt * k2, local_time + 0.5 * sub_dt)
+        k4 = rhs(next_state + sub_dt * k3, local_time + sub_dt)
         next_state = next_state + sub_dt * (k1 + 2 * k2 + 2 * k3 + k4) / 6
     return next_state
 
@@ -3956,6 +4276,209 @@ def scale_appended_pulse_width_controls(periodic_nmpc, scale: float) -> dict:
     return {"scale": scale, "start_node": start_node, "controls": summary}
 
 
+def compensate_appended_pulse_widths_from_ding_force(
+    periodic_nmpc,
+    n_substeps: int = 5,
+    bisection_iterations: int = 20,
+    previous_solution=None,
+) -> dict:
+    """Match previous-cycle nodal forces with cheap per-muscle Ding rollouts."""
+
+    if n_substeps < 1:
+        raise ValueError("Ding force-compensation substeps must be positive.")
+    if bisection_iterations < 1:
+        raise ValueError("Ding force-compensation iterations must be positive.")
+
+    nlp = periodic_nmpc.nlp[0]
+    cycle_len = int(periodic_nmpc.cycle_len)
+    first_control_key = next(iter(nlp.u_init.keys()))
+    n_control_nodes = nlp.u_init[first_control_key].init.shape[1]
+    start_node = n_control_nodes - cycle_len
+    previous_start = start_node - cycle_len
+    previous_states = None
+    previous_controls_by_key = None
+    if previous_start < 0 and previous_solution is not None:
+        previous_states = previous_solution.decision_states(
+            to_merge=SolutionMerge.NODES
+        )
+        previous_controls_by_key = previous_solution.decision_controls(
+            to_merge=SolutionMerge.NODES
+        )
+        start_node = 0
+    elif previous_start < 0:
+        return {
+            "applied": False,
+            "reason": "requires_two_control_cycles_or_previous_solution",
+            "start_node": start_node,
+            "muscles": {},
+        }
+
+    dt = periodic_nmpc.cycle_duration / cycle_len
+    summaries = {}
+    for muscle_model in nlp.model.muscles_dynamics_model:
+        muscle_name = muscle_model.muscle_name
+        six_state_keys = _ding_state_keys(muscle_name)
+        five_state_keys = (
+            f"Cn_{muscle_name}",
+            f"F_{muscle_name}",
+            f"A_{muscle_name}",
+            f"Tau1_{muscle_name}",
+            f"Km_{muscle_name}",
+        )
+        state_keys = (
+            six_state_keys
+            if all(key in nlp.x_init.keys() for key in six_state_keys)
+            else five_state_keys
+        )
+        control_key = f"last_pulse_width_{muscle_name}"
+        if any(key not in nlp.x_init.keys() for key in state_keys):
+            continue
+        if control_key not in nlp.u_init.keys():
+            continue
+
+        state_trajectory = np.vstack(
+            [np.asarray(nlp.x_init[key].init[0, :], dtype=float) for key in state_keys]
+        )
+        force_index = state_keys.index(f"F_{muscle_name}")
+        controls = nlp.u_init[control_key].init
+        if previous_controls_by_key is None:
+            previous_controls = np.asarray(
+                controls[0, previous_start:start_node], dtype=float
+            )
+            target_forces = np.asarray(
+                state_trajectory[force_index, previous_start + 1 : start_node + 1],
+                dtype=float,
+            )
+        else:
+            if control_key not in previous_controls_by_key:
+                continue
+            force_key = f"F_{muscle_name}"
+            if force_key not in previous_states:
+                continue
+            previous_controls = np.asarray(
+                previous_controls_by_key[control_key], dtype=float
+            ).reshape(-1)[:cycle_len]
+            previous_force = np.asarray(
+                previous_states[force_key], dtype=float
+            ).reshape(-1)
+            if (
+                previous_controls.size < cycle_len
+                or previous_force.size < cycle_len + 1
+            ):
+                continue
+            target_forces = previous_force[1 : cycle_len + 1]
+        original_appended = np.asarray(
+            controls[0, start_node : start_node + cycle_len], dtype=float
+        ).copy()
+        current_state = np.asarray(state_trajectory[:, start_node], dtype=float).copy()
+        baseline_state = current_state.copy()
+        bounds = nlp.u_bounds[control_key]
+        lower = float(np.min(np.asarray(bounds.min, dtype=float)))
+        upper = float(np.max(np.asarray(bounds.max, dtype=float)))
+        selected_controls = np.empty(cycle_len)
+        selected_forces = np.empty(cycle_len)
+        baseline_forces = np.empty(cycle_len)
+
+        for local_node, target_force in enumerate(target_forces):
+            baseline_state = _rk4_periodic_ding_step(
+                muscle_model,
+                baseline_state,
+                original_appended[local_node],
+                dt,
+                n_substeps=n_substeps,
+            )
+            baseline_forces[local_node] = baseline_state[force_index]
+
+            low_state = _rk4_periodic_ding_step(
+                muscle_model,
+                current_state,
+                lower,
+                dt,
+                n_substeps=n_substeps,
+            )
+            high_state = _rk4_periodic_ding_step(
+                muscle_model,
+                current_state,
+                upper,
+                dt,
+                n_substeps=n_substeps,
+            )
+            low_force = float(low_state[force_index])
+            high_force = float(high_state[force_index])
+            if (target_force - low_force) * (target_force - high_force) >= 0.0:
+                if abs(target_force - low_force) <= abs(target_force - high_force):
+                    selected = lower
+                    selected_state = low_state
+                else:
+                    selected = upper
+                    selected_state = high_state
+            else:
+                left = lower
+                right = upper
+                increasing = high_force >= low_force
+                selected = 0.5 * (left + right)
+                selected_state = _rk4_periodic_ding_step(
+                    muscle_model,
+                    current_state,
+                    selected,
+                    dt,
+                    n_substeps=n_substeps,
+                )
+                for _ in range(bisection_iterations):
+                    selected = 0.5 * (left + right)
+                    selected_state = _rk4_periodic_ding_step(
+                        muscle_model,
+                        current_state,
+                        selected,
+                        dt,
+                        n_substeps=n_substeps,
+                    )
+                    force_is_low = float(selected_state[force_index]) < target_force
+                    if force_is_low == increasing:
+                        left = selected
+                    else:
+                        right = selected
+
+            selected_controls[local_node] = selected
+            selected_forces[local_node] = selected_state[force_index]
+            current_state = selected_state
+
+        controls[0, start_node : start_node + cycle_len] = selected_controls
+        safe_previous = np.maximum(np.abs(previous_controls), np.finfo(float).eps)
+        gain = selected_controls / safe_previous
+        summaries[muscle_name] = {
+            "control_key": control_key,
+            "gain_min": float(np.min(gain)),
+            "gain_mean": float(np.mean(gain)),
+            "gain_max": float(np.max(gain)),
+            "pulse_width_min": float(np.min(selected_controls)),
+            "pulse_width_max": float(np.max(selected_controls)),
+            "baseline_force_rmse": float(
+                np.sqrt(np.mean((baseline_forces - target_forces) ** 2))
+            ),
+            "compensated_force_rmse": float(
+                np.sqrt(np.mean((selected_forces - target_forces) ** 2))
+            ),
+            "saturated_count": int(
+                np.count_nonzero(
+                    np.isclose(selected_controls, lower)
+                    | np.isclose(selected_controls, upper)
+                )
+            ),
+        }
+
+    return {
+        "applied": bool(summaries),
+        "reason": None if summaries else "periodic_ding_states_unavailable",
+        "start_node": start_node,
+        "previous_start_node": previous_start if previous_states is None else None,
+        "previous_solution_used": previous_states is not None,
+        "n_substeps": n_substeps,
+        "bisection_iterations": bisection_iterations,
+        "muscles": summaries,
+    }
+
+
 def rollout_transferred_cycle_full_dynamics(
     periodic_nmpc,
     n_substeps: int = 5,
@@ -4128,7 +4651,11 @@ def rollout_transferred_cycle_acados_irk(
             "The ACADOS IRK transfer requires one more state node than controls."
         )
 
-    start_node = periodic_nmpc.nodes_per_cycle
+    start_node = (
+        0
+        if n_control_nodes <= periodic_nmpc.nodes_per_cycle
+        else periodic_nmpc.nodes_per_cycle
+    )
     if start_node < 0 or start_node >= n_control_nodes:
         raise ValueError("The ACADOS IRK transfer start node is outside the horizon.")
 
@@ -4348,9 +4875,27 @@ def _acados_residual_history_summary(diagnostics: dict) -> dict:
         rows.append(values)
     common_size = min(values.size for values in rows)
     history = np.vstack([values[:common_size] for values in rows])
+    finite_columns = np.all(np.isfinite(history), axis=0)
+    if not np.any(finite_columns):
+        return {}
+    feasibility = np.max(np.abs(history[1:]), axis=0)
+    stationarity = np.abs(history[0])
+    candidate_indices = np.flatnonzero(finite_columns)
+    best_index = int(
+        candidate_indices[
+            np.lexsort(
+                (
+                    stationarity[candidate_indices],
+                    feasibility[candidate_indices],
+                )
+            )[0]
+        ]
+    )
     return {
         "initial": history[:, 0],
-        "best": np.min(np.abs(history), axis=1),
+        "best": history[:, best_index],
+        "best_index": best_index,
+        "componentwise_best": np.min(np.abs(history), axis=1),
         "final": history[:, -1],
     }
 
@@ -4581,7 +5126,7 @@ def run_acados_transfer_sqp_restarts(
             )
             residual_history = _acados_residual_history_summary(diagnostics)
             residuals = (
-                np.asarray(residual_history["final"], dtype=float).reshape(-1)
+                np.asarray(residual_history["best"], dtype=float).reshape(-1)
                 if residual_history
                 else reported_residuals
             )
@@ -4633,7 +5178,10 @@ def run_acados_transfer_sqp_restarts(
                 summary["primal_source"] = "solution"
             elif accepted_for_restart:
                 capsule_summary = apply_acados_capsule_primal_to_initial_guess(
-                    periodic_nmpc
+                    periodic_nmpc,
+                    iterate_index=(
+                        residual_history.get("best_index") if residual_history else None
+                    ),
                 )
                 summary["capsule_primal"] = capsule_summary
                 if capsule_summary["applied"]:
@@ -6202,15 +6750,149 @@ def refresh_acados_cached_objective_targets(periodic_nmpc) -> None:
             reference[: column.size, 0] = column
 
 
+def _penalty_is_lagrange(penalty) -> bool:
+    penalty_type = getattr(penalty, "type", None)
+    get_type = getattr(penalty_type, "get_type", None)
+    if get_type is None:
+        return False
+    return getattr(get_type(), "__name__", "") == "LagrangeFunction"
+
+
+def _penalty_output_dimension(penalty, terminal: bool = False) -> int:
+    functions = getattr(penalty, "function", ())
+    if not functions:
+        return 0
+    function = functions[-1] if terminal else functions[0]
+    return int(function.numel_out())
+
+
+def acados_objective_weight_layout(periodic_nmpc) -> dict[str, list[dict]]:
+    """Mirror Bioptim's NONLINEAR_LS block ordering for runtime W updates."""
+
+    layouts = {"W": [], "W_0": [], "W_e": []}
+    offsets = {field: 0 for field in layouts}
+    for penalty in periodic_nmpc.nlp[0].J:
+        if not penalty:
+            continue
+
+        node = penalty.node[0] if penalty.node else None
+        key = getattr(penalty, "extra_parameters", {}).get("key")
+        placements = []
+        if _penalty_is_lagrange(penalty):
+            placements.append(("W", False))
+        if node not in (Node.INTERMEDIATES, Node.PENULTIMATE, Node.END):
+            placements.append(("W_0", False))
+        if node in (Node.END, Node.ALL):
+            placements.append(("W_e", True))
+
+        for field, terminal in placements:
+            size = _penalty_output_dimension(penalty, terminal=terminal)
+            start = offsets[field]
+            stop = start + size
+            layouts[field].append(
+                {
+                    "key": key,
+                    "start": start,
+                    "stop": stop,
+                    "penalty": penalty,
+                }
+            )
+            offsets[field] = stop
+    return layouts
+
+
+def set_acados_runtime_control_regularization_weight(
+    periodic_nmpc, weight: float
+) -> dict:
+    """Update only pulse-width proximity blocks in an existing Acados capsule."""
+
+    if not np.isfinite(weight) or weight <= 0.0:
+        raise ValueError("The runtime control regularization weight must be positive.")
+    interface = getattr(periodic_nmpc, "ocp_solver", None)
+    generated_solver = getattr(interface, "ocp_solver", None)
+    if generated_solver is None:
+        return {"applied": False, "reason": "solver_unavailable", "weight": weight}
+
+    layout = acados_objective_weight_layout(periodic_nmpc)
+    matrices = {
+        field: np.array(getattr(interface, field), dtype=float, copy=True)
+        for field in layout
+    }
+    updated_blocks = []
+    for field, blocks in layout.items():
+        matrix = matrices[field]
+        for block in blocks:
+            key = block["key"]
+            if not isinstance(key, str) or not key.startswith("last_pulse_width_"):
+                continue
+            rows = np.arange(block["start"], block["stop"])
+            if rows.size == 0:
+                continue
+            matrix[np.ix_(rows, rows)] = np.eye(rows.size) * weight
+            updated_blocks.append(
+                {
+                    "field": field,
+                    "key": key,
+                    "start": int(rows[0]),
+                    "stop": int(rows[-1] + 1),
+                }
+            )
+
+    if not updated_blocks:
+        return {
+            "applied": False,
+            "reason": "control_regularization_objective_missing",
+            "weight": weight,
+        }
+
+    horizon = int(interface.acados_ocp.solver_options.N_horizon)
+
+    def cost_set(stage, matrix):
+        try:
+            generated_solver.cost_set(stage, "W", matrix, api="new")
+        except TypeError:
+            generated_solver.cost_set(stage, "W", matrix)
+
+    cost_set(0, matrices["W_0"])
+    for stage in range(1, horizon):
+        cost_set(stage, matrices["W"])
+    cost_set(horizon, matrices["W_e"])
+    periodic_nmpc._cocofest_proximal_control_weight = weight
+    return {
+        "applied": True,
+        "reason": None,
+        "weight": weight,
+        "updated_blocks": updated_blocks,
+    }
+
+
 def set_terminal_wheel_q_bound_slack(periodic_nmpc, slack: float) -> None:
     if slack < 0:
         raise ValueError("Terminal wheel q slack must be non-negative.")
-    q_init = np.asarray(periodic_nmpc.nlp[0].x_init["q"].init, dtype=float)
     bounds = periodic_nmpc.nlp[0].x_bounds["q"]
-    center = float(q_init[2, -1])
+    center = getattr(periodic_nmpc, "_cocofest_terminal_wheel_q_center", None)
+    if center is None:
+        q_init = np.asarray(periodic_nmpc.nlp[0].x_init["q"].init, dtype=float)
+        center = float(q_init[2, -1])
+        periodic_nmpc._cocofest_terminal_wheel_q_center = center
     bounds.min[2, 2] = center - slack
     bounds.max[2, 2] = center + slack
     periodic_nmpc._sync_acados_state_bounds()
+
+
+def recenter_terminal_wheel_q_bound_slack(periodic_nmpc, slack: float) -> dict:
+    """Recenter a terminal-angle continuation after the MHE bounds shift."""
+
+    bounds = periodic_nmpc.nlp[0].x_bounds["q"]
+    center = 0.5 * float(bounds.min[2, 2] + bounds.max[2, 2])
+    periodic_nmpc._cocofest_terminal_wheel_q_center = center
+    set_terminal_wheel_q_bound_slack(periodic_nmpc, slack)
+    return {
+        "center": center,
+        "slack": slack,
+        "lower": center - slack,
+        "upper": center + slack,
+    }
 
 
 def apply_pulse_width_control_trust_region(
@@ -6568,6 +7250,18 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
         raise ValueError(
             "--acados-transfer-pulse-width-scale must be finite and positive."
         )
+    if args.transfer_ding_force_compensation_substeps < 1:
+        raise ValueError(
+            "--transfer-ding-force-compensation-substeps must be positive."
+        )
+    if args.transfer_ding_force_compensation_iterations < 1:
+        raise ValueError(
+            "--transfer-ding-force-compensation-iterations must be positive."
+        )
+    if args.transfer_ding_force_compensation and args.model_formulation == "standard":
+        raise ValueError(
+            "Ding force compensation requires a periodic model formulation."
+        )
     if args.acados_transfer_full_dynamics_rollout and args.acados_transfer_irk_rollout:
         raise ValueError(
             "Choose only one of --transfer-full-dynamics-rollout and "
@@ -6650,12 +7344,56 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
         and args.acados_control_homotopy_radii is None
     ):
         raise ValueError("Per-window control homotopy requires control homotopy radii.")
+    if args.acados_proximal_control_weights is not None and args.solver != "acados":
+        raise ValueError("Proximal control continuation is only available with ACADOS.")
+    if (
+        args.acados_proximal_control_each_window
+        and args.acados_proximal_control_weights is None
+    ):
+        raise ValueError(
+            "Per-window proximal continuation requires proximal control weights."
+        )
+    if (
+        args.acados_proximal_control_weights is not None
+        and args.acados_control_homotopy_radii is not None
+    ):
+        raise ValueError("Bound and proximal control continuations cannot be combined.")
+    if args.acados_proximal_control_tolerance <= 0:
+        raise ValueError(
+            "--acados-proximal-control-tolerance must be strictly positive."
+        )
+    if args.acados_proximal_control_stage_iterations < 1:
+        raise ValueError(
+            "--acados-proximal-control-stage-iterations must be strictly positive."
+        )
+    if args.acados_proximal_control_max_restarts < 0:
+        raise ValueError("--acados-proximal-control-max-restarts must be non-negative.")
     if args.acados_terminal_wheel_q_slack < 0:
         raise ValueError("--acados-terminal-wheel-q-slack must be non-negative.")
+    if args.acados_terminal_wheel_q_homotopy_slacks is not None:
+        if args.solver != "acados":
+            raise ValueError(
+                "Terminal wheel-bound continuation is only available with ACADOS."
+            )
+        args.acados_terminal_wheel_q_slack = (
+            args.acados_terminal_wheel_q_homotopy_slacks[0]
+        )
+    if (
+        args.acados_terminal_wheel_q_homotopy_each_window
+        and args.acados_terminal_wheel_q_homotopy_slacks is None
+    ):
+        raise ValueError(
+            "Per-window terminal bound continuation requires homotopy slacks."
+        )
     if args.terminal_qdot_regularization_weight < 0:
         raise ValueError("--terminal-qdot-regularization-weight must be non-negative.")
     if args.wheel_qdot_bound_margin <= 0:
         raise ValueError("--wheel-qdot-bound-margin must be strictly positive.")
+
+    if args.acados_proximal_control_weights is not None:
+        args.control_regularization_weight = args.acados_proximal_control_weights[0]
+        args.control_regularization_target = None
+        args.control_regularization_target_source = "previous"
 
     periodic_ipopt_refinement_enabled = (
         args.periodic_ipopt_refinement and not args.disable_periodic_ipopt_refinement
@@ -6893,6 +7631,22 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
                 f"{args.acados_control_homotopy_window_growth}"
             )
             print(
+                "acados_proximal_control_weights: "
+                f"{args.acados_proximal_control_weights}"
+            )
+            print(
+                "acados_proximal_control_each_window: "
+                f"{args.acados_proximal_control_each_window}"
+            )
+            print(
+                "acados_proximal_control_tolerance: "
+                f"{args.acados_proximal_control_tolerance}"
+            )
+            print(
+                "acados_proximal_control_stage_iterations: "
+                f"{args.acados_proximal_control_stage_iterations}"
+            )
+            print(
                 "acados_fes_state_trust_radius: "
                 f"{args.acados_fes_state_trust_radius}"
             )
@@ -7100,6 +7854,14 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
                 "acados_transfer_pulse_width_scale: "
                 f"{args.acados_transfer_pulse_width_scale}"
             )
+            print(
+                "transfer_ding_force_compensation: "
+                f"{args.transfer_ding_force_compensation}"
+            )
+            print(
+                "transfer_ding_force_compensation_substeps: "
+                f"{args.transfer_ding_force_compensation_substeps}"
+            )
         if (
             args.solver == "ipopt"
             or (
@@ -7127,6 +7889,10 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
         if args.control_regularization_target_source in {"warmup", "previous"}:
             warmup_simulation_conditions["control_regularization_weight"] = 0.0
             warmup_simulation_conditions["control_regularization_target"] = None
+        if args.terminal_qdot_regularization_target_source == "first_node":
+            # This cyclic regularization belongs to the periodic target problem;
+            # keep the standard IPOPT bridge identical to the historical reference.
+            warmup_simulation_conditions["terminal_qdot_regularization_weight"] = 0.0
         standard_warmup_cache_hit = _warmup_cache_path(
             args, model_path, warmup_simulation_conditions, cycling_info
         ).exists()
@@ -7324,7 +8090,12 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
             )
 
     if args.terminal_qdot_regularization_weight:
-        terminal_qdot = np.asarray(nmpc.nlp[0].x_init["qdot"].init, dtype=float)[:, -1]
+        qdot_guess = np.asarray(nmpc.nlp[0].x_init["qdot"].init, dtype=float)
+        terminal_qdot = (
+            qdot_guess[:, 0]
+            if args.terminal_qdot_regularization_target_source == "first_node"
+            else qdot_guess[:, -1]
+        )
         apply_terminal_qdot_regularization_target(nmpc, terminal_qdot)
 
     if args.full_dynamics_phase_one:
@@ -7407,13 +8178,21 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
     ipopt_dual_warm_start_summaries = []
     transfer_rollout_summaries = []
     transfer_control_scaling_summaries = []
+    transfer_ding_force_compensation_summaries = []
     transfer_bound_homotopy_summaries = []
     transfer_sqp_restart_summaries = []
     transfer_bound_projection_summaries = []
     inter_window_refinement_summaries = []
     inter_window_control_homotopy_summaries = []
     control_homotopy_summaries = []
+    proximal_control_summaries = []
+    terminal_wheel_bound_summaries = []
+    inter_window_terminal_wheel_bound_summaries = []
+    inter_window_proximal_control_summaries = []
     initial_guess_audits = [{"window": 0, **initial_guess_audit}]
+    requested_window_solves = receding_horizon_window_count(
+        args.n_windows, args.cycles_per_window
+    )
 
     def cache_first_successful_window(_nmpc, solution):
         diagnostics = snapshot_acados_diagnostics(solution)
@@ -7442,6 +8221,8 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
 
     def update_functions(_nmpc, cycle_idx, _sol):
         print(f"window {cycle_idx}")
+        if args.solver == "acados":
+            _nmpc._cocofest_dual_warm_start_mode = args.acados_dual_warm_start_mode
         transfer_rollout_applied = None
         completed_window_diagnostics = None
         if args.solver == "acados" and _sol is not None:
@@ -7468,8 +8249,25 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
                     f"lam_x={dual_summary['lam_x_size']} "
                     f"reason={dual_summary['reason']}"
                 )
-        continue_solving = cycle_idx + 1 < args.n_windows
+        continue_solving = cycle_idx < requested_window_solves
         targets_updated = False
+        if (
+            continue_solving
+            and _sol is not None
+            and args.solver == "acados"
+            and args.acados_terminal_wheel_q_homotopy_each_window
+        ):
+            terminal_bound_expansion = recenter_terminal_wheel_q_bound_slack(
+                _nmpc, args.acados_terminal_wheel_q_homotopy_slacks[0]
+            )
+            if echo:
+                print(
+                    "acados_terminal_wheel_bound_preexpanded: "
+                    f"window={cycle_idx} center={terminal_bound_expansion['center']:.6f} "
+                    f"slack={terminal_bound_expansion['slack']:.6g} "
+                    f"bounds=[{terminal_bound_expansion['lower']:.6f}, "
+                    f"{terminal_bound_expansion['upper']:.6f}]"
+                )
         if continue_solving and _sol is not None:
             if (
                 args.control_regularization_target_source == "previous"
@@ -7482,14 +8280,20 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
                         "previous_control_regularization_targets_recentered: "
                         f"window={cycle_idx} keys={len(target_keys)}"
                     )
-            if (
-                args.terminal_qdot_regularization_weight
-                and args.terminal_qdot_regularization_target_source == "previous"
+            if args.terminal_qdot_regularization_weight and (
+                args.terminal_qdot_regularization_target_source
+                in ("previous", "first_node")
             ):
-                previous_states = _sol.decision_states(to_merge=SolutionMerge.NODES)
+                if args.terminal_qdot_regularization_target_source == "previous":
+                    previous_states = _sol.decision_states(to_merge=SolutionMerge.NODES)
+                    terminal_qdot_target = previous_states["qdot"][:, -1]
+                else:
+                    terminal_qdot_target = np.asarray(
+                        _nmpc.nlp[0].x_init["qdot"].init, dtype=float
+                    )[:, 0]
                 targets_updated = (
                     apply_terminal_qdot_regularization_target(
-                        _nmpc, previous_states["qdot"][:, -1]
+                        _nmpc, terminal_qdot_target
                     )
                     or targets_updated
                 )
@@ -7596,6 +8400,44 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
                     f"start_node={control_scaling_summary['start_node']} "
                     f"clipped_values={clipped_count}"
                 )
+        if (
+            continue_solving
+            and _sol is not None
+            and args.transfer_ding_force_compensation
+        ):
+            compensation_summary = compensate_appended_pulse_widths_from_ding_force(
+                _nmpc,
+                n_substeps=args.transfer_ding_force_compensation_substeps,
+                bisection_iterations=(args.transfer_ding_force_compensation_iterations),
+                previous_solution=_sol,
+            )
+            compensation_summary["window"] = cycle_idx
+            transfer_ding_force_compensation_summaries.append(compensation_summary)
+            if (
+                compensation_summary["applied"]
+                and args.control_regularization_target_source == "previous"
+                and args.control_regularization_weight
+            ):
+                apply_initial_guess_control_regularization_targets(_nmpc)
+                if args.solver == "acados":
+                    refresh_acados_cached_objective_targets(_nmpc)
+            if echo:
+                print(
+                    "transfer_ding_force_compensation: "
+                    f"applied={compensation_summary['applied']} "
+                    f"start_node={compensation_summary['start_node']} "
+                    f"reason={compensation_summary['reason']}"
+                )
+                for muscle_name, item in compensation_summary["muscles"].items():
+                    print(
+                        "transfer_ding_force_compensation_muscle: "
+                        f"muscle={muscle_name} "
+                        f"gain=[{item['gain_min']:.6g}, {item['gain_mean']:.6g}, "
+                        f"{item['gain_max']:.6g}] "
+                        f"force_rmse={item['baseline_force_rmse']:.6g}->"
+                        f"{item['compensated_force_rmse']:.6g} "
+                        f"saturated={item['saturated_count']}"
+                    )
         if (
             continue_solving
             and _sol is not None
@@ -7799,6 +8641,47 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
                     "acados_control_homotopy_window_warning: "
                     f"window={cycle_idx} no_finite_radius_accepted"
                 )
+        if (
+            continue_solving
+            and _sol is not None
+            and args.solver == "acados"
+            and args.acados_proximal_control_each_window
+        ):
+            if echo:
+                print(f"running_acados_proximal_control_window: {cycle_idx}")
+            window_continuation = run_acados_proximal_control_continuation(
+                _nmpc,
+                solver,
+                weights=args.acados_proximal_control_weights,
+                convergence_tolerance=args.acados_proximal_control_tolerance,
+                max_restarts=args.acados_proximal_control_max_restarts,
+                stage_iterations=args.acados_proximal_control_stage_iterations,
+                echo=echo,
+            )
+            for item in window_continuation:
+                item["window"] = cycle_idx
+            inter_window_proximal_control_summaries.extend(window_continuation)
+        if (
+            continue_solving
+            and _sol is not None
+            and args.solver == "acados"
+            and args.acados_terminal_wheel_q_homotopy_each_window
+        ):
+            if echo:
+                print(f"running_acados_terminal_wheel_bound_window: {cycle_idx}")
+            window_terminal_continuation = run_acados_terminal_wheel_bound_continuation(
+                _nmpc,
+                solver,
+                slacks=args.acados_terminal_wheel_q_homotopy_slacks,
+                convergence_tolerance=args.acados_proximal_control_tolerance,
+                stage_iterations=args.acados_proximal_control_stage_iterations,
+                echo=echo,
+            )
+            for item in window_terminal_continuation:
+                item["window"] = cycle_idx
+            inter_window_terminal_wheel_bound_summaries.extend(
+                window_terminal_continuation
+            )
         if completed_window_diagnostics is not None:
             if echo and args.acados_diagnostics:
                 print_acados_diagnostics(
@@ -7908,7 +8791,13 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
             qpscaling_scale_objective=args.acados_qpscaling_scale_objective,
             qpscaling_scale_constraints=args.acados_qpscaling_scale_constraints,
             ext_qp_res=args.acados_ext_qp_res,
-            store_iterates=bool(args.acados_transfer_sqp_restarts),
+            store_iterates=bool(
+                args.acados_transfer_sqp_restarts
+                or (
+                    args.acados_proximal_control_weights is not None
+                    and args.acados_proximal_control_max_restarts
+                )
+            ),
             print_level=args.acados_print_level,
         )
         if (
@@ -7971,6 +8860,44 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
             print("post_control_homotopy_initial_guess_diagnostics:")
             print_initial_guess_diagnostics(nmpc)
 
+    if args.solver == "acados" and args.acados_proximal_control_weights is not None:
+        proximal_control_summaries = run_acados_proximal_control_continuation(
+            nmpc,
+            solver,
+            weights=args.acados_proximal_control_weights,
+            convergence_tolerance=args.acados_proximal_control_tolerance,
+            max_restarts=args.acados_proximal_control_max_restarts,
+            stage_iterations=args.acados_proximal_control_stage_iterations,
+            echo=echo,
+        )
+        set_acados_runtime_max_iterations(nmpc, args.max_acados_iterations)
+        solver.set_only_first_options_has_changed(False)
+        solver.set_nlp_solver_tol_eq(solver.nlp_solver_tol_eq)
+        solver.set_nlp_solver_tol_ineq(solver.nlp_solver_tol_ineq)
+        solver.set_nlp_solver_tol_comp(solver.nlp_solver_tol_comp)
+        solver.set_nlp_solver_tol_stat(solver.nlp_solver_tol_stat)
+        if echo and args.acados_diagnostics:
+            print("post_proximal_control_initial_guess_diagnostics:")
+            print_initial_guess_diagnostics(nmpc)
+
+    proximal_ready = (
+        not proximal_control_summaries or proximal_control_summaries[-1]["accepted"]
+    )
+    if (
+        args.solver == "acados"
+        and args.acados_terminal_wheel_q_homotopy_slacks is not None
+        and proximal_ready
+    ):
+        terminal_wheel_bound_summaries = run_acados_terminal_wheel_bound_continuation(
+            nmpc,
+            solver,
+            slacks=args.acados_terminal_wheel_q_homotopy_slacks,
+            convergence_tolerance=args.acados_proximal_control_tolerance,
+            stage_iterations=args.acados_proximal_control_stage_iterations,
+            echo=echo,
+        )
+        set_acados_runtime_max_iterations(nmpc, args.max_acados_iterations)
+
     if args.single_shot:
         sol = super(RecedingHorizonOptimization, nmpc).solve(
             solver=solver,
@@ -8027,6 +8954,8 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
         summary["standard_warmup_cache_hit"] = standard_warmup_cache_hit
         if control_homotopy_summaries:
             summary["control_homotopy_summaries"] = control_homotopy_summaries
+        if terminal_wheel_bound_summaries:
+            summary["terminal_wheel_bound_summaries"] = terminal_wheel_bound_summaries
         return summary
 
     try:
@@ -8079,6 +9008,10 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
         summary["transfer_control_scaling_summaries"] = (
             transfer_control_scaling_summaries
         )
+    if transfer_ding_force_compensation_summaries:
+        summary["transfer_ding_force_compensation_summaries"] = (
+            transfer_ding_force_compensation_summaries
+        )
     if transfer_bound_homotopy_summaries:
         summary["transfer_bound_homotopy_summaries"] = transfer_bound_homotopy_summaries
     if transfer_sqp_restart_summaries:
@@ -8095,6 +9028,18 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
         )
     if control_homotopy_summaries:
         summary["control_homotopy_summaries"] = control_homotopy_summaries
+    if proximal_control_summaries:
+        summary["proximal_control_summaries"] = proximal_control_summaries
+    if terminal_wheel_bound_summaries:
+        summary["terminal_wheel_bound_summaries"] = terminal_wheel_bound_summaries
+    if inter_window_proximal_control_summaries:
+        summary["inter_window_proximal_control_summaries"] = (
+            inter_window_proximal_control_summaries
+        )
+    if inter_window_terminal_wheel_bound_summaries:
+        summary["inter_window_terminal_wheel_bound_summaries"] = (
+            inter_window_terminal_wheel_bound_summaries
+        )
     if initial_guess_state_traces is not None:
         summary["initial_guess_state_traces"] = initial_guess_state_traces
         summary["initial_guess_control_traces"] = initial_guess_control_traces

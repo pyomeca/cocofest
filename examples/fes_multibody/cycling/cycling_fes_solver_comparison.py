@@ -23,12 +23,16 @@ try:
     from .cycling_pulse_width_mhe_acados_periodic import (
         ACADOS_STATUS_NAMES,
         build_argument_parser,
+        parse_proximal_control_weights,
+        parse_terminal_wheel_q_slacks,
         solve_case,
     )
 except ImportError:
     from cycling_pulse_width_mhe_acados_periodic import (
         ACADOS_STATUS_NAMES,
         build_argument_parser,
+        parse_proximal_control_weights,
+        parse_terminal_wheel_q_slacks,
         solve_case,
     )
 
@@ -1147,12 +1151,19 @@ def main(
     terminal_qdot_regularization_weight: float = 0.0,
     terminal_qdot_regularization_target_source: str = "previous",
     acados_terminal_wheel_q_slack: float = 0.2,
+    acados_terminal_wheel_q_homotopy_slacks: tuple[float, ...] | None = None,
+    acados_terminal_wheel_q_homotopy_each_window: bool = False,
     state_scaling: str = "none",
     acados_state_scaling: str | None = None,
     pulse_width_scaling: float = 1 / 400,
     acados_pulse_width_scaling: float | None = None,
     acados_pulse_width_trust_radius: float | None = None,
     acados_transfer_pulse_width_trust_radius: float | None = None,
+    acados_proximal_control_weights: tuple[float, ...] | None = None,
+    acados_proximal_control_each_window: bool = False,
+    acados_proximal_control_tolerance: float = 5e-4,
+    acados_proximal_control_stage_iterations: int = 50,
+    acados_proximal_control_max_restarts: int = 1,
     acados_fes_state_trust_radius: float | None = None,
     acados_fatigue_warmstart_mode: str = "continuous",
     acados_tolerance: float | None = None,
@@ -1176,6 +1187,9 @@ def main(
     shared_initial_phase_one: bool = False,
     shared_transfer_rollout_substeps: int = 5,
     shared_transfer_rollout_max_bound_violation: float = 1.0,
+    shared_transfer_ding_force_compensation: bool = False,
+    shared_transfer_ding_force_compensation_substeps: int = 5,
+    shared_transfer_ding_force_compensation_iterations: int = 20,
     acados_integrator_type: str = "IRK",
     acados_collocation_type: str = "GAUSS_LEGENDRE",
     acados_sim_stages: int = 4,
@@ -1417,6 +1431,23 @@ def main(
     )
     acados_args.acados_stationarity_tolerance = acados_stationarity_tolerance
     acados_args.acados_dual_warm_start_mode = acados_dual_warm_start_mode
+    acados_args.acados_proximal_control_weights = acados_proximal_control_weights
+    acados_args.acados_proximal_control_each_window = (
+        acados_proximal_control_each_window
+    )
+    acados_args.acados_proximal_control_tolerance = acados_proximal_control_tolerance
+    acados_args.acados_proximal_control_stage_iterations = (
+        acados_proximal_control_stage_iterations
+    )
+    acados_args.acados_proximal_control_max_restarts = (
+        acados_proximal_control_max_restarts
+    )
+    acados_args.acados_terminal_wheel_q_homotopy_slacks = (
+        acados_terminal_wheel_q_homotopy_slacks
+    )
+    acados_args.acados_terminal_wheel_q_homotopy_each_window = (
+        acados_terminal_wheel_q_homotopy_each_window
+    )
     for solver_args in (ipopt_args, acados_args):
         solver_args.acados_transfer_full_dynamics_rollout = (
             shared_transfer_full_dynamics_rollout
@@ -1426,6 +1457,15 @@ def main(
         solver_args.acados_transfer_rollout_substeps = shared_transfer_rollout_substeps
         solver_args.acados_transfer_rollout_max_bound_violation = (
             shared_transfer_rollout_max_bound_violation
+        )
+        solver_args.transfer_ding_force_compensation = (
+            shared_transfer_ding_force_compensation
+        )
+        solver_args.transfer_ding_force_compensation_substeps = (
+            shared_transfer_ding_force_compensation_substeps
+        )
+        solver_args.transfer_ding_force_compensation_iterations = (
+            shared_transfer_ding_force_compensation_iterations
         )
 
     normalized_ipopt_profile = _normalize_ipopt_profile(ipopt_profile)
@@ -1507,6 +1547,20 @@ def build_cli() -> argparse.ArgumentParser:
     parser.add_argument("--shared-transfer-rollout-substeps", type=int, default=5)
     parser.add_argument(
         "--shared-transfer-rollout-max-bound-violation", type=float, default=1.0
+    )
+    parser.add_argument(
+        "--shared-transfer-ding-force-compensation",
+        action="store_true",
+        help=(
+            "Apply the same per-muscle Ding pulse-width compensation to IPOPT "
+            "and ACADOS transfers; use with --ipopt-profile acados_like."
+        ),
+    )
+    parser.add_argument(
+        "--shared-transfer-ding-force-compensation-substeps", type=int, default=5
+    )
+    parser.add_argument(
+        "--shared-transfer-ding-force-compensation-iterations", type=int, default=20
     )
     parser.add_argument(
         "--ipopt-profile",
@@ -1684,6 +1738,27 @@ def build_cli() -> argparse.ArgumentParser:
     parser.add_argument("--acados-pulse-width-trust-radius", type=float, default=None)
     parser.add_argument(
         "--acados-transfer-pulse-width-trust-radius", type=float, default=None
+    )
+    parser.add_argument(
+        "--acados-proximal-control-weights",
+        type=parse_proximal_control_weights,
+        default=None,
+        help="Strictly decreasing control-proximity weights used only by ACADOS.",
+    )
+    parser.add_argument("--acados-proximal-control-each-window", action="store_true")
+    parser.add_argument("--acados-proximal-control-tolerance", type=float, default=5e-4)
+    parser.add_argument(
+        "--acados-proximal-control-stage-iterations", type=int, default=50
+    )
+    parser.add_argument("--acados-proximal-control-max-restarts", type=int, default=1)
+    parser.add_argument(
+        "--acados-terminal-wheel-q-homotopy-slacks",
+        type=parse_terminal_wheel_q_slacks,
+        default=None,
+    )
+    parser.add_argument(
+        "--acados-terminal-wheel-q-homotopy-each-window",
+        action="store_true",
     )
     parser.add_argument("--acados-fes-state-trust-radius", type=float, default=None)
     parser.add_argument(
@@ -1863,6 +1938,12 @@ if __name__ == "__main__":
             args.terminal_qdot_regularization_target_source
         ),
         acados_terminal_wheel_q_slack=args.acados_terminal_wheel_q_slack,
+        acados_terminal_wheel_q_homotopy_slacks=(
+            args.acados_terminal_wheel_q_homotopy_slacks
+        ),
+        acados_terminal_wheel_q_homotopy_each_window=(
+            args.acados_terminal_wheel_q_homotopy_each_window
+        ),
         state_scaling=args.state_scaling,
         acados_state_scaling=args.acados_state_scaling,
         pulse_width_scaling=args.pulse_width_scaling,
@@ -1870,6 +1951,15 @@ if __name__ == "__main__":
         acados_pulse_width_trust_radius=args.acados_pulse_width_trust_radius,
         acados_transfer_pulse_width_trust_radius=(
             args.acados_transfer_pulse_width_trust_radius
+        ),
+        acados_proximal_control_weights=args.acados_proximal_control_weights,
+        acados_proximal_control_each_window=(args.acados_proximal_control_each_window),
+        acados_proximal_control_tolerance=(args.acados_proximal_control_tolerance),
+        acados_proximal_control_stage_iterations=(
+            args.acados_proximal_control_stage_iterations
+        ),
+        acados_proximal_control_max_restarts=(
+            args.acados_proximal_control_max_restarts
         ),
         acados_fes_state_trust_radius=args.acados_fes_state_trust_radius,
         acados_fatigue_warmstart_mode=args.acados_fatigue_warmstart_mode,
@@ -1897,6 +1987,15 @@ if __name__ == "__main__":
         shared_transfer_rollout_substeps=args.shared_transfer_rollout_substeps,
         shared_transfer_rollout_max_bound_violation=(
             args.shared_transfer_rollout_max_bound_violation
+        ),
+        shared_transfer_ding_force_compensation=(
+            args.shared_transfer_ding_force_compensation
+        ),
+        shared_transfer_ding_force_compensation_substeps=(
+            args.shared_transfer_ding_force_compensation_substeps
+        ),
+        shared_transfer_ding_force_compensation_iterations=(
+            args.shared_transfer_ding_force_compensation_iterations
         ),
         acados_integrator_type=args.acados_integrator_type,
         acados_collocation_type=args.acados_collocation_type,

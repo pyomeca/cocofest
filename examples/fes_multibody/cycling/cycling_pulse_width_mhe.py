@@ -325,6 +325,10 @@ class MyCyclicNMPC(FesNmpcMsk):
             return True
 
         source = states[key][i]
+        if source.size == self.nodes_per_cycle + 1:
+            cycle_delta = source[-1] - source[0]
+            self.nlp[0].x_init[key].init[i, :] = source + cycle_delta
+            return True
         retained_cycle = source[self.nodes_per_cycle :]
         cycle_delta = source[-1] - source[self.nodes_per_cycle]
         appended_cycle = source[self.nodes_per_cycle + 1 :] + cycle_delta
@@ -349,6 +353,9 @@ class MyCyclicNMPC(FesNmpcMsk):
 
         source = data[key][i]
         if state:
+            if source.size == self.nodes_per_cycle + 1:
+                self.nlp[0].x_init[key].init[i, :] = source
+                return True
             retained_cycle = source[self.nodes_per_cycle :]
             if getattr(self, "repeat_cyclical_state_initial_guess", False):
                 appended_cycle = source[self.nodes_per_cycle + 1 :]
@@ -380,6 +387,14 @@ class MyCyclicNMPC(FesNmpcMsk):
             return True
 
         source = states[key][i]
+        if source.size == self.nodes_per_cycle + 1:
+            wheel_cycle_shift = (
+                self._wheel_cycle_shift(states)
+                if self.use_signed_wheel_shift
+                else self.pedal_turn_in_one_cycle
+            )
+            self.nlp[0].x_init[key].init[i, :] = source + wheel_cycle_shift
+            return True
         retained_cycle = source[self.nodes_per_cycle :]
         if not self.use_signed_wheel_shift:
             appended_cycle = (
