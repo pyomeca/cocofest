@@ -1070,6 +1070,15 @@ def build_argument_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--acados-control-homotopy-stage-iterations",
+        type=int,
+        default=50,
+        help=(
+            "Maximum SQP iterations per homotopy attempt. Short attempts preserve "
+            "a usable iterate for restart before a late QP failure."
+        ),
+    )
+    parser.add_argument(
         "--acados-control-homotopy-keep-final-radius",
         action="store_true",
         help=(
@@ -2354,6 +2363,7 @@ def run_acados_control_homotopy(
     convergence_tolerance: float,
     fixed_control_tolerance: float,
     max_restarts: int = 2,
+    stage_iterations: int | None = 50,
     echo: bool = True,
     solve_stage=None,
 ) -> list[dict]:
@@ -2361,6 +2371,8 @@ def run_acados_control_homotopy(
 
     stage_solver = deepcopy(solver)
     stage_solver.set_convergence_tolerance(convergence_tolerance)
+    if stage_iterations is not None:
+        stage_solver.set_maximum_iterations(stage_iterations)
     summaries = []
 
     if solve_stage is None:
@@ -5768,6 +5780,10 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
         raise ValueError(
             "--acados-control-homotopy-max-restarts must be greater than or equal to zero."
         )
+    if args.acados_control_homotopy_stage_iterations < 1:
+        raise ValueError(
+            "--acados-control-homotopy-stage-iterations must be strictly positive."
+        )
     if args.acados_control_homotopy_window_growth < 1.0:
         raise ValueError(
             "--acados-control-homotopy-window-growth must be greater than or equal to one."
@@ -6016,6 +6032,10 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
             print(
                 "acados_control_homotopy_max_restarts: "
                 f"{args.acados_control_homotopy_max_restarts}"
+            )
+            print(
+                "acados_control_homotopy_stage_iterations: "
+                f"{args.acados_control_homotopy_stage_iterations}"
             )
             print(
                 "acados_control_homotopy_keep_final_radius: "
@@ -6522,6 +6542,12 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
 
     def update_functions(_nmpc, cycle_idx, _sol):
         print(f"window {cycle_idx}")
+        completed_window_diagnostics = None
+        if args.solver == "acados" and _sol is not None:
+            # Auxiliary refinement and homotopy solves reuse the mutable Acados
+            # backend. Snapshot the completed window before they overwrite it.
+            completed_window_diagnostics = snapshot_acados_diagnostics(_sol)
+            acados_window_diagnostics.append(completed_window_diagnostics)
         if echo and _sol is not None:
             states = _sol.decision_states(to_merge=SolutionMerge.NODES)
             print(
@@ -6735,6 +6761,7 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
                 convergence_tolerance=args.acados_control_homotopy_tolerance,
                 fixed_control_tolerance=args.acados_fixed_control_tolerance,
                 max_restarts=args.acados_control_homotopy_max_restarts,
+                stage_iterations=args.acados_control_homotopy_stage_iterations,
                 echo=echo,
             )
             for item in window_homotopy:
@@ -6754,11 +6781,11 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
                     "acados_control_homotopy_window_warning: "
                     f"window={cycle_idx} no_finite_radius_accepted"
                 )
-        if args.solver == "acados" and _sol is not None:
-            diagnostics = snapshot_acados_diagnostics(_sol)
-            acados_window_diagnostics.append(diagnostics)
+        if completed_window_diagnostics is not None:
             if echo and args.acados_diagnostics:
-                print_acados_diagnostics(f"window[{cycle_idx - 1}]", diagnostics)
+                print_acados_diagnostics(
+                    f"window[{cycle_idx - 1}]", completed_window_diagnostics
+                )
                 if continue_solving:
                     print(f"window[{cycle_idx}] transferred_initial_guess_diagnostics:")
                     print_initial_guess_diagnostics(_nmpc)
@@ -6884,6 +6911,7 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
             convergence_tolerance=args.acados_control_homotopy_tolerance,
             fixed_control_tolerance=args.acados_fixed_control_tolerance,
             max_restarts=args.acados_control_homotopy_max_restarts,
+            stage_iterations=args.acados_control_homotopy_stage_iterations,
             echo=echo,
         )
         solver.set_only_first_options_has_changed(False)

@@ -271,6 +271,8 @@ def test_control_homotopy_radii_are_parsed_as_an_increasing_sequence():
             "1.25",
             "--acados-control-homotopy-max-restarts",
             "3",
+            "--acados-control-homotopy-stage-iterations",
+            "40",
         ]
     )
 
@@ -279,6 +281,7 @@ def test_control_homotopy_radii_are_parsed_as_an_increasing_sequence():
     assert args.acados_control_homotopy_each_window is True
     assert args.acados_control_homotopy_window_growth == 1.25
     assert args.acados_control_homotopy_max_restarts == 3
+    assert args.acados_control_homotopy_stage_iterations == 40
 
 
 def test_acados_cyclical_transfer_extrapolates_by_default():
@@ -365,6 +368,7 @@ def test_control_homotopy_stops_on_failure_and_restores_bounds(monkeypatch):
         echo=False,
         solve_stage=solve_stage,
         max_restarts=0,
+        stage_iterations=25,
     )
 
     assert [summary["accepted"] for summary in summaries] == [True, True, False]
@@ -377,12 +381,16 @@ def test_control_homotopy_stops_on_failure_and_restores_bounds(monkeypatch):
     np.testing.assert_allclose(bounds.max, [[0.6, 0.6, 0.6]])
     assert nmpc._cocofest_fix_controls_to_warmup is False
     assert nmpc._cocofest_nodewise_control_bounds == {}
+    assert summaries[0]["stage"] == 0
 
 
 def test_control_homotopy_restarts_a_nearly_feasible_stage(monkeypatch):
     class FakeSolver:
         def set_convergence_tolerance(self, value):
             self.tolerance = value
+
+        def set_maximum_iterations(self, value):
+            self.max_iterations = value
 
     bounds = SimpleNamespace(min=np.array([[0.1, 0.1]]), max=np.array([[0.6, 0.6]]))
     nmpc = SimpleNamespace(
@@ -438,6 +446,7 @@ def test_control_homotopy_restarts_a_nearly_feasible_stage(monkeypatch):
         convergence_tolerance=5e-4,
         fixed_control_tolerance=1e-8,
         max_restarts=1,
+        stage_iterations=25,
         echo=False,
         solve_stage=lambda: next(solutions),
     )
