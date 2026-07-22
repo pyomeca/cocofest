@@ -49,7 +49,7 @@ IPOPT_PROFILE_DEFAULTS = {
         "fatigue_warmstart_mode": "continuous",
     },
     "acados_like": {
-        "model_formulation": "periodic",
+        "model_formulation": "periodic_node",
         "torque_application": "constant",
         "ode_solver": "rk4",
         "rk_steps": 5,
@@ -58,7 +58,7 @@ IPOPT_PROFILE_DEFAULTS = {
         "use_sx": True,
         "enforce_start_constraints": False,
         "disable_standard_ipopt_warmup": False,
-        "disable_periodic_fes_warmup_projection": None,
+        "disable_periodic_fes_warmup_projection": False,
         "fatigue_warmstart_mode": None,
     },
 }
@@ -507,6 +507,50 @@ def _initial_guess_state_comparisons(acados_result: dict) -> list[dict]:
     )
 
 
+def _shared_initial_guess_comparison(ipopt_result: dict, acados_result: dict) -> dict:
+    """Compare the physical primal supplied to each backend before its first solve."""
+
+    categories = (
+        ("states", "initial_guess_state_traces"),
+        ("controls", "initial_guess_control_traces"),
+    )
+    max_error = 0.0
+    mismatches = []
+    common_values = 0
+    for category, result_key in categories:
+        ipopt_values = ipopt_result.get(result_key, {})
+        acados_values = acados_result.get(result_key, {})
+        if set(ipopt_values) != set(acados_values):
+            mismatches.append(f"{category}_keys")
+            continue
+        for key in sorted(ipopt_values):
+            ipopt_array = np.asarray(ipopt_values[key], dtype=float)
+            acados_array = np.asarray(acados_values[key], dtype=float)
+            if ipopt_array.shape != acados_array.shape:
+                mismatches.append(f"{category}:{key}:shape")
+                continue
+            common_values += ipopt_array.size
+            if ipopt_array.size:
+                max_error = max(
+                    max_error, float(np.max(np.abs(ipopt_array - acados_array)))
+                )
+
+    ipopt_audits = ipopt_result.get("initial_guess_audits") or []
+    acados_audits = acados_result.get("initial_guess_audits") or []
+    ipopt_signature = ipopt_audits[0].get("signature") if ipopt_audits else None
+    acados_signature = acados_audits[0].get("signature") if acados_audits else None
+    comparable = not mismatches and common_values > 0
+    return {
+        "comparable": comparable,
+        "exact": comparable and max_error == 0.0,
+        "max_abs_error": max_error if comparable else None,
+        "common_values": common_values,
+        "mismatches": mismatches,
+        "ipopt_signature": ipopt_signature,
+        "acados_signature": acados_signature,
+    }
+
+
 def _normalize_ipopt_profile(profile: str) -> str:
     return profile.replace("-", "_")
 
@@ -860,6 +904,8 @@ def print_comparison(
             f"max_step={_format_metric(diagnostics.get('max_step'))} "
             f"window_statuses={result.get('window_statuses')}"
         )
+        if result.get("error"):
+            print(f"{label} solve_error: {result['error']}")
         if result.get("window_iterations"):
             iterations = [
                 value for value in result["window_iterations"] if value is not None
@@ -876,6 +922,10 @@ def print_comparison(
             f"successful_prefix_windows={performance[label]['successful_prefix_windows']} "
             f"solver_time_per_cycle_s={_format_metric(solver_per_cycle)} "
             f"wall_time_per_cycle_s={_format_metric(wall_per_cycle)} "
+            "initial_guess_preparation_time_s="
+            f"{_format_metric(result.get('initial_guess_preparation_time_s'))} "
+            "standard_warmup_cache_hit="
+            f"{_format_metric(result.get('standard_warmup_cache_hit'))} "
             f"end_to_end_wall_time_s={_format_metric(result.get('end_to_end_wall_time_s'))}"
         )
         if label == "ACADOS" and result.get("window_statuses"):
@@ -893,6 +943,20 @@ def print_comparison(
                     f"qp_iter={_format_array(item.get('qp_iter'))} | "
                     f"qp_stat={_format_array(item.get('qp_stat'))}"
                 )
+
+    initial_guess_comparison = _shared_initial_guess_comparison(
+        ipopt_result, acados_result
+    )
+    print(
+        "initial guess fairness | "
+        f"comparable={initial_guess_comparison['comparable']} | "
+        f"exact={initial_guess_comparison['exact']} | "
+        f"max_abs_error={_format_metric(initial_guess_comparison['max_abs_error'])} | "
+        f"common_values={initial_guess_comparison['common_values']} | "
+        f"ipopt_signature={initial_guess_comparison['ipopt_signature']} | "
+        f"acados_signature={initial_guess_comparison['acados_signature']} | "
+        f"mismatches={initial_guess_comparison['mismatches']}"
+    )
 
     common_validated_cycles = min(
         performance["IPOPT"]["validated_cycles"],
@@ -1107,6 +1171,11 @@ def main(
     acados_qpscaling_scale_constraints: str = "INF_NORM",
     acados_ext_qp_res: bool = False,
     acados_project_qdot_from_q: bool = False,
+    shared_transfer_full_dynamics_rollout: bool = False,
+    shared_transfer_phase_one: bool = False,
+    shared_initial_phase_one: bool = False,
+    shared_transfer_rollout_substeps: int = 5,
+    shared_transfer_rollout_max_bound_violation: float = 1.0,
     acados_integrator_type: str = "IRK",
     acados_collocation_type: str = "GAUSS_LEGENDRE",
     acados_sim_stages: int = 4,
@@ -1194,7 +1263,7 @@ def main(
         acados_qpscaling_scale_constraints=acados_qpscaling_scale_constraints,
         acados_ext_qp_res=False,
         acados_project_qdot_from_q=False,
-        disable_periodic_fes_warmup_projection=True,
+        disable_periodic_fes_warmup_projection=(disable_periodic_fes_warmup_projection),
         periodic_fes_warmup_projection_weight=periodic_fes_warmup_projection_weight,
         periodic_fes_warmup_projection_mode=periodic_fes_warmup_projection_mode,
         periodic_fes_warmup_projection_strategy=periodic_fes_warmup_projection_strategy,
@@ -1348,6 +1417,16 @@ def main(
     )
     acados_args.acados_stationarity_tolerance = acados_stationarity_tolerance
     acados_args.acados_dual_warm_start_mode = acados_dual_warm_start_mode
+    for solver_args in (ipopt_args, acados_args):
+        solver_args.acados_transfer_full_dynamics_rollout = (
+            shared_transfer_full_dynamics_rollout
+        )
+        solver_args.acados_transfer_phase_one = shared_transfer_phase_one
+        solver_args.full_dynamics_phase_one = shared_initial_phase_one
+        solver_args.acados_transfer_rollout_substeps = shared_transfer_rollout_substeps
+        solver_args.acados_transfer_rollout_max_bound_violation = (
+            shared_transfer_rollout_max_bound_violation
+        )
 
     normalized_ipopt_profile = _normalize_ipopt_profile(ipopt_profile)
     ipopt_label = (
@@ -1408,6 +1487,28 @@ def build_cli() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--shared-transfer-full-dynamics-rollout",
+        action="store_true",
+        help=(
+            "Apply the same complete-dynamics RK4 rollout to the appended cycle "
+            "for IPOPT and ACADOS."
+        ),
+    )
+    parser.add_argument(
+        "--shared-transfer-phase-one",
+        action="store_true",
+        help="Apply the same bounded phase-I projection between windows for both solvers.",
+    )
+    parser.add_argument(
+        "--shared-initial-phase-one",
+        action="store_true",
+        help="Apply the same complete-dynamics phase-I projection before the first solve.",
+    )
+    parser.add_argument("--shared-transfer-rollout-substeps", type=int, default=5)
+    parser.add_argument(
+        "--shared-transfer-rollout-max-bound-violation", type=float, default=1.0
+    )
+    parser.add_argument(
         "--ipopt-profile",
         choices=("historical", "acados_like", "acados-like"),
         default="historical",
@@ -1419,7 +1520,7 @@ def build_cli() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--ipopt-model-formulation",
-        choices=("standard", "periodic"),
+        choices=("standard", "periodic", "periodic_node"),
         default=None,
         help="Override the IPOPT model formulation selected by --ipopt-profile.",
     )
@@ -1788,6 +1889,15 @@ if __name__ == "__main__":
         acados_qpscaling_scale_constraints=args.acados_qpscaling_scale_constraints,
         acados_ext_qp_res=args.acados_ext_qp_res,
         acados_project_qdot_from_q=args.acados_project_qdot_from_q,
+        shared_transfer_full_dynamics_rollout=(
+            args.shared_transfer_full_dynamics_rollout
+        ),
+        shared_transfer_phase_one=args.shared_transfer_phase_one,
+        shared_initial_phase_one=args.shared_initial_phase_one,
+        shared_transfer_rollout_substeps=args.shared_transfer_rollout_substeps,
+        shared_transfer_rollout_max_bound_violation=(
+            args.shared_transfer_rollout_max_bound_violation
+        ),
         acados_integrator_type=args.acados_integrator_type,
         acados_collocation_type=args.acados_collocation_type,
         acados_sim_stages=args.acados_sim_stages,

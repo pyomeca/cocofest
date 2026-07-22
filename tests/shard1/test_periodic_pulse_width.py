@@ -5,6 +5,10 @@ from bioptim import Node, Solver
 
 import examples.fes_multibody.cycling.cycling_pulse_width_mhe_acados_periodic as periodic_example
 import examples.fes_multibody.cycling.cycling_fes_solver_comparison as comparison_example
+from cocofest.optimization.receding_horizon_initial_guess import (
+    audit_initial_guess,
+    copy_container_values,
+)
 from cocofest.models.ding2007.ding2007_with_fatigue_periodic import (
     DingModelPulseWidthFrequencyWithFatiguePeriodic,
 )
@@ -1987,6 +1991,127 @@ def test_transferred_guess_is_projected_after_bounds_move():
     assert summary["control_max_change"] == 2.0
     np.testing.assert_allclose(state_guess.init, [[1.0, -1.0]])
     np.testing.assert_allclose(control_guess.init, [[2.0]])
+
+
+def test_initial_guess_audit_is_solver_independent_and_deterministic():
+    nmpc = SimpleNamespace(
+        nlp=[
+            SimpleNamespace(
+                x_init={"q": SimpleNamespace(init=np.array([[1.0, 2.0]]))},
+                u_init={"tau": SimpleNamespace(init=np.array([[3.0]]))},
+            )
+        ]
+    )
+
+    first = audit_initial_guess(nmpc)
+    second = audit_initial_guess(nmpc)
+
+    assert first["signature"] == second["signature"]
+    assert first["finite"] is True
+    assert first["state_shapes"] == {"q": (1, 2)}
+    assert first["control_shapes"] == {"tau": (1, 1)}
+    nmpc.nlp[0].x_init["q"].init[0, 1] += 1.0
+    assert audit_initial_guess(nmpc)["signature"] != first["signature"]
+
+
+def test_generic_initial_guess_copy_reports_incompatible_grids():
+    source = {"q": SimpleNamespace(init=np.ones((1, 3)))}
+    target = {"q": SimpleNamespace(init=np.zeros((1, 2)))}
+
+    with np.testing.assert_raises_regex(ValueError, "shape"):
+        copy_container_values(source, target, "init")
+
+
+def test_shared_transfer_rollout_cli_is_available_to_ipopt():
+    args = periodic_example.build_argument_parser().parse_args(
+        [
+            "--solver",
+            "ipopt",
+            "--transfer-full-dynamics-rollout",
+            "--transfer-phase-one",
+            "--transfer-rollout-substeps",
+            "7",
+        ]
+    )
+    comparison_args = comparison_example.build_cli().parse_args(
+        [
+            "--shared-transfer-full-dynamics-rollout",
+            "--shared-transfer-phase-one",
+            "--shared-initial-phase-one",
+            "--shared-transfer-rollout-substeps",
+            "7",
+        ]
+    )
+
+    assert args.acados_transfer_full_dynamics_rollout is True
+    assert args.acados_transfer_phase_one is True
+    assert args.acados_transfer_rollout_substeps == 7
+    assert comparison_args.shared_transfer_full_dynamics_rollout is True
+    assert comparison_args.shared_transfer_phase_one is True
+    assert comparison_args.shared_initial_phase_one is True
+    assert comparison_args.shared_transfer_rollout_substeps == 7
+    assert (
+        comparison_example.IPOPT_PROFILE_DEFAULTS["acados_like"]["model_formulation"]
+        == "periodic_node"
+    )
+    assert (
+        comparison_example.IPOPT_PROFILE_DEFAULTS["acados_like"][
+            "disable_periodic_fes_warmup_projection"
+        ]
+        is False
+    )
+
+
+def test_shared_initial_guess_comparison_detects_exact_and_biased_seeds():
+    shared = {
+        "initial_guess_state_traces": {"q": np.array([[1.0, 2.0]])},
+        "initial_guess_control_traces": {"u": np.array([[3.0]])},
+        "initial_guess_audits": [{"signature": "same"}],
+    }
+    exact = comparison_example._shared_initial_guess_comparison(shared, shared)
+    changed = {
+        **shared,
+        "initial_guess_control_traces": {"u": np.array([[4.0]])},
+        "initial_guess_audits": [{"signature": "different"}],
+    }
+    biased = comparison_example._shared_initial_guess_comparison(shared, changed)
+
+    assert exact["comparable"] is True
+    assert exact["exact"] is True
+    assert exact["max_abs_error"] == 0.0
+    assert biased["comparable"] is True
+    assert biased["exact"] is False
+    assert biased["max_abs_error"] == 1.0
+
+
+def test_failed_first_window_keeps_initial_guess_for_backend_comparison():
+    nmpc = SimpleNamespace(
+        nlp=[
+            SimpleNamespace(
+                controls={"u": object()},
+                u_bounds={
+                    "u": SimpleNamespace(min=np.array([[0.0]]), max=np.array([[1.0]]))
+                },
+            )
+        ]
+    )
+    states = {"q": np.array([[0.0, 0.0], [0.0, 0.0], [0.0, -1.0]])}
+    controls = {"u": np.array([[0.5]])}
+
+    summary = periodic_example.build_failed_solve_summary(
+        nmpc,
+        SimpleNamespace(n_windows=2),
+        RuntimeError("no iterate"),
+        states,
+        controls,
+    )
+
+    assert summary["success"] is False
+    assert summary["attempted_windows"] == 0
+    assert summary["diagnostics"]["issues"] == ["no_solver_solution"]
+    assert summary["initial_guess_state_traces"] is states
+    assert summary["initial_guess_control_traces"] is controls
+    assert summary["final_wheel_angle"] == -1.0
 
 
 def test_full_dynamics_rhs_passes_numerical_timeseries_as_data():

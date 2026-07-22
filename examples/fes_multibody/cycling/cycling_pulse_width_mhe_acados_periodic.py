@@ -11,6 +11,7 @@ import os
 from pathlib import Path
 import sys
 from sys import platform as sys_platform
+from time import perf_counter
 
 import numpy as np
 
@@ -21,6 +22,13 @@ if str(REPO_ROOT) not in sys.path:
 from bioptim import MultiCyclicCycleSolutions, Node, OdeSolver, SolutionMerge, Solver
 from bioptim.optimization.receding_horizon_optimization import (
     RecedingHorizonOptimization,
+)
+
+from cocofest.optimization.receding_horizon_initial_guess import (
+    audit_initial_guess,
+    copy_container_values,
+    project_initial_guess_to_bounds,
+    snapshot_container,
 )
 
 try:
@@ -972,9 +980,15 @@ def build_argument_parser() -> argparse.ArgumentParser:
         help="Project the ACADOS qdot initial guess from finite differences of q before solving.",
     )
     parser.add_argument(
+        "--transfer-full-dynamics-rollout",
         "--acados-transfer-full-dynamics-rollout",
+        dest="acados_transfer_full_dynamics_rollout",
         action="store_true",
-        help="Reintegrate the appended cycle with the complete dynamics after each window transfer.",
+        help=(
+            "Reintegrate the appended cycle with the complete dynamics after each "
+            "window transfer. This solver-independent rollout is available to IPOPT "
+            "and ACADOS."
+        ),
     )
     parser.add_argument(
         "--acados-transfer-irk-rollout",
@@ -985,11 +999,13 @@ def build_argument_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--transfer-phase-one",
         "--acados-transfer-phase-one",
+        dest="acados_transfer_phase_one",
         action="store_true",
         help=(
             "Apply the bounded proximal complete-dynamics phase I after each MHE window "
-            "transfer. Uses the --full-dynamics-phase-one-* settings."
+            "transfer for either solver. Uses the --full-dynamics-phase-one-* settings."
         ),
     )
     parser.add_argument(
@@ -1064,13 +1080,17 @@ def build_argument_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--transfer-rollout-substeps",
         "--acados-transfer-rollout-substeps",
+        dest="acados_transfer_rollout_substeps",
         type=int,
         default=5,
         help="RK4 substeps used by the full-dynamics inter-window rollout.",
     )
     parser.add_argument(
+        "--transfer-pulse-width-scale",
         "--acados-transfer-pulse-width-scale",
+        dest="acados_transfer_pulse_width_scale",
         type=float,
         default=1.0,
         help=(
@@ -1079,7 +1099,9 @@ def build_argument_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--transfer-rollout-max-bound-violation",
         "--acados-transfer-rollout-max-bound-violation",
+        dest="acados_transfer_rollout_max_bound_violation",
         type=float,
         default=1.0,
         help="Reject the inter-window rollout when a state exceeds its bounds by more than this value.",
@@ -2161,13 +2183,6 @@ def _state_traces_from_exported_cycles(
         )
 
     return state_traces
-
-
-def _initial_guess_traces(container) -> dict[str, np.ndarray]:
-    return {
-        key: np.array(container[key].init, dtype=float, copy=True)
-        for key in container.keys()
-    }
 
 
 def _control_bounds_summary(nmpc) -> dict[str, dict[str, float]]:
@@ -4393,8 +4408,8 @@ def run_acados_transfer_bound_homotopy(
                 warm_start=None,
             )
 
-    accepted_states = _initial_guess_traces(periodic_nmpc.nlp[0].x_init)
-    accepted_controls = _initial_guess_traces(periodic_nmpc.nlp[0].u_init)
+    accepted_states = snapshot_container(periodic_nmpc.nlp[0].x_init)
+    accepted_controls = snapshot_container(periodic_nmpc.nlp[0].u_init)
     summaries = []
     completed = False
     try:
@@ -4476,10 +4491,8 @@ def run_acados_transfer_bound_homotopy(
                     apply_solution_directly_to_periodic_nmpc_initial_guess(
                         periodic_nmpc, solution
                     )
-                    accepted_states = _initial_guess_traces(periodic_nmpc.nlp[0].x_init)
-                    accepted_controls = _initial_guess_traces(
-                        periodic_nmpc.nlp[0].u_init
-                    )
+                    accepted_states = snapshot_container(periodic_nmpc.nlp[0].x_init)
+                    accepted_controls = snapshot_container(periodic_nmpc.nlp[0].u_init)
                     stage_accepted = True
                     break
                 if not retryable:
@@ -4552,8 +4565,8 @@ def run_acados_transfer_sqp_restarts(
     summaries = []
     best_feasibility = np.inf
     best_stationarity = np.inf
-    best_states = _initial_guess_traces(periodic_nmpc.nlp[0].x_init)
-    best_controls = _initial_guess_traces(periodic_nmpc.nlp[0].u_init)
+    best_states = snapshot_container(periodic_nmpc.nlp[0].x_init)
+    best_controls = snapshot_container(periodic_nmpc.nlp[0].u_init)
     completed = False
     try:
         for attempt in range(max_restarts):
@@ -4631,8 +4644,8 @@ def run_acados_transfer_sqp_restarts(
                     )
                     summary["primal_source"] = "solution_fallback"
             if solver_success or accepted_for_restart:
-                best_states = _initial_guess_traces(periodic_nmpc.nlp[0].x_init)
-                best_controls = _initial_guess_traces(periodic_nmpc.nlp[0].u_init)
+                best_states = snapshot_container(periodic_nmpc.nlp[0].x_init)
+                best_controls = snapshot_container(periodic_nmpc.nlp[0].u_init)
                 best_feasibility = feasibility
                 best_stationarity = stationarity
             if echo and "capsule_primal" in summary:
@@ -4677,33 +4690,10 @@ def run_acados_transfer_sqp_restarts(
 def project_transferred_initial_guess_to_bounds(periodic_nmpc) -> dict:
     """Make the shifted primal warm start admissible after bounds have moved."""
 
-    nlp = periodic_nmpc.nlp[0]
-    states_before = {
-        key: np.asarray(nlp.x_init[key].init, dtype=float).copy()
-        for key in nlp.x_init.keys()
-    }
-    controls_before = {
-        key: np.asarray(nlp.u_init[key].init, dtype=float).copy()
-        for key in nlp.u_init.keys()
-    }
-    periodic_nmpc._correct_init_guess_to_fit_bounds(corrected_input="states")
-    periodic_nmpc._correct_init_guess_to_fit_bounds(corrected_input="controls")
-    periodic_nmpc._sync_acados_state_bounds()
-
-    state_changes = {
-        key: float(np.max(np.abs(nlp.x_init[key].init - values)))
-        for key, values in states_before.items()
-    }
-    control_changes = {
-        key: float(np.max(np.abs(nlp.u_init[key].init - values)))
-        for key, values in controls_before.items()
-    }
-    return {
-        "state_max_change": max(state_changes.values(), default=0.0),
-        "control_max_change": max(control_changes.values(), default=0.0),
-        "state_changes": state_changes,
-        "control_changes": control_changes,
-    }
+    return project_initial_guess_to_bounds(
+        periodic_nmpc,
+        sync_bounds=getattr(periodic_nmpc, "_sync_acados_state_bounds", None),
+    )
 
 
 def _projection_state_keys(muscle_name: str, projection_mode: str) -> tuple[str, ...]:
@@ -5980,18 +5970,9 @@ def apply_solution_directly_to_periodic_nmpc_initial_guess(
 
 
 def _copy_list_values(source, target, attribute_name: str) -> None:
-    source_keys = set(source.keys())
-    for key in target.keys():
-        if key not in source_keys:
-            continue
-        source_values = np.asarray(getattr(source[key], attribute_name), dtype=float)
-        target_values = getattr(target[key], attribute_name)
-        if source_values.shape != target_values.shape:
-            raise ValueError(
-                f"Cannot copy '{key}' {attribute_name} with shape {source_values.shape} "
-                f"into shape {target_values.shape}."
-            )
-        target_values[:, :] = source_values
+    """Compatibility wrapper for the reusable initial-guess helper."""
+
+    copy_container_values(source, target, attribute_name)
 
 
 def _copy_initial_guesses_and_bounds(source_nmpc, target_nmpc) -> None:
@@ -6289,6 +6270,62 @@ def apply_pulse_width_control_trust_region(
     return summary
 
 
+def build_failed_solve_summary(
+    nmpc,
+    args: argparse.Namespace,
+    error: Exception,
+    initial_guess_state_traces: dict[str, np.ndarray],
+    initial_guess_control_traces: dict[str, np.ndarray],
+) -> dict:
+    """Return a benchmark-compatible result when no first solution exists."""
+
+    wheel_trace = np.asarray(initial_guess_state_traces.get("q", np.empty((0, 0))))
+    wheel_trace = (
+        wheel_trace[2].copy()
+        if wheel_trace.ndim == 2 and wheel_trace.shape[0] > 2
+        else np.array([], dtype=float)
+    )
+    return {
+        "success": False,
+        "solver_success": False,
+        "physical_success": False,
+        "status": None,
+        "objective": float("nan"),
+        "solver_time_s": 0.0,
+        "wall_time_s": 0.0,
+        "final_wheel_angle": float(wheel_trace[-1]) if wheel_trace.size else None,
+        "requested_windows": args.n_windows,
+        "attempted_windows": 0,
+        "successful_windows": 0,
+        "failed_windows": 1,
+        "exported_cycles": 0,
+        "covered_cycles": 0,
+        "wheel_angle_trace": wheel_trace,
+        "state_traces": {},
+        "control_traces": {},
+        "window_statuses": [],
+        "window_solutions": [],
+        "window_iterations": [],
+        "diagnostics": {
+            "is_physical": False,
+            "issues": ["no_solver_solution"],
+            "max_abs_angle": (
+                float(np.max(np.abs(wheel_trace))) if wheel_trace.size else None
+            ),
+            "max_step": (
+                float(np.max(np.abs(np.diff(wheel_trace))))
+                if wheel_trace.size > 1
+                else None
+            ),
+        },
+        "error": f"{type(error).__name__}: {error}",
+        "args": args,
+        "control_bounds": _control_bounds_summary(nmpc),
+        "initial_guess_state_traces": initial_guess_state_traces,
+        "initial_guess_control_traces": initial_guess_control_traces,
+    }
+
+
 def restore_pulse_width_control_bounds(periodic_nmpc) -> None:
     original_bounds = getattr(periodic_nmpc, "_cocofest_original_control_bounds", {})
     for key, (lower, upper) in original_bounds.items():
@@ -6463,6 +6500,7 @@ def get_one_cycle_acados_continuation_source(
 
 
 def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
+    preparation_start = perf_counter()
     objectives = parse_objectives(args.objective)
 
     if args.n_windows < 1:
@@ -6518,7 +6556,7 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
             "--acados-transfer-pulse-width-trust-radius must be non-negative."
         )
     if args.acados_transfer_rollout_substeps < 1:
-        raise ValueError("--acados-transfer-rollout-substeps must be >= 1.")
+        raise ValueError("--transfer-rollout-substeps must be >= 1.")
     if args.acados_transfer_rollout_max_bound_violation < 0:
         raise ValueError(
             "--acados-transfer-rollout-max-bound-violation must be non-negative."
@@ -6532,7 +6570,7 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
         )
     if args.acados_transfer_full_dynamics_rollout and args.acados_transfer_irk_rollout:
         raise ValueError(
-            "Choose only one of --acados-transfer-full-dynamics-rollout and "
+            "Choose only one of --transfer-full-dynamics-rollout and "
             "--acados-transfer-irk-rollout."
         )
     if args.acados_transfer_bound_homotopy and not args.acados_transfer_irk_rollout:
@@ -6631,6 +6669,7 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
             "--periodic-ipopt-refinement."
         )
     periodic_ipopt_reference_solution = None
+    standard_warmup_cache_hit = None
 
     continuation_source = None
     horizon_seed = None
@@ -6731,6 +6770,11 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
     nmpc.n_cycles_simultaneous = args.cycles_per_window
     if args.solver == "acados":
         patch_bioptim_acados_interface()
+
+    # These settings define the physical receding-horizon transfer, not the
+    # numerical backend. Apply them to periodic IPOPT diagnostics as well so a
+    # backend comparison starts from the same bounds and primal trajectory.
+    if args.solver == "acados" or periodic_cn_sum_approximation:
         nmpc.first_node_state_slack = {
             "q": [0.0, 0.0, args.acados_wheel_q_slack],
             "qdot": [0.0, 0.0, args.acados_wheel_qdot_slack],
@@ -6765,7 +6809,7 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
         nmpc._cocofest_dual_warm_start_mode = args.acados_dual_warm_start_mode
         nmpc._cocofest_dual_shift_stages = args.stimulations_per_cycle
         relaxed_fes_bounds = []
-        if not nmpc.bound_first_node_all_states:
+        if args.solver == "acados" and not nmpc.bound_first_node_all_states:
             relaxed_fes_bounds = relax_acados_first_node_fes_bounds(nmpc)
         if echo and relaxed_fes_bounds:
             print(
@@ -7083,6 +7127,9 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
         if args.control_regularization_target_source in {"warmup", "previous"}:
             warmup_simulation_conditions["control_regularization_weight"] = 0.0
             warmup_simulation_conditions["control_regularization_target"] = None
+        standard_warmup_cache_hit = _warmup_cache_path(
+            args, model_path, warmup_simulation_conditions, cycling_info
+        ).exists()
         warmup_solution = run_standard_ipopt_warmup(
             args, mhe_info, cycling_info, warmup_simulation_conditions, model_path
         )
@@ -7339,11 +7386,22 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
     if args.solver == "acados" and args.acados_diagnostics:
         print_initial_guess_diagnostics(nmpc)
 
-    initial_guess_state_traces = None
-    initial_guess_control_traces = None
-    if args.solver == "acados":
-        initial_guess_state_traces = _initial_guess_traces(nmpc.nlp[0].x_init)
-        initial_guess_control_traces = _initial_guess_traces(nmpc.nlp[0].u_init)
+    initial_guess_audit = audit_initial_guess(nmpc)
+    initial_guess_snapshot = initial_guess_audit.pop("snapshot")
+    initial_guess_state_traces = initial_guess_snapshot["states"]
+    initial_guess_control_traces = initial_guess_snapshot["controls"]
+    if echo:
+        print(
+            "initial_guess_audit: "
+            f"signature={initial_guess_audit['signature']} "
+            f"finite={initial_guess_audit['finite']}"
+        )
+    initial_guess_preparation_time_s = perf_counter() - preparation_start
+    if echo:
+        print(
+            "initial_guess_preparation_time_s: "
+            f"{initial_guess_preparation_time_s:.6f}"
+        )
 
     acados_window_diagnostics = []
     ipopt_dual_warm_start_summaries = []
@@ -7355,6 +7413,7 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
     inter_window_refinement_summaries = []
     inter_window_control_homotopy_summaries = []
     control_homotopy_summaries = []
+    initial_guess_audits = [{"window": 0, **initial_guess_audit}]
 
     def cache_first_successful_window(_nmpc, solution):
         diagnostics = snapshot_acados_diagnostics(solution)
@@ -7515,11 +7574,10 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
         if (
             continue_solving
             and _sol is not None
-            and args.solver == "acados"
             and not np.isclose(args.acados_transfer_pulse_width_scale, 1.0)
             and (
                 args.acados_transfer_full_dynamics_rollout
-                or args.acados_transfer_irk_rollout
+                or (args.solver == "acados" and args.acados_transfer_irk_rollout)
             )
         ):
             control_scaling_summary = scale_appended_pulse_width_controls(
@@ -7533,7 +7591,7 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
                     for item in control_scaling_summary["controls"].values()
                 )
                 print(
-                    "acados_transfer_pulse_width_scaling: "
+                    "transfer_pulse_width_scaling: "
                     f"scale={args.acados_transfer_pulse_width_scale:.6g} "
                     f"start_node={control_scaling_summary['start_node']} "
                     f"clipped_values={clipped_count}"
@@ -7541,7 +7599,6 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
         if (
             continue_solving
             and _sol is not None
-            and args.solver == "acados"
             and args.acados_transfer_full_dynamics_rollout
         ):
             rollout_summary = rollout_transferred_cycle_full_dynamics(
@@ -7554,7 +7611,7 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
             transfer_rollout_summaries.append(rollout_summary)
             if echo:
                 print(
-                    "acados_transfer_full_dynamics_rollout: "
+                    "transfer_full_dynamics_rollout: "
                     f"applied={rollout_summary['applied']} "
                     f"start_node={rollout_summary['start_node']} "
                     "max_bound_violation="
@@ -7564,19 +7621,19 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
                 if violation_by_key:
                     worst_key = max(violation_by_key, key=violation_by_key.get)
                     print(
-                        "acados_transfer_rollout_worst_bound: "
+                        "transfer_rollout_worst_bound: "
                         f"key={worst_key} "
                         f"violation={violation_by_key[worst_key]:.6g}"
                     )
                 if rollout_summary["applied"]:
                     print(
-                        "acados_transfer_rollout_terminal_delta: "
+                        "transfer_rollout_terminal_delta: "
                         f"q={rollout_summary['terminal_delta'].get('q')} "
                         f"qdot={rollout_summary['terminal_delta'].get('qdot')}"
                     )
                 else:
                     print(
-                        "acados_transfer_rollout_nonfinite_node: "
+                        "transfer_rollout_nonfinite_node: "
                         f"{rollout_summary.get('nonfinite_node')}"
                     )
         if (
@@ -7657,12 +7714,7 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
                     f"max_expansion={homotopy_summary['max_expansion']:.6g} "
                     f"worst_key={worst_key}"
                 )
-        if (
-            continue_solving
-            and _sol is not None
-            and args.solver == "acados"
-            and args.acados_transfer_phase_one
-        ):
+        if continue_solving and _sol is not None and args.acados_transfer_phase_one:
             phase_one_summary = project_full_dynamics_initial_guess(
                 _nmpc,
                 proximity_weight=args.full_dynamics_phase_one_proximity_weight,
@@ -7671,17 +7723,18 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
             )
             if echo:
                 print(
-                    "acados_transfer_phase_one: "
+                    "transfer_phase_one: "
                     f"scaled_defect_before={phase_one_summary['scaled_defect_before']:.6g} "
                     f"scaled_defect_after={phase_one_summary['scaled_defect_after']:.6g} "
                     f"max_state_change={phase_one_summary['max_state_change']:.6g}"
                 )
-        if continue_solving and _sol is not None and args.solver == "acados":
+        if continue_solving and _sol is not None:
             bound_projection = project_transferred_initial_guess_to_bounds(_nmpc)
+            bound_projection["window"] = cycle_idx + 1
             transfer_bound_projection_summaries.append(bound_projection)
             if echo:
                 print(
-                    "acados_transfer_bound_projection: "
+                    "transfer_bound_projection: "
                     f"state_max_change={bound_projection['state_max_change']:.6g} "
                     f"control_max_change={bound_projection['control_max_change']:.6g}"
                 )
@@ -7787,6 +7840,17 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
                     "acados_pulse_width_trust_region_recentered: "
                     f"window={cycle_idx} radius={transfer_radius:.9g} "
                     f"max_center={max_center:.9g}"
+                )
+        if continue_solving and _sol is not None:
+            next_audit = audit_initial_guess(_nmpc)
+            next_audit.pop("snapshot")
+            initial_guess_audits.append({"window": cycle_idx + 1, **next_audit})
+            if echo:
+                print(
+                    "transferred_initial_guess_audit: "
+                    f"window={cycle_idx + 1} "
+                    f"signature={next_audit['signature']} "
+                    f"finite={next_audit['finite']}"
                 )
         return continue_solving
 
@@ -7958,21 +8022,41 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
             summary["initial_guess_control_traces"] = initial_guess_control_traces
         summary["args"] = args
         summary["control_bounds"] = _control_bounds_summary(nmpc)
+        summary["initial_guess_audits"] = initial_guess_audits
+        summary["initial_guess_preparation_time_s"] = initial_guess_preparation_time_s
+        summary["standard_warmup_cache_hit"] = standard_warmup_cache_hit
         if control_homotopy_summaries:
             summary["control_homotopy_summaries"] = control_homotopy_summaries
         return summary
 
-    sol = nmpc.solve_fes_nmpc(
-        update_functions,
-        solver=solver,
-        solver_first_iter=solver_first_iter,
-        total_cycles=args.n_windows,
-        external_force=cycling_info.get("resistive_torque"),
-        cycle_solutions=MultiCyclicCycleSolutions.ALL_CYCLES,
-        get_all_iterations=True,
-        cyclic_options={"states": {}},
-        max_consecutive_failing=args.max_consecutive_failing,
-    )
+    try:
+        sol = nmpc.solve_fes_nmpc(
+            update_functions,
+            solver=solver,
+            solver_first_iter=solver_first_iter,
+            total_cycles=args.n_windows,
+            external_force=cycling_info.get("resistive_torque"),
+            cycle_solutions=MultiCyclicCycleSolutions.ALL_CYCLES,
+            get_all_iterations=True,
+            cyclic_options={"states": {}},
+            max_consecutive_failing=args.max_consecutive_failing,
+        )
+    except RuntimeError as exc:
+        if "did not produce a valid solution" not in str(exc):
+            raise
+        if echo:
+            print(f"solve_error: {type(exc).__name__}: {exc}")
+        summary = build_failed_solve_summary(
+            nmpc,
+            args,
+            exc,
+            initial_guess_state_traces,
+            initial_guess_control_traces,
+        )
+        summary["initial_guess_audits"] = initial_guess_audits
+        summary["initial_guess_preparation_time_s"] = initial_guess_preparation_time_s
+        summary["standard_warmup_cache_hit"] = standard_warmup_cache_hit
+        return summary
     if echo:
         summarize_windows(
             sol,
@@ -7999,6 +8083,10 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
         summary["transfer_bound_homotopy_summaries"] = transfer_bound_homotopy_summaries
     if transfer_sqp_restart_summaries:
         summary["transfer_sqp_restart_summaries"] = transfer_sqp_restart_summaries
+    if transfer_bound_projection_summaries:
+        summary["transfer_bound_projection_summaries"] = (
+            transfer_bound_projection_summaries
+        )
     if inter_window_refinement_summaries:
         summary["inter_window_refinement_summaries"] = inter_window_refinement_summaries
     if inter_window_control_homotopy_summaries:
@@ -8012,6 +8100,9 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
         summary["initial_guess_control_traces"] = initial_guess_control_traces
     summary["args"] = args
     summary["control_bounds"] = _control_bounds_summary(nmpc)
+    summary["initial_guess_audits"] = initial_guess_audits
+    summary["initial_guess_preparation_time_s"] = initial_guess_preparation_time_s
+    summary["standard_warmup_cache_hit"] = standard_warmup_cache_hit
     return summary
 
 
