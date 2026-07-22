@@ -310,6 +310,26 @@ def test_periodic_ipopt_window_cache_paths_are_window_specific(tmp_path, monkeyp
     assert first != second
 
 
+def test_strict_fes_continuity_uses_a_distinct_periodic_ipopt_cache(
+    tmp_path, monkeypatch
+):
+    parser = periodic_example.build_argument_parser()
+    relaxed_args = parser.parse_args([])
+    strict_args = parser.parse_args(["--acados-bind-first-node-fes-states"])
+    model_path = tmp_path / "cycling.bioMod"
+    model_path.write_text("version 4\n")
+    monkeypatch.setattr(periodic_example, "_cache_root", lambda: tmp_path)
+
+    relaxed = periodic_example._periodic_ipopt_refinement_cache_path(
+        relaxed_args, model_path
+    )
+    strict = periodic_example._periodic_ipopt_refinement_cache_path(
+        strict_args, model_path
+    )
+
+    assert relaxed != strict
+
+
 def test_control_homotopy_stops_on_failure_and_restores_bounds(monkeypatch):
     class FakeSolver:
         def set_maximum_iterations(self, value):

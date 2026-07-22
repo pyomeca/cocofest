@@ -927,6 +927,15 @@ def build_argument_parser() -> argparse.ArgumentParser:
         help="Path margin, in rad, around the transferred ACADOS wheel/crank angle interval.",
     )
     parser.add_argument(
+        "--acados-bind-first-node-fes-states",
+        action="store_true",
+        help=(
+            "Enforce inter-window continuity for every FES and fatigue state. "
+            "Use this for physical endurance benchmarks; relaxed first-node FES "
+            "bounds remain available for solver diagnostics."
+        ),
+    )
+    parser.add_argument(
         "--acados-project-qdot-from-q",
         action="store_true",
         help="Project the ACADOS qdot initial guess from finite differences of q before solving.",
@@ -1482,6 +1491,7 @@ def _periodic_ipopt_refinement_cache_path(
         "acados_sim_stages": args.acados_sim_stages,
         "acados_sim_steps": args.acados_sim_steps,
         "acados_collocation_type": args.acados_collocation_type,
+        "bind_first_node_fes_states": args.acados_bind_first_node_fes_states,
         "ipopt_linear_solver": args.ipopt_linear_solver,
         "sources": [
             _source_stamp(model_path),
@@ -6011,7 +6021,10 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
         # historical Ding states. Keep their initial value near the IPOPT
         # warmup; otherwise ACADOS can manufacture a low-cost but nonphysical
         # initial fatigue state that cannot be continued to another cycle.
-        nmpc.bound_first_node_all_states = args.model_formulation == "periodic_node"
+        nmpc.bound_first_node_all_states = (
+            args.acados_bind_first_node_fes_states
+            or args.model_formulation == "periodic_node"
+        )
         nmpc.bound_first_node_wheel_qdot = False
         nmpc.advance_wheel_q_bounds = True
         nmpc.wheel_q_path_margin = args.acados_wheel_q_path_margin
