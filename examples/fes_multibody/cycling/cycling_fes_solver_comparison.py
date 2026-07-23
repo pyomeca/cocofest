@@ -1258,6 +1258,7 @@ def main(
     acados_proximal_control_tolerance: float = 5e-4,
     acados_proximal_control_stage_iterations: int = 50,
     acados_proximal_control_max_restarts: int = 1,
+    acados_proximal_control_try_next_weight_on_failure: bool = False,
     acados_transfer_sqp_restarts: int = 0,
     acados_transfer_sqp_restart_iterations: int = 1,
     acados_transfer_sqp_restart_feasibility_tolerance: float = 1e-2,
@@ -1281,6 +1282,11 @@ def main(
     acados_project_qdot_from_q: bool = False,
     shared_transfer_full_dynamics_rollout: bool = False,
     shared_transfer_phase_one: bool = False,
+    acados_transfer_phase_one: bool = False,
+    acados_cyclical_transfer_mode: str = "extrapolate",
+    acados_transfer_phase_one_proximity_weight: float = 1.0,
+    acados_transfer_phase_one_defect_weight: float = 10.0,
+    acados_transfer_phase_one_substeps: int = 5,
     shared_initial_phase_one: bool = False,
     shared_transfer_rollout_substeps: int = 5,
     shared_transfer_rollout_max_bound_violation: float = 1.0,
@@ -1544,6 +1550,9 @@ def main(
     acados_args.acados_proximal_control_max_restarts = (
         acados_proximal_control_max_restarts
     )
+    acados_args.acados_proximal_control_try_next_weight_on_failure = (
+        acados_proximal_control_try_next_weight_on_failure
+    )
     acados_args.acados_transfer_sqp_restarts = acados_transfer_sqp_restarts
     acados_args.acados_transfer_sqp_restart_iterations = (
         acados_transfer_sqp_restart_iterations
@@ -1580,6 +1589,17 @@ def main(
         shared_transfer_ding_force_compensation
         or acados_transfer_ding_force_compensation
     )
+    acados_args.acados_transfer_phase_one = bool(
+        shared_transfer_phase_one or acados_transfer_phase_one
+    )
+    acados_args.acados_cyclical_transfer_mode = acados_cyclical_transfer_mode
+    acados_args.full_dynamics_phase_one_proximity_weight = (
+        acados_transfer_phase_one_proximity_weight
+    )
+    acados_args.full_dynamics_phase_one_defect_weight = (
+        acados_transfer_phase_one_defect_weight
+    )
+    acados_args.full_dynamics_phase_one_substeps = acados_transfer_phase_one_substeps
 
     normalized_ipopt_profile = _normalize_ipopt_profile(ipopt_profile)
     ipopt_label = {
@@ -1652,6 +1672,35 @@ def build_cli() -> argparse.ArgumentParser:
         "--shared-transfer-phase-one",
         action="store_true",
         help="Apply the same bounded phase-I projection between windows for both solvers.",
+    )
+    parser.add_argument(
+        "--acados-transfer-phase-one",
+        action="store_true",
+        help=(
+            "Apply the bounded phase-I transfer projection only to ACADOS, "
+            "leaving the historical IPOPT reference unchanged."
+        ),
+    )
+    parser.add_argument(
+        "--acados-cyclical-transfer-mode",
+        choices=("extrapolate", "repeat"),
+        default="extrapolate",
+        help="Construct the appended ACADOS cycle by extrapolation or repetition.",
+    )
+    parser.add_argument(
+        "--acados-transfer-phase-one-proximity-weight",
+        type=float,
+        default=1.0,
+    )
+    parser.add_argument(
+        "--acados-transfer-phase-one-defect-weight",
+        type=float,
+        default=10.0,
+    )
+    parser.add_argument(
+        "--acados-transfer-phase-one-substeps",
+        type=int,
+        default=5,
     )
     parser.add_argument(
         "--shared-initial-phase-one",
@@ -1882,6 +1931,10 @@ def build_cli() -> argparse.ArgumentParser:
     )
     parser.add_argument("--acados-proximal-control-max-restarts", type=int, default=1)
     parser.add_argument(
+        "--acados-proximal-control-try-next-weight-on-failure",
+        action="store_true",
+    )
+    parser.add_argument(
         "--acados-transfer-sqp-restarts",
         type=int,
         default=0,
@@ -2107,6 +2160,9 @@ if __name__ == "__main__":
         acados_proximal_control_max_restarts=(
             args.acados_proximal_control_max_restarts
         ),
+        acados_proximal_control_try_next_weight_on_failure=(
+            args.acados_proximal_control_try_next_weight_on_failure
+        ),
         acados_transfer_sqp_restarts=args.acados_transfer_sqp_restarts,
         acados_transfer_sqp_restart_iterations=(
             args.acados_transfer_sqp_restart_iterations
@@ -2136,6 +2192,15 @@ if __name__ == "__main__":
             args.shared_transfer_full_dynamics_rollout
         ),
         shared_transfer_phase_one=args.shared_transfer_phase_one,
+        acados_transfer_phase_one=args.acados_transfer_phase_one,
+        acados_cyclical_transfer_mode=args.acados_cyclical_transfer_mode,
+        acados_transfer_phase_one_proximity_weight=(
+            args.acados_transfer_phase_one_proximity_weight
+        ),
+        acados_transfer_phase_one_defect_weight=(
+            args.acados_transfer_phase_one_defect_weight
+        ),
+        acados_transfer_phase_one_substeps=(args.acados_transfer_phase_one_substeps),
         shared_initial_phase_one=args.shared_initial_phase_one,
         shared_transfer_rollout_substeps=args.shared_transfer_rollout_substeps,
         shared_transfer_rollout_max_bound_violation=(

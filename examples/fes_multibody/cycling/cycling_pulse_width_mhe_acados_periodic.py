@@ -1122,7 +1122,16 @@ def build_argument_parser() -> argparse.ArgumentParser:
         "--acados-transfer-bound-homotopy-tolerance",
         type=float,
         default=1e-4,
-        help="KKT tolerance used by transfer-bound homotopy stages.",
+        help="KKT residual threshold used to accept transfer-bound homotopy stages.",
+    )
+    parser.add_argument(
+        "--acados-transfer-bound-homotopy-solver-tolerance",
+        type=float,
+        default=None,
+        help=(
+            "Optional stricter KKT tolerance requested from ACADOS during each "
+            "transfer-bound homotopy stage."
+        ),
     )
     parser.add_argument(
         "--acados-transfer-sqp-restarts",
@@ -1374,6 +1383,14 @@ def build_argument_parser() -> argparse.ArgumentParser:
         type=int,
         default=1,
         help="Maximum same-weight restarts for a nearly feasible proximal stage.",
+    )
+    parser.add_argument(
+        "--acados-proximal-control-try-next-weight-on-failure",
+        action="store_true",
+        help=(
+            "After resetting a failed proximal stage, try the next lower "
+            "configured weight from the unchanged transferred primal."
+        ),
     )
     parser.add_argument(
         "--ipopt-linear-solver",
@@ -2895,6 +2912,7 @@ def run_acados_proximal_control_continuation(
     convergence_tolerance: float,
     max_restarts: int = 1,
     stage_iterations: int | None = 50,
+    try_next_weight_on_failure: bool = False,
     echo: bool = True,
     solve_stage=None,
 ) -> list[dict]:
@@ -3001,7 +3019,7 @@ def run_acados_proximal_control_continuation(
                     periodic_nmpc, solution
                 )
             summary["solver_reset"] = reset_acados_solver_memory(periodic_nmpc)
-        if not stage_accepted:
+        if not stage_accepted and not try_next_weight_on_failure:
             break
 
     if accepted_weight is not None:
@@ -3288,12 +3306,15 @@ def print_initial_guess_diagnostics(nmpc) -> None:
             )
 
 
-def project_qdot_initial_guess_from_q(nmpc) -> None:
+def project_qdot_initial_guess_from_q(nmpc, start_node: int = 0) -> dict:
     if "q" not in nmpc.nlp[0].x_init.keys() or "qdot" not in nmpc.nlp[0].x_init.keys():
-        return
+        return {"applied": False, "max_change": 0.0, "clipped_count": 0}
 
     dt = nmpc.cycle_duration / nmpc.cycle_len
     q = np.asarray(nmpc.nlp[0].x_init["q"].init, dtype=float)
+    previous_qdot = np.asarray(nmpc.nlp[0].x_init["qdot"].init, dtype=float).copy()
+    if start_node < 0 or start_node >= q.shape[1]:
+        raise ValueError("qdot projection start_node must index the state trajectory.")
     qdot = np.empty_like(q)
     qdot[:, :-1] = np.diff(q, axis=1) / dt
     qdot[:, -1] = qdot[:, -2]
@@ -3301,8 +3322,18 @@ def project_qdot_initial_guess_from_q(nmpc) -> None:
     lower, upper = _trajectory_bounds_for_guess(
         nmpc.nlp[0].x_bounds["qdot"], qdot.shape[1]
     )
-    nmpc.nlp[0].x_init["qdot"].init[:, :] = np.minimum(np.maximum(qdot, lower), upper)
+    projected_qdot = np.minimum(np.maximum(qdot, lower), upper)
+    nmpc.nlp[0].x_init["qdot"].init[:, start_node:] = projected_qdot[:, start_node:]
     nmpc._sync_acados_state_bounds()
+    projected_slice = projected_qdot[:, start_node:]
+    previous_slice = previous_qdot[:, start_node:]
+    raw_slice = qdot[:, start_node:]
+    return {
+        "applied": True,
+        "start_node": start_node,
+        "max_change": float(np.max(np.abs(projected_slice - previous_slice))),
+        "clipped_count": int(np.count_nonzero(projected_slice != raw_slice)),
+    }
 
 
 def _window_accounting(
@@ -4171,16 +4202,31 @@ def _proximal_phase_one_update(
     return np.minimum(np.maximum(candidate, lower), upper)
 
 
+def _maximum_state_initial_guess_bound_violation(nmpc) -> float:
+    maximum = 0.0
+    nlp = nmpc.nlp[0]
+    for key in nlp.x_init.keys():
+        values = np.asarray(nlp.x_init[key].init, dtype=float)
+        lower, upper = _trajectory_bounds_for_guess(nlp.x_bounds[key], values.shape[1])
+        violation = np.maximum(lower - values, 0.0) + np.maximum(values - upper, 0.0)
+        if violation.size:
+            maximum = max(maximum, float(np.max(violation)))
+    return maximum
+
+
 def project_full_dynamics_initial_guess(
     nmpc,
     proximity_weight: float = 1.0,
     defect_weight: float = 10.0,
     n_substeps: int = 10,
+    max_backtracking_steps: int = 6,
 ) -> dict:
-    """Sequential proximal phase I with controls fixed to the reference values."""
+    """Sequential proximal phase I with a monotone backtracking safeguard."""
 
     if n_substeps < 1:
         raise ValueError("Phase-I RK4 substeps must be strictly positive.")
+    if max_backtracking_steps < 0:
+        raise ValueError("Phase-I backtracking steps must be non-negative.")
     before = _full_dynamics_rollout_defect_details(nmpc, n_substeps=n_substeps)
     nlp = nmpc.nlp[0]
     first_state_key = next(iter(nlp.x_init.keys()))
@@ -4192,6 +4238,11 @@ def project_full_dynamics_initial_guess(
             "The complete-dynamics phase-I projection currently requires one state node "
             "per shooting endpoint; use RK4, RK8 or IRK instead of direct collocation."
         )
+    state_snapshot = {
+        key: np.asarray(nlp.x_init[key].init, dtype=float).copy()
+        for key in nlp.x_init.keys()
+    }
+    bound_violation_before = _maximum_state_initial_guess_bound_violation(nmpc)
     states = _stack_initial_guess_values(nlp.x_init, nlp.states, n_state_nodes)
     reference = states.copy()
     controls = _stack_initial_guess_values(nlp.u_init, nlp.controls, n_control_nodes)
@@ -4231,20 +4282,120 @@ def project_full_dynamics_initial_guess(
         nlp.x_init[key].init[:, :] = states[indexes, :]
     nmpc._correct_init_guess_to_fit_bounds(corrected_input="states")
     nmpc._sync_acados_state_bounds()
-    after = _full_dynamics_rollout_defect_details(nmpc, n_substeps=n_substeps)
+    candidate_after = _full_dynamics_rollout_defect_details(nmpc, n_substeps=n_substeps)
+    candidate_bound_violation_after = _maximum_state_initial_guess_bound_violation(nmpc)
+    candidate_state_values = {
+        key: np.asarray(nlp.x_init[key].init, dtype=float).copy()
+        for key in nlp.x_init.keys()
+    }
 
     def maximum_scaled_defect(details: dict) -> float:
         return max(details.get("scaled_by_block", {}).values(), default=0.0)
+
+    scaled_defect_before = maximum_scaled_defect(before)
+    candidate_scaled_defect_after = maximum_scaled_defect(candidate_after)
+    defect_tolerance = max(1e-12, abs(scaled_defect_before) * 1e-12)
+    bound_tolerance = max(1e-12, abs(bound_violation_before) * 1e-12)
+
+    def admissible(scaled_defect: float, bound_violation: float) -> bool:
+        return bool(
+            np.isfinite(scaled_defect)
+            and np.isfinite(bound_violation)
+            and scaled_defect <= scaled_defect_before + defect_tolerance
+            and bound_violation <= bound_violation_before + bound_tolerance
+        )
+
+    candidate_accepted = admissible(
+        candidate_scaled_defect_after, candidate_bound_violation_after
+    )
+    selected_step = 1.0 if candidate_accepted else 0.0
+    selected_details = candidate_after if candidate_accepted else before
+    selected_scaled_defect = (
+        candidate_scaled_defect_after if candidate_accepted else scaled_defect_before
+    )
+    selected_bound_violation = (
+        candidate_bound_violation_after
+        if candidate_accepted
+        else bound_violation_before
+    )
+    selected_state_values = (
+        candidate_state_values if candidate_accepted else state_snapshot
+    )
+    backtracking_evaluations = []
+    if not candidate_accepted:
+        for step_index in range(1, max_backtracking_steps + 1):
+            step = 0.5**step_index
+            for key in nlp.x_init.keys():
+                nlp.x_init[key].init[:, :] = state_snapshot[key] + step * (
+                    candidate_state_values[key] - state_snapshot[key]
+                )
+            nmpc._correct_init_guess_to_fit_bounds(corrected_input="states")
+            nmpc._sync_acados_state_bounds()
+            trial_details = _full_dynamics_rollout_defect_details(
+                nmpc, n_substeps=n_substeps
+            )
+            trial_scaled_defect = maximum_scaled_defect(trial_details)
+            trial_bound_violation = _maximum_state_initial_guess_bound_violation(nmpc)
+            trial_admissible = admissible(trial_scaled_defect, trial_bound_violation)
+            backtracking_evaluations.append(
+                {
+                    "step": step,
+                    "scaled_defect": trial_scaled_defect,
+                    "bound_violation": trial_bound_violation,
+                    "admissible": trial_admissible,
+                }
+            )
+            if (
+                trial_admissible
+                and trial_scaled_defect < selected_scaled_defect - defect_tolerance
+            ):
+                selected_step = step
+                selected_details = trial_details
+                selected_scaled_defect = trial_scaled_defect
+                selected_bound_violation = trial_bound_violation
+                selected_state_values = {
+                    key: np.asarray(nlp.x_init[key].init, dtype=float).copy()
+                    for key in nlp.x_init.keys()
+                }
+
+    accepted = selected_step > 0.0
+    for key, values in selected_state_values.items():
+        nlp.x_init[key].init[:, :] = values
+    nmpc._sync_acados_state_bounds()
+    candidate_max_state_change = float(np.max(np.abs(states - reference)))
+    selected_max_state_change = max(
+        (
+            float(np.max(np.abs(selected_state_values[key] - state_snapshot[key])))
+            for key in state_snapshot
+        ),
+        default=0.0,
+    )
 
     return {
         "proximity_weight": proximity_weight,
         "defect_weight": defect_weight,
         "n_substeps": n_substeps,
-        "scaled_defect_before": maximum_scaled_defect(before),
-        "scaled_defect_after": maximum_scaled_defect(after),
+        "max_backtracking_steps": max_backtracking_steps,
+        "backtracking_evaluations": backtracking_evaluations,
+        "accepted": accepted,
+        "restored": not accepted,
+        "accepted_step": selected_step,
+        "scaled_defect_before": scaled_defect_before,
+        "scaled_defect_after": selected_scaled_defect,
+        "candidate_scaled_defect_after": candidate_scaled_defect_after,
+        "scaled_by_block_before": before.get("scaled_by_block", {}),
+        "scaled_by_block_after": selected_details.get("scaled_by_block", {}),
+        "candidate_scaled_by_block_after": candidate_after.get("scaled_by_block", {}),
         "absolute_by_block_before": before.get("absolute_by_block", {}),
-        "absolute_by_block_after": after.get("absolute_by_block", {}),
-        "max_state_change": float(np.max(np.abs(states - reference))),
+        "absolute_by_block_after": selected_details.get("absolute_by_block", {}),
+        "candidate_absolute_by_block_after": candidate_after.get(
+            "absolute_by_block", {}
+        ),
+        "bound_violation_before": bound_violation_before,
+        "bound_violation_after": selected_bound_violation,
+        "candidate_bound_violation_after": candidate_bound_violation_after,
+        "max_state_change": selected_max_state_change,
+        "candidate_max_state_change": candidate_max_state_change,
     }
 
 
@@ -4815,8 +4966,9 @@ def _copy_state_bounds(periodic_nmpc) -> dict[str, tuple[np.ndarray, np.ndarray]
 def build_relaxed_transfer_state_bounds(
     periodic_nmpc,
     padding: float,
+    relaxed_keys: tuple[str, ...] = ("q", "qdot"),
 ) -> tuple[dict[str, tuple[np.ndarray, np.ndarray]], dict[str, float]]:
-    """Enclose the transferred trajectory without relaxing its first node."""
+    """Enclose selected transferred states without relaxing their first node."""
 
     if padding < 0.0:
         raise ValueError("Transfer-bound homotopy padding must be non-negative.")
@@ -4824,6 +4976,9 @@ def build_relaxed_transfer_state_bounds(
     relaxed_bounds = _copy_state_bounds(periodic_nmpc)
     expansion_by_key = {}
     for key, (relaxed_min, relaxed_max) in relaxed_bounds.items():
+        if key not in relaxed_keys:
+            expansion_by_key[key] = 0.0
+            continue
         values = np.asarray(periodic_nmpc.nlp[0].x_init[key].init, dtype=float)
         if values.shape[1] < 2 or relaxed_min.shape[1] < 3:
             raise ValueError(
@@ -4945,6 +5100,7 @@ def run_acados_transfer_bound_homotopy(
     padding: float,
     convergence_tolerance: float,
     stage_iterations: int,
+    solver_tolerance: float | None = None,
     max_restarts: int = 1,
     echo: bool = True,
     solve_stage=None,
@@ -4959,21 +5115,10 @@ def run_acados_transfer_bound_homotopy(
         periodic_nmpc, "_cocofest_fix_controls_to_warmup", False
     )
     original_runtime_iterations = getattr(solver, "nlp_solver_max_iter", None)
-    control_spans = []
-    for key in periodic_nmpc.nlp[0].u_init.keys():
-        if not key.startswith("last_pulse_width_"):
-            continue
-        bounds = periodic_nmpc.nlp[0].u_bounds[key]
-        control_spans.append(
-            float(
-                np.max(np.asarray(bounds.max, dtype=float))
-                - np.min(np.asarray(bounds.min, dtype=float))
-            )
-        )
-    max_control_radius = max(control_spans, default=0.0)
-
     stage_solver = deepcopy(solver)
-    stage_solver.set_convergence_tolerance(convergence_tolerance)
+    stage_solver.set_convergence_tolerance(
+        convergence_tolerance if solver_tolerance is None else solver_tolerance
+    )
     stage_solver.set_maximum_iterations(stage_iterations)
     acados_interface = getattr(periodic_nmpc, "ocp_solver", None)
     if getattr(acados_interface, "ocp_solver", None) is not None:
@@ -5001,29 +5146,14 @@ def run_acados_transfer_bound_homotopy(
                 periodic_nmpc, original_bounds, relaxed_bounds, fraction
             )
             restore_pulse_width_control_bounds(periodic_nmpc)
+            periodic_nmpc._cocofest_fix_controls_to_warmup = False
             control_radius = None
-            if np.isclose(fraction, 0.0):
-                periodic_nmpc._cocofest_fix_controls_to_warmup = True
-            else:
-                periodic_nmpc._cocofest_fix_controls_to_warmup = False
-                if fraction < 1.0 and max_control_radius > 0.0:
-                    control_radius = fraction * max_control_radius
-                    apply_pulse_width_control_trust_region(
-                        periodic_nmpc, control_radius
-                    )
             periodic_nmpc._correct_init_guess_to_fit_bounds(corrected_input="states")
             stage_accepted = False
             for attempt in range(max_restarts + 1):
                 set_acados_runtime_max_iterations(periodic_nmpc, stage_iterations)
                 solution = solve_stage()
                 diagnostics = snapshot_acados_diagnostics(solution)
-                accepted = _status_is_success(
-                    solution.status
-                ) or acados_diagnostics_meet_tolerances(
-                    diagnostics,
-                    convergence_tolerance=convergence_tolerance,
-                    stationarity_tolerance=convergence_tolerance,
-                )
                 residuals = diagnostics.get("residuals")
                 residuals = (
                     None
@@ -5031,6 +5161,21 @@ def run_acados_transfer_bound_homotopy(
                     else np.asarray(residuals, dtype=float).reshape(-1)
                 )
                 residual_history = _acados_residual_history_summary(diagnostics)
+                final_history_residuals = residual_history.get("final")
+                final_history_accepted = bool(
+                    final_history_residuals is not None
+                    and np.all(np.isfinite(final_history_residuals))
+                    and np.max(np.abs(final_history_residuals)) <= convergence_tolerance
+                )
+                accepted = (
+                    _status_is_success(solution.status)
+                    or acados_diagnostics_meet_tolerances(
+                        diagnostics,
+                        convergence_tolerance=convergence_tolerance,
+                        stationarity_tolerance=convergence_tolerance,
+                    )
+                    or final_history_accepted
+                )
                 retryable = bool(
                     not accepted
                     and solution.status in (2, 4)
@@ -5047,6 +5192,7 @@ def run_acados_transfer_bound_homotopy(
                     "control_radius": control_radius,
                     "status": solution.status,
                     "accepted": accepted,
+                    "accepted_from_residual_history": final_history_accepted,
                     "retryable": retryable,
                     "residuals": None if residuals is None else residuals.copy(),
                     "residual_history": residual_history,
@@ -5074,6 +5220,10 @@ def run_acados_transfer_bound_homotopy(
                     apply_solution_directly_to_periodic_nmpc_initial_guess(
                         periodic_nmpc, solution
                     )
+                    if solution.status != 0:
+                        summary["solver_reset"] = reset_acados_solver_memory(
+                            periodic_nmpc
+                        )
                     accepted_states = snapshot_container(periodic_nmpc.nlp[0].x_init)
                     accepted_controls = snapshot_container(periodic_nmpc.nlp[0].u_init)
                     stage_accepted = True
@@ -7371,6 +7521,13 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
         raise ValueError(
             "--acados-transfer-bound-homotopy-tolerance must be strictly positive."
         )
+    if (
+        args.acados_transfer_bound_homotopy_solver_tolerance is not None
+        and args.acados_transfer_bound_homotopy_solver_tolerance <= 0
+    ):
+        raise ValueError(
+            "--acados-transfer-bound-homotopy-solver-tolerance must be strictly positive."
+        )
     if args.acados_transfer_sqp_restarts < 0:
         raise ValueError("--acados-transfer-sqp-restarts must be non-negative.")
     if args.acados_transfer_sqp_restart_iterations < 1:
@@ -7732,6 +7889,10 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
                 f"{args.acados_proximal_control_stage_iterations}"
             )
             print(
+                "acados_proximal_control_try_next_weight_on_failure: "
+                f"{args.acados_proximal_control_try_next_weight_on_failure}"
+            )
+            print(
                 "acados_fes_state_trust_radius: "
                 f"{args.acados_fes_state_trust_radius}"
             )
@@ -7912,6 +8073,10 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
                 print(
                     "acados_transfer_bound_homotopy_tolerance: "
                     f"{args.acados_transfer_bound_homotopy_tolerance}"
+                )
+                print(
+                    "acados_transfer_bound_homotopy_solver_tolerance: "
+                    f"{args.acados_transfer_bound_homotopy_solver_tolerance}"
                 )
             print(f"acados_transfer_sqp_restarts: {args.acados_transfer_sqp_restarts}")
             if args.acados_transfer_sqp_restarts:
@@ -8202,9 +8367,15 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
                 "full_dynamics_phase_one: "
                 f"proximity_weight={phase_one_summary['proximity_weight']:.6g} "
                 f"defect_weight={phase_one_summary['defect_weight']:.6g} "
+                f"accepted={phase_one_summary['accepted']} "
+                f"accepted_step={phase_one_summary['accepted_step']:.6g} "
                 f"scaled_defect_before={phase_one_summary['scaled_defect_before']:.6g} "
                 f"scaled_defect_after={phase_one_summary['scaled_defect_after']:.6g} "
-                f"max_state_change={phase_one_summary['max_state_change']:.6g}"
+                f"candidate_scaled_defect_after="
+                f"{phase_one_summary['candidate_scaled_defect_after']:.6g} "
+                f"max_state_change={phase_one_summary['max_state_change']:.6g} "
+                f"scaled_by_block_after="
+                f"{phase_one_summary['scaled_by_block_after']}"
             )
 
     if args.solver == "acados" and args.acados_fes_state_trust_radius is not None:
@@ -8270,6 +8441,7 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
     ipopt_dual_warm_start_summaries = []
     transfer_rollout_summaries = []
     transfer_control_scaling_summaries = []
+    transfer_qdot_projection_summaries = []
     transfer_ding_force_compensation_summaries = []
     transfer_bound_homotopy_summaries = []
     transfer_sqp_restart_summaries = []
@@ -8470,6 +8642,25 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
         if (
             continue_solving
             and _sol is not None
+            and args.solver == "acados"
+            and args.acados_project_qdot_from_q
+        ):
+            qdot_projection_summary = project_qdot_initial_guess_from_q(
+                _nmpc, start_node=_nmpc.cycle_len
+            )
+            qdot_projection_summary["window"] = cycle_idx
+            transfer_qdot_projection_summaries.append(qdot_projection_summary)
+            if echo:
+                print(
+                    "transfer_qdot_projection: "
+                    f"applied={qdot_projection_summary['applied']} "
+                    f"start_node={qdot_projection_summary['start_node']} "
+                    f"max_change={qdot_projection_summary['max_change']:.6g} "
+                    f"clipped_values={qdot_projection_summary['clipped_count']}"
+                )
+        if (
+            continue_solving
+            and _sol is not None
             and not np.isclose(args.acados_transfer_pulse_width_scale, 1.0)
             and (
                 args.acados_transfer_full_dynamics_rollout
@@ -8630,6 +8821,7 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
                 padding=args.acados_transfer_bound_homotopy_padding,
                 convergence_tolerance=(args.acados_transfer_bound_homotopy_tolerance),
                 stage_iterations=args.acados_transfer_bound_homotopy_iterations,
+                solver_tolerance=(args.acados_transfer_bound_homotopy_solver_tolerance),
                 echo=echo,
             )
             homotopy_summary["window"] = cycle_idx
@@ -8658,9 +8850,17 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
             if echo:
                 print(
                     "transfer_phase_one: "
+                    f"accepted={phase_one_summary['accepted']} "
+                    f"accepted_step={phase_one_summary['accepted_step']:.6g} "
                     f"scaled_defect_before={phase_one_summary['scaled_defect_before']:.6g} "
                     f"scaled_defect_after={phase_one_summary['scaled_defect_after']:.6g} "
-                    f"max_state_change={phase_one_summary['max_state_change']:.6g}"
+                    f"candidate_scaled_defect_after="
+                    f"{phase_one_summary['candidate_scaled_defect_after']:.6g} "
+                    f"max_state_change={phase_one_summary['max_state_change']:.6g} "
+                    f"scaled_by_block_before="
+                    f"{phase_one_summary['scaled_by_block_before']} "
+                    f"scaled_by_block_after="
+                    f"{phase_one_summary['scaled_by_block_after']}"
                 )
         if continue_solving and _sol is not None:
             bound_projection = project_transferred_initial_guess_to_bounds(_nmpc)
@@ -8748,6 +8948,9 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
                 convergence_tolerance=args.acados_proximal_control_tolerance,
                 max_restarts=args.acados_proximal_control_max_restarts,
                 stage_iterations=args.acados_proximal_control_stage_iterations,
+                try_next_weight_on_failure=(
+                    args.acados_proximal_control_try_next_weight_on_failure
+                ),
                 echo=echo,
             )
             for item in window_continuation:
@@ -8956,6 +9159,9 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
             convergence_tolerance=args.acados_proximal_control_tolerance,
             max_restarts=args.acados_proximal_control_max_restarts,
             stage_iterations=args.acados_proximal_control_stage_iterations,
+            try_next_weight_on_failure=(
+                args.acados_proximal_control_try_next_weight_on_failure
+            ),
             echo=echo,
         )
         set_acados_runtime_max_iterations(nmpc, args.max_acados_iterations)
@@ -9096,6 +9302,10 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
     if transfer_control_scaling_summaries:
         summary["transfer_control_scaling_summaries"] = (
             transfer_control_scaling_summaries
+        )
+    if transfer_qdot_projection_summaries:
+        summary["transfer_qdot_projection_summaries"] = (
+            transfer_qdot_projection_summaries
         )
     if transfer_ding_force_compensation_summaries:
         summary["transfer_ding_force_compensation_summaries"] = (

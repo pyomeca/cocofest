@@ -299,6 +299,7 @@ def test_proximal_control_weights_are_parsed_as_a_decreasing_sequence():
             "--acados-proximal-control-weights",
             "1e6,1e5,1e4",
             "--acados-proximal-control-each-window",
+            "--acados-proximal-control-try-next-weight-on-failure",
             "--acados-terminal-wheel-q-homotopy-slacks",
             "0.2,0.1,0.02",
             "--acados-terminal-wheel-q-homotopy-each-window",
@@ -309,6 +310,7 @@ def test_proximal_control_weights_are_parsed_as_a_decreasing_sequence():
 
     assert args.acados_proximal_control_weights == (1e6, 1e5, 1e4)
     assert args.acados_proximal_control_each_window is True
+    assert args.acados_proximal_control_try_next_weight_on_failure is True
     assert args.acados_proximal_control_stage_iterations == 30
 
 
@@ -336,6 +338,8 @@ def test_transfer_bound_homotopy_fractions_are_parsed():
             "0.1",
             "--acados-transfer-bound-homotopy-iterations",
             "12",
+            "--acados-transfer-bound-homotopy-solver-tolerance",
+            "1e-5",
         ]
     )
 
@@ -343,6 +347,7 @@ def test_transfer_bound_homotopy_fractions_are_parsed():
     assert args.acados_transfer_bound_homotopy_fractions == (0.0, 0.5, 1.0)
     assert args.acados_transfer_bound_homotopy_padding == 0.1
     assert args.acados_transfer_bound_homotopy_iterations == 12
+    assert args.acados_transfer_bound_homotopy_solver_tolerance == 1e-5
 
 
 def test_transfer_sqp_restart_options_are_parsed():
@@ -794,6 +799,78 @@ def test_proximal_control_continuation_restarts_from_best_failed_qp_iterate(
     assert summaries[0]["restartable"] is True
     assert restored_iterates == [1]
     assert reset_calls == [True]
+
+
+def test_proximal_control_continuation_can_fallback_to_a_lower_weight(
+    monkeypatch,
+):
+    class FakeSolver:
+        def set_convergence_tolerance(self, value):
+            self.tolerance = value
+
+    solutions = iter(
+        [
+            SimpleNamespace(
+                status=4,
+                residuals=np.array([1.0, 1.0, 0.0, 1e-4]),
+                solver_time_to_optimize=1.0,
+                real_time_to_optimize=1.1,
+            ),
+            SimpleNamespace(
+                status=0,
+                residuals=np.zeros(4),
+                solver_time_to_optimize=2.0,
+                real_time_to_optimize=2.1,
+            ),
+        ]
+    )
+    nmpc = SimpleNamespace(nlp=[SimpleNamespace(u_bounds={})])
+    applied_weights = []
+    monkeypatch.setattr(
+        periodic_example,
+        "set_acados_runtime_control_regularization_weight",
+        lambda _nmpc, weight: (
+            applied_weights.append(weight)
+            or {"applied": True, "reason": None, "weight": weight}
+        ),
+    )
+    monkeypatch.setattr(
+        periodic_example,
+        "set_acados_runtime_max_iterations",
+        lambda _nmpc, _iterations: True,
+    )
+    monkeypatch.setattr(
+        periodic_example,
+        "snapshot_acados_diagnostics",
+        lambda solution: {"residuals": solution.residuals},
+    )
+    monkeypatch.setattr(
+        periodic_example,
+        "reset_acados_solver_memory",
+        lambda _nmpc: True,
+    )
+    monkeypatch.setattr(
+        periodic_example,
+        "apply_solution_directly_to_periodic_nmpc_initial_guess",
+        lambda _nmpc, _solution: None,
+    )
+
+    summaries = periodic_example.run_acados_proximal_control_continuation(
+        nmpc,
+        FakeSolver(),
+        weights=(1e4, 1e3),
+        convergence_tolerance=1e-3,
+        max_restarts=0,
+        stage_iterations=20,
+        try_next_weight_on_failure=True,
+        echo=False,
+        solve_stage=lambda: next(solutions),
+    )
+
+    assert [summary["weight"] for summary in summaries] == [1e4, 1e3]
+    assert [summary["accepted"] for summary in summaries] == [False, True]
+    assert applied_weights == [1e4, 1e3, 1e3]
+    assert nmpc._cocofest_dual_warm_start_mode == "preserve"
 
 
 def test_ding_force_compensation_increases_width_when_capacity_drops():
@@ -1316,8 +1393,14 @@ def test_endurance_cli_stops_on_failure_and_keeps_robust_irk_defaults():
     assert args.acados_sim_stages == 4
     assert args.acados_sim_steps == 5
     assert args.acados_dual_warm_start_mode == "reset"
+    assert args.acados_transfer_phase_one is False
+    assert args.acados_cyclical_transfer_mode == "extrapolate"
+    assert args.acados_transfer_phase_one_proximity_weight == 1.0
+    assert args.acados_transfer_phase_one_defect_weight == 10.0
+    assert args.acados_transfer_phase_one_substeps == 5
     assert args.acados_transfer_pulse_width_trust_radius is None
     assert args.acados_proximal_control_weights is None
+    assert args.acados_proximal_control_try_next_weight_on_failure is False
     assert args.periodic_ipopt_refinement_ode_solver == "target"
 
 
@@ -1805,6 +1888,136 @@ def test_proximal_phase_one_rejects_collocation_layout():
 
     with np.testing.assert_raises_regex(ValueError, "one state node"):
         periodic_example.project_full_dynamics_initial_guess(nmpc)
+
+
+def test_proximal_phase_one_restores_initial_guess_when_defect_increases(
+    monkeypatch,
+):
+    class Variables(dict):
+        shape = 1
+
+    defects = iter(
+        [
+            {"scaled_by_block": {"q": 1.0}, "absolute_by_block": {"q": 1.0}},
+            {"scaled_by_block": {"q": 2.0}, "absolute_by_block": {"q": 2.0}},
+        ]
+    )
+    sync_calls = []
+    nmpc = SimpleNamespace(
+        cycle_duration=1.0,
+        cycle_len=1,
+        nlp=[
+            SimpleNamespace(
+                x_init={"q": SimpleNamespace(init=np.array([[0.0, 1.0]]))},
+                u_init={"u": SimpleNamespace(init=np.array([[0.0]]))},
+                x_bounds={
+                    "q": SimpleNamespace(
+                        min=np.array([[-100.0, -100.0, -100.0]]),
+                        max=np.array([[100.0, 100.0, 100.0]]),
+                    )
+                },
+                states=Variables(q=SimpleNamespace(index=[0])),
+                controls=Variables(u=SimpleNamespace(index=[0])),
+            )
+        ],
+        _correct_init_guess_to_fit_bounds=lambda corrected_input: None,
+        _sync_acados_state_bounds=lambda: sync_calls.append(True),
+    )
+    monkeypatch.setattr(
+        periodic_example,
+        "_full_dynamics_rollout_defect_details",
+        lambda *_args, **_kwargs: next(defects),
+    )
+    monkeypatch.setattr(
+        periodic_example,
+        "_numerical_timeseries_at_node",
+        lambda *_args, **_kwargs: None,
+    )
+    monkeypatch.setattr(
+        periodic_example,
+        "_rk4_full_dynamics_step",
+        lambda *_args, **_kwargs: np.array([10.0]),
+    )
+
+    summary = periodic_example.project_full_dynamics_initial_guess(
+        nmpc,
+        proximity_weight=0.0,
+        defect_weight=1.0,
+        n_substeps=1,
+        max_backtracking_steps=0,
+    )
+
+    assert summary["accepted"] is False
+    assert summary["restored"] is True
+    assert summary["scaled_defect_before"] == 1.0
+    assert summary["candidate_scaled_defect_after"] == 2.0
+    assert summary["scaled_defect_after"] == 1.0
+    assert summary["max_state_change"] == 0.0
+    np.testing.assert_allclose(nmpc.nlp[0].x_init["q"].init, [[0.0, 1.0]])
+    assert len(sync_calls) == 2
+
+
+def test_proximal_phase_one_backtracks_to_a_monotone_update(monkeypatch):
+    class Variables(dict):
+        shape = 1
+
+    defects = iter(
+        [
+            {"scaled_by_block": {"q": 1.0}, "absolute_by_block": {"q": 1.0}},
+            {"scaled_by_block": {"q": 2.0}, "absolute_by_block": {"q": 2.0}},
+            {"scaled_by_block": {"q": 0.8}, "absolute_by_block": {"q": 0.8}},
+            {"scaled_by_block": {"q": 0.9}, "absolute_by_block": {"q": 0.9}},
+        ]
+    )
+    nmpc = SimpleNamespace(
+        cycle_duration=1.0,
+        cycle_len=1,
+        nlp=[
+            SimpleNamespace(
+                x_init={"q": SimpleNamespace(init=np.array([[0.0, 1.0]]))},
+                u_init={"u": SimpleNamespace(init=np.array([[0.0]]))},
+                x_bounds={
+                    "q": SimpleNamespace(
+                        min=np.array([[-100.0, -100.0, -100.0]]),
+                        max=np.array([[100.0, 100.0, 100.0]]),
+                    )
+                },
+                states=Variables(q=SimpleNamespace(index=[0])),
+                controls=Variables(u=SimpleNamespace(index=[0])),
+            )
+        ],
+        _correct_init_guess_to_fit_bounds=lambda corrected_input: None,
+        _sync_acados_state_bounds=lambda: None,
+    )
+    monkeypatch.setattr(
+        periodic_example,
+        "_full_dynamics_rollout_defect_details",
+        lambda *_args, **_kwargs: next(defects),
+    )
+    monkeypatch.setattr(
+        periodic_example,
+        "_numerical_timeseries_at_node",
+        lambda *_args, **_kwargs: None,
+    )
+    monkeypatch.setattr(
+        periodic_example,
+        "_rk4_full_dynamics_step",
+        lambda *_args, **_kwargs: np.array([10.0]),
+    )
+
+    summary = periodic_example.project_full_dynamics_initial_guess(
+        nmpc,
+        proximity_weight=0.0,
+        defect_weight=1.0,
+        n_substeps=1,
+        max_backtracking_steps=2,
+    )
+
+    assert summary["accepted"] is True
+    assert summary["accepted_step"] == 0.5
+    assert summary["candidate_scaled_defect_after"] == 2.0
+    assert summary["scaled_defect_after"] == 0.8
+    np.testing.assert_allclose(nmpc.nlp[0].x_init["q"].init, [[0.0, 5.5]])
 
 
 def test_pulse_width_summary_preserves_ipopt_control_variation():
@@ -2452,6 +2665,102 @@ def test_transfer_bound_homotopy_never_relaxes_first_node():
     assert relaxed["qdot"][0][0, 1] < bounds.min[0, 1] < -1.0
 
 
+def test_qdot_projection_is_recomputed_from_q_and_clipped_to_bounds():
+    qdot_init = SimpleNamespace(init=np.zeros((1, 3)))
+    nmpc = SimpleNamespace(
+        cycle_duration=1.0,
+        cycle_len=2,
+        nlp=[
+            SimpleNamespace(
+                x_init={
+                    "q": SimpleNamespace(init=np.array([[0.0, -1.0, -3.0]])),
+                    "qdot": qdot_init,
+                },
+                x_bounds={
+                    "qdot": SimpleNamespace(
+                        min=np.array([[-10.0, -3.0, -3.0]]),
+                        max=np.array([[10.0, 3.0, 3.0]]),
+                    )
+                },
+            )
+        ],
+        _sync_acados_state_bounds=lambda: None,
+    )
+
+    summary = periodic_example.project_qdot_initial_guess_from_q(nmpc)
+
+    np.testing.assert_allclose(qdot_init.init, [[-2.0, -3.0, -3.0]])
+    assert summary == {
+        "applied": True,
+        "start_node": 0,
+        "max_change": 3.0,
+        "clipped_count": 2,
+    }
+
+
+def test_qdot_projection_can_preserve_the_solved_cycle():
+    qdot_init = SimpleNamespace(init=np.array([[1.0, 2.0, 3.0, 4.0]]))
+    nmpc = SimpleNamespace(
+        cycle_duration=1.0,
+        cycle_len=2,
+        nlp=[
+            SimpleNamespace(
+                x_init={
+                    "q": SimpleNamespace(init=np.array([[0.0, -1.0, -2.0, -4.0]])),
+                    "qdot": qdot_init,
+                },
+                x_bounds={
+                    "qdot": SimpleNamespace(
+                        min=np.array([[-10.0, -10.0, -10.0]]),
+                        max=np.array([[10.0, 10.0, 10.0]]),
+                    )
+                },
+            )
+        ],
+        _sync_acados_state_bounds=lambda: None,
+    )
+
+    summary = periodic_example.project_qdot_initial_guess_from_q(nmpc, start_node=2)
+
+    np.testing.assert_allclose(qdot_init.init, [[1.0, 2.0, -4.0, -4.0]])
+    assert summary["start_node"] == 2
+    assert summary["max_change"] == 8.0
+
+
+def test_transfer_bound_homotopy_only_relaxes_mechanical_states():
+    qdot_bounds = SimpleNamespace(
+        min=np.array([[-0.1, -1.0, -2.1]]),
+        max=np.array([[0.1, 1.0, -1.9]]),
+    )
+    fatigue_bounds = SimpleNamespace(
+        min=np.array([[0.0, 0.0, 0.0]]),
+        max=np.array([[1.0, 1.0, 1.0]]),
+    )
+    nmpc = SimpleNamespace(
+        nlp=[
+            SimpleNamespace(
+                x_init={
+                    "qdot": SimpleNamespace(init=np.array([[0.0, -4.0, -5.0]])),
+                    "A_Triceps": SimpleNamespace(init=np.array([[1.0, 10.0, 20.0]])),
+                },
+                x_bounds={
+                    "qdot": qdot_bounds,
+                    "A_Triceps": fatigue_bounds,
+                },
+            )
+        ]
+    )
+
+    relaxed, expansion = periodic_example.build_relaxed_transfer_state_bounds(
+        nmpc, padding=0.1
+    )
+
+    assert expansion["qdot"] > 0.0
+    assert expansion["A_Triceps"] == 0.0
+    np.testing.assert_allclose(relaxed["A_Triceps"][0], fatigue_bounds.min)
+    np.testing.assert_allclose(relaxed["A_Triceps"][1], fatigue_bounds.max)
+
+
 def test_transfer_bound_homotopy_restores_physical_bounds(monkeypatch):
     class FakeSolver:
         def __init__(self):
@@ -2481,6 +2790,7 @@ def test_transfer_bound_homotopy_restores_physical_bounds(monkeypatch):
         _correct_init_guess_to_fit_bounds=lambda corrected_input: None,
         _sync_acados_state_bounds=lambda: None,
     )
+    fixed_control_values = []
     solutions = [
         SimpleNamespace(
             status=0, solver_time_to_optimize=0.1, real_time_to_optimize=0.2
@@ -2508,7 +2818,10 @@ def test_transfer_bound_homotopy_restores_physical_bounds(monkeypatch):
         convergence_tolerance=1e-4,
         stage_iterations=10,
         echo=False,
-        solve_stage=lambda: solutions.pop(0),
+        solve_stage=lambda: (
+            fixed_control_values.append(nmpc._cocofest_fix_controls_to_warmup)
+            or solutions.pop(0)
+        ),
     )
 
     assert summary["completed"] is True
@@ -2516,6 +2829,74 @@ def test_transfer_bound_homotopy_restores_physical_bounds(monkeypatch):
     np.testing.assert_allclose(bounds.min, original_min)
     np.testing.assert_allclose(bounds.max, original_max)
     assert nmpc._cocofest_fix_controls_to_warmup is True
+    assert fixed_control_values == [False, False]
+
+
+def test_transfer_bound_homotopy_accepts_last_finite_nlp_iterate(monkeypatch):
+    class FakeSolver:
+        nlp_solver_max_iter = 100
+
+        def set_convergence_tolerance(self, value):
+            self.tolerance = value
+
+        def set_maximum_iterations(self, value):
+            self.nlp_solver_max_iter = value
+
+    bounds = SimpleNamespace(
+        min=np.array([[-0.1, -1.0, -2.1]]),
+        max=np.array([[0.1, 1.0, -1.9]]),
+    )
+    nmpc = SimpleNamespace(
+        nlp=[
+            SimpleNamespace(
+                x_init={"qdot": SimpleNamespace(init=np.array([[0.0, -4.0, -5.0]]))},
+                u_init={"u": SimpleNamespace(init=np.zeros((1, 2)))},
+                x_bounds={"qdot": bounds},
+            )
+        ],
+        ocp_solver=None,
+        _cocofest_fix_controls_to_warmup=False,
+        _correct_init_guess_to_fit_bounds=lambda corrected_input: None,
+        _sync_acados_state_bounds=lambda: None,
+    )
+    solution = SimpleNamespace(
+        status=4, solver_time_to_optimize=0.1, real_time_to_optimize=0.2
+    )
+    monkeypatch.setattr(
+        periodic_example,
+        "snapshot_acados_diagnostics",
+        lambda _: {
+            "residuals": np.array([1.0, 100.0, 0.0, 0.0]),
+            "res_stat_all": np.array([0.02]),
+            "res_eq_all": np.array([0.03]),
+            "res_ineq_all": np.array([0.0]),
+            "res_comp_all": np.array([0.01]),
+        },
+    )
+    monkeypatch.setattr(
+        periodic_example,
+        "apply_solution_directly_to_periodic_nmpc_initial_guess",
+        lambda periodic_nmpc, accepted_solution: None,
+    )
+    monkeypatch.setattr(
+        periodic_example, "reset_acados_solver_memory", lambda periodic_nmpc: True
+    )
+
+    summary = periodic_example.run_acados_transfer_bound_homotopy(
+        nmpc,
+        FakeSolver(),
+        fractions=(1.0,),
+        padding=0.1,
+        convergence_tolerance=0.05,
+        stage_iterations=10,
+        echo=False,
+        solve_stage=lambda: solution,
+    )
+
+    assert summary["completed"] is True
+    assert summary["stages"][0]["accepted"] is True
+    assert summary["stages"][0]["accepted_from_residual_history"] is True
+    assert summary["stages"][0]["solver_reset"] is True
 
 
 def test_transfer_sqp_restarts_from_nearly_feasible_iterate(monkeypatch):
@@ -2735,6 +3116,15 @@ def test_shared_transfer_rollout_cli_is_available_to_ipopt():
             "--shared-transfer-full-dynamics-rollout",
             "--compact-rho-output",
             "--shared-transfer-phase-one",
+            "--acados-transfer-phase-one",
+            "--acados-cyclical-transfer-mode",
+            "repeat",
+            "--acados-transfer-phase-one-proximity-weight",
+            "0",
+            "--acados-transfer-phase-one-defect-weight",
+            "1",
+            "--acados-transfer-phase-one-substeps",
+            "10",
             "--shared-initial-phase-one",
             "--shared-transfer-rollout-substeps",
             "7",
@@ -2745,6 +3135,7 @@ def test_shared_transfer_rollout_cli_is_available_to_ipopt():
             "--acados-proximal-control-weights",
             "1e6,1e5",
             "--acados-proximal-control-each-window",
+            "--acados-proximal-control-try-next-weight-on-failure",
             "--acados-transfer-sqp-restarts",
             "2",
             "--acados-transfer-sqp-restart-iterations",
@@ -2765,6 +3156,11 @@ def test_shared_transfer_rollout_cli_is_available_to_ipopt():
     assert comparison_args.shared_transfer_full_dynamics_rollout is True
     assert comparison_args.compact_rho_output is True
     assert comparison_args.shared_transfer_phase_one is True
+    assert comparison_args.acados_transfer_phase_one is True
+    assert comparison_args.acados_cyclical_transfer_mode == "repeat"
+    assert comparison_args.acados_transfer_phase_one_proximity_weight == 0
+    assert comparison_args.acados_transfer_phase_one_defect_weight == 1
+    assert comparison_args.acados_transfer_phase_one_substeps == 10
     assert comparison_args.shared_initial_phase_one is True
     assert comparison_args.shared_transfer_rollout_substeps == 7
     assert comparison_args.shared_transfer_ding_force_compensation is True
@@ -2772,6 +3168,7 @@ def test_shared_transfer_rollout_cli_is_available_to_ipopt():
     assert comparison_args.acados_transfer_ding_force_compensation is True
     assert comparison_args.acados_proximal_control_weights == (1e6, 1e5)
     assert comparison_args.acados_proximal_control_each_window is True
+    assert comparison_args.acados_proximal_control_try_next_weight_on_failure is True
     assert comparison_args.acados_transfer_sqp_restarts == 2
     assert comparison_args.acados_transfer_sqp_restart_iterations == 1
     assert comparison_args.acados_transfer_sqp_restart_feasibility_tolerance == 0.01
