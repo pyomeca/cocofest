@@ -1293,6 +1293,7 @@ def main(
     acados_transfer_phase_one_proximity_weight: float = 1.0,
     acados_transfer_phase_one_defect_weight: float = 10.0,
     acados_transfer_phase_one_substeps: int = 5,
+    acados_transfer_phase_one_max_state_change: float | None = None,
     shared_initial_phase_one: bool = False,
     shared_transfer_rollout_substeps: int = 5,
     shared_transfer_rollout_max_bound_violation: float = 1.0,
@@ -1624,6 +1625,9 @@ def main(
         acados_transfer_phase_one_defect_weight
     )
     acados_args.full_dynamics_phase_one_substeps = acados_transfer_phase_one_substeps
+    acados_args.full_dynamics_phase_one_max_state_change = (
+        acados_transfer_phase_one_max_state_change
+    )
 
     normalized_ipopt_profile = _normalize_ipopt_profile(ipopt_profile)
     ipopt_label = {
@@ -1725,6 +1729,11 @@ def build_cli() -> argparse.ArgumentParser:
         "--acados-transfer-phase-one-substeps",
         type=int,
         default=5,
+    )
+    parser.add_argument(
+        "--acados-transfer-phase-one-max-state-change",
+        type=float,
+        default=None,
     )
     parser.add_argument(
         "--shared-initial-phase-one",
@@ -2269,6 +2278,9 @@ if __name__ == "__main__":
             args.acados_transfer_phase_one_defect_weight
         ),
         acados_transfer_phase_one_substeps=(args.acados_transfer_phase_one_substeps),
+        acados_transfer_phase_one_max_state_change=(
+            args.acados_transfer_phase_one_max_state_change
+        ),
         shared_initial_phase_one=args.shared_initial_phase_one,
         shared_transfer_rollout_substeps=args.shared_transfer_rollout_substeps,
         shared_transfer_rollout_max_bound_violation=(

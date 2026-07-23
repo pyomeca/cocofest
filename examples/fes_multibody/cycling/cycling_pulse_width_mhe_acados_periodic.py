@@ -1295,6 +1295,15 @@ def build_argument_parser() -> argparse.ArgumentParser:
         help="RK4 substeps used by the complete-dynamics phase-I projection.",
     )
     parser.add_argument(
+        "--full-dynamics-phase-one-max-state-change",
+        type=float,
+        default=None,
+        help=(
+            "Optional maximum absolute state correction accepted from phase I. "
+            "Larger corrections trigger monotone backtracking."
+        ),
+    )
+    parser.add_argument(
         "--check-wheel-periodicity",
         action="store_true",
         help="Compare the complete dynamics at q_crank and q_crank + 2*pi before solving.",
@@ -4546,6 +4555,7 @@ def project_full_dynamics_initial_guess(
     defect_weight: float = 10.0,
     n_substeps: int = 10,
     max_backtracking_steps: int = 6,
+    max_state_change: float | None = None,
 ) -> dict:
     """Sequential proximal phase I with a monotone backtracking safeguard."""
 
@@ -4553,6 +4563,8 @@ def project_full_dynamics_initial_guess(
         raise ValueError("Phase-I RK4 substeps must be strictly positive.")
     if max_backtracking_steps < 0:
         raise ValueError("Phase-I backtracking steps must be non-negative.")
+    if max_state_change is not None and max_state_change <= 0.0:
+        raise ValueError("Phase-I maximum state change must be strictly positive.")
     before = _full_dynamics_rollout_defect_details(nmpc, n_substeps=n_substeps)
     nlp = nmpc.nlp[0]
     first_state_key = next(iter(nlp.x_init.keys()))
@@ -4615,6 +4627,17 @@ def project_full_dynamics_initial_guess(
         for key in nlp.x_init.keys()
     }
 
+    def maximum_state_change(values: dict) -> float:
+        return max(
+            (
+                float(np.max(np.abs(values[key] - state_snapshot[key])))
+                for key in state_snapshot
+            ),
+            default=0.0,
+        )
+
+    candidate_max_state_change = maximum_state_change(candidate_state_values)
+
     def maximum_scaled_defect(details: dict) -> float:
         return max(details.get("scaled_by_block", {}).values(), default=0.0)
 
@@ -4623,16 +4646,24 @@ def project_full_dynamics_initial_guess(
     defect_tolerance = max(1e-12, abs(scaled_defect_before) * 1e-12)
     bound_tolerance = max(1e-12, abs(bound_violation_before) * 1e-12)
 
-    def admissible(scaled_defect: float, bound_violation: float) -> bool:
+    def admissible(
+        scaled_defect: float,
+        bound_violation: float,
+        state_change: float,
+    ) -> bool:
         return bool(
             np.isfinite(scaled_defect)
             and np.isfinite(bound_violation)
+            and np.isfinite(state_change)
             and scaled_defect <= scaled_defect_before + defect_tolerance
             and bound_violation <= bound_violation_before + bound_tolerance
+            and (max_state_change is None or state_change <= max_state_change)
         )
 
     candidate_accepted = admissible(
-        candidate_scaled_defect_after, candidate_bound_violation_after
+        candidate_scaled_defect_after,
+        candidate_bound_violation_after,
+        candidate_max_state_change,
     )
     selected_step = 1.0 if candidate_accepted else 0.0
     selected_details = candidate_after if candidate_accepted else before
@@ -4662,12 +4693,22 @@ def project_full_dynamics_initial_guess(
             )
             trial_scaled_defect = maximum_scaled_defect(trial_details)
             trial_bound_violation = _maximum_state_initial_guess_bound_violation(nmpc)
-            trial_admissible = admissible(trial_scaled_defect, trial_bound_violation)
+            trial_state_values = {
+                key: np.asarray(nlp.x_init[key].init, dtype=float)
+                for key in nlp.x_init.keys()
+            }
+            trial_max_state_change = maximum_state_change(trial_state_values)
+            trial_admissible = admissible(
+                trial_scaled_defect,
+                trial_bound_violation,
+                trial_max_state_change,
+            )
             backtracking_evaluations.append(
                 {
                     "step": step,
                     "scaled_defect": trial_scaled_defect,
                     "bound_violation": trial_bound_violation,
+                    "max_state_change": trial_max_state_change,
                     "admissible": trial_admissible,
                 }
             )
@@ -4688,20 +4729,14 @@ def project_full_dynamics_initial_guess(
     for key, values in selected_state_values.items():
         nlp.x_init[key].init[:, :] = values
     nmpc._sync_acados_state_bounds()
-    candidate_max_state_change = float(np.max(np.abs(states - reference)))
-    selected_max_state_change = max(
-        (
-            float(np.max(np.abs(selected_state_values[key] - state_snapshot[key])))
-            for key in state_snapshot
-        ),
-        default=0.0,
-    )
+    selected_max_state_change = maximum_state_change(selected_state_values)
 
     return {
         "proximity_weight": proximity_weight,
         "defect_weight": defect_weight,
         "n_substeps": n_substeps,
         "max_backtracking_steps": max_backtracking_steps,
+        "max_state_change_limit": max_state_change,
         "backtracking_evaluations": backtracking_evaluations,
         "accepted": accepted,
         "restored": not accepted,
@@ -7747,6 +7782,13 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
         raise ValueError("--cycles-per-window must be >= 1")
     if args.stimulations_per_cycle < 1:
         raise ValueError("--stimulations-per-cycle must be >= 1")
+    if (
+        args.full_dynamics_phase_one_max_state_change is not None
+        and args.full_dynamics_phase_one_max_state_change <= 0
+    ):
+        raise ValueError(
+            "--full-dynamics-phase-one-max-state-change must be strictly positive."
+        )
     if args.acados_continuation_source_max_iterations < 1:
         raise ValueError(
             "--acados-continuation-source-max-iterations must be strictly positive."
@@ -8496,6 +8538,10 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
                 f"{historical_init_guess_path if historical_init_guess_path else 'None'}"
             )
         print(f"full_dynamics_phase_one: {args.full_dynamics_phase_one}")
+        print(
+            "full_dynamics_phase_one_max_state_change: "
+            f"{args.full_dynamics_phase_one_max_state_change}"
+        )
 
     if periodic_cn_sum_approximation and not args.disable_standard_ipopt_warmup:
         if echo:
@@ -8726,6 +8772,7 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
             proximity_weight=args.full_dynamics_phase_one_proximity_weight,
             defect_weight=args.full_dynamics_phase_one_defect_weight,
             n_substeps=args.full_dynamics_phase_one_substeps,
+            max_state_change=args.full_dynamics_phase_one_max_state_change,
         )
         if echo:
             print(
@@ -9220,6 +9267,7 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
                 proximity_weight=args.full_dynamics_phase_one_proximity_weight,
                 defect_weight=args.full_dynamics_phase_one_defect_weight,
                 n_substeps=args.full_dynamics_phase_one_substeps,
+                max_state_change=args.full_dynamics_phase_one_max_state_change,
             )
             if echo:
                 print(

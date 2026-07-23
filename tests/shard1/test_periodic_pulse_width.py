@@ -1977,14 +1977,14 @@ def test_proximal_phase_one_restores_initial_guess_when_defect_increases(
     assert len(sync_calls) == 2
 
 
-def test_proximal_phase_one_backtracks_to_a_monotone_update(monkeypatch):
+def test_proximal_phase_one_backtracks_to_respect_state_change_limit(monkeypatch):
     class Variables(dict):
         shape = 1
 
     defects = iter(
         [
             {"scaled_by_block": {"q": 1.0}, "absolute_by_block": {"q": 1.0}},
-            {"scaled_by_block": {"q": 2.0}, "absolute_by_block": {"q": 2.0}},
+            {"scaled_by_block": {"q": 0.7}, "absolute_by_block": {"q": 0.7}},
             {"scaled_by_block": {"q": 0.8}, "absolute_by_block": {"q": 0.8}},
             {"scaled_by_block": {"q": 0.9}, "absolute_by_block": {"q": 0.9}},
         ]
@@ -2031,12 +2031,15 @@ def test_proximal_phase_one_backtracks_to_a_monotone_update(monkeypatch):
         defect_weight=1.0,
         n_substeps=1,
         max_backtracking_steps=2,
+        max_state_change=5.0,
     )
 
     assert summary["accepted"] is True
     assert summary["accepted_step"] == 0.5
-    assert summary["candidate_scaled_defect_after"] == 2.0
+    assert summary["candidate_scaled_defect_after"] == 0.7
     assert summary["scaled_defect_after"] == 0.8
+    assert summary["max_state_change"] == 4.5
+    assert summary["candidate_max_state_change"] == 9.0
     np.testing.assert_allclose(nmpc.nlp[0].x_init["q"].init, [[0.0, 5.5]])
 
 
@@ -3235,6 +3238,8 @@ def test_shared_transfer_rollout_cli_is_available_to_ipopt():
             "--transfer-phase-one",
             "--transfer-rollout-substeps",
             "7",
+            "--full-dynamics-phase-one-max-state-change",
+            "20",
         ]
     )
     comparison_args = comparison_example.build_cli().parse_args(
@@ -3251,6 +3256,8 @@ def test_shared_transfer_rollout_cli_is_available_to_ipopt():
             "1",
             "--acados-transfer-phase-one-substeps",
             "10",
+            "--acados-transfer-phase-one-max-state-change",
+            "20",
             "--shared-initial-phase-one",
             "--shared-transfer-rollout-substeps",
             "7",
@@ -3279,6 +3286,7 @@ def test_shared_transfer_rollout_cli_is_available_to_ipopt():
     assert args.acados_transfer_full_dynamics_rollout is True
     assert args.acados_transfer_phase_one is True
     assert args.acados_transfer_rollout_substeps == 7
+    assert args.full_dynamics_phase_one_max_state_change == 20
     assert comparison_args.shared_transfer_full_dynamics_rollout is True
     assert comparison_args.compact_rho_output is True
     assert comparison_args.shared_transfer_phase_one is True
@@ -3287,6 +3295,7 @@ def test_shared_transfer_rollout_cli_is_available_to_ipopt():
     assert comparison_args.acados_transfer_phase_one_proximity_weight == 0
     assert comparison_args.acados_transfer_phase_one_defect_weight == 1
     assert comparison_args.acados_transfer_phase_one_substeps == 10
+    assert comparison_args.acados_transfer_phase_one_max_state_change == 20
     assert comparison_args.shared_initial_phase_one is True
     assert comparison_args.shared_transfer_rollout_substeps == 7
     assert comparison_args.shared_transfer_ding_force_compensation is True
