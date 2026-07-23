@@ -560,6 +560,14 @@ def build_argument_parser() -> argparse.ArgumentParser:
         help="Number of successive MHE windows to solve.",
     )
     parser.add_argument(
+        "--compact-rho-output",
+        action="store_true",
+        help=(
+            "Assemble receding-horizon states and controls numerically instead of "
+            "rebuilding a symbolic OCP spanning every exported cycle."
+        ),
+    )
+    parser.add_argument(
         "--solver",
         type=str,
         choices=("acados", "ipopt"),
@@ -1123,6 +1131,14 @@ def build_argument_parser() -> argparse.ArgumentParser:
         help=(
             "Largest dynamics, inequality, or complementarity residual accepted "
             "as a restartable transferred iterate."
+        ),
+    )
+    parser.add_argument(
+        "--acados-store-iterates",
+        action="store_true",
+        help=(
+            "Retain every SQP iterate so a restart can select an intermediate "
+            "primal. This substantially increases memory use on long MHE runs."
         ),
     )
     parser.add_argument(
@@ -2041,7 +2057,7 @@ def _codegen_signature(args: argparse.Namespace) -> str:
         "acados_qpscaling_scale_objective": args.acados_qpscaling_scale_objective,
         "acados_qpscaling_scale_constraints": args.acados_qpscaling_scale_constraints,
         "acados_ext_qp_res": args.acados_ext_qp_res,
-        "acados_store_iterates": bool(args.acados_transfer_sqp_restarts),
+        "acados_store_iterates": args.acados_store_iterates,
         "acados_print_level": args.acados_print_level,
         "sources": [
             _source_stamp(
@@ -8841,13 +8857,7 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
             qpscaling_scale_objective=args.acados_qpscaling_scale_objective,
             qpscaling_scale_constraints=args.acados_qpscaling_scale_constraints,
             ext_qp_res=args.acados_ext_qp_res,
-            store_iterates=bool(
-                args.acados_transfer_sqp_restarts
-                or (
-                    args.acados_proximal_control_weights is not None
-                    and args.acados_proximal_control_max_restarts
-                )
-            ),
+            store_iterates=args.acados_store_iterates,
             print_level=args.acados_print_level,
         )
         if (
@@ -9019,6 +9029,7 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
             get_all_iterations=True,
             cyclic_options={"states": {}},
             max_consecutive_failing=args.max_consecutive_failing,
+            compact_solution_output=args.compact_rho_output,
         )
     except RuntimeError as exc:
         if "did not produce a valid solution" not in str(exc):

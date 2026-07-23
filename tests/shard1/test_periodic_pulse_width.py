@@ -9,7 +9,10 @@ from cocofest.optimization.receding_horizon_initial_guess import (
     audit_initial_guess,
     copy_container_values,
 )
-from cocofest.optimization.fes_nmpc_multibody import FesNmpcMsk
+from cocofest.optimization.fes_nmpc_multibody import (
+    CompactNmpcSolution,
+    FesNmpcMsk,
+)
 from cocofest.models.ding2007.ding2007_with_fatigue_periodic import (
     DingModelPulseWidthFrequencyWithFatiguePeriodic,
 )
@@ -358,9 +361,47 @@ def test_transfer_sqp_restart_options_are_parsed():
     assert args.acados_transfer_sqp_restarts == 4
     assert args.acados_transfer_sqp_restart_iterations == 2
     assert args.acados_transfer_sqp_restart_feasibility_tolerance == 0.02
+
+
+def test_acados_iterate_storage_is_opt_in():
+    parser = periodic_example.build_argument_parser()
+    stored_args = parser.parse_args(["--acados-store-iterates"])
+
+    assert parser.parse_args([]).acados_store_iterates is False
+    assert stored_args.acados_store_iterates is True
     assert periodic_example._codegen_signature(
         parser.parse_args([])
-    ) != periodic_example._codegen_signature(args)
+    ) != periodic_example._codegen_signature(stored_args)
+
+
+def test_compact_rho_output_is_opt_in():
+    parser = periodic_example.build_argument_parser()
+
+    assert parser.parse_args([]).compact_rho_output is False
+    assert parser.parse_args(["--compact-rho-output"]).compact_rho_output is True
+
+
+def test_compact_rho_output_concatenates_trajectories_without_an_ocp():
+    nmpc = object.__new__(FesNmpcMsk)
+    nmpc._compact_solution_output = True
+    nmpc.nlp = [
+        SimpleNamespace(states={"q": None}, controls={"u": None}, parameters={})
+    ]
+
+    solution = nmpc._initialize_solution(
+        dt=0.1,
+        states=[
+            {"q": np.array([[0.0, 1.0]])},
+            {"q": np.array([[1.0, 2.0]])},
+            {"q": np.array([[2.0]])},
+        ],
+        controls=[{"u": np.array([[3.0]])}, {"u": np.array([[4.0]])}],
+        parameters=[],
+    )
+
+    assert isinstance(solution, CompactNmpcSolution)
+    np.testing.assert_array_equal(solution.decision_states()["q"], [[0.0, 1.0, 2.0]])
+    np.testing.assert_array_equal(solution.decision_controls()["u"], [[3.0, 4.0]])
 
 
 def test_acados_cyclical_transfer_extrapolates_by_default():

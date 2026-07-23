@@ -18,6 +18,26 @@ from .fes_nmpc import FesNmpc
 from ..models.dynamical_model import FesMskModel
 
 
+class CompactNmpcSolution:
+    """Numerical RHO output that avoids rebuilding a large symbolic OCP."""
+
+    def __init__(self, states: dict, controls: dict, parameters: dict | None = None):
+        self._states = states
+        self._controls = controls
+        self.parameters = {} if parameters is None else parameters
+        self.cycle_parameters = None
+        self.status = None
+        self.cost = 0.0
+        self.solver_time_to_optimize = None
+        self.real_time_to_optimize = None
+
+    def decision_states(self, **_) -> dict:
+        return self._states
+
+    def decision_controls(self, **_) -> dict:
+        return self._controls
+
+
 class FesNmpcMsk(FesNmpc):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -73,6 +93,29 @@ class FesNmpcMsk(FesNmpc):
     def _initialize_solution(
         self, dt: float, states: list, controls: list, parameters: list
     ):
+        if getattr(self, "_compact_solution_output", False):
+            merged_states = {
+                key: np.concatenate(
+                    [state[key][:, :-1] for state in states[:-1]]
+                    + [states[-1][key][:, -1:]],
+                    axis=1,
+                )
+                for key in self.nlp[0].states.keys()
+            }
+            merged_controls = {
+                key: np.concatenate([control[key] for control in controls], axis=1)
+                for key in self.nlp[0].controls.keys()
+            }
+            merged_parameters = {
+                key: np.concatenate(
+                    [np.asarray(parameter[key]).reshape(-1) for parameter in parameters]
+                )
+                for key in self.nlp[0].parameters.keys()
+            }
+            return CompactNmpcSolution(
+                merged_states, merged_controls, merged_parameters
+            )
+
         combine_model = False if isinstance(self.nlp[0].model, BiorbdModel) else True
         combined_model = (
             self.create_model_from_list(self.all_models)
@@ -156,6 +199,13 @@ class FesNmpcMsk(FesNmpc):
         parameters: np.ndarray,
     ):
         """return a solution for a single window kept of the MHE"""
+        if getattr(self, "_compact_solution_output", False):
+            return CompactNmpcSolution(
+                {key: np.asarray(values) for key, values in states.items()},
+                {key: np.asarray(values) for key, values in controls.items()},
+                {key: np.asarray(values) for key, values in parameters.items()},
+            )
+
         x_init = InitialGuessList()
         for key in self.nlp[0].states.keys():
             x_init.add(
@@ -280,7 +330,9 @@ class FesNmpcMsk(FesNmpc):
         get_all_iterations: bool = True,
         cyclic_options: dict = None,
         max_consecutive_failing: int = 3,
+        compact_solution_output: bool = False,
     ):
+        self._compact_solution_output = compact_solution_output
         try:
             sol = self.solve(
                 update_functions,
@@ -313,6 +365,9 @@ class FesNmpcMsk(FesNmpc):
                 "The receding-horizon solve returned no solution. "
                 "The solver likely stopped before producing a feasible window."
             )
+        if compact_solution_output:
+            return sol
+
         model = self.nlp[0].model
 
         total_nmpc_duration = self.cycle_duration * total_cycles
