@@ -374,6 +374,19 @@ def test_acados_iterate_storage_is_opt_in():
     ) != periodic_example._codegen_signature(stored_args)
 
 
+def test_hpipm_tuning_options_are_parsed_and_affect_codegen():
+    parser = periodic_example.build_argument_parser()
+    tuned_args = parser.parse_args(
+        ["--acados-qp-cond-n", "10", "--acados-hpipm-mode", "BALANCE"]
+    )
+
+    assert tuned_args.acados_qp_cond_n == 10
+    assert tuned_args.acados_hpipm_mode == "BALANCE"
+    assert periodic_example._codegen_signature(
+        parser.parse_args([])
+    ) != periodic_example._codegen_signature(tuned_args)
+
+
 def test_compact_rho_output_is_opt_in():
     parser = periodic_example.build_argument_parser()
 

@@ -819,6 +819,21 @@ def build_argument_parser() -> argparse.ArgumentParser:
         help="QP solver backend used by ACADOS.",
     )
     parser.add_argument(
+        "--acados-qp-cond-n",
+        type=int,
+        default=None,
+        help=(
+            "Condensed HPIPM horizon. The default preserves all shooting stages; "
+            "smaller values partially condense the QP."
+        ),
+    )
+    parser.add_argument(
+        "--acados-hpipm-mode",
+        choices=("BALANCE", "SPEED_ABS", "SPEED", "ROBUST"),
+        default="ROBUST",
+        help="HPIPM interior-point tuning profile.",
+    )
+    parser.add_argument(
         "--acados-integrator-type",
         choices=("ERK", "IRK", "DISCRETE"),
         default="IRK",
@@ -2027,6 +2042,8 @@ def _codegen_signature(args: argparse.Namespace) -> str:
             args.acados_first_window_stationarity_tolerance
         ),
         "acados_qp_solver": args.acados_qp_solver,
+        "acados_qp_cond_n": args.acados_qp_cond_n,
+        "acados_hpipm_mode": args.acados_hpipm_mode,
         "acados_integrator_type": args.acados_integrator_type,
         "acados_collocation_type": args.acados_collocation_type,
         "acados_sim_stages": args.acados_sim_stages,
@@ -2114,6 +2131,8 @@ def configure_acados_solver(
     convergence_tolerance: float | None,
     stationarity_tolerance: float | None,
     qp_solver: str,
+    qp_cond_n: int | None,
+    hpipm_mode: str,
     integrator_type: str,
     collocation_type: str,
     sim_method_num_stages: int,
@@ -2189,7 +2208,9 @@ def configure_acados_solver(
         solver, 1, "globalization_line_search_use_sufficient_descent"
     )
     set_acados_unsafe_option(solver, 0, "globalization_use_SOC")
-    set_acados_unsafe_option(solver, "ROBUST", "hpipm_mode")
+    set_acados_unsafe_option(solver, hpipm_mode, "hpipm_mode")
+    if qp_cond_n is not None:
+        set_acados_unsafe_option(solver, qp_cond_n, "qp_solver_cond_N")
     set_acados_unsafe_option(solver, regularize_method, "regularize_method")
     set_acados_unsafe_option(solver, levenberg_marquardt, "levenberg_marquardt")
     set_acados_unsafe_option(
@@ -7260,6 +7281,11 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
         )
     if args.acados_horizon_continuation and args.solver != "acados":
         raise ValueError("--acados-horizon-continuation requires --solver acados.")
+    if args.acados_qp_cond_n is not None:
+        if args.acados_qp_cond_n < 1:
+            raise ValueError("--acados-qp-cond-n must be strictly positive.")
+        if args.acados_qp_solver != "PARTIAL_CONDENSING_HPIPM":
+            raise ValueError("--acados-qp-cond-n requires PARTIAL_CONDENSING_HPIPM.")
     if (
         args.acados_stationarity_tolerance is not None
         and args.acados_stationarity_tolerance <= 0
@@ -8825,6 +8851,8 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
             convergence_tolerance=args.acados_tolerance,
             stationarity_tolerance=args.acados_stationarity_tolerance,
             qp_solver=args.acados_qp_solver,
+            qp_cond_n=args.acados_qp_cond_n,
+            hpipm_mode=args.acados_hpipm_mode,
             integrator_type=args.acados_integrator_type,
             collocation_type=args.acados_collocation_type,
             sim_method_num_stages=args.acados_sim_stages,
