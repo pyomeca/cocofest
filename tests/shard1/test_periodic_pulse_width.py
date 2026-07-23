@@ -2654,6 +2654,12 @@ def test_shared_transfer_rollout_cli_is_available_to_ipopt():
             "--acados-proximal-control-weights",
             "1e6,1e5",
             "--acados-proximal-control-each-window",
+            "--acados-transfer-sqp-restarts",
+            "2",
+            "--acados-transfer-sqp-restart-iterations",
+            "1",
+            "--acados-transfer-sqp-restart-feasibility-tolerance",
+            "0.01",
             "--acados-terminal-wheel-q-homotopy-slacks",
             "0.2,0.1,0.02",
             "--acados-terminal-wheel-q-homotopy-each-window",
@@ -2672,6 +2678,9 @@ def test_shared_transfer_rollout_cli_is_available_to_ipopt():
     assert comparison_args.acados_transfer_ding_force_compensation is True
     assert comparison_args.acados_proximal_control_weights == (1e6, 1e5)
     assert comparison_args.acados_proximal_control_each_window is True
+    assert comparison_args.acados_transfer_sqp_restarts == 2
+    assert comparison_args.acados_transfer_sqp_restart_iterations == 1
+    assert comparison_args.acados_transfer_sqp_restart_feasibility_tolerance == 0.01
     assert comparison_args.acados_terminal_wheel_q_homotopy_slacks == (
         0.2,
         0.1,

@@ -1180,6 +1180,9 @@ def main(
     acados_proximal_control_tolerance: float = 5e-4,
     acados_proximal_control_stage_iterations: int = 50,
     acados_proximal_control_max_restarts: int = 1,
+    acados_transfer_sqp_restarts: int = 0,
+    acados_transfer_sqp_restart_iterations: int = 1,
+    acados_transfer_sqp_restart_feasibility_tolerance: float = 1e-2,
     acados_fes_state_trust_radius: float | None = None,
     acados_fatigue_warmstart_mode: str = "continuous",
     acados_tolerance: float | None = None,
@@ -1458,6 +1461,13 @@ def main(
     )
     acados_args.acados_proximal_control_max_restarts = (
         acados_proximal_control_max_restarts
+    )
+    acados_args.acados_transfer_sqp_restarts = acados_transfer_sqp_restarts
+    acados_args.acados_transfer_sqp_restart_iterations = (
+        acados_transfer_sqp_restart_iterations
+    )
+    acados_args.acados_transfer_sqp_restart_feasibility_tolerance = (
+        acados_transfer_sqp_restart_feasibility_tolerance
     )
     acados_args.acados_terminal_wheel_q_homotopy_slacks = (
         acados_terminal_wheel_q_homotopy_slacks
@@ -1788,6 +1798,18 @@ def build_cli() -> argparse.ArgumentParser:
     )
     parser.add_argument("--acados-proximal-control-max-restarts", type=int, default=1)
     parser.add_argument(
+        "--acados-transfer-sqp-restarts",
+        type=int,
+        default=0,
+        help="Short SQP transfer-repair attempts before each ACADOS MHE window.",
+    )
+    parser.add_argument("--acados-transfer-sqp-restart-iterations", type=int, default=1)
+    parser.add_argument(
+        "--acados-transfer-sqp-restart-feasibility-tolerance",
+        type=float,
+        default=1e-2,
+    )
+    parser.add_argument(
         "--acados-terminal-wheel-q-homotopy-slacks",
         type=parse_terminal_wheel_q_slacks,
         default=None,
@@ -1999,6 +2021,13 @@ if __name__ == "__main__":
         ),
         acados_proximal_control_max_restarts=(
             args.acados_proximal_control_max_restarts
+        ),
+        acados_transfer_sqp_restarts=args.acados_transfer_sqp_restarts,
+        acados_transfer_sqp_restart_iterations=(
+            args.acados_transfer_sqp_restart_iterations
+        ),
+        acados_transfer_sqp_restart_feasibility_tolerance=(
+            args.acados_transfer_sqp_restart_feasibility_tolerance
         ),
         acados_fes_state_trust_radius=args.acados_fes_state_trust_radius,
         acados_fatigue_warmstart_mode=args.acados_fatigue_warmstart_mode,
