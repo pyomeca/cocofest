@@ -1231,6 +1231,35 @@ def test_benchmark_extracts_collocation_shooting_nodes_without_interpolation():
     np.testing.assert_array_equal(limited["control_traces"]["u"], [[0, 1, 2, 3]])
 
 
+def test_state_comparison_aligns_wheel_turn_representation():
+    reference = {
+        "q": np.array(
+            [
+                [0.1, 0.2, 0.3],
+                [0.4, 0.5, 0.6],
+                [0.0, -np.pi, -2 * np.pi],
+            ]
+        )
+    }
+    compared = {
+        "q": np.array(
+            [
+                [0.1, 0.2, 0.3],
+                [0.4, 0.5, 0.6],
+                [-2 * np.pi + 0.01, -3 * np.pi + 0.01, -4 * np.pi + 0.01],
+            ]
+        )
+    }
+
+    metrics = comparison_example._state_trace_comparisons(
+        reference, compared, "reference", "compared"
+    )
+    wheel = next(metric for metric in metrics if metric["key"] == "q[2]")
+
+    np.testing.assert_allclose(wheel["rmse"], 0.01)
+    np.testing.assert_allclose(wheel["final_error"], 0.01)
+
+
 def test_endurance_metrics_report_fatigue_and_control_saturation():
     result = _benchmark_result([0, 0, 4])
 
@@ -2697,6 +2726,7 @@ def test_shared_transfer_rollout_cli_is_available_to_ipopt():
     comparison_args = comparison_example.build_cli().parse_args(
         [
             "--shared-transfer-full-dynamics-rollout",
+            "--compact-rho-output",
             "--shared-transfer-phase-one",
             "--shared-initial-phase-one",
             "--shared-transfer-rollout-substeps",
@@ -2717,6 +2747,8 @@ def test_shared_transfer_rollout_cli_is_available_to_ipopt():
             "--acados-terminal-wheel-q-homotopy-slacks",
             "0.2,0.1,0.02",
             "--acados-terminal-wheel-q-homotopy-each-window",
+            "--acados-newton-iter",
+            "3",
         ]
     )
 
@@ -2724,6 +2756,7 @@ def test_shared_transfer_rollout_cli_is_available_to_ipopt():
     assert args.acados_transfer_phase_one is True
     assert args.acados_transfer_rollout_substeps == 7
     assert comparison_args.shared_transfer_full_dynamics_rollout is True
+    assert comparison_args.compact_rho_output is True
     assert comparison_args.shared_transfer_phase_one is True
     assert comparison_args.shared_initial_phase_one is True
     assert comparison_args.shared_transfer_rollout_substeps == 7
@@ -2741,6 +2774,7 @@ def test_shared_transfer_rollout_cli_is_available_to_ipopt():
         0.02,
     )
     assert comparison_args.acados_terminal_wheel_q_homotopy_each_window is True
+    assert comparison_args.acados_newton_iter == 3
     assert (
         comparison_example.IPOPT_PROFILE_DEFAULTS["acados_like"]["model_formulation"]
         == "periodic_node"

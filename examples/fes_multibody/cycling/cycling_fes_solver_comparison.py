@@ -491,10 +491,20 @@ def _state_trace_comparisons(
             common_len = min(reference_values.shape[1], compared_values.shape[1])
             reference_common = reference_values[row, :common_len]
             compared_common = compared_values[row, :common_len]
+            metric_key = key if reference_values.shape[0] == 1 else f"{key}[{row}]"
+            if metric_key == "q[2]":
+                reference_common = np.unwrap(reference_common)
+                compared_common = np.unwrap(compared_common)
+                turn_offset = int(
+                    np.rint(
+                        np.median((compared_common - reference_common) / (2 * np.pi))
+                    )
+                )
+                compared_common = compared_common - turn_offset * 2 * np.pi
             diff = compared_common - reference_common
             comparisons.append(
                 {
-                    "key": (key if reference_values.shape[0] == 1 else f"{key}[{row}]"),
+                    "key": metric_key,
                     "common_len": common_len,
                     "rmse": float(np.sqrt(np.mean(diff**2))),
                     "mae": float(np.mean(np.abs(diff))),
@@ -514,6 +524,89 @@ def _state_trace_comparisons(
             )
 
     return sorted(comparisons, key=lambda item: item["rmse"], reverse=True)
+
+
+def _print_solution_metrics(
+    ipopt_result: dict,
+    acados_result: dict,
+    *,
+    line_prefix: str = "",
+    state_comparison_limit: int = 12,
+) -> None:
+    trace_metrics = _trace_comparison(ipopt_result, acados_result)
+    print(
+        f"{line_prefix}wheel trace comparison | "
+        f"common_len={trace_metrics['common_len']} | "
+        f"unwrapped_rmse={trace_metrics['unwrapped_wheel_rmse']:.6f} | "
+        f"unwrapped_max_abs_error={trace_metrics['unwrapped_wheel_max_abs_error']:.6f} | "
+        f"unwrapped_final_error={trace_metrics['unwrapped_wheel_final_error']:.6f} | "
+        f"turn_aligned_unwrapped_rmse={trace_metrics['turn_aligned_unwrapped_rmse']:.6f} | "
+        f"turn_aligned_unwrapped_max_abs_error={trace_metrics['turn_aligned_unwrapped_max_abs_error']:.6f} | "
+        f"turn_aligned_unwrapped_final_error={trace_metrics['turn_aligned_unwrapped_final_error']:.6f} | "
+        f"unwrapped_turn_offset={trace_metrics['unwrapped_turn_offset']} | "
+        f"phase_rmse={trace_metrics['phase_rmse']:.6f} | "
+        f"phase_max_abs_error={trace_metrics['phase_max_abs_error']:.6f} | "
+        f"phase_final_error={trace_metrics['phase_final_error']:.6f}"
+    )
+    print(
+        f"{line_prefix}raw wheel final-angle representation | "
+        f"raw_final_error={trace_metrics['raw_final_error']:.6f} | "
+        f"raw_final_turn_offset={trace_metrics['raw_final_turn_offset']}"
+    )
+
+    control_metrics = _control_comparisons(ipopt_result, acados_result)
+    if control_metrics:
+        print(
+            f"{line_prefix}control comparison | key | common_len | rmse | mae | max_abs_error | final_error | "
+            "ipopt_mean | acados_mean | ipopt_sum | acados_sum | ipopt_range | acados_range"
+        )
+        for metric in control_metrics:
+            print(
+                f"{line_prefix}control comparison | "
+                f"{metric['key']} | "
+                f"{metric['common_len']} | "
+                f"{_format_control_metric(metric['rmse'])} | "
+                f"{_format_control_metric(metric['mae'])} | "
+                f"{_format_control_metric(metric['max_abs_error'])} | "
+                f"{_format_control_metric(metric['final_error'])} | "
+                f"{_format_control_metric(metric['ipopt_mean'])} | "
+                f"{_format_control_metric(metric['acados_mean'])} | "
+                f"{_format_control_metric(metric['ipopt_sum'])} | "
+                f"{_format_control_metric(metric['acados_sum'])} | "
+                f"[{_format_control_metric(metric['ipopt_min'])}, {_format_control_metric(metric['ipopt_max'])}] | "
+                f"[{_format_control_metric(metric['acados_min'])}, {_format_control_metric(metric['acados_max'])}]"
+            )
+    else:
+        print(
+            f"{line_prefix}control comparison warning: no common control keys were found."
+        )
+
+    state_metrics = _state_comparisons(ipopt_result, acados_result)
+    if state_metrics and state_comparison_limit:
+        print(
+            f"{line_prefix}state comparison | key | common_len | rmse | mae | max_abs_error | final_error | "
+            "ipopt_mean | acados_mean | ipopt_range | acados_range"
+        )
+        for metric in state_metrics[:state_comparison_limit]:
+            ipopt_min, ipopt_max = metric["ipopt_range"]
+            acados_min, acados_max = metric["acados_range"]
+            print(
+                f"{line_prefix}state comparison | "
+                f"{metric['key']} | "
+                f"{metric['common_len']} | "
+                f"{_format_control_metric(metric['rmse'])} | "
+                f"{_format_control_metric(metric['mae'])} | "
+                f"{_format_control_metric(metric['max_abs_error'])} | "
+                f"{_format_control_metric(metric['final_error'])} | "
+                f"{_format_control_metric(metric['ipopt_mean'])} | "
+                f"{_format_control_metric(metric['acados_mean'])} | "
+                f"[{_format_control_metric(ipopt_min)}, {_format_control_metric(ipopt_max)}] | "
+                f"[{_format_control_metric(acados_min)}, {_format_control_metric(acados_max)}]"
+            )
+    elif not state_metrics:
+        print(
+            f"{line_prefix}state comparison warning: no common state keys were found."
+        )
 
 
 def _initial_guess_state_comparisons(acados_result: dict) -> list[dict]:
@@ -1001,76 +1094,34 @@ def print_comparison(
     )
     print(f"solution comparison validated cycles: {common_validated_cycles}")
     print("solution comparison grid: shooting_nodes_only")
-    trace_metrics = _trace_comparison(comparison_ipopt, comparison_acados)
-    print(
-        "wheel trace comparison | "
-        f"common_len={trace_metrics['common_len']} | "
-        f"unwrapped_rmse={trace_metrics['unwrapped_wheel_rmse']:.6f} | "
-        f"unwrapped_max_abs_error={trace_metrics['unwrapped_wheel_max_abs_error']:.6f} | "
-        f"unwrapped_final_error={trace_metrics['unwrapped_wheel_final_error']:.6f} | "
-        f"turn_aligned_unwrapped_rmse={trace_metrics['turn_aligned_unwrapped_rmse']:.6f} | "
-        f"turn_aligned_unwrapped_max_abs_error={trace_metrics['turn_aligned_unwrapped_max_abs_error']:.6f} | "
-        f"turn_aligned_unwrapped_final_error={trace_metrics['turn_aligned_unwrapped_final_error']:.6f} | "
-        f"unwrapped_turn_offset={trace_metrics['unwrapped_turn_offset']} | "
-        f"phase_rmse={trace_metrics['phase_rmse']:.6f} | "
-        f"phase_max_abs_error={trace_metrics['phase_max_abs_error']:.6f} | "
-        f"phase_final_error={trace_metrics['phase_final_error']:.6f}"
-    )
-    print(
-        "raw wheel final-angle representation | "
-        f"raw_final_error={trace_metrics['raw_final_error']:.6f} | "
-        f"raw_final_turn_offset={trace_metrics['raw_final_turn_offset']}"
+    _print_solution_metrics(
+        comparison_ipopt,
+        comparison_acados,
+        state_comparison_limit=state_comparison_limit,
     )
 
-    control_metrics = _control_comparisons(comparison_ipopt, comparison_acados)
-    if control_metrics:
+    common_exported_cycles = min(
+        _exported_cycle_count(ipopt_result),
+        _exported_cycle_count(acados_result),
+    )
+    if common_exported_cycles > common_validated_cycles:
         print(
-            "control comparison | key | common_len | rmse | mae | max_abs_error | final_error | "
-            "ipopt_mean | acados_mean | ipopt_sum | acados_sum | ipopt_range | acados_range"
+            "exported diagnostic warning: includes windows without a successful solver status; "
+            "use these metrics to inspect trajectories, not as a convergence certificate."
         )
-        for metric in control_metrics:
-            print(
-                "control comparison | "
-                f"{metric['key']} | "
-                f"{metric['common_len']} | "
-                f"{_format_control_metric(metric['rmse'])} | "
-                f"{_format_control_metric(metric['mae'])} | "
-                f"{_format_control_metric(metric['max_abs_error'])} | "
-                f"{_format_control_metric(metric['final_error'])} | "
-                f"{_format_control_metric(metric['ipopt_mean'])} | "
-                f"{_format_control_metric(metric['acados_mean'])} | "
-                f"{_format_control_metric(metric['ipopt_sum'])} | "
-                f"{_format_control_metric(metric['acados_sum'])} | "
-                f"[{_format_control_metric(metric['ipopt_min'])}, {_format_control_metric(metric['ipopt_max'])}] | "
-                f"[{_format_control_metric(metric['acados_min'])}, {_format_control_metric(metric['acados_max'])}]"
-            )
-    else:
-        print("control comparison warning: no common control keys were found.")
-
-    state_metrics = _state_comparisons(comparison_ipopt, comparison_acados)
-    if state_metrics and state_comparison_limit:
-        print(
-            "state comparison | key | common_len | rmse | mae | max_abs_error | final_error | "
-            "ipopt_mean | acados_mean | ipopt_range | acados_range"
+        print(f"exported diagnostic cycles: {common_exported_cycles}")
+        exported_ipopt = _truncate_result_to_cycles(
+            ipopt_result, common_exported_cycles
         )
-        for metric in state_metrics[:state_comparison_limit]:
-            ipopt_min, ipopt_max = metric["ipopt_range"]
-            acados_min, acados_max = metric["acados_range"]
-            print(
-                "state comparison | "
-                f"{metric['key']} | "
-                f"{metric['common_len']} | "
-                f"{_format_control_metric(metric['rmse'])} | "
-                f"{_format_control_metric(metric['mae'])} | "
-                f"{_format_control_metric(metric['max_abs_error'])} | "
-                f"{_format_control_metric(metric['final_error'])} | "
-                f"{_format_control_metric(metric['ipopt_mean'])} | "
-                f"{_format_control_metric(metric['acados_mean'])} | "
-                f"[{_format_control_metric(ipopt_min)}, {_format_control_metric(ipopt_max)}] | "
-                f"[{_format_control_metric(acados_min)}, {_format_control_metric(acados_max)}]"
-            )
-    elif not state_metrics:
-        print("state comparison warning: no common state keys were found.")
+        exported_acados = _truncate_result_to_cycles(
+            acados_result, common_exported_cycles
+        )
+        _print_solution_metrics(
+            exported_ipopt,
+            exported_acados,
+            line_prefix="exported diagnostic ",
+            state_comparison_limit=state_comparison_limit,
+        )
 
     initial_guess_state_metrics = _initial_guess_state_comparisons(acados_result)
     if initial_guess_state_metrics and state_comparison_limit:
@@ -1148,6 +1199,7 @@ def main(
     cycles_per_window: int = 2,
     stimulations_per_cycle: int = 30,
     n_windows: int = 2,
+    compact_rho_output: bool = False,
     resistive_torque: float = -0.2,
     acados_dir: str | None = None,
     codegen_tag: str | None = None,
@@ -1214,6 +1266,7 @@ def main(
     acados_collocation_type: str = "GAUSS_LEGENDRE",
     acados_sim_stages: int = 4,
     acados_sim_steps: int = 5,
+    acados_newton_iter: int = 5,
     disable_periodic_fes_warmup_projection: bool = False,
     periodic_fes_warmup_projection_weight: float = 1.0,
     periodic_fes_warmup_projection_mode: str = "all",
@@ -1442,10 +1495,13 @@ def main(
     )
     ipopt_args.max_consecutive_failing = max_consecutive_failing
     acados_args.max_consecutive_failing = max_consecutive_failing
+    ipopt_args.compact_rho_output = compact_rho_output
+    acados_args.compact_rho_output = compact_rho_output
     acados_args.acados_integrator_type = acados_integrator_type
     acados_args.acados_collocation_type = acados_collocation_type
     acados_args.acados_sim_stages = acados_sim_stages
     acados_args.acados_sim_steps = acados_sim_steps
+    acados_args.acados_newton_iter = acados_newton_iter
     acados_args.periodic_ipopt_refinement_ode_solver = (
         periodic_ipopt_refinement_ode_solver
     )
@@ -1533,6 +1589,7 @@ def build_cli() -> argparse.ArgumentParser:
     parser.add_argument("--cycles-per-window", type=int, default=2)
     parser.add_argument("--stimulations-per-cycle", type=int, default=30)
     parser.add_argument("--n-windows", type=int, default=2)
+    parser.add_argument("--compact-rho-output", action="store_true")
     parser.add_argument(
         "--max-consecutive-failing",
         type=int,
@@ -1739,6 +1796,7 @@ def build_cli() -> argparse.ArgumentParser:
             "default; one can be used with an experimental IPOPT-IRK bridge."
         ),
     )
+    parser.add_argument("--acados-newton-iter", type=int, default=5)
     parser.add_argument("--control-regularization-weight", type=float, default=0.0)
     parser.add_argument(
         "--acados-control-regularization-weight", type=float, default=None
@@ -1978,6 +2036,7 @@ if __name__ == "__main__":
         cycles_per_window=args.cycles_per_window,
         stimulations_per_cycle=args.stimulations_per_cycle,
         n_windows=args.n_windows,
+        compact_rho_output=args.compact_rho_output,
         resistive_torque=args.resistive_torque,
         acados_dir=args.acados_dir,
         codegen_tag=args.codegen_tag,
@@ -2072,6 +2131,7 @@ if __name__ == "__main__":
         acados_collocation_type=args.acados_collocation_type,
         acados_sim_stages=args.acados_sim_stages,
         acados_sim_steps=args.acados_sim_steps,
+        acados_newton_iter=args.acados_newton_iter,
         disable_periodic_fes_warmup_projection=(
             args.disable_periodic_fes_warmup_projection
         ),
