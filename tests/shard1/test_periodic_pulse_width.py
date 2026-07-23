@@ -18,6 +18,7 @@ from cocofest.models.ding2007.ding2007_with_fatigue_periodic_node import (
 )
 from examples.fes_multibody.cycling.cycling_pulse_width_mhe import MyCyclicNMPC
 from examples.fes_multibody.cycling.cycling_pulse_width_mhe_acados_periodic import (
+    _copy_refinement_initial_guesses,
     pulse_width_initial_guess_summary,
     set_acados_unsafe_option,
     tile_one_cycle_solution_to_periodic_nmpc,
@@ -2702,6 +2703,28 @@ def test_periodic_collocation_ipopt_profile_is_available():
     assert defaults["torque_application"] == "constant"
     assert defaults["ode_solver"] == "collocation"
     assert defaults["use_sx"] is False
+
+    periodic_args = periodic_example.build_argument_parser().parse_args(
+        ["--periodic-ipopt-refinement-ode-solver", "collocation"]
+    )
+    comparison_args = comparison_example.build_cli().parse_args(
+        ["--periodic-ipopt-refinement-ode-solver", "collocation"]
+    )
+    assert periodic_args.periodic_ipopt_refinement_ode_solver == "collocation"
+    assert comparison_args.periodic_ipopt_refinement_ode_solver == "collocation"
+
+
+def test_refinement_initial_guess_expands_shooting_nodes_for_collocation():
+    source = {
+        "q": SimpleNamespace(init=np.array([[0.0, 1.0, 2.0]])),
+    }
+    target = {
+        "q": SimpleNamespace(init=np.zeros((1, 9))),
+    }
+
+    _copy_refinement_initial_guesses(source, target, has_terminal_node=True)
+
+    np.testing.assert_allclose(target["q"].init, np.linspace(0.0, 2.0, 9)[None, :])
 
 
 def test_fes_nmpc_reports_incomplete_export_as_solver_failure():

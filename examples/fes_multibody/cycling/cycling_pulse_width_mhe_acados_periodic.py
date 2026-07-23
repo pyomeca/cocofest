@@ -1426,11 +1426,12 @@ def build_argument_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--periodic-ipopt-refinement-ode-solver",
-        choices=("target", "rk4", "irk"),
+        choices=("target", "collocation", "rk4", "irk"),
         default="target",
         help=(
             "Integrator used by the periodic IPOPT bridge. 'target' preserves "
-            "the main Bioptim transcription; 'irk' can match an ACADOS IRK map."
+            "the main Bioptim transcription; 'collocation' provides the robust "
+            "periodic bridge; 'irk' can match an ACADOS IRK map."
         ),
     )
     parser.add_argument(
@@ -6523,9 +6524,51 @@ def _copy_list_values(source, target, attribute_name: str) -> None:
     copy_container_values(source, target, attribute_name)
 
 
+def _copy_refinement_initial_guesses(source, target, has_terminal_node: bool) -> None:
+    """Copy shooting-node guesses onto a denser collocation grid when needed."""
+
+    source_keys = set(source.keys())
+    for key in target.keys():
+        if key not in source_keys:
+            continue
+        source_values = np.asarray(source[key].init, dtype=float)
+        target_values = target[key].init
+        if source_values.shape == target_values.shape:
+            target_values[:, :] = source_values
+            continue
+
+        source_len = source_values.shape[1]
+        target_len = target_values.shape[1]
+        source_intervals = source_len - int(has_terminal_node)
+        target_intervals = target_len - int(has_terminal_node)
+        if (
+            source_values.shape[0] != target_values.shape[0]
+            or source_intervals <= 0
+            or target_intervals % source_intervals != 0
+        ):
+            raise ValueError(
+                f"Cannot copy refinement initial guess '{key}' with shape "
+                f"{source_values.shape} into shape {target_values.shape}."
+            )
+
+        subdivision = target_intervals // source_intervals
+        source_grid = np.arange(source_len, dtype=float)
+        target_grid = np.arange(target_len, dtype=float) / subdivision
+        for row, values in enumerate(source_values):
+            target_values[row, :] = np.interp(target_grid, source_grid, values)
+
+
 def _copy_initial_guesses_and_bounds(source_nmpc, target_nmpc) -> None:
-    _copy_list_values(source_nmpc.nlp[0].x_init, target_nmpc.nlp[0].x_init, "init")
-    _copy_list_values(source_nmpc.nlp[0].u_init, target_nmpc.nlp[0].u_init, "init")
+    _copy_refinement_initial_guesses(
+        source_nmpc.nlp[0].x_init,
+        target_nmpc.nlp[0].x_init,
+        has_terminal_node=True,
+    )
+    _copy_refinement_initial_guesses(
+        source_nmpc.nlp[0].u_init,
+        target_nmpc.nlp[0].u_init,
+        has_terminal_node=False,
+    )
     _copy_list_values(source_nmpc.nlp[0].x_bounds, target_nmpc.nlp[0].x_bounds, "min")
     _copy_list_values(source_nmpc.nlp[0].x_bounds, target_nmpc.nlp[0].x_bounds, "max")
     _copy_list_values(source_nmpc.nlp[0].u_bounds, target_nmpc.nlp[0].u_bounds, "min")
@@ -7992,19 +8035,26 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
                 simulation_conditions=nmpc_simulation_conditions,
                 model_formulation=args.model_formulation,
                 refinement_ode_solver=(
-                    OdeSolver.IRK(
-                        polynomial_degree=args.acados_sim_stages,
-                        method=(
-                            "legendre"
-                            if args.acados_collocation_type == "GAUSS_LEGENDRE"
-                            else "radau"
-                        ),
+                    OdeSolver.COLLOCATION(
+                        polynomial_degree=args.collocation_degree,
+                        method=args.collocation_method,
                     )
-                    if args.periodic_ipopt_refinement_ode_solver == "irk"
+                    if args.periodic_ipopt_refinement_ode_solver == "collocation"
                     else (
-                        OdeSolver.RK4(n_integration_steps=args.rk_steps)
-                        if args.periodic_ipopt_refinement_ode_solver == "rk4"
-                        else None
+                        OdeSolver.IRK(
+                            polynomial_degree=args.acados_sim_stages,
+                            method=(
+                                "legendre"
+                                if args.acados_collocation_type == "GAUSS_LEGENDRE"
+                                else "radau"
+                            ),
+                        )
+                        if args.periodic_ipopt_refinement_ode_solver == "irk"
+                        else (
+                            OdeSolver.RK4(n_integration_steps=args.rk_steps)
+                            if args.periodic_ipopt_refinement_ode_solver == "rk4"
+                            else None
+                        )
                     )
                 ),
             )

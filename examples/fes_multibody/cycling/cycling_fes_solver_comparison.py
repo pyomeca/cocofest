@@ -1935,9 +1935,12 @@ def build_cli() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--periodic-ipopt-refinement-ode-solver",
-        choices=("target", "rk4", "irk"),
+        choices=("target", "collocation", "rk4", "irk"),
         default="target",
-        help="Integrator for the IPOPT bridge used to initialize ACADOS.",
+        help=(
+            "Integrator for the IPOPT bridge used to initialize ACADOS; "
+            "collocation is the robust periodic bridge."
+        ),
     )
     parser.add_argument("--state-comparison-limit", type=int, default=12)
     parser.add_argument("--warmup-state-comparison-limit", type=int, default=12)
