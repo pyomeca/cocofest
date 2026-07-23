@@ -1258,8 +1258,13 @@ def main(
     acados_proximal_control_tolerance: float = 5e-4,
     acados_proximal_control_stage_iterations: int = 50,
     acados_proximal_control_max_restarts: int = 1,
+    acados_proximal_control_restart_feasibility_factor: float = 1.0,
     acados_proximal_control_try_next_weight_on_failure: bool = False,
     continue_after_acados_transfer_failure: bool = False,
+    acados_transfer_mechanical_restoration: bool = False,
+    acados_transfer_mechanical_control_radius: float = 5e-5,
+    acados_transfer_mechanical_regularization: float = 1e-2,
+    acados_transfer_mechanical_substeps: int = 5,
     acados_transfer_sqp_restarts: int = 0,
     acados_transfer_sqp_restart_iterations: int = 1,
     acados_transfer_sqp_restart_feasibility_tolerance: float = 1e-2,
@@ -1551,11 +1556,26 @@ def main(
     acados_args.acados_proximal_control_max_restarts = (
         acados_proximal_control_max_restarts
     )
+    acados_args.acados_proximal_control_restart_feasibility_factor = (
+        acados_proximal_control_restart_feasibility_factor
+    )
     acados_args.acados_proximal_control_try_next_weight_on_failure = (
         acados_proximal_control_try_next_weight_on_failure
     )
     acados_args.continue_after_acados_transfer_failure = (
         continue_after_acados_transfer_failure
+    )
+    acados_args.acados_transfer_mechanical_restoration = (
+        acados_transfer_mechanical_restoration
+    )
+    acados_args.acados_transfer_mechanical_control_radius = (
+        acados_transfer_mechanical_control_radius
+    )
+    acados_args.acados_transfer_mechanical_regularization = (
+        acados_transfer_mechanical_regularization
+    )
+    acados_args.acados_transfer_mechanical_substeps = (
+        acados_transfer_mechanical_substeps
     )
     acados_args.acados_transfer_sqp_restarts = acados_transfer_sqp_restarts
     acados_args.acados_transfer_sqp_restart_iterations = (
@@ -1935,12 +1955,36 @@ def build_cli() -> argparse.ArgumentParser:
     )
     parser.add_argument("--acados-proximal-control-max-restarts", type=int, default=1)
     parser.add_argument(
+        "--acados-proximal-control-restart-feasibility-factor",
+        type=float,
+        default=1.0,
+    )
+    parser.add_argument(
         "--acados-proximal-control-try-next-weight-on-failure",
         action="store_true",
     )
     parser.add_argument(
         "--continue-after-acados-transfer-failure",
         action="store_true",
+    )
+    parser.add_argument(
+        "--acados-transfer-mechanical-restoration",
+        action="store_true",
+    )
+    parser.add_argument(
+        "--acados-transfer-mechanical-control-radius",
+        type=float,
+        default=5e-5,
+    )
+    parser.add_argument(
+        "--acados-transfer-mechanical-regularization",
+        type=float,
+        default=1e-2,
+    )
+    parser.add_argument(
+        "--acados-transfer-mechanical-substeps",
+        type=int,
+        default=5,
     )
     parser.add_argument(
         "--acados-transfer-sqp-restarts",
@@ -2168,12 +2212,25 @@ if __name__ == "__main__":
         acados_proximal_control_max_restarts=(
             args.acados_proximal_control_max_restarts
         ),
+        acados_proximal_control_restart_feasibility_factor=(
+            args.acados_proximal_control_restart_feasibility_factor
+        ),
         acados_proximal_control_try_next_weight_on_failure=(
             args.acados_proximal_control_try_next_weight_on_failure
         ),
         continue_after_acados_transfer_failure=(
             args.continue_after_acados_transfer_failure
         ),
+        acados_transfer_mechanical_restoration=(
+            args.acados_transfer_mechanical_restoration
+        ),
+        acados_transfer_mechanical_control_radius=(
+            args.acados_transfer_mechanical_control_radius
+        ),
+        acados_transfer_mechanical_regularization=(
+            args.acados_transfer_mechanical_regularization
+        ),
+        acados_transfer_mechanical_substeps=(args.acados_transfer_mechanical_substeps),
         acados_transfer_sqp_restarts=args.acados_transfer_sqp_restarts,
         acados_transfer_sqp_restart_iterations=(
             args.acados_transfer_sqp_restart_iterations

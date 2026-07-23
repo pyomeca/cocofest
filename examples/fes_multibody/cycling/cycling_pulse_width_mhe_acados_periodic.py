@@ -1058,6 +1058,32 @@ def build_argument_parser() -> argparse.ArgumentParser:
         help="Project the ACADOS qdot initial guess from finite differences of q before solving.",
     )
     parser.add_argument(
+        "--acados-transfer-mechanical-restoration",
+        action="store_true",
+        help=(
+            "Jointly restore appended-cycle qdot and one pulse-width offset per "
+            "muscle using a reduced rollout sensitivity problem."
+        ),
+    )
+    parser.add_argument(
+        "--acados-transfer-mechanical-control-radius",
+        type=float,
+        default=5e-5,
+        help="Maximum pulse-width correction per muscle in the reduced restoration.",
+    )
+    parser.add_argument(
+        "--acados-transfer-mechanical-regularization",
+        type=float,
+        default=1e-2,
+        help="Tikhonov regularization applied to reduced restoration parameters.",
+    )
+    parser.add_argument(
+        "--acados-transfer-mechanical-substeps",
+        type=int,
+        default=5,
+        help="RK4 substeps used by reduced appended-cycle rollout sensitivities.",
+    )
+    parser.add_argument(
         "--transfer-full-dynamics-rollout",
         "--acados-transfer-full-dynamics-rollout",
         dest="acados_transfer_full_dynamics_rollout",
@@ -1383,6 +1409,15 @@ def build_argument_parser() -> argparse.ArgumentParser:
         type=int,
         default=1,
         help="Maximum same-weight restarts for a nearly feasible proximal stage.",
+    )
+    parser.add_argument(
+        "--acados-proximal-control-restart-feasibility-factor",
+        type=float,
+        default=1.0,
+        help=(
+            "Multiplier applied only to the feasibility threshold that permits "
+            "another proximal SQP call; final acceptance remains unchanged."
+        ),
     )
     parser.add_argument(
         "--acados-proximal-control-try-next-weight-on-failure",
@@ -2920,6 +2955,7 @@ def run_acados_proximal_control_continuation(
     weights: tuple[float, ...],
     convergence_tolerance: float,
     max_restarts: int = 1,
+    restart_feasibility_factor: float = 1.0,
     stage_iterations: int | None = 50,
     try_next_weight_on_failure: bool = False,
     echo: bool = True,
@@ -2975,7 +3011,8 @@ def run_acados_proximal_control_continuation(
                 and solution.status in (2, 4)
                 and attempt < max_restarts
                 and acados_homotopy_stage_is_restartable(
-                    {"residuals": restart_residuals}, convergence_tolerance
+                    {"residuals": restart_residuals},
+                    convergence_tolerance * restart_feasibility_factor,
                 )
             )
             residuals = diagnostics.get("residuals")
@@ -3397,6 +3434,231 @@ def project_qdot_initial_guess_from_q(
         "scaled_defect_after": scaled_defect_after,
         "max_change": float(np.max(np.abs(accepted_slice - previous_slice))),
         "clipped_count": int(np.count_nonzero(projected_slice != raw_slice)),
+    }
+
+
+def _appended_mechanical_rollout_residual(
+    nmpc,
+    start_node: int,
+    n_substeps: int,
+) -> np.ndarray:
+    """Roll out the appended cycle and compare its mechanical state trajectory."""
+
+    nlp = nmpc.nlp[0]
+    first_state_key = next(iter(nlp.x_init.keys()))
+    first_control_key = next(iter(nlp.u_init.keys()))
+    n_state_nodes = nlp.x_init[first_state_key].init.shape[1]
+    n_control_nodes = nlp.u_init[first_control_key].init.shape[1]
+    if n_state_nodes != n_control_nodes + 1:
+        raise ValueError(
+            "Mechanical transfer restoration requires one state node per "
+            "shooting endpoint."
+        )
+    if start_node < 0 or start_node >= n_control_nodes:
+        raise ValueError("Mechanical restoration start_node must index a control node.")
+
+    states = _stack_initial_guess_values(nlp.x_init, nlp.states, n_state_nodes)
+    controls = _stack_initial_guess_values(nlp.u_init, nlp.controls, n_control_nodes)
+    mechanical_indexes = []
+    for key in ("q", "qdot"):
+        mechanical_indexes.extend(
+            np.asarray(nlp.states[key].index).reshape((-1,)).tolist()
+        )
+    mechanical_indexes = np.asarray(mechanical_indexes, dtype=int)
+    scales = np.maximum(
+        np.max(np.abs(states[mechanical_indexes, start_node:]), axis=1),
+        1.0,
+    )
+    dt = nmpc.cycle_duration / nmpc.cycle_len
+    predicted = states[:, start_node].copy()
+    residuals = []
+    for node in range(start_node, n_control_nodes):
+        predicted = _rk4_full_dynamics_step(
+            nlp,
+            predicted,
+            controls[:, node],
+            node * dt,
+            dt,
+            n_substeps=n_substeps,
+            numerical_timeseries=_numerical_timeseries_at_node(nlp, node),
+        )
+        if not np.all(np.isfinite(predicted)):
+            return np.full(
+                mechanical_indexes.size * (n_control_nodes - start_node),
+                np.nan,
+            )
+        target = states[mechanical_indexes, node + 1]
+        residuals.append((predicted[mechanical_indexes] - target) / scales)
+    return np.concatenate(residuals)
+
+
+def restore_appended_cycle_mechanics(
+    nmpc,
+    start_node: int,
+    control_radius: float = 5e-5,
+    regularization: float = 1e-2,
+    n_substeps: int = 5,
+    max_backtracking_steps: int = 5,
+) -> dict:
+    """Jointly adjust appended qdot and one pulse-width offset per muscle."""
+
+    from scipy.optimize import lsq_linear
+
+    if control_radius <= 0.0:
+        raise ValueError("Mechanical restoration control radius must be positive.")
+    if regularization < 0.0:
+        raise ValueError("Mechanical restoration regularization must be non-negative.")
+    if n_substeps < 1:
+        raise ValueError("Mechanical restoration substeps must be positive.")
+    if max_backtracking_steps < 0:
+        raise ValueError(
+            "Mechanical restoration backtracking steps must be non-negative."
+        )
+
+    nlp = nmpc.nlp[0]
+    pulse_width_keys = [
+        key for key in nlp.u_init.keys() if key.startswith("last_pulse_width_")
+    ]
+    if not pulse_width_keys:
+        return {
+            "applied": False,
+            "reason": "no_pulse_width_controls",
+            "start_node": start_node,
+        }
+
+    q = np.asarray(nlp.x_init["q"].init, dtype=float)
+    qdot_reference = np.asarray(nlp.x_init["qdot"].init, dtype=float).copy()
+    qdot_target = np.empty_like(q)
+    dt = nmpc.cycle_duration / nmpc.cycle_len
+    qdot_target[:, :-1] = np.diff(q, axis=1) / dt
+    qdot_target[:, -1] = qdot_target[:, -2]
+    qdot_lower, qdot_upper = _trajectory_bounds_for_guess(
+        nlp.x_bounds["qdot"], qdot_target.shape[1]
+    )
+    qdot_target = np.minimum(np.maximum(qdot_target, qdot_lower), qdot_upper)
+    qdot_start_node = start_node + 1
+    qdot_direction = (
+        qdot_target[:, qdot_start_node:] - qdot_reference[:, qdot_start_node:]
+    )
+
+    control_reference = {
+        key: np.asarray(nlp.u_init[key].init, dtype=float).copy()
+        for key in pulse_width_keys
+    }
+    control_bounds = {
+        key: _trajectory_bounds_for_guess(
+            nlp.u_bounds[key], control_reference[key].shape[1]
+        )
+        for key in pulse_width_keys
+    }
+
+    def apply_parameters(parameters: np.ndarray) -> None:
+        nlp.x_init["qdot"].init[:, :] = qdot_reference
+        nlp.x_init["qdot"].init[:, qdot_start_node:] = (
+            qdot_reference[:, qdot_start_node:] + parameters[0] * qdot_direction
+        )
+        for index, key in enumerate(pulse_width_keys, start=1):
+            reference = control_reference[key]
+            lower, upper = control_bounds[key]
+            candidate = reference[:, start_node:] + parameters[index] * control_radius
+            nlp.u_init[key].init[:, :] = reference
+            nlp.u_init[key].init[:, start_node:] = np.minimum(
+                np.maximum(candidate, lower[:, start_node:]),
+                upper[:, start_node:],
+            )
+
+    parameter_count = len(pulse_width_keys) + 1
+    zero_parameters = np.zeros(parameter_count)
+    apply_parameters(zero_parameters)
+    residual_before = _appended_mechanical_rollout_residual(
+        nmpc, start_node=start_node, n_substeps=n_substeps
+    )
+    if not np.all(np.isfinite(residual_before)):
+        apply_parameters(zero_parameters)
+        return {
+            "applied": False,
+            "reason": "nonfinite_baseline_rollout",
+            "start_node": start_node,
+        }
+
+    jacobian = np.empty((residual_before.size, parameter_count))
+    perturbations = np.full(parameter_count, 0.2)
+    perturbations[0] = 0.05
+    for parameter_index, perturbation in enumerate(perturbations):
+        parameters = zero_parameters.copy()
+        parameters[parameter_index] = perturbation
+        apply_parameters(parameters)
+        residual = _appended_mechanical_rollout_residual(
+            nmpc, start_node=start_node, n_substeps=n_substeps
+        )
+        if np.all(np.isfinite(residual)):
+            jacobian[:, parameter_index] = (residual - residual_before) / perturbation
+        else:
+            jacobian[:, parameter_index] = 0.0
+
+    augmented_jacobian = np.vstack(
+        (jacobian, np.sqrt(regularization) * np.eye(parameter_count))
+    )
+    augmented_target = np.concatenate((-residual_before, np.zeros(parameter_count)))
+    lower_parameters = np.full(parameter_count, -1.0)
+    lower_parameters[0] = 0.0
+    upper_parameters = np.ones(parameter_count)
+    linear_solution = lsq_linear(
+        augmented_jacobian,
+        augmented_target,
+        bounds=(lower_parameters, upper_parameters),
+    ).x
+
+    score_before = float(np.sqrt(np.mean(residual_before**2)))
+    score_after = score_before
+    accepted_step = 0.0
+    accepted_parameters = zero_parameters
+    tolerance = max(1e-12, score_before * 1e-12)
+    for step_index in range(max_backtracking_steps + 1):
+        step = 0.5**step_index
+        parameters = step * linear_solution
+        apply_parameters(parameters)
+        residual = _appended_mechanical_rollout_residual(
+            nmpc, start_node=start_node, n_substeps=n_substeps
+        )
+        if not np.all(np.isfinite(residual)):
+            continue
+        score = float(np.sqrt(np.mean(residual**2)))
+        if score < score_after - tolerance:
+            accepted_step = step
+            accepted_parameters = parameters.copy()
+            score_after = score
+
+    apply_parameters(accepted_parameters)
+    nmpc._sync_acados_state_bounds()
+    control_changes = {
+        key: float(
+            np.max(
+                np.abs(
+                    np.asarray(nlp.u_init[key].init, dtype=float)
+                    - control_reference[key]
+                )
+            )
+        )
+        for key in pulse_width_keys
+    }
+    return {
+        "applied": bool(accepted_step > 0.0),
+        "reason": None if accepted_step > 0.0 else "no_improving_step",
+        "start_node": start_node,
+        "accepted_step": accepted_step,
+        "score_before": score_before,
+        "score_after": score_after,
+        "linear_parameters": linear_solution,
+        "accepted_parameters": accepted_parameters,
+        "qdot_max_change": float(
+            np.max(
+                np.abs(
+                    np.asarray(nlp.x_init["qdot"].init, dtype=float) - qdot_reference
+                )
+            )
+        ),
+        "control_max_change_by_key": control_changes,
     }
 
 
@@ -7538,6 +7800,20 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
         )
     if args.acados_transfer_rollout_substeps < 1:
         raise ValueError("--transfer-rollout-substeps must be >= 1.")
+    if args.acados_transfer_mechanical_control_radius <= 0:
+        raise ValueError(
+            "--acados-transfer-mechanical-control-radius must be positive."
+        )
+    if args.acados_transfer_mechanical_regularization < 0:
+        raise ValueError(
+            "--acados-transfer-mechanical-regularization must be non-negative."
+        )
+    if args.acados_transfer_mechanical_substeps < 1:
+        raise ValueError("--acados-transfer-mechanical-substeps must be positive.")
+    if args.acados_transfer_mechanical_restoration and args.solver != "acados":
+        raise ValueError(
+            "Reduced transfer mechanical restoration is only available with ACADOS."
+        )
     if args.acados_transfer_rollout_max_bound_violation < 0:
         raise ValueError(
             "--acados-transfer-rollout-max-bound-violation must be non-negative."
@@ -7674,6 +7950,10 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
         )
     if args.acados_proximal_control_max_restarts < 0:
         raise ValueError("--acados-proximal-control-max-restarts must be non-negative.")
+    if args.acados_proximal_control_restart_feasibility_factor < 1:
+        raise ValueError(
+            "--acados-proximal-control-restart-feasibility-factor must be >= 1."
+        )
     if args.acados_terminal_wheel_q_slack < 0:
         raise ValueError("--acados-terminal-wheel-q-slack must be non-negative.")
     if args.acados_terminal_wheel_q_homotopy_slacks is not None:
@@ -7953,6 +8233,10 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
                 f"{args.acados_proximal_control_stage_iterations}"
             )
             print(
+                "acados_proximal_control_restart_feasibility_factor: "
+                f"{args.acados_proximal_control_restart_feasibility_factor}"
+            )
+            print(
                 "acados_proximal_control_try_next_weight_on_failure: "
                 f"{args.acados_proximal_control_try_next_weight_on_failure}"
             )
@@ -8160,6 +8444,23 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
                 "acados_transfer_rollout_substeps: "
                 f"{args.acados_transfer_rollout_substeps}"
             )
+            print(
+                "acados_transfer_mechanical_restoration: "
+                f"{args.acados_transfer_mechanical_restoration}"
+            )
+            if args.acados_transfer_mechanical_restoration:
+                print(
+                    "acados_transfer_mechanical_control_radius: "
+                    f"{args.acados_transfer_mechanical_control_radius}"
+                )
+                print(
+                    "acados_transfer_mechanical_regularization: "
+                    f"{args.acados_transfer_mechanical_regularization}"
+                )
+                print(
+                    "acados_transfer_mechanical_substeps: "
+                    f"{args.acados_transfer_mechanical_substeps}"
+                )
             print(
                 "acados_transfer_rollout_max_bound_violation: "
                 f"{args.acados_transfer_rollout_max_bound_violation}"
@@ -8506,6 +8807,7 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
     transfer_rollout_summaries = []
     transfer_control_scaling_summaries = []
     transfer_qdot_projection_summaries = []
+    transfer_mechanical_restoration_summaries = []
     transfer_ding_force_compensation_summaries = []
     transfer_bound_homotopy_summaries = []
     transfer_sqp_restart_summaries = []
@@ -8934,6 +9236,33 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
                     f"scaled_by_block_after="
                     f"{phase_one_summary['scaled_by_block_after']}"
                 )
+        if (
+            continue_solving
+            and _sol is not None
+            and args.solver == "acados"
+            and args.acados_transfer_mechanical_restoration
+        ):
+            mechanical_summary = restore_appended_cycle_mechanics(
+                _nmpc,
+                start_node=_nmpc.cycle_len,
+                control_radius=args.acados_transfer_mechanical_control_radius,
+                regularization=args.acados_transfer_mechanical_regularization,
+                n_substeps=args.acados_transfer_mechanical_substeps,
+            )
+            mechanical_summary["window"] = cycle_idx
+            transfer_mechanical_restoration_summaries.append(mechanical_summary)
+            if echo:
+                print(
+                    "transfer_mechanical_restoration: "
+                    f"applied={mechanical_summary['applied']} "
+                    f"reason={mechanical_summary.get('reason')} "
+                    f"step={mechanical_summary.get('accepted_step')} "
+                    f"score={mechanical_summary.get('score_before')}->"
+                    f"{mechanical_summary.get('score_after')} "
+                    f"qdot_max_change={mechanical_summary.get('qdot_max_change')} "
+                    f"control_changes="
+                    f"{mechanical_summary.get('control_max_change_by_key')}"
+                )
         if continue_solving and _sol is not None:
             bound_projection = project_transferred_initial_guess_to_bounds(_nmpc)
             bound_projection["window"] = cycle_idx + 1
@@ -9019,6 +9348,9 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
                 weights=args.acados_proximal_control_weights,
                 convergence_tolerance=args.acados_proximal_control_tolerance,
                 max_restarts=args.acados_proximal_control_max_restarts,
+                restart_feasibility_factor=(
+                    args.acados_proximal_control_restart_feasibility_factor
+                ),
                 stage_iterations=args.acados_proximal_control_stage_iterations,
                 try_next_weight_on_failure=(
                     args.acados_proximal_control_try_next_weight_on_failure
@@ -9243,6 +9575,9 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
             weights=args.acados_proximal_control_weights,
             convergence_tolerance=args.acados_proximal_control_tolerance,
             max_restarts=args.acados_proximal_control_max_restarts,
+            restart_feasibility_factor=(
+                args.acados_proximal_control_restart_feasibility_factor
+            ),
             stage_iterations=args.acados_proximal_control_stage_iterations,
             try_next_weight_on_failure=(
                 args.acados_proximal_control_try_next_weight_on_failure
@@ -9391,6 +9726,10 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
     if transfer_qdot_projection_summaries:
         summary["transfer_qdot_projection_summaries"] = (
             transfer_qdot_projection_summaries
+        )
+    if transfer_mechanical_restoration_summaries:
+        summary["transfer_mechanical_restoration_summaries"] = (
+            transfer_mechanical_restoration_summaries
         )
     if transfer_ding_force_compensation_summaries:
         summary["transfer_ding_force_compensation_summaries"] = (

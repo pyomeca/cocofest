@@ -306,6 +306,15 @@ def test_proximal_control_weights_are_parsed_as_a_decreasing_sequence():
             "--acados-terminal-wheel-q-homotopy-each-window",
             "--acados-proximal-control-stage-iterations",
             "30",
+            "--acados-proximal-control-restart-feasibility-factor",
+            "5",
+            "--acados-transfer-mechanical-restoration",
+            "--acados-transfer-mechanical-control-radius",
+            "7e-5",
+            "--acados-transfer-mechanical-regularization",
+            "0.02",
+            "--acados-transfer-mechanical-substeps",
+            "7",
         ]
     )
 
@@ -314,6 +323,11 @@ def test_proximal_control_weights_are_parsed_as_a_decreasing_sequence():
     assert args.acados_proximal_control_try_next_weight_on_failure is True
     assert args.continue_after_acados_transfer_failure is True
     assert args.acados_proximal_control_stage_iterations == 30
+    assert args.acados_proximal_control_restart_feasibility_factor == 5
+    assert args.acados_transfer_mechanical_restoration is True
+    assert args.acados_transfer_mechanical_control_radius == 7e-5
+    assert args.acados_transfer_mechanical_regularization == 0.02
+    assert args.acados_transfer_mechanical_substeps == 7
 
 
 def test_terminal_wheel_bound_slacks_are_parsed_as_a_decreasing_sequence():
@@ -759,7 +773,7 @@ def test_proximal_control_continuation_restarts_from_best_failed_qp_iterate(
             {
                 "residuals": np.array([1e8, 10.0, 0.0, 1e6]),
                 "res_stat_all": np.array([3.0, 0.2, 1e8]),
-                "res_eq_all": np.array([1.0, 2e-4, 10.0]),
+                "res_eq_all": np.array([1.0, 2e-3, 10.0]),
                 "res_ineq_all": np.zeros(3),
                 "res_comp_all": np.array([0.1, 1e-5, 1e6]),
             }
@@ -792,6 +806,7 @@ def test_proximal_control_continuation_restarts_from_best_failed_qp_iterate(
         weights=(1e6,),
         convergence_tolerance=5e-4,
         max_restarts=1,
+        restart_feasibility_factor=5.0,
         stage_iterations=20,
         echo=False,
         solve_stage=lambda: next(solutions),
@@ -1403,7 +1418,9 @@ def test_endurance_cli_stops_on_failure_and_keeps_robust_irk_defaults():
     assert args.acados_transfer_pulse_width_trust_radius is None
     assert args.acados_proximal_control_weights is None
     assert args.acados_proximal_control_try_next_weight_on_failure is False
+    assert args.acados_proximal_control_restart_feasibility_factor == 1
     assert args.continue_after_acados_transfer_failure is False
+    assert args.acados_transfer_mechanical_restoration is False
     assert args.periodic_ipopt_refinement_ode_solver == "target"
 
 
@@ -2773,6 +2790,67 @@ def test_qdot_projection_selects_the_best_dynamics_step(monkeypatch):
     assert summary["accepted_step"] == 0.5
     assert summary["scaled_defect_before"] == 2.0
     assert summary["scaled_defect_after"] == 0.0
+
+
+def test_reduced_mechanical_restoration_adjusts_qdot_and_controls(monkeypatch):
+    qdot_init = SimpleNamespace(init=np.zeros((1, 5)))
+    pulse_width_init = SimpleNamespace(init=np.full((1, 4), 2e-4))
+    nmpc = SimpleNamespace(
+        cycle_duration=1.0,
+        cycle_len=2,
+        nlp=[
+            SimpleNamespace(
+                x_init={
+                    "q": SimpleNamespace(
+                        init=np.array([[0.0, -1.0, -2.0, -3.0, -4.0]])
+                    ),
+                    "qdot": qdot_init,
+                },
+                x_bounds={
+                    "qdot": SimpleNamespace(
+                        min=np.full((1, 5), -10.0),
+                        max=np.full((1, 5), 10.0),
+                    )
+                },
+                u_init={"last_pulse_width_Biceps": pulse_width_init},
+                u_bounds={
+                    "last_pulse_width_Biceps": SimpleNamespace(
+                        min=np.full((1, 4), 1e-4),
+                        max=np.full((1, 4), 6e-4),
+                    )
+                },
+            )
+        ],
+        _sync_acados_state_bounds=lambda: None,
+    )
+
+    def fake_rollout(candidate_nmpc, start_node, n_substeps):
+        qdot = candidate_nmpc.nlp[0].x_init["qdot"].init[0, -1]
+        pulse_width = np.mean(
+            candidate_nmpc.nlp[0].u_init["last_pulse_width_Biceps"].init[0, start_node:]
+        )
+        return np.array([qdot + 1.0, (pulse_width - 2.25e-4) / 5e-5])
+
+    monkeypatch.setattr(
+        periodic_example,
+        "_appended_mechanical_rollout_residual",
+        fake_rollout,
+    )
+
+    summary = periodic_example.restore_appended_cycle_mechanics(
+        nmpc,
+        start_node=2,
+        control_radius=5e-5,
+        regularization=0.0,
+    )
+
+    assert summary["applied"] is True
+    np.testing.assert_allclose(qdot_init.init[:, :3], 0.0)
+    np.testing.assert_allclose(qdot_init.init[:, 3:], -1.0)
+    np.testing.assert_allclose(pulse_width_init.init[:, :2], 2e-4)
+    np.testing.assert_allclose(pulse_width_init.init[:, 2:], 2.25e-4)
+    np.testing.assert_allclose(summary["accepted_parameters"], [0.5, 0.5])
+    assert summary["score_after"] < 1e-10
 
 
 def test_transfer_bound_homotopy_only_relaxes_mechanical_states():
