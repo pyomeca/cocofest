@@ -300,6 +300,7 @@ def test_proximal_control_weights_are_parsed_as_a_decreasing_sequence():
             "1e6,1e5,1e4",
             "--acados-proximal-control-each-window",
             "--acados-proximal-control-try-next-weight-on-failure",
+            "--continue-after-acados-transfer-failure",
             "--acados-terminal-wheel-q-homotopy-slacks",
             "0.2,0.1,0.02",
             "--acados-terminal-wheel-q-homotopy-each-window",
@@ -311,6 +312,7 @@ def test_proximal_control_weights_are_parsed_as_a_decreasing_sequence():
     assert args.acados_proximal_control_weights == (1e6, 1e5, 1e4)
     assert args.acados_proximal_control_each_window is True
     assert args.acados_proximal_control_try_next_weight_on_failure is True
+    assert args.continue_after_acados_transfer_failure is True
     assert args.acados_proximal_control_stage_iterations == 30
 
 
@@ -1401,6 +1403,7 @@ def test_endurance_cli_stops_on_failure_and_keeps_robust_irk_defaults():
     assert args.acados_transfer_pulse_width_trust_radius is None
     assert args.acados_proximal_control_weights is None
     assert args.acados_proximal_control_try_next_weight_on_failure is False
+    assert args.continue_after_acados_transfer_failure is False
     assert args.periodic_ipopt_refinement_ode_solver == "target"
 
 
@@ -2693,6 +2696,9 @@ def test_qdot_projection_is_recomputed_from_q_and_clipped_to_bounds():
     assert summary == {
         "applied": True,
         "start_node": 0,
+        "accepted_step": 1.0,
+        "scaled_defect_before": None,
+        "scaled_defect_after": None,
         "max_change": 3.0,
         "clipped_count": 2,
     }
@@ -2725,6 +2731,48 @@ def test_qdot_projection_can_preserve_the_solved_cycle():
     np.testing.assert_allclose(qdot_init.init, [[1.0, 2.0, -4.0, -4.0]])
     assert summary["start_node"] == 2
     assert summary["max_change"] == 8.0
+
+
+def test_qdot_projection_selects_the_best_dynamics_step(monkeypatch):
+    qdot_init = SimpleNamespace(init=np.zeros((1, 3)))
+    nmpc = SimpleNamespace(
+        cycle_duration=1.0,
+        cycle_len=2,
+        nlp=[
+            SimpleNamespace(
+                x_init={
+                    "q": SimpleNamespace(init=np.array([[0.0, -2.0, -4.0]])),
+                    "qdot": qdot_init,
+                },
+                x_bounds={
+                    "qdot": SimpleNamespace(
+                        min=np.array([[-10.0, -10.0, -10.0]]),
+                        max=np.array([[10.0, 10.0, 10.0]]),
+                    )
+                },
+            )
+        ],
+        _sync_acados_state_bounds=lambda: None,
+    )
+
+    def fake_defects(candidate_nmpc, n_substeps):
+        values = candidate_nmpc.nlp[0].x_init["qdot"].init
+        score = float(np.max(np.abs(values + 2.0)))
+        return {"scaled_by_block": {"qdot": score}}
+
+    monkeypatch.setattr(
+        periodic_example, "_full_dynamics_rollout_defect_details", fake_defects
+    )
+
+    summary = periodic_example.project_qdot_initial_guess_from_q(
+        nmpc,
+        select_by_dynamics=True,
+    )
+
+    np.testing.assert_allclose(qdot_init.init, [[-2.0, -2.0, -2.0]])
+    assert summary["accepted_step"] == 0.5
+    assert summary["scaled_defect_before"] == 2.0
+    assert summary["scaled_defect_after"] == 0.0
 
 
 def test_transfer_bound_homotopy_only_relaxes_mechanical_states():

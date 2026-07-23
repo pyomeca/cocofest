@@ -1393,6 +1393,15 @@ def build_argument_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--continue-after-acados-transfer-failure",
+        action="store_true",
+        help=(
+            "Diagnostic mode that keeps advancing after an auxiliary ACADOS "
+            "transfer solve fails. Endurance runs stop at the first failed "
+            "transfer by default."
+        ),
+    )
+    parser.add_argument(
         "--ipopt-linear-solver",
         type=str,
         default="ma57",
@@ -3306,9 +3315,19 @@ def print_initial_guess_diagnostics(nmpc) -> None:
             )
 
 
-def project_qdot_initial_guess_from_q(nmpc, start_node: int = 0) -> dict:
+def project_qdot_initial_guess_from_q(
+    nmpc,
+    start_node: int = 0,
+    select_by_dynamics: bool = False,
+    dynamics_substeps: int = 5,
+    max_backtracking_steps: int = 5,
+) -> dict:
     if "q" not in nmpc.nlp[0].x_init.keys() or "qdot" not in nmpc.nlp[0].x_init.keys():
         return {"applied": False, "max_change": 0.0, "clipped_count": 0}
+    if dynamics_substeps < 1:
+        raise ValueError("qdot projection dynamics_substeps must be positive.")
+    if max_backtracking_steps < 0:
+        raise ValueError("qdot projection backtracking steps must be non-negative.")
 
     dt = nmpc.cycle_duration / nmpc.cycle_len
     q = np.asarray(nmpc.nlp[0].x_init["q"].init, dtype=float)
@@ -3323,15 +3342,60 @@ def project_qdot_initial_guess_from_q(nmpc, start_node: int = 0) -> dict:
         nmpc.nlp[0].x_bounds["qdot"], qdot.shape[1]
     )
     projected_qdot = np.minimum(np.maximum(qdot, lower), upper)
-    nmpc.nlp[0].x_init["qdot"].init[:, start_node:] = projected_qdot[:, start_node:]
-    nmpc._sync_acados_state_bounds()
     projected_slice = projected_qdot[:, start_node:]
     previous_slice = previous_qdot[:, start_node:]
     raw_slice = qdot[:, start_node:]
+    accepted_step = 1.0
+    scaled_defect_before = None
+    scaled_defect_after = None
+
+    if select_by_dynamics:
+        before = _full_dynamics_rollout_defect_details(
+            nmpc, n_substeps=dynamics_substeps
+        )
+
+        def maximum_scaled_defect(details):
+            return max(details.get("scaled_by_block", {}).values(), default=np.inf)
+
+        scaled_defect_before = maximum_scaled_defect(before)
+        if np.isfinite(scaled_defect_before):
+            accepted_step = 0.0
+            scaled_defect_after = scaled_defect_before
+            tolerance = max(1e-12, abs(scaled_defect_before) * 1e-12)
+            for step_index in range(max_backtracking_steps + 1):
+                step = 0.5**step_index
+                candidate = previous_slice + step * (projected_slice - previous_slice)
+                nmpc.nlp[0].x_init["qdot"].init[:, start_node:] = candidate
+                details = _full_dynamics_rollout_defect_details(
+                    nmpc, n_substeps=dynamics_substeps
+                )
+                scaled_defect = maximum_scaled_defect(details)
+                if (
+                    np.isfinite(scaled_defect)
+                    and scaled_defect < scaled_defect_after - tolerance
+                ):
+                    accepted_step = step
+                    scaled_defect_after = scaled_defect
+            accepted_qdot = previous_slice + accepted_step * (
+                projected_slice - previous_slice
+            )
+            nmpc.nlp[0].x_init["qdot"].init[:, start_node:] = accepted_qdot
+        else:
+            nmpc.nlp[0].x_init["qdot"].init[:, start_node:] = projected_slice
+    else:
+        nmpc.nlp[0].x_init["qdot"].init[:, start_node:] = projected_slice
+
+    nmpc._sync_acados_state_bounds()
+    accepted_slice = np.asarray(
+        nmpc.nlp[0].x_init["qdot"].init[:, start_node:], dtype=float
+    )
     return {
-        "applied": True,
+        "applied": bool(accepted_step > 0.0),
         "start_node": start_node,
-        "max_change": float(np.max(np.abs(projected_slice - previous_slice))),
+        "accepted_step": accepted_step,
+        "scaled_defect_before": scaled_defect_before,
+        "scaled_defect_after": scaled_defect_after,
+        "max_change": float(np.max(np.abs(accepted_slice - previous_slice))),
         "clipped_count": int(np.count_nonzero(projected_slice != raw_slice)),
     }
 
@@ -8453,6 +8517,7 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
     terminal_wheel_bound_summaries = []
     inter_window_terminal_wheel_bound_summaries = []
     inter_window_proximal_control_summaries = []
+    transfer_failure_window = None
     initial_guess_audits = [{"window": 0, **initial_guess_audit}]
     requested_window_solves = receding_horizon_window_count(
         args.n_windows, args.cycles_per_window
@@ -8484,6 +8549,7 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
         nmpc.before_window_advance = cache_first_successful_window
 
     def update_functions(_nmpc, cycle_idx, _sol):
+        nonlocal transfer_failure_window
         print(f"window {cycle_idx}")
         if args.solver == "acados":
             _nmpc._cocofest_dual_warm_start_mode = args.acados_dual_warm_start_mode
@@ -8646,7 +8712,10 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
             and args.acados_project_qdot_from_q
         ):
             qdot_projection_summary = project_qdot_initial_guess_from_q(
-                _nmpc, start_node=_nmpc.cycle_len
+                _nmpc,
+                start_node=_nmpc.cycle_len,
+                select_by_dynamics=True,
+                dynamics_substeps=args.full_dynamics_phase_one_substeps,
             )
             qdot_projection_summary["window"] = cycle_idx
             transfer_qdot_projection_summaries.append(qdot_projection_summary)
@@ -8655,6 +8724,9 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
                     "transfer_qdot_projection: "
                     f"applied={qdot_projection_summary['applied']} "
                     f"start_node={qdot_projection_summary['start_node']} "
+                    f"accepted_step={qdot_projection_summary['accepted_step']:.6g} "
+                    f"scaled_defect={qdot_projection_summary['scaled_defect_before']}->"
+                    f"{qdot_projection_summary['scaled_defect_after']} "
                     f"max_change={qdot_projection_summary['max_change']:.6g} "
                     f"clipped_values={qdot_projection_summary['clipped_count']}"
                 )
@@ -8956,6 +9028,19 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
             for item in window_continuation:
                 item["window"] = cycle_idx
             inter_window_proximal_control_summaries.extend(window_continuation)
+            if (
+                window_continuation
+                and not window_continuation[-1]["accepted"]
+                and not args.continue_after_acados_transfer_failure
+            ):
+                continue_solving = False
+                transfer_failure_window = cycle_idx
+                if echo:
+                    print(
+                        "acados_transfer_failure_stop: "
+                        f"window={cycle_idx} "
+                        f"status={window_continuation[-1]['status']}"
+                    )
         if (
             continue_solving
             and _sol is not None
@@ -9335,6 +9420,8 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
         summary["inter_window_proximal_control_summaries"] = (
             inter_window_proximal_control_summaries
         )
+    if transfer_failure_window is not None:
+        summary["transfer_failure_window"] = transfer_failure_window
     if inter_window_terminal_wheel_bound_summaries:
         summary["inter_window_terminal_wheel_bound_summaries"] = (
             inter_window_terminal_wheel_bound_summaries

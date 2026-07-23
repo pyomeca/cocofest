@@ -1259,6 +1259,7 @@ def main(
     acados_proximal_control_stage_iterations: int = 50,
     acados_proximal_control_max_restarts: int = 1,
     acados_proximal_control_try_next_weight_on_failure: bool = False,
+    continue_after_acados_transfer_failure: bool = False,
     acados_transfer_sqp_restarts: int = 0,
     acados_transfer_sqp_restart_iterations: int = 1,
     acados_transfer_sqp_restart_feasibility_tolerance: float = 1e-2,
@@ -1552,6 +1553,9 @@ def main(
     )
     acados_args.acados_proximal_control_try_next_weight_on_failure = (
         acados_proximal_control_try_next_weight_on_failure
+    )
+    acados_args.continue_after_acados_transfer_failure = (
+        continue_after_acados_transfer_failure
     )
     acados_args.acados_transfer_sqp_restarts = acados_transfer_sqp_restarts
     acados_args.acados_transfer_sqp_restart_iterations = (
@@ -1935,6 +1939,10 @@ def build_cli() -> argparse.ArgumentParser:
         action="store_true",
     )
     parser.add_argument(
+        "--continue-after-acados-transfer-failure",
+        action="store_true",
+    )
+    parser.add_argument(
         "--acados-transfer-sqp-restarts",
         type=int,
         default=0,
@@ -2162,6 +2170,9 @@ if __name__ == "__main__":
         ),
         acados_proximal_control_try_next_weight_on_failure=(
             args.acados_proximal_control_try_next_weight_on_failure
+        ),
+        continue_after_acados_transfer_failure=(
+            args.continue_after_acados_transfer_failure
         ),
         acados_transfer_sqp_restarts=args.acados_transfer_sqp_restarts,
         acados_transfer_sqp_restart_iterations=(
