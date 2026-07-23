@@ -1268,6 +1268,13 @@ def test_endurance_metrics_report_fatigue_and_control_saturation():
 
     a_row = next(row for row in fatigue if row["key"] == "A_Biceps")
     np.testing.assert_allclose(a_row["relative_final"], (100 - 4 * 20 / 6) / 100)
+    np.testing.assert_allclose(
+        comparison_example._minimum_a_capacity_ratio(fatigue),
+        a_row["relative_final"],
+    )
+    assert comparison_example._format_a_capacity_by_muscle(fatigue) == (
+        f"Biceps={a_row['relative_final']:.6f}"
+    )
     assert saturation[0]["upper_fraction"] == 0.25
 
 

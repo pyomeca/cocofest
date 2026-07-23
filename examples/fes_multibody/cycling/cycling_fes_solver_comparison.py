@@ -306,6 +306,24 @@ def _fatigue_metrics(result: dict, cycle_count: int) -> list[dict]:
     return rows
 
 
+def _minimum_a_capacity_ratio(fatigue: list[dict]) -> float | None:
+    ratios = [
+        row["relative_final"]
+        for row in fatigue
+        if row["key"].startswith("A_") and row["relative_final"] is not None
+    ]
+    return min(ratios) if ratios else None
+
+
+def _format_a_capacity_by_muscle(fatigue: list[dict]) -> str:
+    rows = [
+        f"{row['key'].removeprefix('A_')}={row['relative_final']:.6f}"
+        for row in fatigue
+        if row["key"].startswith("A_") and row["relative_final"] is not None
+    ]
+    return ",".join(rows) if rows else "None"
+
+
 def _control_saturation_metrics(result: dict, cycle_count: int) -> list[dict]:
     if cycle_count <= 0:
         return []
@@ -1152,20 +1170,28 @@ def print_comparison(
 
     for label, result in (("IPOPT", ipopt_result), ("ACADOS", acados_result)):
         validated_cycles = performance[label]["validated_cycles"]
-        fatigue = _fatigue_metrics(result, validated_cycles)
+        validated_fatigue = _fatigue_metrics(result, validated_cycles)
         saturation = _control_saturation_metrics(result, validated_cycles)
-        a_ratios = [
-            row["relative_final"]
-            for row in fatigue
-            if row["key"].startswith("A_") and row["relative_final"] is not None
-        ]
         print(
-            f"{label} endurance: "
+            f"{label} validated endurance: "
             f"stop={_stop_classification(result)['label']} "
-            f"min_A_capacity_ratio={_format_metric(min(a_ratios) if a_ratios else None)} "
+            f"cycles={validated_cycles} "
+            "min_A_capacity_ratio="
+            f"{_format_metric(_minimum_a_capacity_ratio(validated_fatigue))} "
+            f"A_capacity_by_muscle={_format_a_capacity_by_muscle(validated_fatigue)} "
             "max_pulse_width_upper_fraction="
             f"{_format_metric(max((row['upper_fraction'] for row in saturation), default=None))}"
         )
+        exported_cycles = _exported_cycle_count(result)
+        if exported_cycles > validated_cycles:
+            exported_fatigue = _fatigue_metrics(result, exported_cycles)
+            print(
+                f"{label} exported diagnostic endurance: "
+                f"cycles={exported_cycles} "
+                "min_A_capacity_ratio="
+                f"{_format_metric(_minimum_a_capacity_ratio(exported_fatigue))} "
+                f"A_capacity_by_muscle={_format_a_capacity_by_muscle(exported_fatigue)}"
+            )
 
     shared_stop = _shared_stop_classification(ipopt_result, acados_result)
     print(
