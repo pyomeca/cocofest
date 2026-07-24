@@ -1289,11 +1289,16 @@ def main(
     shared_transfer_full_dynamics_rollout: bool = False,
     shared_transfer_phase_one: bool = False,
     acados_transfer_phase_one: bool = False,
+    acados_transfer_phase_one_mode: str = "all",
+    acados_transfer_phase_one_lookback_nodes: int | None = None,
     acados_cyclical_transfer_mode: str = "extrapolate",
     acados_transfer_phase_one_proximity_weight: float = 1.0,
     acados_transfer_phase_one_defect_weight: float = 10.0,
     acados_transfer_phase_one_substeps: int = 5,
     acados_transfer_phase_one_max_state_change: float | None = None,
+    acados_transfer_phase_one_max_q_change: float | None = None,
+    acados_transfer_phase_one_max_qdot_change: float | None = None,
+    acados_transfer_phase_one_max_fes_change: float | None = None,
     shared_initial_phase_one: bool = False,
     shared_transfer_rollout_substeps: int = 5,
     shared_transfer_rollout_max_bound_violation: float = 1.0,
@@ -1617,6 +1622,10 @@ def main(
     acados_args.acados_transfer_phase_one = bool(
         shared_transfer_phase_one or acados_transfer_phase_one
     )
+    acados_args.acados_transfer_phase_one_mode = acados_transfer_phase_one_mode
+    acados_args.acados_transfer_phase_one_lookback_nodes = (
+        acados_transfer_phase_one_lookback_nodes
+    )
     acados_args.acados_cyclical_transfer_mode = acados_cyclical_transfer_mode
     acados_args.full_dynamics_phase_one_proximity_weight = (
         acados_transfer_phase_one_proximity_weight
@@ -1627,6 +1636,15 @@ def main(
     acados_args.full_dynamics_phase_one_substeps = acados_transfer_phase_one_substeps
     acados_args.full_dynamics_phase_one_max_state_change = (
         acados_transfer_phase_one_max_state_change
+    )
+    acados_args.full_dynamics_phase_one_max_q_change = (
+        acados_transfer_phase_one_max_q_change
+    )
+    acados_args.full_dynamics_phase_one_max_qdot_change = (
+        acados_transfer_phase_one_max_qdot_change
+    )
+    acados_args.full_dynamics_phase_one_max_fes_change = (
+        acados_transfer_phase_one_max_fes_change
     )
 
     normalized_ipopt_profile = _normalize_ipopt_profile(ipopt_profile)
@@ -1710,6 +1728,16 @@ def build_cli() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--acados-transfer-phase-one-mode",
+        choices=("all", "mechanical"),
+        default="all",
+    )
+    parser.add_argument(
+        "--acados-transfer-phase-one-lookback-nodes",
+        type=int,
+        default=None,
+    )
+    parser.add_argument(
         "--acados-cyclical-transfer-mode",
         choices=("extrapolate", "repeat"),
         default="extrapolate",
@@ -1735,6 +1763,12 @@ def build_cli() -> argparse.ArgumentParser:
         type=float,
         default=None,
     )
+    for block in ("q", "qdot", "fes"):
+        parser.add_argument(
+            f"--acados-transfer-phase-one-max-{block}-change",
+            type=float,
+            default=None,
+        )
     parser.add_argument(
         "--shared-initial-phase-one",
         action="store_true",
@@ -2270,6 +2304,10 @@ if __name__ == "__main__":
         ),
         shared_transfer_phase_one=args.shared_transfer_phase_one,
         acados_transfer_phase_one=args.acados_transfer_phase_one,
+        acados_transfer_phase_one_mode=args.acados_transfer_phase_one_mode,
+        acados_transfer_phase_one_lookback_nodes=(
+            args.acados_transfer_phase_one_lookback_nodes
+        ),
         acados_cyclical_transfer_mode=args.acados_cyclical_transfer_mode,
         acados_transfer_phase_one_proximity_weight=(
             args.acados_transfer_phase_one_proximity_weight
@@ -2280,6 +2318,15 @@ if __name__ == "__main__":
         acados_transfer_phase_one_substeps=(args.acados_transfer_phase_one_substeps),
         acados_transfer_phase_one_max_state_change=(
             args.acados_transfer_phase_one_max_state_change
+        ),
+        acados_transfer_phase_one_max_q_change=(
+            args.acados_transfer_phase_one_max_q_change
+        ),
+        acados_transfer_phase_one_max_qdot_change=(
+            args.acados_transfer_phase_one_max_qdot_change
+        ),
+        acados_transfer_phase_one_max_fes_change=(
+            args.acados_transfer_phase_one_max_fes_change
         ),
         shared_initial_phase_one=args.shared_initial_phase_one,
         shared_transfer_rollout_substeps=args.shared_transfer_rollout_substeps,

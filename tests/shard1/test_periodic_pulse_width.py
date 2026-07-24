@@ -1354,6 +1354,33 @@ def test_state_comparison_aligns_wheel_turn_representation():
     np.testing.assert_allclose(wheel["final_error"], 0.01)
 
 
+def test_full_dynamics_q_defect_scale_is_independent_of_unwrapped_turns():
+    class Variables(dict):
+        pass
+
+    nlp = SimpleNamespace(
+        states=Variables(
+            q=SimpleNamespace(index=[0, 1]),
+            qdot=SimpleNamespace(index=[2]),
+            F_Test=SimpleNamespace(index=[3]),
+        )
+    )
+    states = np.array(
+        [
+            [0.0, 100.0 * 2.0 * np.pi],
+            [1.0, 1.5],
+            [-2.0, -3.0],
+            [10.0, 20.0],
+        ]
+    )
+
+    scales = periodic_example._full_dynamics_defect_state_scales(nlp, states)
+
+    np.testing.assert_allclose(scales[[0, 1], :], 2.0 * np.pi)
+    assert scales[2, 0] == 3.0
+    assert scales[3, 0] == 20.0
+
+
 def test_endurance_metrics_report_fatigue_and_control_saturation():
     result = _benchmark_result([0, 0, 4])
 
@@ -2031,7 +2058,7 @@ def test_proximal_phase_one_backtracks_to_respect_state_change_limit(monkeypatch
         defect_weight=1.0,
         n_substeps=1,
         max_backtracking_steps=2,
-        max_state_change=5.0,
+        max_state_change_by_block={"q": 5.0},
     )
 
     assert summary["accepted"] is True
@@ -2040,7 +2067,94 @@ def test_proximal_phase_one_backtracks_to_respect_state_change_limit(monkeypatch
     assert summary["scaled_defect_after"] == 0.8
     assert summary["max_state_change"] == 4.5
     assert summary["candidate_max_state_change"] == 9.0
+    assert summary["state_change_by_block"]["q"] == 4.5
     np.testing.assert_allclose(nmpc.nlp[0].x_init["q"].init, [[0.0, 5.5]])
+
+
+def test_proximal_phase_one_preserves_retained_nodes_and_immutable_blocks(
+    monkeypatch,
+):
+    class StateVariables(dict):
+        shape = 2
+
+    class ControlVariables(dict):
+        shape = 1
+
+    defects = iter(
+        [
+            {
+                "scaled_by_block": {"q": 1.0, "fes": 1.0},
+                "absolute_by_block": {"q": 1.0, "fes": 1.0},
+            },
+            {
+                "scaled_by_block": {"q": 0.5, "fes": 1.0},
+                "absolute_by_block": {"q": 0.5, "fes": 1.0},
+            },
+        ]
+    )
+    q = np.array([[0.0, 1.0, 2.0]])
+    force = np.array([[10.0, 11.0, 12.0]])
+    nmpc = SimpleNamespace(
+        cycle_duration=2.0,
+        cycle_len=2,
+        nlp=[
+            SimpleNamespace(
+                x_init={
+                    "q": SimpleNamespace(init=q.copy()),
+                    "F_Test": SimpleNamespace(init=force.copy()),
+                },
+                u_init={"u": SimpleNamespace(init=np.zeros((1, 2)))},
+                x_bounds={
+                    "q": SimpleNamespace(
+                        min=np.full((1, 3), -100.0),
+                        max=np.full((1, 3), 100.0),
+                    ),
+                    "F_Test": SimpleNamespace(
+                        min=np.full((1, 3), -100.0),
+                        max=np.full((1, 3), 100.0),
+                    ),
+                },
+                states=StateVariables(
+                    q=SimpleNamespace(index=[0]),
+                    F_Test=SimpleNamespace(index=[1]),
+                ),
+                controls=ControlVariables(u=SimpleNamespace(index=[0])),
+            )
+        ],
+        _correct_init_guess_to_fit_bounds=lambda corrected_input: None,
+        _sync_acados_state_bounds=lambda: None,
+    )
+    monkeypatch.setattr(
+        periodic_example,
+        "_full_dynamics_rollout_defect_details",
+        lambda *_args, **_kwargs: next(defects),
+    )
+    monkeypatch.setattr(
+        periodic_example,
+        "_numerical_timeseries_at_node",
+        lambda *_args, **_kwargs: None,
+    )
+    monkeypatch.setattr(
+        periodic_example,
+        "_rk4_full_dynamics_step",
+        lambda *_args, **_kwargs: np.array([10.0, 99.0]),
+    )
+
+    summary = periodic_example.project_full_dynamics_initial_guess(
+        nmpc,
+        proximity_weight=1.0,
+        defect_weight=1.0,
+        n_substeps=1,
+        start_node=1,
+        mutable_blocks=("q",),
+        monotone_blocks=("q",),
+    )
+
+    assert summary["accepted"] is True
+    assert summary["start_node"] == 1
+    assert summary["mutable_blocks"] == ("q",)
+    np.testing.assert_allclose(nmpc.nlp[0].x_init["q"].init, [[0.0, 1.0, 6.0]])
+    np.testing.assert_allclose(nmpc.nlp[0].x_init["F_Test"].init, force)
 
 
 def test_pulse_width_summary_preserves_ipopt_control_variation():
@@ -3236,10 +3350,20 @@ def test_shared_transfer_rollout_cli_is_available_to_ipopt():
             "ipopt",
             "--transfer-full-dynamics-rollout",
             "--transfer-phase-one",
+            "--acados-transfer-phase-one-mode",
+            "mechanical",
+            "--acados-transfer-phase-one-lookback-nodes",
+            "15",
             "--transfer-rollout-substeps",
             "7",
             "--full-dynamics-phase-one-max-state-change",
             "20",
+            "--full-dynamics-phase-one-max-q-change",
+            "1",
+            "--full-dynamics-phase-one-max-qdot-change",
+            "2",
+            "--full-dynamics-phase-one-max-fes-change",
+            "3",
         ]
     )
     comparison_args = comparison_example.build_cli().parse_args(
@@ -3248,6 +3372,10 @@ def test_shared_transfer_rollout_cli_is_available_to_ipopt():
             "--compact-rho-output",
             "--shared-transfer-phase-one",
             "--acados-transfer-phase-one",
+            "--acados-transfer-phase-one-mode",
+            "mechanical",
+            "--acados-transfer-phase-one-lookback-nodes",
+            "15",
             "--acados-cyclical-transfer-mode",
             "repeat",
             "--acados-transfer-phase-one-proximity-weight",
@@ -3258,6 +3386,12 @@ def test_shared_transfer_rollout_cli_is_available_to_ipopt():
             "10",
             "--acados-transfer-phase-one-max-state-change",
             "20",
+            "--acados-transfer-phase-one-max-q-change",
+            "1",
+            "--acados-transfer-phase-one-max-qdot-change",
+            "2",
+            "--acados-transfer-phase-one-max-fes-change",
+            "3",
             "--shared-initial-phase-one",
             "--shared-transfer-rollout-substeps",
             "7",
@@ -3285,17 +3419,27 @@ def test_shared_transfer_rollout_cli_is_available_to_ipopt():
 
     assert args.acados_transfer_full_dynamics_rollout is True
     assert args.acados_transfer_phase_one is True
+    assert args.acados_transfer_phase_one_mode == "mechanical"
+    assert args.acados_transfer_phase_one_lookback_nodes == 15
     assert args.acados_transfer_rollout_substeps == 7
     assert args.full_dynamics_phase_one_max_state_change == 20
+    assert args.full_dynamics_phase_one_max_q_change == 1
+    assert args.full_dynamics_phase_one_max_qdot_change == 2
+    assert args.full_dynamics_phase_one_max_fes_change == 3
     assert comparison_args.shared_transfer_full_dynamics_rollout is True
     assert comparison_args.compact_rho_output is True
     assert comparison_args.shared_transfer_phase_one is True
     assert comparison_args.acados_transfer_phase_one is True
+    assert comparison_args.acados_transfer_phase_one_mode == "mechanical"
+    assert comparison_args.acados_transfer_phase_one_lookback_nodes == 15
     assert comparison_args.acados_cyclical_transfer_mode == "repeat"
     assert comparison_args.acados_transfer_phase_one_proximity_weight == 0
     assert comparison_args.acados_transfer_phase_one_defect_weight == 1
     assert comparison_args.acados_transfer_phase_one_substeps == 10
     assert comparison_args.acados_transfer_phase_one_max_state_change == 20
+    assert comparison_args.acados_transfer_phase_one_max_q_change == 1
+    assert comparison_args.acados_transfer_phase_one_max_qdot_change == 2
+    assert comparison_args.acados_transfer_phase_one_max_fes_change == 3
     assert comparison_args.shared_initial_phase_one is True
     assert comparison_args.shared_transfer_rollout_substeps == 7
     assert comparison_args.shared_transfer_ding_force_compensation is True

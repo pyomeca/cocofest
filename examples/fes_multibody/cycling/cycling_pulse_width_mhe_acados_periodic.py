@@ -1113,6 +1113,25 @@ def build_argument_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--acados-transfer-phase-one-mode",
+        choices=("all", "mechanical"),
+        default="all",
+        help=(
+            "Update all appended states during transfer phase I, or preserve the "
+            "shifted Ding states and update only q/qdot."
+        ),
+    )
+    parser.add_argument(
+        "--acados-transfer-phase-one-lookback-nodes",
+        type=int,
+        default=None,
+        help=(
+            "Number of retained-cycle nodes reprojected before the appended-cycle "
+            "junction. The default reprojects the complete retained cycle; zero "
+            "restricts phase I to the appended cycle."
+        ),
+    )
+    parser.add_argument(
         "--acados-transfer-bound-homotopy",
         action="store_true",
         help=(
@@ -1303,6 +1322,16 @@ def build_argument_parser() -> argparse.ArgumentParser:
             "Larger corrections trigger monotone backtracking."
         ),
     )
+    for block in ("q", "qdot", "fes"):
+        parser.add_argument(
+            f"--full-dynamics-phase-one-max-{block}-change",
+            type=float,
+            default=None,
+            help=(
+                f"Optional maximum absolute {block} correction accepted from phase I. "
+                "The limit is checked after projection into the state bounds."
+            ),
+        )
     parser.add_argument(
         "--check-wheel-periodicity",
         action="store_true",
@@ -4220,6 +4249,16 @@ def _rk4_full_dynamics_step(
     return next_state
 
 
+def _full_dynamics_defect_state_scales(nlp, states: np.ndarray) -> np.ndarray:
+    """Use a turn-invariant scale for angular coordinates."""
+
+    scales = np.maximum(np.max(np.abs(states), axis=1, keepdims=True), 1.0)
+    if "q" in nlp.states.keys():
+        q_indexes = np.asarray(nlp.states["q"].index).reshape((-1,)).tolist()
+        scales[q_indexes, :] = 2.0 * np.pi
+    return scales
+
+
 def _full_dynamics_rollout_defect_details(
     nmpc, n_substeps: int = 5, top_key_count: int = 8
 ) -> dict[str, dict[str, float]]:
@@ -4257,7 +4296,7 @@ def _full_dynamics_rollout_defect_details(
         )
 
     defects = states[:, 1:] - predicted[:, 1:]
-    state_scales = np.maximum(np.max(np.abs(states), axis=1, keepdims=True), 1.0)
+    state_scales = _full_dynamics_defect_state_scales(nlp, states)
     scaled_defects = defects / state_scales
 
     absolute_by_block = {}
@@ -4556,6 +4595,10 @@ def project_full_dynamics_initial_guess(
     n_substeps: int = 10,
     max_backtracking_steps: int = 6,
     max_state_change: float | None = None,
+    max_state_change_by_block: dict[str, float] | None = None,
+    start_node: int = 0,
+    mutable_blocks: tuple[str, ...] = ("q", "qdot", "fes"),
+    monotone_blocks: tuple[str, ...] | None = None,
 ) -> dict:
     """Sequential proximal phase I with a monotone backtracking safeguard."""
 
@@ -4565,6 +4608,36 @@ def project_full_dynamics_initial_guess(
         raise ValueError("Phase-I backtracking steps must be non-negative.")
     if max_state_change is not None and max_state_change <= 0.0:
         raise ValueError("Phase-I maximum state change must be strictly positive.")
+    max_state_change_by_block = dict(max_state_change_by_block or {})
+    unsupported_blocks = set(max_state_change_by_block) - {"q", "qdot", "fes"}
+    if unsupported_blocks:
+        raise ValueError(
+            "Unsupported phase-I state-change blocks: "
+            f"{', '.join(sorted(unsupported_blocks))}."
+        )
+    if any(limit <= 0.0 for limit in max_state_change_by_block.values()):
+        raise ValueError(
+            "Phase-I maximum state changes by block must be strictly positive."
+        )
+    supported_blocks = {"q", "qdot", "fes"}
+    mutable_blocks = tuple(dict.fromkeys(mutable_blocks))
+    unsupported_mutable_blocks = set(mutable_blocks) - supported_blocks
+    if unsupported_mutable_blocks:
+        raise ValueError(
+            "Unsupported mutable phase-I blocks: "
+            f"{', '.join(sorted(unsupported_mutable_blocks))}."
+        )
+    if not mutable_blocks:
+        raise ValueError("At least one phase-I state block must be mutable.")
+    monotone_blocks = (
+        None if monotone_blocks is None else tuple(dict.fromkeys(monotone_blocks))
+    )
+    unsupported_monotone_blocks = set(monotone_blocks or ()) - supported_blocks
+    if unsupported_monotone_blocks:
+        raise ValueError(
+            "Unsupported monotone phase-I blocks: "
+            f"{', '.join(sorted(unsupported_monotone_blocks))}."
+        )
     before = _full_dynamics_rollout_defect_details(nmpc, n_substeps=n_substeps)
     nlp = nmpc.nlp[0]
     first_state_key = next(iter(nlp.x_init.keys()))
@@ -4576,6 +4649,8 @@ def project_full_dynamics_initial_guess(
             "The complete-dynamics phase-I projection currently requires one state node "
             "per shooting endpoint; use RK4, RK8 or IRK instead of direct collocation."
         )
+    if start_node < 0 or start_node >= n_control_nodes:
+        raise ValueError("Phase-I start_node must index a control node.")
     state_snapshot = {
         key: np.asarray(nlp.x_init[key].init, dtype=float).copy()
         for key in nlp.x_init.keys()
@@ -4594,8 +4669,45 @@ def project_full_dynamics_initial_guess(
         lower[indexes, :] = key_lower
         upper[indexes, :] = key_upper
 
+    block_indexes = {
+        "q": (
+            np.asarray(nlp.states["q"].index).reshape((-1,)).tolist()
+            if "q" in nlp.states.keys()
+            else []
+        ),
+        "qdot": (
+            np.asarray(nlp.states["qdot"].index).reshape((-1,)).tolist()
+            if "qdot" in nlp.states.keys()
+            else []
+        ),
+        "fes": [
+            index
+            for key in nlp.states.keys()
+            if key not in ("q", "qdot")
+            for index in np.asarray(nlp.states[key].index).reshape((-1,)).tolist()
+        ],
+    }
+    mutable_indexes = [
+        index for block in mutable_blocks for index in block_indexes[block]
+    ]
+    if not mutable_indexes:
+        raise ValueError("The requested mutable phase-I blocks contain no states.")
+    historical_full_projection = start_node == 0 and set(mutable_blocks) == {
+        "q",
+        "qdot",
+        "fes",
+    }
+
+    def restore_fixed_states() -> None:
+        for key in nlp.x_init.keys():
+            values = nlp.x_init[key].init
+            values[:, : start_node + 1] = state_snapshot[key][:, : start_node + 1]
+            block = key if key in ("q", "qdot") else "fes"
+            if block not in mutable_blocks:
+                values[:, :] = state_snapshot[key]
+
     dt = nmpc.cycle_duration / nmpc.cycle_len
-    for node in range(n_control_nodes):
+    for node in range(start_node, n_control_nodes):
         numerical_data = _numerical_timeseries_at_node(nlp, node)
         predicted = _rk4_full_dynamics_step(
             nlp,
@@ -4606,19 +4718,31 @@ def project_full_dynamics_initial_guess(
             n_substeps=n_substeps,
             numerical_timeseries=numerical_data,
         )
-        states[:, node + 1] = _proximal_phase_one_update(
-            reference[:, node + 1],
-            predicted,
-            lower[:, node + 1],
-            upper[:, node + 1],
-            proximity_weight,
-            defect_weight,
-        )
+        if historical_full_projection:
+            states[:, node + 1] = _proximal_phase_one_update(
+                reference[:, node + 1],
+                predicted,
+                lower[:, node + 1],
+                upper[:, node + 1],
+                proximity_weight,
+                defect_weight,
+            )
+        else:
+            states[mutable_indexes, node + 1] = _proximal_phase_one_update(
+                reference[mutable_indexes, node + 1],
+                predicted[mutable_indexes],
+                lower[mutable_indexes, node + 1],
+                upper[mutable_indexes, node + 1],
+                proximity_weight,
+                defect_weight,
+            )
 
     for key in nlp.states.keys():
         indexes = np.asarray(nlp.states[key].index).reshape((-1,)).tolist()
         nlp.x_init[key].init[:, :] = states[indexes, :]
     nmpc._correct_init_guess_to_fit_bounds(corrected_input="states")
+    if not historical_full_projection:
+        restore_fixed_states()
     nmpc._sync_acados_state_bounds()
     candidate_after = _full_dynamics_rollout_defect_details(nmpc, n_substeps=n_substeps)
     candidate_bound_violation_after = _maximum_state_initial_guess_bound_violation(nmpc)
@@ -4627,30 +4751,68 @@ def project_full_dynamics_initial_guess(
         for key in nlp.x_init.keys()
     }
 
-    def maximum_state_change(values: dict) -> float:
-        return max(
-            (
-                float(np.max(np.abs(values[key] - state_snapshot[key])))
-                for key in state_snapshot
-            ),
-            default=0.0,
-        )
+    state_keys_by_block = {
+        "q": tuple(key for key in state_snapshot if key == "q"),
+        "qdot": tuple(key for key in state_snapshot if key == "qdot"),
+        "fes": tuple(key for key in state_snapshot if key not in ("q", "qdot")),
+    }
 
-    candidate_max_state_change = maximum_state_change(candidate_state_values)
+    def state_change_by_block(values: dict) -> dict[str, float]:
+        return {
+            block: max(
+                (
+                    float(np.max(np.abs(values[key] - state_snapshot[key])))
+                    for key in keys
+                ),
+                default=0.0,
+            )
+            for block, keys in state_keys_by_block.items()
+        }
+
+    def maximum_state_change(changes_by_block: dict[str, float]) -> float:
+        return max(changes_by_block.values(), default=0.0)
+
+    candidate_state_change_by_block = state_change_by_block(candidate_state_values)
+    candidate_max_state_change = maximum_state_change(candidate_state_change_by_block)
 
     def maximum_scaled_defect(details: dict) -> float:
         return max(details.get("scaled_by_block", {}).values(), default=0.0)
 
+    def selection_scaled_defect(details: dict) -> float:
+        if monotone_blocks is None:
+            return maximum_scaled_defect(details)
+        return max(
+            (
+                details.get("scaled_by_block", {}).get(block, np.inf)
+                for block in monotone_blocks
+            ),
+            default=np.inf,
+        )
+
     scaled_defect_before = maximum_scaled_defect(before)
     candidate_scaled_defect_after = maximum_scaled_defect(candidate_after)
+    selection_defect_before = selection_scaled_defect(before)
     defect_tolerance = max(1e-12, abs(scaled_defect_before) * 1e-12)
     bound_tolerance = max(1e-12, abs(bound_violation_before) * 1e-12)
+    block_defect_tolerances = {
+        block: max(1e-12, abs(value) * 1e-12)
+        for block, value in before.get("scaled_by_block", {}).items()
+    }
 
     def admissible(
+        details: dict,
         scaled_defect: float,
         bound_violation: float,
         state_change: float,
+        changes_by_block: dict[str, float],
     ) -> bool:
+        blockwise_monotone = monotone_blocks is None or all(
+            block in details.get("scaled_by_block", {})
+            and block in before.get("scaled_by_block", {})
+            and details["scaled_by_block"][block]
+            <= before["scaled_by_block"][block] + block_defect_tolerances[block]
+            for block in monotone_blocks
+        )
         return bool(
             np.isfinite(scaled_defect)
             and np.isfinite(bound_violation)
@@ -4658,17 +4820,29 @@ def project_full_dynamics_initial_guess(
             and scaled_defect <= scaled_defect_before + defect_tolerance
             and bound_violation <= bound_violation_before + bound_tolerance
             and (max_state_change is None or state_change <= max_state_change)
+            and all(
+                changes_by_block[block] <= limit
+                for block, limit in max_state_change_by_block.items()
+            )
+            and blockwise_monotone
         )
 
     candidate_accepted = admissible(
+        candidate_after,
         candidate_scaled_defect_after,
         candidate_bound_violation_after,
         candidate_max_state_change,
+        candidate_state_change_by_block,
     )
     selected_step = 1.0 if candidate_accepted else 0.0
     selected_details = candidate_after if candidate_accepted else before
     selected_scaled_defect = (
         candidate_scaled_defect_after if candidate_accepted else scaled_defect_before
+    )
+    selected_selection_defect = (
+        selection_scaled_defect(candidate_after)
+        if candidate_accepted
+        else selection_defect_before
     )
     selected_bound_violation = (
         candidate_bound_violation_after
@@ -4687,6 +4861,8 @@ def project_full_dynamics_initial_guess(
                     candidate_state_values[key] - state_snapshot[key]
                 )
             nmpc._correct_init_guess_to_fit_bounds(corrected_input="states")
+            if not historical_full_projection:
+                restore_fixed_states()
             nmpc._sync_acados_state_bounds()
             trial_details = _full_dynamics_rollout_defect_details(
                 nmpc, n_substeps=n_substeps
@@ -4697,11 +4873,14 @@ def project_full_dynamics_initial_guess(
                 key: np.asarray(nlp.x_init[key].init, dtype=float)
                 for key in nlp.x_init.keys()
             }
-            trial_max_state_change = maximum_state_change(trial_state_values)
+            trial_state_change_by_block = state_change_by_block(trial_state_values)
+            trial_max_state_change = maximum_state_change(trial_state_change_by_block)
             trial_admissible = admissible(
+                trial_details,
                 trial_scaled_defect,
                 trial_bound_violation,
                 trial_max_state_change,
+                trial_state_change_by_block,
             )
             backtracking_evaluations.append(
                 {
@@ -4709,16 +4888,19 @@ def project_full_dynamics_initial_guess(
                     "scaled_defect": trial_scaled_defect,
                     "bound_violation": trial_bound_violation,
                     "max_state_change": trial_max_state_change,
+                    "state_change_by_block": trial_state_change_by_block,
                     "admissible": trial_admissible,
                 }
             )
             if (
                 trial_admissible
-                and trial_scaled_defect < selected_scaled_defect - defect_tolerance
+                and selection_scaled_defect(trial_details)
+                < selected_selection_defect - defect_tolerance
             ):
                 selected_step = step
                 selected_details = trial_details
                 selected_scaled_defect = trial_scaled_defect
+                selected_selection_defect = selection_scaled_defect(trial_details)
                 selected_bound_violation = trial_bound_violation
                 selected_state_values = {
                     key: np.asarray(nlp.x_init[key].init, dtype=float).copy()
@@ -4729,7 +4911,8 @@ def project_full_dynamics_initial_guess(
     for key, values in selected_state_values.items():
         nlp.x_init[key].init[:, :] = values
     nmpc._sync_acados_state_bounds()
-    selected_max_state_change = maximum_state_change(selected_state_values)
+    selected_state_change_by_block = state_change_by_block(selected_state_values)
+    selected_max_state_change = maximum_state_change(selected_state_change_by_block)
 
     return {
         "proximity_weight": proximity_weight,
@@ -4737,6 +4920,10 @@ def project_full_dynamics_initial_guess(
         "n_substeps": n_substeps,
         "max_backtracking_steps": max_backtracking_steps,
         "max_state_change_limit": max_state_change,
+        "max_state_change_limits_by_block": max_state_change_by_block,
+        "start_node": start_node,
+        "mutable_blocks": mutable_blocks,
+        "monotone_blocks": monotone_blocks,
         "backtracking_evaluations": backtracking_evaluations,
         "accepted": accepted,
         "restored": not accepted,
@@ -4757,6 +4944,8 @@ def project_full_dynamics_initial_guess(
         "candidate_bound_violation_after": candidate_bound_violation_after,
         "max_state_change": selected_max_state_change,
         "candidate_max_state_change": candidate_max_state_change,
+        "state_change_by_block": selected_state_change_by_block,
+        "candidate_state_change_by_block": candidate_state_change_by_block,
     }
 
 
@@ -7789,6 +7978,23 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
         raise ValueError(
             "--full-dynamics-phase-one-max-state-change must be strictly positive."
         )
+    phase_one_max_state_change_by_block = {
+        block: getattr(args, f"full_dynamics_phase_one_max_{block}_change")
+        for block in ("q", "qdot", "fes")
+        if getattr(args, f"full_dynamics_phase_one_max_{block}_change") is not None
+    }
+    if any(limit <= 0 for limit in phase_one_max_state_change_by_block.values()):
+        raise ValueError(
+            "--full-dynamics-phase-one maximum changes by block must be "
+            "strictly positive."
+        )
+    if (
+        args.acados_transfer_phase_one_lookback_nodes is not None
+        and args.acados_transfer_phase_one_lookback_nodes < 0
+    ):
+        raise ValueError(
+            "--acados-transfer-phase-one-lookback-nodes must be non-negative."
+        )
     if args.acados_continuation_source_max_iterations < 1:
         raise ValueError(
             "--acados-continuation-source-max-iterations must be strictly positive."
@@ -8444,6 +8650,14 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
             print(f"acados_transfer_irk_rollout: {args.acados_transfer_irk_rollout}")
             print(f"acados_transfer_phase_one: {args.acados_transfer_phase_one}")
             print(
+                "acados_transfer_phase_one_mode: "
+                f"{args.acados_transfer_phase_one_mode}"
+            )
+            print(
+                "acados_transfer_phase_one_lookback_nodes: "
+                f"{args.acados_transfer_phase_one_lookback_nodes}"
+            )
+            print(
                 "acados_transfer_bound_homotopy: "
                 f"{args.acados_transfer_bound_homotopy}"
             )
@@ -8541,6 +8755,10 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
         print(
             "full_dynamics_phase_one_max_state_change: "
             f"{args.full_dynamics_phase_one_max_state_change}"
+        )
+        print(
+            "full_dynamics_phase_one_max_state_change_by_block: "
+            f"{phase_one_max_state_change_by_block or None}"
         )
 
     if periodic_cn_sum_approximation and not args.disable_standard_ipopt_warmup:
@@ -8773,6 +8991,7 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
             defect_weight=args.full_dynamics_phase_one_defect_weight,
             n_substeps=args.full_dynamics_phase_one_substeps,
             max_state_change=args.full_dynamics_phase_one_max_state_change,
+            max_state_change_by_block=phase_one_max_state_change_by_block,
         )
         if echo:
             print(
@@ -8786,6 +9005,8 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
                 f"candidate_scaled_defect_after="
                 f"{phase_one_summary['candidate_scaled_defect_after']:.6g} "
                 f"max_state_change={phase_one_summary['max_state_change']:.6g} "
+                f"state_change_by_block="
+                f"{phase_one_summary['state_change_by_block']} "
                 f"scaled_by_block_after="
                 f"{phase_one_summary['scaled_by_block_after']}"
             )
@@ -9262,12 +9483,34 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
                     f"worst_key={worst_key}"
                 )
         if continue_solving and _sol is not None and args.acados_transfer_phase_one:
+            transfer_phase_one_blocks = (
+                ("q", "qdot")
+                if args.acados_transfer_phase_one_mode == "mechanical"
+                else ("q", "qdot", "fes")
+            )
+            transfer_phase_one_start_node = max(
+                0,
+                _nmpc.cycle_len
+                - (
+                    _nmpc.cycle_len
+                    if args.acados_transfer_phase_one_lookback_nodes is None
+                    else args.acados_transfer_phase_one_lookback_nodes
+                ),
+            )
             phase_one_summary = project_full_dynamics_initial_guess(
                 _nmpc,
                 proximity_weight=args.full_dynamics_phase_one_proximity_weight,
                 defect_weight=args.full_dynamics_phase_one_defect_weight,
                 n_substeps=args.full_dynamics_phase_one_substeps,
                 max_state_change=args.full_dynamics_phase_one_max_state_change,
+                max_state_change_by_block=phase_one_max_state_change_by_block,
+                start_node=transfer_phase_one_start_node,
+                mutable_blocks=transfer_phase_one_blocks,
+                monotone_blocks=(
+                    transfer_phase_one_blocks
+                    if args.acados_transfer_phase_one_mode == "mechanical"
+                    else None
+                ),
             )
             if echo:
                 print(
@@ -9279,6 +9522,10 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
                     f"candidate_scaled_defect_after="
                     f"{phase_one_summary['candidate_scaled_defect_after']:.6g} "
                     f"max_state_change={phase_one_summary['max_state_change']:.6g} "
+                    f"state_change_by_block="
+                    f"{phase_one_summary['state_change_by_block']} "
+                    f"start_node={phase_one_summary['start_node']} "
+                    f"mutable_blocks={phase_one_summary['mutable_blocks']} "
                     f"scaled_by_block_before="
                     f"{phase_one_summary['scaled_by_block_before']} "
                     f"scaled_by_block_after="
