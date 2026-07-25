@@ -1,5 +1,8 @@
 import pyorerun as prr
-import biorbd
+try:
+    import biorbd
+except ImportError:  # Source-built Linux CasADi backend.
+    import biorbd_casadi as biorbd
 import pickle
 import numpy as np
 

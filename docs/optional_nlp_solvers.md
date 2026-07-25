@@ -1,0 +1,648 @@
+# MadNLP and Alpaqa for the cycling fatigue problem
+
+The cycling MHE accepts `ipopt`, `madnlp`, `alpaqa`, and `acados` as solver
+backends. The solver-comparison entry point runs a selected matrix and defaults
+to the fatigue-only objective:
+
+```bash
+python examples/fes_multibody/cycling/cycling_fes_solver_comparison.py \
+  --solvers madnlp,alpaqa \
+  --objective fatigue \
+  --objective-shape quadratic \
+  --ipopt-profile periodic-collocation \
+  --cycles-per-window 1 \
+  --stimulations-per-cycle 30 \
+  --n-windows 3 \
+  --n-threads 8 \
+  --state-scaling full \
+  --madnlp-max-iter 300 \
+  --alpaqa-max-iter 300 \
+  --alpaqa-max-wall-time 60 \
+  --max-consecutive-failing 1 \
+  --output-json /tmp/cocofest-fatigue-solvers.json
+```
+
+## Cross-solver hot-start and tuning
+
+MadNLP and Alpaqa use the exact same transcription, scaling, terminal crank
+bound, standard warmup, and shifted primal MHE trajectory as IPOPT. The
+comparison runner additionally seeds their first window, by default, with the
+cached periodic IPOPT solution. That seed is committed only when IPOPT exposes
+a measured primal infeasibility below the acceptance threshold. Disable it
+with `--no-optional-nlp-periodic-ipopt-hot-start` to measure cold robustness.
+The one-off IPOPT time is reported as warm-start preparation and is not part of
+the hot-window solver timing.
+
+The CasADi build used for the assisted endurance benchmark must expose both
+`ipopt` and the target plugin. A local diagnostic build containing only
+MadNLP/Alpaqa cannot execute either the standard IPOPT warmup or the certified
+periodic seed. In that special case, both
+`--ipopt-disable-standard-warmup` and
+`--no-optional-nlp-periodic-ipopt-hot-start` are required, but the resulting
+cold solve is not representative of the intended endurance workflow.
+
+The useful transfers are not identical for every backend:
+
+| Mechanism | IPOPT | MadNLP | Alpaqa | ACADOS |
+|---|---|---|---|---|
+| Shifted primal trajectory | yes | yes | yes | yes |
+| Periodic IPOPT seed | native reference | optional/default in comparison | optional/default in comparison | default |
+| Constraint multiplier reuse | optional | experimental | supported | reset/rebuilt |
+| Bound multiplier reuse | supported | experimental | unsupported by plugin | backend-specific |
+| Internal scaling | IPOPT options | `--madnlp-nlp-scaling` | relies strongly on model/constraint scaling | QP scaling |
+| Linear solver choice | MUMPS/MA57 | MadNLP runtime types | not applicable to PANOC | QP solver |
+| Native C evaluator | optional | experimental | unsupported by the CasADi plugin | generated code |
+| Time budget | IPOPT option | `--madnlp-max-wall-time` | ALM and inner PANOC budgets | backend timeout |
+
+Relevant MadNLP screens include:
+
+```bash
+--madnlp-linear-solver MumpsSolver
+--madnlp-linear-solver UmfpackSolver
+--madnlp-linear-solver LDLSolver
+--madnlp-nlp-scaling
+--madnlp-acceptable-tolerance 1e-5
+--madnlp-acceptable-iterations 2
+--madnlp-max-wall-time 600
+```
+
+`Ma57Solver` is also accepted by MadNLP, but it uses MadNLPHSL's Julia runtime.
+It does not reuse `--ipopt-hsl-library`. On the tested macOS runtime it failed
+because its own `libhsl_subset.dylib` path was unresolved, even though IPOPT
+could load MA57 successfully. Do not select it on the calculator until a
+minimal MadNLP-MA57 solve passes there.
+
+Relevant Alpaqa screens include:
+
+```bash
+--alpaqa-lbfgs-memory 20
+--alpaqa-max-iter 1000
+--alpaqa-alm-max-iter 50
+--alpaqa-initial-penalty 0
+--alpaqa-initial-tolerance 1e-3
+--alpaqa-penalty-update-factor 5
+--alpaqa-maximum-penalty 1e7
+--alpaqa-max-wall-time 600
+--alpaqa-panoc-max-wall-time 60
+--alpaqa-max-no-progress 100
+```
+
+Alpaqa is especially sensitive to constraint scaling, its initial penalty, and
+the ratio between the outer ALM and inner PANOC budgets. Test these one factor
+at a time. Its CasADi plugin cannot reconstruct the derivatives required after
+the current `nlp.c` import path, so C compilation remains explicitly
+unsupported.
+
+With the default quadratic shape, the fatigue objective is the Lagrange
+integral of `(1 - A_muscle / A_scale)^2` for every muscle. Its weight vector is
+`[0, 1, 0]`; force, stimulation-charge, terminal wheel-angle, control, and
+wheel-speed objectives are therefore disabled.
+
+## ACADOS assisted example
+
+The standalone ACADOS example now defaults to a `0.2 N.m` crank assistance:
+
+```bash
+python examples/fes_multibody/cycling/cycling_pulse_width_mhe_acados_periodic.py \
+  --crank-assistance 0.2 \
+  --n-windows 50 \
+  --compact-rho-output \
+  --max-consecutive-failing 2 \
+  --codegen-tag assistance_0p2
+```
+
+The crank turns in the negative direction (`qdot ~= -2*pi rad/s`), so the
+assistance magnitude is converted internally to a signed `-0.2 N.m` torque.
+Its nominal external power is therefore positive, about `+1.257 W`. Use
+`--signed-crank-torque 0.2` only for the opposite, genuinely resistive,
+experiment.
+
+The assisted defaults use the exact `periodic_node` forcing, a one-cycle
+horizon, full state scaling, exact first-node crank-angle continuity, and a
+`0.002 rad` terminal angle tolerance. The one-cycle horizon is intentional:
+it fixes the crank phase every cycle without introducing an internal seam,
+and halves the NLP size relative to the former two-cycle profile. The
+initialization pipeline is:
+
+1. solve the standard Ding collocation problem with the same assisted torque
+   using IPOPT-MUMPS;
+2. advance the solution by one executed cycle, including controls and the
+   continuous `A`, `Tau1`, and `Km` fatigue states;
+3. project the trajectory onto the periodic FES dynamics;
+4. run and cache one one-cycle periodic IPOPT refinement, accepting it only
+   when IPOPT reports a measured primal infeasibility below the threshold;
+5. solve ACADOS first with controls fixed to the IPOPT reference, then release
+   them over the measured radii `1e-8` and `1e-7 s`;
+6. retain the largest converged radius, then recenter that trust region after
+   every RHO shift.
+
+On the local one-cycle assisted test, the periodic IPOPT bridge converged with
+`inf_pr=4.73e-9` in `62.5 s` and was then cached. ACADOS reproduced its cost
+(`3.69957`) in `1.40 s`. A five-cycle MHE smoke test subsequently completed
+all five physical cycles: four windows converged in 3--7 SQP iterations and
+one non-consecutive window reached the 100-iteration limit; total ACADOS
+solver time was `37.4 s`, including `29.8 s` for that outlier. This is why
+`--max-consecutive-failing 2` remains useful for endurance runs.
+
+For explicit two-cycle experiments, ACADOS now receives stage-wise crank-angle
+bounds at every internal cycle seam. The old underconstrained formulation
+allowed the first and second cycle to cover about `0.793` and `1.207` turns,
+respectively, even though the total was two turns. The strict bridge exposes
+the resulting `~1.30 rad` phase error instead of silently optimizing a
+different problem. An experimental seam continuation is available through
+`--acados-cycle-boundary-homotopy-slacks`, but it is not the default: on the
+macOS test it had not reached the strict `0.002 rad` seam within the bounded
+continuation budget.
+
+The warm-start preparation time is reported separately from the ACADOS solve
+times, and `warmup_cycles_consumed=1` makes the initial fatigue advance
+explicit. Automatic caches include the signed torque. Explicit warmup seeds
+must also contain matching physical metadata, so an old `+0.2 N.m` resistance
+seed is rejected instead of being reused silently.
+
+A legacy seed created before metadata was introduced can only be used with an
+explicit sign assertion:
+
+```bash
+--standard-warmup-seed /absolute/path/to/legacy_warmup.npz \
+--legacy-standard-warmup-seed-signed-torque -0.2
+```
+
+The loader also checks that its control grid matches the requested horizon.
+The assertion is runtime-only; it does not rewrite the legacy file.
+
+## Bioptim and CasADi requirements
+
+The implementations currently live in two Bioptim 3.5 development branches:
+
+- MadNLP: `codex/madnlp-integration-master` at `346eb1d445e6ba67010b96c6f16ba830185119e7`;
+- Alpaqa: `codex/alpaqa-integration` at `d84e7e43534360fc048e0be26a3bd69a2abc2d77`.
+
+Install the applicable branch and a CasADi build that contains the corresponding
+`nlpsol` plugin. A normal Cocofest installation remains valid: unavailable
+optional solvers produce an actionable benchmark failure instead of preventing
+Cocofest from importing or aborting the rest of the solver matrix.
+
+The two development branches are separate. To expose both factories in one
+Python process, their Bioptim integrations must first be combined. Otherwise,
+run the same benchmark once per branch with `--solvers madnlp` and
+`--solvers alpaqa`; the JSON schema is identical.
+
+Plugin availability can be checked before a long solve:
+
+```python
+import casadi as ca
+from bioptim import Solver
+
+print("MadNLP:", hasattr(Solver, "MADNLP") and ca.has_nlpsol("madnlp"))
+print("Alpaqa:", hasattr(Solver, "ALPAQA") and ca.has_nlpsol("alpaqa"))
+```
+
+## NLP formulation and warm-start policy
+
+MadNLP and Alpaqa clone the complete IPOPT-side NLP selected by
+`--ipopt-profile`; only the nonlinear solver backend and its options change.
+This makes IPOPT, MadNLP, and Alpaqa directly comparable within a profile:
+
+- `historical` uses the standard formulation, segment-level external torque,
+  and `COLLOCATION(3, radau)`;
+- `periodic-collocation` uses `periodic_node`, a constant generalized crank
+  torque, and the same robust collocation scheme.
+
+The periodic profile is substantially faster for MadNLP in the macOS
+experiments below. It is still a different formulation from the historical
+profile and from the ACADOS RK transcription, so results must not be compared
+across those profiles as if they were the same NLP.
+
+The first horizon reuses the accumulated robust initialization pipeline:
+
+1. load and validate the historical collocation solution using a source-aware
+   cache signature;
+2. resample it exactly onto the active grid;
+3. project state and pulse-width values into their scaled bounds;
+4. preserve the FES rollout and accumulated fatigue states;
+5. audit finiteness and record a reproducible initial-guess signature.
+
+Between horizons, Cocofest advances one pedalling cycle, shifts the
+state/control trajectory, applies the signed wheel-angle shift, keeps fatigue
+states continuous, synchronizes fixed first-node values with the new bounds,
+and projects the result again.
+
+Direct collocation degree three stores 120 state samples but only 30 controls
+per cycle. These two strides are now kept separate when shifting a window. An
+earlier implementation incorrectly used the state stride for controls, so a
+60-control two-cycle vector was never shifted; all option screens made before
+this correction are labelled preliminary below.
+
+The shifted primal must not be replaced by Bioptim's generic warm-start helper.
+Multipliers can be assigned directly after size and finiteness checks:
+
+- MadNLP now defaults to no multiplier transfer. Its primal state/control
+  hot-start remains enabled.
+- Bound and constraint multiplier transfer remains available as an explicit
+  ablation, but those blocks are not yet shifted structurally by cycle.
+- Alpaqa accepts only constraint multipliers (`lam_g`) through CasADi.
+
+The shifted primal and first-node synchronization are therefore the reliable
+warm start. Multiplier transfer should not become the default until its blocks
+are transformed consistently with the receding horizon.
+
+The number of Bioptim/CasADi workers is configurable with `--n-threads` and
+defaults to the logical CPU count. This replaces the historical hard-coded
+value of 48, which oversubscribed smaller machines. When these workers are
+enabled, keep nested BLAS/OpenMP pools at one thread unless a separate timing
+experiment demonstrates a benefit.
+
+For a same-direction torque continuation in `0.02 N.m` increments, a
+neighbouring solved warmup can be reused without rebuilding it:
+
+```bash
+--standard-warmup-seed /absolute/path/to/warmup_previous_torque.npz
+```
+
+This bypasses only the standard IPOPT seed solve. The target OCP and its
+constant torque are still rebuilt at the requested new load, then MadNLP
+optimizes the complete target NLP. The seed path is stored in benchmark JSON
+for provenance. The cache metadata must match the horizon, stimulation grid,
+torque application, and mechanical role. In particular, a resistance seed
+cannot be reused for an assisted target.
+
+## Linux GitHub Actions endurance benchmark
+
+The manually triggered
+[`cycling_solver_benchmark_linux.yml`](../.github/workflows/cycling_solver_benchmark_linux.yml)
+workflow runs IPOPT-MUMPS, MadNLP, and Alpaqa in parallel on separate Linux runners.
+The default Kevin experiment compares IPOPT-MUMPS, MadNLP, and Alpaqa over
+30 one-cycle RHO windows and stops after two consecutive failed windows. It
+uses the assisted physical case (`-0.20 N.m` signed crank torque), 30
+stimulations per cycle, the fatigue-only objective, periodic Radau
+collocation, and a `0.002 rad` terminal crank-angle slack.
+
+A preliminary IPOPT job builds one content-addressed, physically certified
+assisted seed. The three benchmark jobs download exactly that immutable
+artifact. MadNLP and Alpaqa additionally run the periodic IPOPT hot start, and
+its cost remains visible in `initial_guess_preparation_time_s`; the warm RHO
+wall times are therefore reported separately from end-to-end time.
+
+Each job determines its effective CPU allocation with `nproc` and passes that
+value to `--n-threads`. Nested OpenMP, BLAS, NumExpr, and Julia pools stay at
+one thread so that CasADi owns the runner-wide parallelism instead of
+oversubscribing every worker. The same value is used to compile the
+source-built CasADi-compatible biorbd dependency.
+
+The default GitHub-hosted runner can be replaced at dispatch time by the label
+of a larger Linux or self-hosted runner. For example:
+
+```bash
+gh workflow run cycling_solver_benchmark_linux.yml \
+  --repo mickaelbegon/cocofest-pedalage \
+  --ref codex/acados-pr-refresh \
+  -f runner_label=ubuntu-22.04 \
+  -f cycles=30 \
+  -f crank_assistance_nm=0.20 \
+  -f terminal_wheel_q_slack=0.002 \
+  -f solver_max_iterations=2000
+```
+
+The action pins the validated MadNLP and Alpaqa Bioptim integration commits.
+Because those integrations currently live on separate branches, the combined
+report records both SHAs and flags that provenance explicitly. Each job first
+asserts that IPOPT and its target plugin coexist in the same CasADi runtime.
+The Alpaqa job builds CasADi 3.7.2 with the pinned Alpaqa 1.0.0a16 source;
+the other two jobs use the validated MadNLP runtime archive.
+
+Each solver artifact contains its JSON and complete log. A final report job
+adds a side-by-side Markdown summary, `rho-timings.csv`, the raw stimulation
+profiles in `stimulation-patterns.csv`, and one combined JSON. The checkpoints
+called “10” and “30” are the executed cycles/RHO 10 and 30 of the same run,
+not OCPs containing 10 or 30 simultaneous cycles. Patterns are exported only
+when the checkpoint belongs to the strictly converged prefix, and include the
+real crank phase and velocity so that a kinematic phase shift is not mistaken
+for a stimulation-strategy difference.
+
+Solver non-convergence is a benchmark result: the JSON preserves all attempted
+windows, while `validated_cycles` remains the strict prefix ending before the
+first failed or infeasible RHO. Status-zero count, independent bound
+violations, native status, and both failed attempts remain available for
+diagnosis.
+
+MA57 is deliberately not part of the portable public-runner matrix because
+CoinHSL cannot be redistributed with a public action. IPOPT-MUMPS is therefore
+the Linux reference. A private runner can add MA57 once its licensed CoinHSL
+path is provisioned locally.
+
+## IPOPT with MA57 and compiled NLP evaluators
+
+IPOPT can load CoinHSL without copying a dynamic library into the active Conda
+environment:
+
+```bash
+--ipopt-linear-solver ma57 \
+--ipopt-hsl-library \
+  /Users/mickaelbegon/miniconda3/envs/Dev_bioptim/lib/libcoinhsl.2.dylib
+```
+
+The selected library is ARM64, contains the MA57 symbols, and has been
+validated with IPOPT 3.14.19. Supplying the absolute path is safer than copying
+it because its Homebrew runtime dependencies remain resolved from the original
+installation. Do not use the small Julia `libhsl.dylib` shim shipped with the
+MadNLP environment as an IPOPT CoinHSL replacement.
+
+`--ipopt-c-compile` and the experimental `--madnlp-c-compile` generate native C
+evaluators for the objective, constraints, gradient, Jacobian, and Lagrangian
+Hessian. They do not compile IPOPT, MadNLP, or MA57 themselves. Each benchmark
+uses a temporary build directory because Bioptim currently generates the fixed
+filename `nlp.c`.
+
+The JSON reports three distinct costs:
+
+- `end_to_end_wall_time_s` includes OCP setup and C generation/compilation;
+- the first window includes the initial solver setup;
+- `hot_solver_time_*` excludes the first successful window and is the primary
+  metric for repeated solves after the OCP has been constructed.
+
+It also exports `nlp_solver_stats` for every window. These are the CasADi/IPOPT
+`t_wall_*`, `t_proc_*`, and `n_call_*` counters. In particular, subtracting
+objective, constraint, gradient, Hessian, and Jacobian evaluation wall times
+from `t_wall_total` gives a useful, although still aggregate, estimate of the
+IPOPT/linear-algebra remainder. It is not a pure factorization timer because it
+also retains line-search and other IPOPT work. It nevertheless prevents
+variable derivative-evaluation time from being attributed incorrectly to
+MUMPS or MA57.
+
+For a receding horizon, `window_objective_sum` is only the sum of the solved
+subproblems. Horizons overlap whenever they contain more than one cycle but
+advance by one cycle, so this sum is then not the cost of the executed
+trajectory. `executed_fatigue_objective` re-evaluates
+`10000 * integral(sum((1 - A / a_scale)^2))` with a common trapezoidal
+quadrature on the unique exported cycles. The fatigue AUC, final
+`A / a_scale`, and pulse-width saturation are reported alongside it.
+
+On the tested Apple Silicon Mac, C compilation did not help either backend. For
+the same three-cycle periodic problem, IPOPT-MA57 increased from 10.97 s to
+15.72 s hot and from 20.64 s to 91.15 s end-to-end. MadNLP increased from
+9.49 s to 12.41 s hot and from 29.61 s to 110.74 s end-to-end. The MadNLP
+CasADi 3.8.0 generator also required a Clang workaround for invalid null-pointer
+arithmetic, so compiled mode remains experimental and is disabled by default.
+
+## Historical-profile fatigue benchmark
+
+The following multi-window measurement was run on macOS on 2026-07-24 with
+Python 3.11, CasADi 3.8.0, the two Bioptim integrations combined, two cycles per
+horizon, three requested cycles, 30 stimulations per cycle, full state scaling,
+the historical collocation seed, tolerance `1e-6`, and one solver process:
+
+| Solver | Outcome | Validated cycles | Solver time | Iterations by window | Minimum final `A/A_scale` | Maximum mean normalized fatigue | Summed fatigue AUC |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| MadNLP | success | 3 | 70.756 s | 125, 84 | 0.993626 | 0.003101 | 0.014412 muscle·cycle |
+| Alpaqa | `SOLVER_RET_LIMITED` | 0 | 60.031 s | not exposed | not scored | not scored | not scored |
+
+Alpaqa produced a physically plausible diagnostic trajectory, but its solver
+status was non-zero when the configured 60 s wall-time limit was reached. It is
+intentionally excluded from validated fatigue and per-cycle timing metrics; the
+native status recorded in the JSON distinguishes a time limit from another
+solver termination reason.
+
+MadNLP's shifted second window took 26.899 s versus 43.857 s for the first
+window, with 84 versus 125 iterations. This exercises the complete inter-window
+pipeline and supports the warm-start choice, but it does not isolate the
+individual contributions of the shifted primal and the bound multipliers.
+
+The JSON summary records the model `a_scale` values, final primal infeasibility
+against a `10 × tolerance` acceptance threshold, global state/control
+finiteness, per-window status, objective, iterations and timing, warm-start
+signatures and multiplier transfers, native solver status, and runtime
+versions.
+
+Both MadNLP windows pass the `1e-5` feasibility threshold: their final primal
+infeasibilities are `3.36e-9` and `8.56e-8`. Alpaqa finishes with
+`SOLVER_RET_LIMITED`, a primal infeasibility of `30.97`, and is rejected before
+any fatigue metric is calculated.
+
+## Periodic-collocation option screen
+
+The following preliminary six-cycle screen used the same `periodic_node`,
+constant `-0.2 N.m` torque,
+Radau degree-three collocation, historical seed, full scaling, eight CasADi
+workers, `1e-6` tolerance, and sequential solver processes:
+
+| Backend | Dual transfer | Outcome | Hot median | Hot P90 | Window-objective sum | Minimum `A/A_scale` |
+|---|---|---:|---:|---:|---:|---:|
+| IPOPT-MA57 candidate | bounds | 6/6 cycles | 50.82 s | 66.76 s | 5.028 | 0.98883 |
+| IPOPT-MUMPS | bounds | 6/6 cycles | 43.60 s | 47.10 s | 5.016 | 0.98877 |
+| MadNLP | all | 6/6 cycles | 9.23 s | 9.77 s | 5.119 | 0.98873 |
+| MadNLP | bounds | 6/6 cycles | 9.73 s | 10.22 s | 5.050 | 0.98863 |
+
+The two IPOPT rows are a contemporary sequential pair. The MadNLP rows come
+from the earlier low-load screen and must not be used to form a direct speedup
+ratio against the later IPOPT seconds.
+
+These absolute rows also predate the corrected 30-control cycle shift and the
+explicit internal cycle-boundary constraint. They are retained only to explain
+the MA57 investigation and must not be used as the final solver ranking.
+
+The IPOPT rows use the same MUMPS-built warm-up seed. An earlier cache key
+included the target linear solver, which gave MA57 and MUMPS different initial
+trajectories and invalidated the apparent solution-quality advantage of MA57.
+The corrected first window converges to the same objective
+(`0.232408982275...`) in 99 iterations for both solvers. Tiny numerical
+differences are subsequently amplified by the shifted primal/dual warm start
+of this nonconvex receding horizon.
+
+The MA57 candidate uses `ma57_pre_alloc=2`, `ma57_block_size=64`, and
+`ma57_node_amalgamation=32`. The larger pre-allocation removes a factor-memory
+reallocation; the other two values are architecture- and sparsity-dependent
+screening candidates, not general optima.
+
+A corrected `+0.22 N.m` paired run over ten cycles produced exactly the same
+iteration sequence for MUMPS and MA57 (`69, 55, 73, 67, 70, 76, 72, 69, 77`),
+the same window-objective sum to `1.4e-10`, and the same executed-fatigue
+objective to `1e-10`. The apparent hot median nevertheless favoured MUMPS
+(`8.09 s` versus `10.53 s`). The IPOPT timing output showed why that total was
+not a clean linear-solver comparison: Hessian and Jacobian evaluation wall
+times, which do not depend on the selected sparse factorizer, were much larger
+during the MA57 process.
+
+Two subsequent short repetitions recorded those oracle timings in JSON. At
+the same 69 and 55 iterations, the median wall-time remainder after subtracting
+all NLP evaluations was about 27--32 percent smaller with MA57. The total
+ranking varied with the much larger multithreaded Hessian/Jacobian cost. This
+remainder is consistent with a MA57 advantage but does not prove its cause,
+because it is not an isolated factorization timer. The interpretation is
+therefore:
+
+- the ARM64 CoinHSL/MA57 installation is valid and there is no evidence of a
+  wrong library or a different solution branch;
+- total macOS wall time is noisy enough to hide or reverse that gain;
+- compare repeated interleaved runs and the exported remainder, not a single
+  total time;
+- keep MUMPS as the operational baseline on this Mac because the longer
+  ten-cycle total favoured it, and retain MA57 as the controlled-performance
+  candidate when CoinHSL is available.
+
+For MadNLP, transferring all multipliers was only about five percent faster in
+this preliminary screen. Because neither constraint nor bound multiplier
+blocks are structurally shifted, the corrected endurance configuration uses
+`off` with `mu_init=0.01`; multiplier modes remain explicit performance
+ablations.
+
+Absolute late-run wall times were affected by concurrent macOS indexing,
+Defender, and desktop processes. The JSON stores every window separately and
+records the threading environment. The table supports the configuration
+choice, but it is not a hardware-independent speed claim.
+
+## Endurance, torque sign, and terminal crank angle
+
+A 30-cycle MadNLP run at the historical signed torque of `-0.22 N.m`
+converged for all 29 overlapping windows. Its hot median and P90 were 30.91 s
+and 41.52 s, its maximum final primal infeasibility was `3.67e-7`, and its
+executed fatigue objective was 291.82. The minimum final `A/A_scale` was still
+0.95362, so this run did not reach a physiological fatigue failure.
+
+That result must not be interpreted as propulsion against a `0.22 N.m`
+resistance. The crank coordinate and velocity decrease in the current model.
+The constant torque is added directly to the generalized wheel torque, so its
+mechanical power is
+
+```text
+P_external = tau_external * qdot_crank
+```
+
+With `tau=-0.22 N.m` and `qdot<0`, this power is positive: the external torque
+drives the crank while the muscles regulate or brake the motion. A physically
+resistive load for this rotation convention has positive torque. Benchmark
+JSON now records `external_crank_power` and classifies it as `driving`,
+`resistive`, or `neutral`; the endurance-to-failure sweep must use that
+diagnostic instead of relying on the option's historical name.
+
+The corrected positive-torque run at `+0.20 N.m` converged for all 29 windows
+and 30 exported cycles. MadNLP's hot median and P90 were 9.37 s and 13.06 s,
+the executed fatigue objective was 12094.87, and the minimum final
+`A/A_scale` reached 0.67676. Mean external crank power was -1.249 W, confirming
+that the load was resistive. This level still did not cause non-convergence;
+the load sweep therefore continues upward in `0.02 N.m` steps with two
+consecutive failures allowed.
+
+At the next continuation point, `+0.22 N.m`, both interior-point solvers reach
+the same failure region:
+
+| Backend | Validated cycles before stop | Last valid-window iterations | Two failed attempts: iterations | Failed primal infeasibilities |
+|---|---:|---:|---:|---:|
+| MadNLP | 9 | 123 | 1306, 1323 | 0.01068, 0.01413 |
+| IPOPT-MUMPS | 10 | 180 | 889, 837 | 0.01159, 0.01444 |
+
+This is substantially stronger evidence than a 1000-iteration cutoff: MadNLP
+was allowed 2000 iterations and still failed twice. The common, increasing
+infeasibility after a long feasible prefix supports a fatigue-dependent
+task-capacity boundary, and IPOPT is one cycle more robust in this experiment.
+It is not a mathematical proof that the NLP is infeasible: the last accepted
+capacity ratios are still approximately 0.846 for MadNLP and 0.831 for IPOPT,
+and both are local nonlinear solvers. A formal fatigue-failure statement would
+require a feasibility-restoration problem or a prescribed-cadence reduced
+model showing that no admissible stimulation can supply the required crank
+work.
+
+The crank angle can be tightened independently of the solver with
+`--first-node-wheel-q-slack` and `--terminal-wheel-q-slack`. The production
+screen uses exact inter-window continuity and `0.002 rad` at internal and final
+cycle boundaries. A custom boundary constraint is imposed at every executed
+cycle seam and recentered after every RHO shift; the terminal center remains
+anchored to the new first node plus
+`n_cycles_simultaneous * signed(2*pi)`. At 30 cycles the maximum local
+turn-progress error was 0.002002 rad. Its same-sign accumulation reached
+0.0380 rad, so use zero boundary slack when an exact absolute final crank angle
+is required.
+
+`physical_success` now checks progress against the problem's expected
+`-2*pi rad/cycle` direction. A finite but reversed or incomplete rotation is
+therefore rejected instead of being accepted merely because it contains no
+large angle jump.
+
+The internal seam constraint is currently added to IPOPT, MadNLP, and Alpaqa
+periodic NLPs. ACADOS still uses its own terminal-bound/diagnostic path and
+does not receive that same custom seam constraint. ACADOS-versus-NLP timings
+are therefore not a strictly paired transcription until an equivalent stage
+constraint is added to the ACADOS problem; the shared progress diagnostic at
+least rejects a wrong or incomplete turn.
+
+## Experimental removal of inactive pulse-width controls
+
+Zero stimulation is not a zero pulse width in the Ding model. An inactive
+control must be fixed to the rheobase-like lower bound `pd0` (approximately
+`0.000131405 s` here), because recruitment depends on `PW-pd0`. The
+experimental `--pulse-width-active-set warmup` option therefore:
+
+1. obtains the target-independent IPOPT warm-up;
+2. unions each muscle's active phase over the two cycles;
+3. circularly expands that phase by a configurable number of stimulation
+   nodes to account for delayed force production;
+4. fixes only the remaining pulse widths to `pd0`.
+
+The first mask table was invalidated by the control-shift bug described above.
+After correcting the shift, imposing an internal seam, fixing inter-window
+crank continuity exactly, using `0.02 rad` seam/terminal slack, disabling dual
+transfer, and reusing the same warmup, the six-cycle screen gave:
+
+| Formulation | Free pulse widths | Hot median / P90 | Iterations by window | Executed fatigue objective | Fatigue AUC |
+|---|---:|---:|---:|---:|---:|
+| full NLP | 240/240 | 7.96 / 15.32 s | 98, 90, 124, 107, 272 | 1.77384 | 0.047784 |
+| warm-up mask, margin 3 | 94/240 | 7.51 / 8.65 s | 102, 95, 99, 121, 120 | 1.82693 | 0.047422 |
+| warm-up mask, margin 4 | 110/240 | 6.17 / 6.21 s | 93, 88, 84, 93, 83 | 1.86633 | 0.048075 |
+
+Margin 3 removes the late 272-iteration outlier and reduces total solver time
+by 21 percent, but changes the executed fatigue objective by 2.99 percent and
+worsens minimum capacity. Margin 4 is faster in this one run but changes the
+executed fatigue objective by 5.21 percent. Neither meets the one-percent
+quality criterion, and one repetition is insufficient to claim a stable
+speedup.
+
+Consequently, the fixed-node mask is an experimental diagnostic, not the
+production formulation. A mask should be accepted only if, on the same seed
+and terminal constraints, it stays within one percent of the full-NLP executed
+fatigue objective and AUC, preserves the worst final capacity, and does not
+create an iteration outlier. A safer use is to obtain a masked candidate and
+then unfreeze and polish with the complete NLP.
+
+The current mask uses nodewise equality bounds and does not remove symbols from
+the CasADi graph. Larger structural gains require one of the following:
+
+- parameterize every muscle's periodic pulse train with a small cyclic spline
+  or Fourier basis, then polish in node space if necessary;
+- reduce the constrained arm-crank mechanics to the single crank coordinate
+  and precompute muscle effectiveness versus crank angle;
+- prescribe cadence when the scientific question is stimulation scheduling,
+  which makes terminal crank accuracy exact by construction and removes
+  mechanical states and contact constraints;
+- eliminate the analytically forced periodic calcium-sum state, then evaluate
+  the slow fatigue states on a coarser grid.
+
+For a geometry-derived muscle mask, usefulness must be evaluated in the
+one-dimensional null space of the contact Jacobian. The relevant sign is the
+future crank power produced after the electromechanical delay, not a raw
+muscle moment arm or the instantaneous sign at the stimulation node.
+
+## Interpretation
+
+MadNLP is relevant for this problem. On the direct Cocofest formulation it
+converges from the robust historical seed. The related Bioptim Linux benchmark
+also reports 17.397 s hot for a 50-interval exact-Hessian muscle-fatigue problem
+versus 23.002 s for IPOPT, with 57 versus 67 iterations. This is a useful
+indication for large collocation horizons, although repeated Cocofest runs are
+still required before treating the timing difference as a stable speedup.
+
+Alpaqa is currently exploratory. It supports the model and consumes the same
+primal/constraint-dual initialization, but it did not converge within 60 s on
+the direct Cocofest fatigue horizon. The integration-branch benchmarks also show
+that Alpaqa is slower than IPOPT on a small cube problem and misses a 0.5 s
+deadline on shifted NMPC windows. Its augmented-Lagrangian/PANOC method appears
+more sensitive to scaling, redundant collocation constraints, and shifted
+feasibility than the interior-point solvers.
+
+Recommended use:
+
+- keep IPOPT as the reference solver;
+- use MadNLP as the first optional alternative for large, Hessian-heavy fatigue
+  horizons and benchmark both cold and hot execution;
+- keep Alpaqa behind an explicit solver selection until a dedicated
+  multiple-shooting or less redundant formulation, penalty tuning, and
+  multi-window feasibility study demonstrate reliable convergence.

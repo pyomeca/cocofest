@@ -24,12 +24,17 @@ The Python interface should come from the same ACADOS checkout as the compiled l
 conda run -n cocofest-run python -c "import acados_template; print(acados_template.__file__)"
 ```
 
-Then the cycling MHE ACADOS example can be launched from the cycling examples directory:
+Then launch the assisted cycling MHE from the repository root:
 
 ```bash
-cd examples/fes_multibody/cycling
-conda run -n cocofest-run python cycling_mhe_acados.py
+conda run -n cocofest-run python \
+  examples/fes_multibody/cycling/cycling_pulse_width_mhe_acados_periodic.py \
+  --crank-assistance 0.2 \
+  --compact-rho-output
 ```
 
-The pulse-width FES MHE still needs IPOPT in bioptim 3.4 because its stimulation and external-force numerical time
-series are not currently exported as ACADOS parameters during code generation.
+The example exports a one-cycle periodic-node FES formulation to ACADOS. IPOPT
+remains part of its initialization pipeline: it constructs an assisted
+standard collocation warmup and certifies a one-cycle periodic seed before the
+timed ACADOS windows. Build, code-generation, and warm-start preparation times
+are reported separately from the ACADOS window solve times.

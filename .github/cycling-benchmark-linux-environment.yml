@@ -1,0 +1,16 @@
+name: cocofest-cycling-benchmark
+channels:
+  - conda-forge
+dependencies:
+  - python =3.11
+  - cmake >=3.25
+  - eigen =3.4.*
+  - ipopt
+  - matplotlib-base >=3.8
+  - ninja
+  - numpy >=2.4,<3
+  - pip
+  - pytest
+  - scipy
+  - swig =4.3.1
+  - tinyxml2

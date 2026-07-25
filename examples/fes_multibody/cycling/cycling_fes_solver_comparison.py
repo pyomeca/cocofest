@@ -1,16 +1,19 @@
-"""
-Compare IPOPT and ACADOS on the cycling pulse-width FES MHE using solver-specific but validated configurations.
+"""Benchmark IPOPT, ACADOS, MadNLP, and Alpaqa on the cycling FES MHE.
 
-IPOPT uses the historically robust collocation-based transcription.
-ACADOS uses the solver-compatible periodic Ding surrogate with the lightweight RK4 setup.
+IPOPT, MadNLP, and Alpaqa share the historically robust collocation
+transcription and warm start. ACADOS retains its validated solver-specific
+periodic formulation. The default objective is fatigue only.
 """
 
 from __future__ import annotations
 
 import argparse
+import json
 import os
+import platform
 from pathlib import Path
 import sys
+from tempfile import TemporaryDirectory
 from time import perf_counter
 
 import numpy as np
@@ -22,7 +25,9 @@ if str(REPO_ROOT) not in sys.path:
 try:
     from .cycling_pulse_width_mhe_acados_periodic import (
         ACADOS_STATUS_NAMES,
+        DEFAULT_CRANK_TORQUE_NM,
         build_argument_parser,
+        parse_crank_assistance,
         parse_proximal_control_weights,
         parse_terminal_wheel_q_slacks,
         solve_case,
@@ -30,13 +35,88 @@ try:
 except ImportError:
     from cycling_pulse_width_mhe_acados_periodic import (
         ACADOS_STATUS_NAMES,
+        DEFAULT_CRANK_TORQUE_NM,
         build_argument_parser,
+        parse_crank_assistance,
         parse_proximal_control_weights,
         parse_terminal_wheel_q_slacks,
         solve_case,
     )
 
 EXAMPLE_DIR = Path(__file__).resolve().parent
+BENCHMARK_SOLVERS = ("ipopt", "acados", "madnlp", "alpaqa")
+BENCHMARK_STIMULATION_PATTERN_CYCLES = (10, 30)
+BENCHMARK_CONFIGURATION_FIELDS = (
+    "solver",
+    "objective",
+    "objective_shape",
+    "model_formulation",
+    "torque_application",
+    "ode_solver",
+    "collocation_degree",
+    "collocation_method",
+    "use_sx",
+    "state_scaling",
+    "pulse_width_scaling",
+    "pulse_width_active_set",
+    "pulse_width_active_threshold",
+    "pulse_width_active_margin",
+    "acados_wheel_q_slack",
+    "acados_terminal_wheel_q_slack",
+    "cycles_per_window",
+    "stimulations_per_cycle",
+    "n_windows",
+    "n_threads",
+    "constant_crank_torque",
+    "crank_torque_role",
+    "crank_assistance_nm",
+    "expected_external_crank_power_w",
+    "max_consecutive_failing",
+    "nlp_tolerance",
+    "ipopt_linear_solver",
+    "warmup_ipopt_linear_solver",
+    "standard_warmup_seed",
+    "legacy_standard_warmup_seed_signed_torque",
+    "ipopt_hsl_library",
+    "ipopt_c_compile",
+    "ipopt_print_level",
+    "ipopt_print_timing_statistics",
+    "ipopt_linear_system_scaling",
+    "ipopt_linear_scaling_on_demand",
+    "ipopt_ma57_automatic_scaling",
+    "ipopt_ma57_pivot_order",
+    "ipopt_ma57_pivtol",
+    "ipopt_ma57_pivtolmax",
+    "ipopt_ma57_pre_alloc",
+    "ipopt_ma57_block_size",
+    "ipopt_ma57_node_amalgamation",
+    "ipopt_ma57_small_pivot_flag",
+    "ipopt_dual_warm_start_mode",
+    "max_ipopt_iterations",
+    "disable_historical_ipopt_initial_guess",
+    "madnlp_dual_warm_start_mode",
+    "madnlp_mu_init",
+    "madnlp_c_compile",
+    "madnlp_linear_solver",
+    "madnlp_max_wall_time",
+    "madnlp_nlp_scaling",
+    "madnlp_acceptable_tolerance",
+    "madnlp_acceptable_iterations",
+    "max_madnlp_iterations",
+    "alpaqa_dual_warm_start_mode",
+    "max_alpaqa_iterations",
+    "alpaqa_alm_max_iterations",
+    "alpaqa_lbfgs_memory",
+    "alpaqa_max_wall_time",
+    "alpaqa_initial_penalty",
+    "alpaqa_initial_tolerance",
+    "alpaqa_penalty_update_factor",
+    "alpaqa_maximum_penalty",
+    "alpaqa_panoc_max_wall_time",
+    "alpaqa_max_no_progress",
+    "nlp_periodic_ipopt_hot_start",
+    "terminal_wheel_regularization_weight",
+)
 
 IPOPT_PROFILE_DEFAULTS = {
     "historical": {
@@ -89,6 +169,22 @@ def _namespace_from_cli(**overrides) -> argparse.Namespace:
     return args
 
 
+def parse_solver_names(raw_solvers: str) -> tuple[str, ...]:
+    values = tuple(
+        dict.fromkeys(
+            item.strip().lower() for item in raw_solvers.split(",") if item.strip()
+        )
+    )
+    invalid = set(values) - set(BENCHMARK_SOLVERS)
+    if invalid:
+        raise argparse.ArgumentTypeError(
+            f"Unsupported solver(s): {', '.join(sorted(invalid))}."
+        )
+    if not values:
+        raise argparse.ArgumentTypeError("Select at least one solver.")
+    return values
+
+
 def _format_metric(value) -> str:
     if value is None:
         return "None"
@@ -97,6 +193,20 @@ def _format_metric(value) -> str:
     if isinstance(value, float):
         return f"{value:.6f}"
     return str(value)
+
+
+def _finite_float(value) -> float | None:
+    """Return a scalar finite float suitable for console and JSON summaries."""
+
+    if value is None:
+        return None
+    try:
+        array = np.asarray(value, dtype=float).reshape(-1)
+    except (TypeError, ValueError):
+        return None
+    if array.size != 1 or not np.isfinite(array[0]):
+        return None
+    return float(array[0])
 
 
 def _format_control_metric(value) -> str:
@@ -147,8 +257,17 @@ def _successful_prefix_length(statuses: list | None) -> int:
     return length
 
 
-def _validated_cycle_count(result: dict) -> int:
+def _validated_window_prefix(result: dict) -> int:
     prefix = _successful_prefix_length(result.get("window_statuses"))
+    feasibility = result.get("window_feasibility") or []
+    for index in range(min(prefix, len(feasibility))):
+        if not feasibility[index].get("passes_tolerance", False):
+            return index
+    return prefix
+
+
+def _validated_cycle_count(result: dict) -> int:
+    prefix = _validated_window_prefix(result)
     if result.get("solver_success"):
         return int(result.get("covered_cycles") or prefix)
     return prefix
@@ -256,7 +375,7 @@ def _window_performance(result: dict) -> dict:
             }
         )
 
-    prefix = _successful_prefix_length(result.get("window_statuses"))
+    prefix = _validated_window_prefix(result)
     successful_rows = rows[:prefix]
 
     def total(key: str) -> float:
@@ -265,6 +384,19 @@ def _window_performance(result: dict) -> dict:
     validated_cycles = _validated_cycle_count(result)
     successful_solver_time = total("solver_time_s")
     successful_wall_time = total("wall_time_s")
+    hot_rows = successful_rows[1:]
+
+    def hot_stat(key: str, percentile: float) -> float | None:
+        values = np.asarray(
+            [
+                float(row[key])
+                for row in hot_rows
+                if row[key] is not None and np.isfinite(float(row[key]))
+            ],
+            dtype=float,
+        )
+        return float(np.percentile(values, percentile)) if values.size else None
+
     return {
         "rows": rows,
         "successful_prefix_windows": prefix,
@@ -277,6 +409,11 @@ def _window_performance(result: dict) -> dict:
         "wall_time_per_cycle_s": (
             successful_wall_time / validated_cycles if validated_cycles else None
         ),
+        "hot_window_count": len(hot_rows),
+        "hot_solver_time_median_s": hot_stat("solver_time_s", 50),
+        "hot_solver_time_p90_s": hot_stat("solver_time_s", 90),
+        "hot_wall_time_median_s": hot_stat("wall_time_s", 50),
+        "hot_wall_time_p90_s": hot_stat("wall_time_s", 90),
     }
 
 
@@ -293,14 +430,45 @@ def _fatigue_metrics(result: dict, cycle_count: int) -> list[dict]:
             continue
         initial = float(trace[0])
         final = float(trace[-1])
+        capacity_scale = result.get("fatigue_capacity_scales", {}).get(key)
+        normalization_reference = (
+            float(capacity_scale)
+            if key.startswith("A_") and capacity_scale is not None
+            else initial
+        )
+        if normalization_reference:
+            normalized_fatigue = 1.0 - trace / normalization_reference
+            mean_normalized_fatigue = float(np.mean(normalized_fatigue))
+            if trace.size > 1:
+                dx = float(cycle_count) / (trace.size - 1)
+                fatigue_auc_cycles = float(
+                    np.sum(
+                        0.5 * (normalized_fatigue[:-1] + normalized_fatigue[1:]) * dx
+                    )
+                )
+            else:
+                fatigue_auc_cycles = 0.0
+        else:
+            mean_normalized_fatigue = None
+            fatigue_auc_cycles = None
         rows.append(
             {
                 "key": key,
                 "initial": initial,
                 "final": final,
-                "relative_final": final / initial if initial else None,
+                "relative_final": (
+                    final / normalization_reference if normalization_reference else None
+                ),
                 "minimum": float(np.min(trace)),
                 "maximum": float(np.max(trace)),
+                "normalization_reference": normalization_reference,
+                "normalization_source": (
+                    "a_scale"
+                    if key.startswith("A_") and capacity_scale is not None
+                    else "initial"
+                ),
+                "mean_normalized_fatigue": mean_normalized_fatigue,
+                "fatigue_auc_cycles": fatigue_auc_cycles,
             }
         )
     return rows
@@ -313,6 +481,143 @@ def _minimum_a_capacity_ratio(fatigue: list[dict]) -> float | None:
         if row["key"].startswith("A_") and row["relative_final"] is not None
     ]
     return min(ratios) if ratios else None
+
+
+def _executed_fatigue_objective(
+    result: dict, cycle_count: int, *, weight: float = 10_000.0
+) -> float | None:
+    """Re-evaluate the fatigue cost on unique exported cycles.
+
+    Receding-horizon window objectives overlap whenever a horizon contains
+    more than one cycle but advances by one cycle. This common trapezoidal
+    quadrature instead scores only the states that were actually exported.
+    """
+
+    if cycle_count <= 0:
+        return None
+    limited = _truncate_result_to_cycles(result, cycle_count)
+    squared_fatigue = None
+    for key, values in sorted(limited.get("state_traces", {}).items()):
+        if not key.startswith("A_"):
+            continue
+        capacity_scale = result.get("fatigue_capacity_scales", {}).get(key)
+        trace = np.asarray(values, dtype=float).reshape(-1)
+        if (
+            capacity_scale is None
+            or not np.isfinite(float(capacity_scale))
+            or float(capacity_scale) == 0.0
+            or trace.size < 2
+            or not np.all(np.isfinite(trace))
+        ):
+            continue
+        term = np.square(1.0 - trace / float(capacity_scale))
+        squared_fatigue = term if squared_fatigue is None else squared_fatigue + term
+
+    if squared_fatigue is None:
+        return None
+    dt = float(cycle_count) / (squared_fatigue.size - 1)
+    integral = np.sum(0.5 * (squared_fatigue[:-1] + squared_fatigue[1:]) * dt)
+    return float(weight * integral)
+
+
+def _external_crank_power_metrics(result: dict, cycle_count: int) -> dict:
+    """Report whether the configured crank torque resists or drives the motion.
+
+    Generalized mechanical power is ``tau * qdot``.  In the historical cycling
+    data the crank angle decreases, so a negative torque has positive power and
+    drives the crank; a positive torque is the genuinely resistive sign.
+    """
+
+    metrics = {
+        "torque_nm": None,
+        "mean_power_w": None,
+        "minimum_power_w": None,
+        "maximum_power_w": None,
+        "role": "unavailable",
+    }
+    if cycle_count <= 0:
+        return metrics
+
+    args = result.get("args")
+    torque = getattr(args, "constant_crank_torque", None)
+    if torque is None or not np.isfinite(float(torque)):
+        return metrics
+    metrics["torque_nm"] = float(torque)
+
+    limited = _truncate_result_to_cycles(result, cycle_count)
+    qdot = limited.get("state_traces", {}).get("qdot")
+    if qdot is None:
+        return metrics
+    qdot = np.asarray(qdot, dtype=float)
+    if qdot.ndim != 2 or qdot.shape[0] < 3 or qdot.shape[1] == 0:
+        return metrics
+
+    power = float(torque) * qdot[2, :]
+    if not np.all(np.isfinite(power)):
+        return metrics
+    if power.size == 1:
+        mean_power = float(power[0])
+    else:
+        mean_power = float(np.sum(0.5 * (power[:-1] + power[1:])) / (power.size - 1))
+
+    power_tolerance = 1e-12
+    role = (
+        "driving"
+        if mean_power > power_tolerance
+        else "resistive"
+        if mean_power < -power_tolerance
+        else "neutral"
+    )
+    metrics.update(
+        mean_power_w=mean_power,
+        minimum_power_w=float(np.min(power)),
+        maximum_power_w=float(np.max(power)),
+        role=role,
+    )
+    return metrics
+
+
+def _cycle_boundary_wheel_angle_metrics(result: dict, cycle_count: int) -> dict:
+    """Measure completed-turn accuracy on the unique executed trajectory."""
+
+    metrics = {
+        "signed_cycle_shift_rad": None,
+        "maximum_absolute_error_rad": None,
+        "final_error_rad": None,
+        "errors_rad": [],
+        "maximum_cycle_progress_error_rad": None,
+        "cycle_progress_errors_rad": [],
+    }
+    if cycle_count <= 0:
+        return metrics
+
+    limited = _truncate_result_to_cycles(result, cycle_count)
+    wheel_angle = np.asarray(limited.get("wheel_angle_trace", []), dtype=float).reshape(
+        -1
+    )
+    shooting_per_cycle = int(result["args"].stimulations_per_cycle)
+    expected_size = cycle_count * shooting_per_cycle + 1
+    if (
+        wheel_angle.size != expected_size
+        or not np.all(np.isfinite(wheel_angle))
+        or np.isclose(wheel_angle[-1], wheel_angle[0])
+    ):
+        return metrics
+
+    cycle_shift = float(np.sign(wheel_angle[-1] - wheel_angle[0]) * 2.0 * np.pi)
+    boundaries = wheel_angle[::shooting_per_cycle]
+    expected = wheel_angle[0] + cycle_shift * np.arange(cycle_count + 1)
+    errors = boundaries - expected
+    progress_errors = np.diff(boundaries) - cycle_shift
+    metrics.update(
+        signed_cycle_shift_rad=cycle_shift,
+        maximum_absolute_error_rad=float(np.max(np.abs(errors))),
+        final_error_rad=float(errors[-1]),
+        errors_rad=errors.tolist(),
+        maximum_cycle_progress_error_rad=float(np.max(np.abs(progress_errors))),
+        cycle_progress_errors_rad=progress_errors.tolist(),
+    )
+    return metrics
 
 
 def _format_a_capacity_by_muscle(fatigue: list[dict]) -> str:
@@ -708,9 +1013,13 @@ def _solver_config(
     wheel_qdot_bound_margin: float,
     terminal_qdot_regularization_weight: float,
     terminal_qdot_regularization_target_source: str,
+    first_node_wheel_q_slack: float,
     acados_terminal_wheel_q_slack: float,
     state_scaling: str,
     pulse_width_scaling: float,
+    pulse_width_active_set: str,
+    pulse_width_active_threshold: float,
+    pulse_width_active_margin: int,
     acados_pulse_width_trust_radius: float | None,
     acados_transfer_pulse_width_trust_radius: float | None,
     acados_fes_state_trust_radius: float | None,
@@ -824,9 +1133,13 @@ def _solver_config(
             terminal_qdot_regularization_target_source=(
                 terminal_qdot_regularization_target_source
             ),
+            acados_wheel_q_slack=first_node_wheel_q_slack,
             acados_terminal_wheel_q_slack=acados_terminal_wheel_q_slack,
             state_scaling=state_scaling,
             pulse_width_scaling=pulse_width_scaling,
+            pulse_width_active_set=pulse_width_active_set,
+            pulse_width_active_threshold=pulse_width_active_threshold,
+            pulse_width_active_margin=pulse_width_active_margin,
             acados_pulse_width_trust_radius=None,
             acados_transfer_pulse_width_trust_radius=None,
             acados_fes_state_trust_radius=None,
@@ -924,6 +1237,7 @@ def _solver_config(
             terminal_qdot_regularization_target_source=(
                 terminal_qdot_regularization_target_source
             ),
+            acados_wheel_q_slack=first_node_wheel_q_slack,
             acados_terminal_wheel_q_slack=acados_terminal_wheel_q_slack,
             state_scaling=state_scaling,
             pulse_width_scaling=pulse_width_scaling,
@@ -987,6 +1301,58 @@ def _solver_config(
         )
 
     raise ValueError(f"Unsupported solver_name '{solver_name}'")
+
+
+def _nlp_solver_config(
+    solver_name: str,
+    reference_args: argparse.Namespace,
+    *,
+    tolerance: float,
+    max_iterations: int,
+    dual_warm_start_mode: str,
+    alpaqa_lbfgs_memory: int = 20,
+    alpaqa_max_wall_time: float | None = None,
+    alpaqa_initial_penalty: float | None = None,
+    alpaqa_alm_max_iterations: int | None = None,
+    madnlp_linear_solver: str | None = None,
+    madnlp_max_wall_time: float | None = None,
+    madnlp_nlp_scaling: bool | None = None,
+    madnlp_acceptable_tolerance: float | None = None,
+    madnlp_acceptable_iterations: int | None = None,
+    alpaqa_initial_tolerance: float | None = None,
+    alpaqa_penalty_update_factor: float | None = None,
+    alpaqa_maximum_penalty: float | None = None,
+    alpaqa_panoc_max_wall_time: float | None = None,
+    alpaqa_max_no_progress: int | None = None,
+    periodic_ipopt_hot_start: bool = False,
+) -> argparse.Namespace:
+    """Clone the IPOPT transcription so only the nonlinear solver changes."""
+
+    if solver_name not in {"madnlp", "alpaqa"}:
+        raise ValueError("The optional NLP solver must be 'madnlp' or 'alpaqa'.")
+    args = argparse.Namespace(**vars(reference_args))
+    args.solver = solver_name
+    args.nlp_tolerance = tolerance
+    setattr(args, f"max_{solver_name}_iterations", max_iterations)
+    setattr(args, f"{solver_name}_dual_warm_start_mode", dual_warm_start_mode)
+    args.nlp_periodic_ipopt_hot_start = periodic_ipopt_hot_start
+    if solver_name == "madnlp":
+        args.madnlp_linear_solver = madnlp_linear_solver
+        args.madnlp_max_wall_time = madnlp_max_wall_time
+        args.madnlp_nlp_scaling = madnlp_nlp_scaling
+        args.madnlp_acceptable_tolerance = madnlp_acceptable_tolerance
+        args.madnlp_acceptable_iterations = madnlp_acceptable_iterations
+    if solver_name == "alpaqa":
+        args.alpaqa_lbfgs_memory = alpaqa_lbfgs_memory
+        args.alpaqa_alm_max_iterations = alpaqa_alm_max_iterations
+        args.alpaqa_max_wall_time = alpaqa_max_wall_time
+        args.alpaqa_initial_penalty = alpaqa_initial_penalty
+        args.alpaqa_initial_tolerance = alpaqa_initial_tolerance
+        args.alpaqa_penalty_update_factor = alpaqa_penalty_update_factor
+        args.alpaqa_maximum_penalty = alpaqa_maximum_penalty
+        args.alpaqa_panoc_max_wall_time = alpaqa_panoc_max_wall_time
+        args.alpaqa_max_no_progress = alpaqa_max_no_progress
+    return args
 
 
 def print_comparison(
@@ -1219,19 +1585,581 @@ def print_comparison(
         )
 
 
+def _failed_solver_result(
+    args: argparse.Namespace, error: Exception, wall_time_s: float
+) -> dict:
+    """Return a benchmark-shaped failure so one missing plugin does not abort the matrix."""
+
+    return {
+        "args": args,
+        "success": False,
+        "solver_success": False,
+        "physical_success": False,
+        "status": None,
+        "objective": None,
+        "solver_time_s": 0.0,
+        "wall_time_s": wall_time_s,
+        "end_to_end_wall_time_s": wall_time_s,
+        "final_wheel_angle": None,
+        "requested_windows": args.n_windows,
+        "attempted_windows": 0,
+        "successful_windows": 0,
+        "exported_cycles": 0,
+        "covered_cycles": 0,
+        "wheel_angle_trace": np.array([], dtype=float),
+        "state_traces": {},
+        "control_traces": {},
+        "control_bounds": {},
+        "window_statuses": [],
+        "window_solutions": [],
+        "diagnostics": {
+            "is_physical": False,
+            "issues": ["solver_unavailable_or_construction_failed"],
+        },
+        "error": f"{type(error).__name__}: {error}",
+    }
+
+
+def _run_benchmark_case(
+    solver_name: str, args: argparse.Namespace, *, echo: bool = True
+) -> dict:
+    label = solver_name.upper()
+    print(f"Running {label} configuration...")
+    start = perf_counter()
+    try:
+        uses_c_codegen = (
+            solver_name == "ipopt" and getattr(args, "ipopt_c_compile", False)
+        ) or (solver_name == "madnlp" and getattr(args, "madnlp_c_compile", False))
+        if uses_c_codegen:
+            previous_cwd = Path.cwd()
+            with TemporaryDirectory(
+                prefix=f"cocofest_{solver_name}_codegen_"
+            ) as codegen_dir:
+                try:
+                    os.chdir(codegen_dir)
+                    result = solve_case(args, echo=echo)
+                finally:
+                    os.chdir(previous_cwd)
+        else:
+            result = solve_case(args, echo=echo)
+    except (AttributeError, ImportError, RuntimeError) as error:
+        result = _failed_solver_result(args, error, perf_counter() - start)
+        print(f"{label} unavailable or failed during setup: {result['error']}")
+        return result
+    result["end_to_end_wall_time_s"] = perf_counter() - start
+    return result
+
+
+def _benchmark_window_rows(result: dict) -> list[dict]:
+    """Return per-window evidence used to validate timing and warm starts."""
+
+    solutions = result.get("window_solutions") or []
+    statuses = result.get("window_statuses") or []
+    iterations = result.get("window_iterations") or []
+    objectives = result.get("window_objectives") or []
+    feasibility = result.get("window_feasibility") or []
+    stats_by_window = {
+        int(stats["window"]): stats
+        for stats in (result.get("nlp_solver_stats") or [])
+        if stats.get("window") is not None
+    }
+    count = max(
+        len(solutions),
+        len(statuses),
+        len(iterations),
+        len(objectives),
+        len(feasibility),
+    )
+    validated_prefix = _validated_window_prefix(result)
+    rows = []
+    for index in range(count):
+        solution = solutions[index] if index < len(solutions) else None
+        status = (
+            int(statuses[index])
+            if index < len(statuses) and statuses[index] is not None
+            else None
+        )
+        window_feasibility = (
+            feasibility[index] if index < len(feasibility) else None
+        )
+        solver_stats = stats_by_window.get(index) or {}
+        madnlp_stats = solver_stats.get("madnlp") or {}
+        native_status = next(
+            (
+                value
+                for value in (
+                    solver_stats.get("unified_return_status"),
+                    solver_stats.get("return_status"),
+                    madnlp_stats.get("status"),
+                )
+                if value is not None
+            ),
+            None,
+        )
+        if native_status is None and index == count - 1:
+            native_status = result.get("native_solver_status")
+        rows.append(
+            {
+                "window": index,
+                "rho": index + 1,
+                "status": status,
+                "native_status": (
+                    str(native_status) if native_status is not None else None
+                ),
+                "solver_converged": status == 0,
+                "primal_feasible": (
+                    bool(window_feasibility.get("passes_tolerance", False))
+                    if window_feasibility is not None
+                    else None
+                ),
+                "validated": index < validated_prefix,
+                "iterations": (iterations[index] if index < len(iterations) else None),
+                "objective": (
+                    _finite_float(objectives[index])
+                    if index < len(objectives)
+                    else None
+                ),
+                "solver_time_s": _finite_float(
+                    getattr(solution, "solver_time_to_optimize", None)
+                ),
+                "wall_time_s": _finite_float(
+                    getattr(solution, "real_time_to_optimize", None)
+                ),
+                "feasibility": window_feasibility,
+            }
+        )
+    return rows
+
+
+def _stimulation_pattern_snapshot(result: dict, cycle: int) -> dict:
+    """Extract the executed pulse-width pattern of one validated one-cycle RHO."""
+
+    validated_cycles = _validated_cycle_count(result)
+    cycles_per_window = int(getattr(result["args"], "cycles_per_window", 1))
+    snapshot = {
+        "cycle": int(cycle),
+        "rho": int(cycle) if cycles_per_window == 1 else None,
+        "rho_equals_cycle": cycles_per_window == 1,
+        "available": False,
+        "reason": None,
+        "stimulations_per_cycle": int(result["args"].stimulations_per_cycle),
+        "phase_fraction": [],
+        "crank_angle_rad": [],
+        "crank_phase_rad": [],
+        "crank_velocity_rad_s": [],
+        "muscles": {},
+    }
+    if cycle < 1:
+        snapshot["reason"] = "cycle_must_be_positive"
+        return snapshot
+    if cycle > validated_cycles:
+        snapshot["reason"] = (
+            f"only_{validated_cycles}_cycles_belong_to_the_converged_prefix"
+        )
+        return snapshot
+
+    shooting_per_cycle = snapshot["stimulations_per_cycle"]
+    limited = _truncate_result_to_cycles(result, cycle)
+    controls = limited.get("control_traces", {})
+    start = (cycle - 1) * shooting_per_cycle
+    stop = cycle * shooting_per_cycle
+    wheel_angle = np.asarray(limited.get("wheel_angle_trace", []), dtype=float).reshape(
+        -1
+    )
+    if wheel_angle.size < stop + 1 or not np.all(
+        np.isfinite(wheel_angle[start : stop + 1])
+    ):
+        snapshot["reason"] = "invalid_crank_angle_trace"
+        return snapshot
+    cycle_wheel_angle = wheel_angle[start:stop]
+    signed_cycle_progress = wheel_angle[stop] - wheel_angle[start]
+    crank_direction = np.sign(signed_cycle_progress)
+    if crank_direction == 0:
+        snapshot["reason"] = "zero_crank_progress"
+        return snapshot
+    snapshot["crank_angle_rad"] = cycle_wheel_angle.tolist()
+    snapshot["crank_phase_rad"] = np.mod(
+        crank_direction * (cycle_wheel_angle - wheel_angle[start]),
+        2.0 * np.pi,
+    ).tolist()
+    qdot = limited.get("state_traces", {}).get("qdot")
+    if qdot is not None:
+        qdot = np.asarray(qdot, dtype=float)
+        if qdot.ndim == 2 and qdot.shape[0] >= 3 and qdot.shape[1] >= stop:
+            crank_velocity = qdot[2, start:stop]
+            if np.all(np.isfinite(crank_velocity)):
+                snapshot["crank_velocity_rad_s"] = crank_velocity.tolist()
+
+    bounds = result.get("control_bounds", {})
+    for key, values in sorted(controls.items()):
+        if not key.startswith("last_pulse_width_"):
+            continue
+        trace = np.asarray(values, dtype=float).reshape(-1)
+        cycle_values = trace[start:stop]
+        if cycle_values.size != shooting_per_cycle or not np.all(
+            np.isfinite(cycle_values)
+        ):
+            snapshot["reason"] = f"invalid_control_trace_for_{key}"
+            snapshot["muscles"] = {}
+            return snapshot
+        control_bounds = bounds.get(key) or {}
+        lower = _finite_float(control_bounds.get("lower"))
+        upper = _finite_float(control_bounds.get("upper"))
+        if lower is not None and upper is not None and upper > lower:
+            normalized = (cycle_values - lower) / (upper - lower)
+            bound_tolerance = max(1e-12, (upper - lower) * 1e-3)
+            lower_fraction = float(
+                np.mean(cycle_values <= lower + bound_tolerance)
+            )
+            upper_fraction = float(
+                np.mean(cycle_values >= upper - bound_tolerance)
+            )
+        else:
+            normalized = np.full(cycle_values.shape, np.nan)
+            lower_fraction = None
+            upper_fraction = None
+        maximum_index = int(np.argmax(cycle_values))
+        snapshot["muscles"][key.removeprefix("last_pulse_width_")] = {
+            "control_key": key,
+            "pulse_width_s": cycle_values.tolist(),
+            "pulse_width_us": (1e6 * cycle_values).tolist(),
+            "normalized_to_bounds": [
+                float(value) if np.isfinite(value) else None for value in normalized
+            ],
+            "minimum_s": float(np.min(cycle_values)),
+            "mean_s": float(np.mean(cycle_values)),
+            "maximum_s": float(np.max(cycle_values)),
+            "lower_bound_s": lower,
+            "upper_bound_s": upper,
+            "lower_bound_fraction": lower_fraction,
+            "upper_bound_fraction": upper_fraction,
+            "maximum_phase_rad": snapshot["crank_phase_rad"][maximum_index],
+        }
+
+    if not snapshot["muscles"]:
+        snapshot["reason"] = "no_pulse_width_controls"
+        return snapshot
+    snapshot["available"] = True
+    snapshot["phase_fraction"] = (
+        np.arange(shooting_per_cycle, dtype=float) / shooting_per_cycle
+    ).tolist()
+    return snapshot
+
+
+def stimulation_pattern_snapshots(
+    result: dict,
+    cycles: tuple[int, ...] = BENCHMARK_STIMULATION_PATTERN_CYCLES,
+) -> dict[str, dict]:
+    """Return JSON-safe stimulation evidence at selected one-cycle RHO indices."""
+
+    return {
+        f"cycle_{cycle}": _stimulation_pattern_snapshot(result, cycle)
+        for cycle in cycles
+    }
+
+
+def solver_overview_rows(results: dict[str, dict]) -> list[dict]:
+    """Build JSON-safe fatigue and timing outcomes for every selected backend."""
+
+    rows = []
+    for solver_name, result in results.items():
+        performance = _window_performance(result)
+        window_rows = _benchmark_window_rows(result)
+        consecutive_failures = 0
+        maximum_consecutive_failures = 0
+        for window in window_rows:
+            if window["solver_converged"] and window["primal_feasible"] is True:
+                consecutive_failures = 0
+            else:
+                consecutive_failures += 1
+                maximum_consecutive_failures = max(
+                    maximum_consecutive_failures, consecutive_failures
+                )
+        first_failed_rho = next(
+            (window["rho"] for window in window_rows if not window["validated"]),
+            None,
+        )
+        fatigue = _fatigue_metrics(result, performance["validated_cycles"])
+        saturation = _control_saturation_metrics(
+            result, performance["validated_cycles"]
+        )
+        a_rows = [row for row in fatigue if row["key"].startswith("A_")]
+        mean_fatigue = max(
+            (
+                row["mean_normalized_fatigue"]
+                for row in a_rows
+                if row["mean_normalized_fatigue"] is not None
+            ),
+            default=None,
+        )
+        fatigue_auc = sum(
+            row["fatigue_auc_cycles"]
+            for row in a_rows
+            if row["fatigue_auc_cycles"] is not None
+        )
+        external_crank_power = _external_crank_power_metrics(
+            result, performance["validated_cycles"]
+        )
+        cycle_boundary_wheel_angle = _cycle_boundary_wheel_angle_metrics(
+            result, performance["validated_cycles"]
+        )
+        attempted_rho_wall_time = sum(
+            window["wall_time_s"]
+            for window in window_rows
+            if window["wall_time_s"] is not None
+        )
+        end_to_end_wall_time = _finite_float(result.get("end_to_end_wall_time_s"))
+        preparation_time = _finite_float(
+            result.get("initial_guess_preparation_time_s")
+        )
+        unattributed_wall_time = (
+            end_to_end_wall_time - preparation_time - attempted_rho_wall_time
+            if end_to_end_wall_time is not None and preparation_time is not None
+            else None
+        )
+        status = _effective_status(result)
+        if status is None and result.get("window_statuses"):
+            status = result["window_statuses"][-1]
+        rows.append(
+            {
+                "solver": solver_name,
+                "success": bool(result.get("success")),
+                "solver_success": bool(result.get("solver_success")),
+                "physical_success": bool(result.get("physical_success")),
+                "status": None if status is None else int(status),
+                "validated_cycles": performance["validated_cycles"],
+                "attempted_windows": result.get("attempted_windows"),
+                "successful_windows": result.get("successful_windows"),
+                "status_zero_windows": sum(
+                    window["solver_converged"] for window in window_rows
+                ),
+                "primal_feasible_windows": sum(
+                    window["primal_feasible"] is True for window in window_rows
+                ),
+                "first_failed_rho": first_failed_rho,
+                "maximum_consecutive_failures": maximum_consecutive_failures,
+                "objective": _finite_float(result.get("objective")),
+                "window_objective_sum": _finite_float(result.get("objective")),
+                "executed_fatigue_objective": _executed_fatigue_objective(
+                    result, performance["validated_cycles"]
+                ),
+                "solver_time_s": _finite_float(result.get("solver_time_s")),
+                "wall_time_s": _finite_float(result.get("wall_time_s")),
+                "end_to_end_wall_time_s": _finite_float(
+                    result.get("end_to_end_wall_time_s")
+                ),
+                "initial_guess_preparation_time_s": preparation_time,
+                "attempted_rho_wall_time_sum_s": attempted_rho_wall_time,
+                "unattributed_wall_time_s": unattributed_wall_time,
+                "validated_solver_time_s": performance["successful_solver_time_s"],
+                "validated_wall_time_s": performance["successful_wall_time_s"],
+                "solver_time_per_cycle_s": performance["solver_time_per_cycle_s"],
+                "wall_time_per_cycle_s": performance["wall_time_per_cycle_s"],
+                "hot_window_count": performance["hot_window_count"],
+                "hot_solver_time_median_s": performance["hot_solver_time_median_s"],
+                "hot_solver_time_p90_s": performance["hot_solver_time_p90_s"],
+                "hot_wall_time_median_s": performance["hot_wall_time_median_s"],
+                "hot_wall_time_p90_s": performance["hot_wall_time_p90_s"],
+                "min_A_capacity_ratio": _minimum_a_capacity_ratio(fatigue),
+                "max_mean_normalized_fatigue": mean_fatigue,
+                "fatigue_auc_cycles": fatigue_auc if a_rows else None,
+                "fatigue_by_state": fatigue,
+                "external_crank_power": external_crank_power,
+                "cycle_boundary_wheel_angle": cycle_boundary_wheel_angle,
+                "control_saturation": saturation,
+                "pulse_width_active_set_summary": result.get(
+                    "pulse_width_active_set_summary"
+                )
+                or [],
+                "stop": _stop_classification(result),
+                "native_solver_status": result.get("native_solver_status"),
+                "windows": window_rows,
+                "stimulation_patterns": stimulation_pattern_snapshots(result),
+                "nlp_solver_stats": result.get("nlp_solver_stats") or [],
+                "warm_start": {
+                    "initial_guess_audits": result.get("initial_guess_audits") or [],
+                    "dual_summaries": result.get("nlp_dual_warm_start_summaries") or [],
+                    "historical_cache_hit": result.get("standard_warmup_cache_hit"),
+                },
+                "fatigue_capacity_scales": result.get("fatigue_capacity_scales", {}),
+                "error": result.get("error"),
+            }
+        )
+    return rows
+
+
+def print_solver_overview(results: dict[str, dict]) -> None:
+    """Print comparable fatigue and timing outcomes for every selected backend."""
+
+    print(
+        "solver overview | solver | success | validated_cycles | "
+        "window_objective_sum | executed_fatigue_objective | "
+        "solver_time_per_cycle_s | hot_solver_time_median_s | "
+        "hot_solver_time_p90_s | min_A_capacity_ratio | "
+        "max_mean_normalized_fatigue | fatigue_auc_cycles | error"
+    )
+    for row in solver_overview_rows(results):
+        print(
+            "solver overview | "
+            f"{row['solver'].upper()} | "
+            f"{row['success']} | "
+            f"{row['validated_cycles']} | "
+            f"{_format_metric(row['window_objective_sum'])} | "
+            f"{_format_metric(row['executed_fatigue_objective'])} | "
+            f"{_format_metric(row['solver_time_per_cycle_s'])} | "
+            f"{_format_metric(row['hot_solver_time_median_s'])} | "
+            f"{_format_metric(row['hot_solver_time_p90_s'])} | "
+            f"{_format_metric(row['min_A_capacity_ratio'])} | "
+            f"{_format_metric(row['max_mean_normalized_fatigue'])} | "
+            f"{_format_metric(row['fatigue_auc_cycles'])} | "
+            f"{row['error']}"
+        )
+
+
+def write_benchmark_summary(output_path: str | Path, results: dict[str, dict]) -> Path:
+    """Persist a compact, reproducible summary without serializing Solution objects."""
+
+    output_path = Path(output_path).expanduser().resolve()
+    configurations = {}
+    for solver_name, result in results.items():
+        args = result.get("args")
+        configurations[solver_name] = {
+            field: getattr(args, field, None)
+            for field in BENCHMARK_CONFIGURATION_FIELDS
+        }
+
+    payload = {
+        "schema_version": 3,
+        "runtime": {
+            "python": platform.python_version(),
+            "platform": platform.platform(),
+            "logical_cpu_count": os.cpu_count(),
+            "thread_environment": {
+                name: os.environ.get(name)
+                for name in (
+                    "OMP_NUM_THREADS",
+                    "OPENBLAS_NUM_THREADS",
+                    "MKL_NUM_THREADS",
+                    "VECLIB_MAXIMUM_THREADS",
+                    "NUMEXPR_NUM_THREADS",
+                    "JULIA_NUM_THREADS",
+                )
+            },
+            "provenance": {
+                name: os.environ.get(name)
+                for name in (
+                    "COCOFEST_BENCHMARK_COMMIT",
+                    "BIOPTIM_BENCHMARK_COMMIT",
+                    "BIOPTIM_INTEGRATION_BRANCH",
+                    "GITHUB_RUN_ID",
+                    "GITHUB_RUN_ATTEMPT",
+                    "RUNNER_NAME",
+                )
+            },
+        },
+        "configurations": configurations,
+        "results": solver_overview_rows(results),
+    }
+    try:
+        import bioptim
+        import casadi
+
+        payload["runtime"]["bioptim"] = getattr(bioptim, "__version__", None)
+        payload["runtime"]["casadi"] = getattr(casadi, "__version__", None)
+    except ImportError:
+        pass
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text(
+        json.dumps(
+            _json_compatible(payload),
+            indent=2,
+            sort_keys=True,
+            allow_nan=False,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    return output_path
+
+
+def _json_compatible(value):
+    """Recursively convert NumPy/CasADi-adjacent values to strict JSON data."""
+
+    if value is None or isinstance(value, (str, bool, int)):
+        return value
+    if isinstance(value, float):
+        return value if np.isfinite(value) else None
+    if isinstance(value, np.generic):
+        return _json_compatible(value.item())
+    if isinstance(value, Path):
+        return str(value)
+    if isinstance(value, dict):
+        return {str(key): _json_compatible(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_json_compatible(item) for item in value]
+    try:
+        array = np.asarray(value)
+    except (TypeError, ValueError):
+        return str(value)
+    if array.ndim == 0:
+        return _json_compatible(array.item())
+    return _json_compatible(array.tolist())
+
+
 def main(
-    objective: str = "force",
+    objective: str = "fatigue",
     objective_shape: str = "quadratic",
-    cycles_per_window: int = 2,
+    solvers: tuple[str, ...] = BENCHMARK_SOLVERS,
+    cycles_per_window: int = 1,
     stimulations_per_cycle: int = 30,
     n_windows: int = 2,
+    n_threads: int | None = None,
     compact_rho_output: bool = False,
-    resistive_torque: float = -0.2,
+    resistive_torque: float = DEFAULT_CRANK_TORQUE_NM,
     acados_dir: str | None = None,
     codegen_tag: str | None = None,
     ipopt_max_iter: int = 2000,
     ipopt_linear_solver: str = "ma57",
+    warmup_ipopt_linear_solver: str | None = None,
+    standard_warmup_seed: str | Path | None = None,
+    legacy_standard_warmup_seed_signed_torque: float | None = None,
+    ipopt_hsl_library: str | None = None,
+    ipopt_c_compile: bool = False,
+    ipopt_print_level: int = 0,
+    ipopt_print_timing_statistics: bool = False,
+    ipopt_linear_system_scaling: str | None = None,
+    ipopt_linear_scaling_on_demand: str | None = None,
+    ipopt_ma57_automatic_scaling: bool | None = None,
+    ipopt_ma57_pivot_order: int | None = None,
+    ipopt_ma57_pivtol: float | None = None,
+    ipopt_ma57_pivtolmax: float | None = None,
+    ipopt_ma57_pre_alloc: float | None = None,
+    ipopt_ma57_block_size: int | None = None,
+    ipopt_ma57_node_amalgamation: int | None = None,
+    ipopt_ma57_small_pivot_flag: int | None = None,
     ipopt_dual_warm_start_mode: str = "bounds",
+    nlp_tolerance: float = 1e-6,
+    madnlp_max_iter: int = 2000,
+    madnlp_dual_warm_start_mode: str = "off",
+    madnlp_mu_init: float = 1e-2,
+    madnlp_c_compile: bool = False,
+    madnlp_linear_solver: str | None = None,
+    madnlp_max_wall_time: float | None = None,
+    madnlp_nlp_scaling: bool | None = None,
+    madnlp_acceptable_tolerance: float | None = None,
+    madnlp_acceptable_iterations: int | None = None,
+    alpaqa_max_iter: int = 2000,
+    alpaqa_alm_max_iter: int | None = None,
+    alpaqa_dual_warm_start_mode: str = "constraints",
+    alpaqa_lbfgs_memory: int = 20,
+    alpaqa_max_wall_time: float | None = None,
+    alpaqa_initial_penalty: float | None = None,
+    alpaqa_initial_tolerance: float | None = None,
+    alpaqa_penalty_update_factor: float | None = None,
+    alpaqa_maximum_penalty: float | None = None,
+    alpaqa_panoc_max_wall_time: float | None = None,
+    alpaqa_max_no_progress: int | None = None,
+    optional_nlp_periodic_ipopt_hot_start: bool = True,
     acados_max_iter: int = 100,
     control_regularization_weight: float = 0.0,
     acados_control_regularization_weight: float | None = None,
@@ -1244,12 +2172,16 @@ def main(
     wheel_qdot_bound_margin: float = 3.0,
     terminal_qdot_regularization_weight: float = 0.0,
     terminal_qdot_regularization_target_source: str = "previous",
-    acados_terminal_wheel_q_slack: float = 0.2,
+    first_node_wheel_q_slack: float = 0.0,
+    acados_terminal_wheel_q_slack: float = 0.002,
     acados_terminal_wheel_q_homotopy_slacks: tuple[float, ...] | None = None,
     acados_terminal_wheel_q_homotopy_each_window: bool = False,
-    state_scaling: str = "none",
+    state_scaling: str = "full",
     acados_state_scaling: str | None = None,
     pulse_width_scaling: float = 1 / 400,
+    pulse_width_active_set: str = "none",
+    pulse_width_active_threshold: float = 0.01,
+    pulse_width_active_margin: int = 3,
     acados_pulse_width_scaling: float | None = None,
     acados_pulse_width_trust_radius: float | None = None,
     acados_transfer_pulse_width_trust_radius: float | None = None,
@@ -1324,7 +2256,7 @@ def main(
     periodic_fes_warmup_force_qdot_defect_limit: float = 3.0,
     periodic_fes_warmup_force_adaptive_steps: int = 10,
     acados_diagnostics: bool = False,
-    periodic_ipopt_refinement: bool = False,
+    periodic_ipopt_refinement: bool = True,
     periodic_ipopt_refinement_iterations: int = 300,
     periodic_ipopt_refinement_use_sx: bool = False,
     periodic_ipopt_refinement_ode_solver: str = "target",
@@ -1345,8 +2277,29 @@ def main(
     ipopt_fatigue_warmstart_mode: str | None = None,
     ipopt_disable_historical_initial_guess: bool = False,
     max_consecutive_failing: int = 1,
+    output_json: str | Path | None = None,
 ):
     os.chdir(EXAMPLE_DIR)
+    if n_threads is None:
+        n_threads = os.cpu_count() or 1
+    if n_threads < 1:
+        raise ValueError("n_threads must be at least 1.")
+    if isinstance(solvers, str):
+        solvers = parse_solver_names(solvers)
+    solvers = tuple(dict.fromkeys(name.lower() for name in solvers))
+    invalid_solvers = set(solvers) - set(BENCHMARK_SOLVERS)
+    if invalid_solvers or not solvers:
+        raise ValueError(
+            "solvers must contain at least one of: " f"{', '.join(BENCHMARK_SOLVERS)}."
+        )
+    objective_names = {
+        item.strip().lower() for item in objective.split(",") if item.strip()
+    }
+    if objective_names != {"fatigue"}:
+        print(
+            "benchmark objective warning: the requested objective is not fatigue-only; "
+            "solver relevance conclusions should use --objective fatigue."
+        )
     if acados_dir:
         os.environ["ACADOS_SOURCE_DIR"] = str(Path(acados_dir).resolve())
 
@@ -1373,9 +2326,13 @@ def main(
         terminal_qdot_regularization_target_source=(
             terminal_qdot_regularization_target_source
         ),
+        first_node_wheel_q_slack=first_node_wheel_q_slack,
         acados_terminal_wheel_q_slack=acados_terminal_wheel_q_slack,
         state_scaling=state_scaling,
         pulse_width_scaling=pulse_width_scaling,
+        pulse_width_active_set=pulse_width_active_set,
+        pulse_width_active_threshold=pulse_width_active_threshold,
+        pulse_width_active_margin=pulse_width_active_margin,
         acados_pulse_width_trust_radius=None,
         acados_transfer_pulse_width_trust_radius=None,
         acados_fes_state_trust_radius=None,
@@ -1476,6 +2433,7 @@ def main(
         terminal_qdot_regularization_target_source=(
             terminal_qdot_regularization_target_source
         ),
+        first_node_wheel_q_slack=first_node_wheel_q_slack,
         acados_terminal_wheel_q_slack=acados_terminal_wheel_q_slack,
         state_scaling=(
             acados_state_scaling if acados_state_scaling is not None else state_scaling
@@ -1485,6 +2443,9 @@ def main(
             if acados_pulse_width_scaling is not None
             else pulse_width_scaling
         ),
+        pulse_width_active_set=pulse_width_active_set,
+        pulse_width_active_threshold=pulse_width_active_threshold,
+        pulse_width_active_margin=pulse_width_active_margin,
         acados_pulse_width_trust_radius=acados_pulse_width_trust_radius,
         acados_transfer_pulse_width_trust_radius=(
             acados_transfer_pulse_width_trust_radius
@@ -1539,6 +2500,30 @@ def main(
     )
     ipopt_args.max_consecutive_failing = max_consecutive_failing
     acados_args.max_consecutive_failing = max_consecutive_failing
+    ipopt_args.warmup_ipopt_linear_solver = warmup_ipopt_linear_solver
+    ipopt_args.standard_warmup_seed = standard_warmup_seed
+    acados_args.standard_warmup_seed = standard_warmup_seed
+    ipopt_args.legacy_standard_warmup_seed_signed_torque = (
+        legacy_standard_warmup_seed_signed_torque
+    )
+    acados_args.legacy_standard_warmup_seed_signed_torque = (
+        legacy_standard_warmup_seed_signed_torque
+    )
+    for name, value in (
+        ("ipopt_print_level", ipopt_print_level),
+        ("ipopt_print_timing_statistics", ipopt_print_timing_statistics),
+        ("ipopt_linear_system_scaling", ipopt_linear_system_scaling),
+        ("ipopt_linear_scaling_on_demand", ipopt_linear_scaling_on_demand),
+        ("ipopt_ma57_automatic_scaling", ipopt_ma57_automatic_scaling),
+        ("ipopt_ma57_pivot_order", ipopt_ma57_pivot_order),
+        ("ipopt_ma57_pivtol", ipopt_ma57_pivtol),
+        ("ipopt_ma57_pivtolmax", ipopt_ma57_pivtolmax),
+        ("ipopt_ma57_pre_alloc", ipopt_ma57_pre_alloc),
+        ("ipopt_ma57_block_size", ipopt_ma57_block_size),
+        ("ipopt_ma57_node_amalgamation", ipopt_ma57_node_amalgamation),
+        ("ipopt_ma57_small_pivot_flag", ipopt_ma57_small_pivot_flag),
+    ):
+        setattr(ipopt_args, name, value)
     ipopt_args.compact_rho_output = compact_rho_output
     acados_args.compact_rho_output = compact_rho_output
     acados_args.acados_integrator_type = acados_integrator_type
@@ -1647,40 +2632,124 @@ def main(
         acados_transfer_phase_one_max_fes_change
     )
 
+    madnlp_args = _nlp_solver_config(
+        "madnlp",
+        ipopt_args,
+        tolerance=nlp_tolerance,
+        max_iterations=madnlp_max_iter,
+        dual_warm_start_mode=madnlp_dual_warm_start_mode,
+        madnlp_linear_solver=madnlp_linear_solver,
+        madnlp_max_wall_time=madnlp_max_wall_time,
+        madnlp_nlp_scaling=madnlp_nlp_scaling,
+        madnlp_acceptable_tolerance=madnlp_acceptable_tolerance,
+        madnlp_acceptable_iterations=madnlp_acceptable_iterations,
+        periodic_ipopt_hot_start=optional_nlp_periodic_ipopt_hot_start,
+    )
+    ipopt_args.ipopt_c_compile = ipopt_c_compile
+    ipopt_args.ipopt_hsl_library = ipopt_hsl_library
+    madnlp_args.ipopt_c_compile = False
+    madnlp_args.ipopt_hsl_library = None
+    madnlp_args.madnlp_mu_init = madnlp_mu_init
+    madnlp_args.madnlp_c_compile = madnlp_c_compile
+    alpaqa_args = _nlp_solver_config(
+        "alpaqa",
+        ipopt_args,
+        tolerance=nlp_tolerance,
+        max_iterations=alpaqa_max_iter,
+        dual_warm_start_mode=alpaqa_dual_warm_start_mode,
+        alpaqa_alm_max_iterations=alpaqa_alm_max_iter,
+        alpaqa_lbfgs_memory=alpaqa_lbfgs_memory,
+        alpaqa_max_wall_time=alpaqa_max_wall_time,
+        alpaqa_initial_penalty=alpaqa_initial_penalty,
+        alpaqa_initial_tolerance=alpaqa_initial_tolerance,
+        alpaqa_penalty_update_factor=alpaqa_penalty_update_factor,
+        alpaqa_maximum_penalty=alpaqa_maximum_penalty,
+        alpaqa_panoc_max_wall_time=alpaqa_panoc_max_wall_time,
+        alpaqa_max_no_progress=alpaqa_max_no_progress,
+        periodic_ipopt_hot_start=optional_nlp_periodic_ipopt_hot_start,
+    )
+    for solver_args_for_threads in (
+        ipopt_args,
+        acados_args,
+        madnlp_args,
+        alpaqa_args,
+    ):
+        solver_args_for_threads.n_threads = n_threads
+
+    ipopt_args.nlp_tolerance = nlp_tolerance
+    ipopt_args.ipopt_dual_warm_start_mode = ipopt_dual_warm_start_mode
+
     normalized_ipopt_profile = _normalize_ipopt_profile(ipopt_profile)
     ipopt_label = {
         "historical": "historical reference",
         "periodic_collocation": "periodic-collocation bridge",
         "acados_like": "ACADOS-like diagnostic",
     }[normalized_ipopt_profile]
-    print(f"Running IPOPT configuration ({ipopt_label})...")
-    start = perf_counter()
-    ipopt_result = solve_case(ipopt_args, echo=True)
-    ipopt_result["end_to_end_wall_time_s"] = perf_counter() - start
-    print()
-    print("Running ACADOS-compatible configuration...")
-    start = perf_counter()
-    acados_result = solve_case(acados_args, echo=True)
-    acados_result["end_to_end_wall_time_s"] = perf_counter() - start
-    print()
-    print_comparison(
-        ipopt_result,
-        acados_result,
-        print_traces=print_traces,
-        state_comparison_limit=state_comparison_limit,
-    )
-    return {"ipopt": ipopt_result, "acados": acados_result}
+    solver_args = {
+        "ipopt": ipopt_args,
+        "acados": acados_args,
+        "madnlp": madnlp_args,
+        "alpaqa": alpaqa_args,
+    }
+    print(f"NLP reference profile: {ipopt_label}")
+    results = {}
+    for solver_name in solvers:
+        results[solver_name] = _run_benchmark_case(
+            solver_name, solver_args[solver_name], echo=True
+        )
+        print()
+
+    print_solver_overview(results)
+    if output_json is not None:
+        written_path = write_benchmark_summary(output_json, results)
+        print(f"benchmark JSON: {written_path}")
+    if "ipopt" in results and "acados" in results:
+        print()
+        print_comparison(
+            results["ipopt"],
+            results["acados"],
+            print_traces=print_traces,
+            state_comparison_limit=state_comparison_limit,
+        )
+    return results
 
 
 def build_cli() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--objective", default="force")
+    parser.add_argument(
+        "--solvers",
+        type=parse_solver_names,
+        default=BENCHMARK_SOLVERS,
+        help="Comma-separated solver matrix: ipopt,acados,madnlp,alpaqa.",
+    )
+    parser.add_argument(
+        "--objective",
+        default="fatigue",
+        help="Benchmark objective; use 'fatigue' for the endurance comparison.",
+    )
     parser.add_argument(
         "--objective-shape", default="quadratic", choices=("quadratic", "linear")
     )
-    parser.add_argument("--cycles-per-window", type=int, default=2)
+    parser.add_argument("--cycles-per-window", type=int, default=1)
     parser.add_argument("--stimulations-per-cycle", type=int, default=30)
-    parser.add_argument("--n-windows", type=int, default=2)
+    parser.add_argument(
+        "--n-windows",
+        type=int,
+        default=2,
+        help=(
+            "Number of cycles to validate; overlapping solve count is "
+            "n_windows - cycles_per_window + 1."
+        ),
+    )
+    parser.add_argument(
+        "--n-threads",
+        type=int,
+        default=os.cpu_count() or 1,
+        help=(
+            "Number of Bioptim/CasADi workers. Defaults to all logical CPUs; "
+            "avoid adding nested BLAS threads unless measured."
+        ),
+    )
     parser.add_argument("--compact-rho-output", action="store_true")
     parser.add_argument(
         "--max-consecutive-failing",
@@ -1692,11 +2761,107 @@ def build_cli() -> argparse.ArgumentParser:
             "failed solves."
         ),
     )
-    parser.add_argument("--resistive-torque", type=float, default=-0.2)
+    torque_group = parser.add_mutually_exclusive_group()
+    torque_group.add_argument(
+        "--crank-assistance",
+        dest="resistive_torque",
+        type=parse_crank_assistance,
+        default=DEFAULT_CRANK_TORQUE_NM,
+        metavar="N_M",
+        help=(
+            "Non-negative crank assistance magnitude. The default 0.2 N.m is "
+            "converted to the signed cycling torque -0.2 N.m."
+        ),
+    )
+    torque_group.add_argument(
+        "--signed-crank-torque",
+        "--resistive-torque",
+        dest="resistive_torque",
+        type=float,
+        metavar="N_M",
+        help=(
+            "Expert signed-torque override. Negative values assist the cycling "
+            "direction; positive values are resistive. --resistive-torque is "
+            "retained as a legacy alias."
+        ),
+    )
     parser.add_argument("--acados-dir", default=os.environ.get("ACADOS_SOURCE_DIR"))
     parser.add_argument("--codegen-tag", default="fes_compare")
     parser.add_argument("--ipopt-max-iter", type=int, default=2000)
     parser.add_argument("--ipopt-linear-solver", default="ma57")
+    parser.add_argument(
+        "--warmup-ipopt-linear-solver",
+        default=None,
+        help="Fixed linear solver used to build a shared warmup across targets.",
+    )
+    parser.add_argument(
+        "--standard-warmup-seed",
+        type=Path,
+        default=None,
+        help=(
+            "Explicit warmup .npz used as the primal seed. Use this for a "
+            "neighbouring 0.02 N.m torque-continuation step."
+        ),
+    )
+    parser.add_argument(
+        "--legacy-standard-warmup-seed-signed-torque",
+        type=float,
+        default=None,
+        metavar="N_M",
+        help=(
+            "Explicit signed-torque assertion required to reuse a legacy "
+            "--standard-warmup-seed without metadata."
+        ),
+    )
+    parser.add_argument(
+        "--ipopt-hsl-library",
+        default=None,
+        help="Absolute CoinHSL library passed to IPOPT's hsllib option.",
+    )
+    parser.add_argument("--ipopt-print-level", type=int, default=0)
+    parser.add_argument("--ipopt-print-timing-statistics", action="store_true")
+    parser.add_argument(
+        "--ipopt-linear-system-scaling",
+        choices=("none", "mc19", "slack-based"),
+        default=None,
+    )
+    parser.add_argument(
+        "--ipopt-linear-scaling-on-demand",
+        choices=("yes", "no"),
+        default=None,
+    )
+    ma57_scaling = parser.add_mutually_exclusive_group()
+    ma57_scaling.add_argument(
+        "--ipopt-ma57-automatic-scaling",
+        dest="ipopt_ma57_automatic_scaling",
+        action="store_true",
+    )
+    ma57_scaling.add_argument(
+        "--ipopt-no-ma57-automatic-scaling",
+        dest="ipopt_ma57_automatic_scaling",
+        action="store_false",
+    )
+    parser.set_defaults(ipopt_ma57_automatic_scaling=None)
+    parser.add_argument("--ipopt-ma57-pivot-order", type=int, default=None)
+    parser.add_argument("--ipopt-ma57-pivtol", type=float, default=None)
+    parser.add_argument("--ipopt-ma57-pivtolmax", type=float, default=None)
+    parser.add_argument("--ipopt-ma57-pre-alloc", type=float, default=None)
+    parser.add_argument("--ipopt-ma57-block-size", type=int, default=None)
+    parser.add_argument("--ipopt-ma57-node-amalgamation", type=int, default=None)
+    parser.add_argument(
+        "--ipopt-ma57-small-pivot-flag",
+        type=int,
+        choices=(0, 1),
+        default=None,
+    )
+    parser.add_argument(
+        "--ipopt-c-compile",
+        action="store_true",
+        help=(
+            "Generate and compile the CasADi NLP before IPOPT solves. Compare "
+            "hot window times separately from the one-off compilation cost."
+        ),
+    )
     parser.add_argument(
         "--ipopt-dual-warm-start-mode",
         choices=("off", "constraints", "bounds", "all"),
@@ -1706,6 +2871,87 @@ def build_cli() -> argparse.ArgumentParser:
             "or both between receding-horizon windows."
         ),
     )
+    parser.add_argument("--nlp-tolerance", type=float, default=1e-6)
+    parser.add_argument("--madnlp-max-iter", type=int, default=2000)
+    parser.add_argument("--madnlp-mu-init", type=float, default=1e-2)
+    parser.add_argument(
+        "--madnlp-linear-solver",
+        default=None,
+        help=(
+            "MadNLP linear-solver type, e.g. MumpsSolver, UmfpackSolver, "
+            "LDLSolver, or Ma57Solver. MadNLPHSL must be configured separately "
+            "before Ma57Solver can work."
+        ),
+    )
+    parser.add_argument("--madnlp-max-wall-time", type=float, default=None)
+    madnlp_scaling_group = parser.add_mutually_exclusive_group()
+    madnlp_scaling_group.add_argument(
+        "--madnlp-nlp-scaling",
+        dest="madnlp_nlp_scaling",
+        action="store_true",
+    )
+    madnlp_scaling_group.add_argument(
+        "--madnlp-no-nlp-scaling",
+        dest="madnlp_nlp_scaling",
+        action="store_false",
+    )
+    parser.set_defaults(madnlp_nlp_scaling=None)
+    parser.add_argument(
+        "--madnlp-acceptable-tolerance", type=float, default=None
+    )
+    parser.add_argument(
+        "--madnlp-acceptable-iterations", type=int, default=None
+    )
+    parser.add_argument(
+        "--madnlp-c-compile",
+        action="store_true",
+        help="Experimentally generate and compile the CasADi NLP used by MadNLP.",
+    )
+    parser.add_argument(
+        "--madnlp-dual-warm-start-mode",
+        choices=("off", "constraints", "bounds", "all"),
+        default="off",
+        help=(
+            "Reuse no MadNLP multipliers by default because multiplier blocks "
+            "are not yet shifted with the receding horizon."
+        ),
+    )
+    parser.add_argument("--alpaqa-max-iter", type=int, default=2000)
+    parser.add_argument("--alpaqa-alm-max-iter", type=int, default=None)
+    parser.add_argument(
+        "--alpaqa-dual-warm-start-mode",
+        choices=("off", "constraints"),
+        default="constraints",
+    )
+    parser.add_argument("--alpaqa-lbfgs-memory", type=int, default=20)
+    parser.add_argument("--alpaqa-max-wall-time", type=float, default=None)
+    parser.add_argument("--alpaqa-initial-penalty", type=float, default=None)
+    parser.add_argument("--alpaqa-initial-tolerance", type=float, default=None)
+    parser.add_argument(
+        "--alpaqa-penalty-update-factor", type=float, default=None
+    )
+    parser.add_argument("--alpaqa-maximum-penalty", type=float, default=None)
+    parser.add_argument(
+        "--alpaqa-panoc-max-wall-time", type=float, default=None
+    )
+    parser.add_argument("--alpaqa-max-no-progress", type=int, default=None)
+    optional_seed_group = parser.add_mutually_exclusive_group()
+    optional_seed_group.add_argument(
+        "--optional-nlp-periodic-ipopt-hot-start",
+        dest="optional_nlp_periodic_ipopt_hot_start",
+        action="store_true",
+        help=(
+            "Seed the first MadNLP/Alpaqa window with a feasibility-certified "
+            "periodic IPOPT solution (default)."
+        ),
+    )
+    optional_seed_group.add_argument(
+        "--no-optional-nlp-periodic-ipopt-hot-start",
+        dest="optional_nlp_periodic_ipopt_hot_start",
+        action="store_false",
+        help="Start MadNLP/Alpaqa directly from the projected standard warmup.",
+    )
+    parser.set_defaults(optional_nlp_periodic_ipopt_hot_start=True)
     parser.add_argument(
         "--shared-transfer-full-dynamics-rollout",
         action="store_true",
@@ -1972,14 +3218,37 @@ def build_cli() -> argparse.ArgumentParser:
         choices=("initial", "previous"),
         default="previous",
     )
-    parser.add_argument("--acados-terminal-wheel-q-slack", type=float, default=0.2)
     parser.add_argument(
-        "--state-scaling", choices=("none", "fes", "full"), default="none"
+        "--first-node-wheel-q-slack",
+        type=float,
+        default=0.0,
+        help=(
+            "Crank-angle continuity slack between consecutive RHO windows. "
+            "Zero preserves the executed cycle boundary exactly."
+        ),
+    )
+    parser.add_argument(
+        "--terminal-wheel-q-slack",
+        "--acados-terminal-wheel-q-slack",
+        dest="acados_terminal_wheel_q_slack",
+        type=float,
+        default=0.002,
+        help="Backend-independent terminal crank-angle slack in rad.",
+    )
+    parser.add_argument(
+        "--state-scaling", choices=("none", "fes", "full"), default="full"
     )
     parser.add_argument(
         "--acados-state-scaling", choices=("none", "fes", "full"), default=None
     )
     parser.add_argument("--pulse-width-scaling", type=float, default=1 / 400)
+    parser.add_argument(
+        "--pulse-width-active-set",
+        choices=("none", "historical", "warmup"),
+        default="none",
+    )
+    parser.add_argument("--pulse-width-active-threshold", type=float, default=0.01)
+    parser.add_argument("--pulse-width-active-margin", type=int, default=3)
     parser.add_argument("--acados-pulse-width-scaling", type=float, default=None)
     parser.add_argument("--acados-pulse-width-trust-radius", type=float, default=None)
     parser.add_argument(
@@ -2168,10 +3437,19 @@ def build_cli() -> argparse.ArgumentParser:
     parser.add_argument(
         "--periodic-fes-warmup-force-adaptive-steps", type=int, default=10
     )
-    parser.add_argument(
+    periodic_refinement_group = parser.add_mutually_exclusive_group()
+    periodic_refinement_group.add_argument(
         "--periodic-ipopt-refinement",
+        dest="periodic_ipopt_refinement",
         action="store_true",
-        help="Run the optional periodic IPOPT refinement before the ACADOS comparison solve.",
+        default=True,
+        help="Run the periodic IPOPT refinement before ACADOS (enabled by default).",
+    )
+    periodic_refinement_group.add_argument(
+        "--disable-periodic-ipopt-refinement",
+        dest="periodic_ipopt_refinement",
+        action="store_false",
+        help="Skip the periodic IPOPT refinement before ACADOS.",
     )
     parser.add_argument(
         "--periodic-ipopt-refinement-iterations",
@@ -2199,24 +3477,75 @@ def build_cli() -> argparse.ArgumentParser:
     parser.add_argument("--state-comparison-limit", type=int, default=12)
     parser.add_argument("--warmup-state-comparison-limit", type=int, default=12)
     parser.add_argument("--print-traces", action="store_true")
+    parser.add_argument(
+        "--output-json",
+        default=None,
+        help="Optional path for a compact JSON summary of every selected solver.",
+    )
     return parser
 
 
 if __name__ == "__main__":
     args = build_cli().parse_args()
     main(
+        solvers=args.solvers,
+        output_json=args.output_json,
         objective=args.objective,
         objective_shape=args.objective_shape,
         cycles_per_window=args.cycles_per_window,
         stimulations_per_cycle=args.stimulations_per_cycle,
         n_windows=args.n_windows,
+        n_threads=args.n_threads,
         compact_rho_output=args.compact_rho_output,
         resistive_torque=args.resistive_torque,
         acados_dir=args.acados_dir,
         codegen_tag=args.codegen_tag,
         ipopt_max_iter=args.ipopt_max_iter,
         ipopt_linear_solver=args.ipopt_linear_solver,
+        warmup_ipopt_linear_solver=args.warmup_ipopt_linear_solver,
+        standard_warmup_seed=args.standard_warmup_seed,
+        legacy_standard_warmup_seed_signed_torque=(
+            args.legacy_standard_warmup_seed_signed_torque
+        ),
+        ipopt_hsl_library=args.ipopt_hsl_library,
+        ipopt_c_compile=args.ipopt_c_compile,
+        ipopt_print_level=args.ipopt_print_level,
+        ipopt_print_timing_statistics=args.ipopt_print_timing_statistics,
+        ipopt_linear_system_scaling=args.ipopt_linear_system_scaling,
+        ipopt_linear_scaling_on_demand=args.ipopt_linear_scaling_on_demand,
+        ipopt_ma57_automatic_scaling=args.ipopt_ma57_automatic_scaling,
+        ipopt_ma57_pivot_order=args.ipopt_ma57_pivot_order,
+        ipopt_ma57_pivtol=args.ipopt_ma57_pivtol,
+        ipopt_ma57_pivtolmax=args.ipopt_ma57_pivtolmax,
+        ipopt_ma57_pre_alloc=args.ipopt_ma57_pre_alloc,
+        ipopt_ma57_block_size=args.ipopt_ma57_block_size,
+        ipopt_ma57_node_amalgamation=args.ipopt_ma57_node_amalgamation,
+        ipopt_ma57_small_pivot_flag=args.ipopt_ma57_small_pivot_flag,
         ipopt_dual_warm_start_mode=args.ipopt_dual_warm_start_mode,
+        nlp_tolerance=args.nlp_tolerance,
+        madnlp_max_iter=args.madnlp_max_iter,
+        madnlp_dual_warm_start_mode=args.madnlp_dual_warm_start_mode,
+        madnlp_mu_init=args.madnlp_mu_init,
+        madnlp_c_compile=args.madnlp_c_compile,
+        madnlp_linear_solver=args.madnlp_linear_solver,
+        madnlp_max_wall_time=args.madnlp_max_wall_time,
+        madnlp_nlp_scaling=args.madnlp_nlp_scaling,
+        madnlp_acceptable_tolerance=args.madnlp_acceptable_tolerance,
+        madnlp_acceptable_iterations=args.madnlp_acceptable_iterations,
+        alpaqa_max_iter=args.alpaqa_max_iter,
+        alpaqa_alm_max_iter=args.alpaqa_alm_max_iter,
+        alpaqa_dual_warm_start_mode=args.alpaqa_dual_warm_start_mode,
+        alpaqa_lbfgs_memory=args.alpaqa_lbfgs_memory,
+        alpaqa_max_wall_time=args.alpaqa_max_wall_time,
+        alpaqa_initial_penalty=args.alpaqa_initial_penalty,
+        alpaqa_initial_tolerance=args.alpaqa_initial_tolerance,
+        alpaqa_penalty_update_factor=args.alpaqa_penalty_update_factor,
+        alpaqa_maximum_penalty=args.alpaqa_maximum_penalty,
+        alpaqa_panoc_max_wall_time=args.alpaqa_panoc_max_wall_time,
+        alpaqa_max_no_progress=args.alpaqa_max_no_progress,
+        optional_nlp_periodic_ipopt_hot_start=(
+            args.optional_nlp_periodic_ipopt_hot_start
+        ),
         acados_max_iter=args.acados_max_iter,
         control_regularization_weight=args.control_regularization_weight,
         acados_control_regularization_weight=args.acados_control_regularization_weight,
@@ -2231,6 +3560,7 @@ if __name__ == "__main__":
         terminal_qdot_regularization_target_source=(
             args.terminal_qdot_regularization_target_source
         ),
+        first_node_wheel_q_slack=args.first_node_wheel_q_slack,
         acados_terminal_wheel_q_slack=args.acados_terminal_wheel_q_slack,
         acados_terminal_wheel_q_homotopy_slacks=(
             args.acados_terminal_wheel_q_homotopy_slacks
@@ -2241,6 +3571,9 @@ if __name__ == "__main__":
         state_scaling=args.state_scaling,
         acados_state_scaling=args.acados_state_scaling,
         pulse_width_scaling=args.pulse_width_scaling,
+        pulse_width_active_set=args.pulse_width_active_set,
+        pulse_width_active_threshold=args.pulse_width_active_threshold,
+        pulse_width_active_margin=args.pulse_width_active_margin,
         acados_pulse_width_scaling=args.acados_pulse_width_scaling,
         acados_pulse_width_trust_radius=args.acados_pulse_width_trust_radius,
         acados_transfer_pulse_width_trust_radius=(

@@ -1,0 +1,57 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+readonly CASADI_REPOSITORY="https://github.com/casadi/casadi.git"
+readonly CASADI_TAG="${CASADI_VERSION:-3.7.2}"
+readonly CASADI_EXPECTED_COMMIT="${CASADI_COMMIT:-f959d3175a444d763e4eda4aece48f4c5f4a6f90}"
+readonly ALPAQA_REPOSITORY="https://github.com/kul-optec/alpaqa.git"
+readonly ALPAQA_REVISION="${ALPAQA_COMMIT:-9c0dde81c0787f95b7ebaff12aa6447dad06ef9e}"
+readonly BUILD_JOBS="${CMAKE_BUILD_PARALLEL_LEVEL:-$(nproc)}"
+
+if [[ "$(uname -s)" != "Linux" ]]; then
+  echo "This installer is intended for Linux." >&2
+  exit 1
+fi
+if [[ -z "${CONDA_PREFIX:-}" ]]; then
+  echo "CONDA_PREFIX must point to the active benchmark environment." >&2
+  exit 1
+fi
+
+build_root="$(mktemp -d)"
+trap 'rm -rf "$build_root"' EXIT
+
+git clone --quiet --branch "$CASADI_TAG" --depth 1 \
+  "$CASADI_REPOSITORY" "$build_root/casadi"
+if [[ "$(git -C "$build_root/casadi" rev-parse HEAD)" != "$CASADI_EXPECTED_COMMIT" ]]; then
+  echo "CasADi tag $CASADI_TAG does not match the pinned commit." >&2
+  exit 1
+fi
+
+cmake \
+  -S "$build_root/casadi" \
+  -B "$build_root/casadi-build" \
+  -G Ninja \
+  -DCMAKE_BUILD_TYPE=Release \
+  -DCMAKE_INSTALL_PREFIX="$CONDA_PREFIX" \
+  -DCMAKE_PREFIX_PATH="$CONDA_PREFIX" \
+  -DPYTHON_EXECUTABLE="$(command -v python)" \
+  -DWITH_PYTHON=ON \
+  -DWITH_PYTHON3=ON \
+  -DWITH_IPOPT=ON \
+  -DWITH_ALPAQA=ON \
+  -DWITH_BUILD_ALPAQA=ON \
+  -DBUILD_ALPAQA_GIT_REPO="$ALPAQA_REPOSITORY" \
+  -DBUILD_ALPAQA_GIT_SHALLOW=OFF \
+  -DBUILD_ALPAQA_VERSION="$ALPAQA_REVISION"
+cmake --build "$build_root/casadi-build" --parallel "$BUILD_JOBS"
+cmake --install "$build_root/casadi-build"
+
+python - <<'PY'
+import casadi as cas
+
+print(f"CasADi {cas.__version__}")
+for solver in ("ipopt", "alpaqa"):
+    available = cas.has_nlpsol(solver)
+    print(f"{solver}: {available}")
+    assert available, solver
+PY

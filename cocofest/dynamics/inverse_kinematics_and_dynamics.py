@@ -2,7 +2,10 @@ import math
 import numpy as np
 from scipy.interpolate import interp1d
 
-import biorbd
+try:
+    import biorbd
+except ImportError:  # Source-built Linux CasADi backend.
+    import biorbd_casadi as biorbd
 
 
 # This function gets the x, y, z circle coordinates based on the angle theta

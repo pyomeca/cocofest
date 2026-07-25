@@ -229,6 +229,10 @@ For longer time span simulation and apprehend muscle fatigue apparition, `Cocofe
 > Solved in 1.02 second, computer with an AMD Ryzen Threadripper PRO 7965WXs x 48 processor. <br>
 > Additional information: frequency = 30Hz, n_shooting = 60, step = 0.033s, final time = 2s, integration = Collocation radau method, polynomial_order = 3, solver = IPOPT, simultaneous turn per optimization = 2. 
 
+The cycling fatigue MHE can also benchmark the optional MadNLP and Alpaqa
+Bioptim integrations. See the
+[solver setup, warm-start policy, and benchmark results](docs/optional_nlp_solvers.md).
+
 <a id="initial-value-problem"></a>
 ## 🎯 Initial value problem
 

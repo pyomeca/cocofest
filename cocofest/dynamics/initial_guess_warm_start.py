@@ -1,6 +1,9 @@
 import numpy as np
 
-import biorbd
+try:
+    import biorbd
+except ImportError:  # Source-built Linux CasADi backend.
+    import biorbd_casadi as biorbd
 
 from bioptim import (
     Axis,

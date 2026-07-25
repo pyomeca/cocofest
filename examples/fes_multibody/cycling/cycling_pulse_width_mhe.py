@@ -58,6 +58,9 @@ class MyCyclicNMPC(FesNmpcMsk):
             if self.nlp[0].dynamics_type.ode_solver.is_direct_collocation
             else 1
         )
+        # Collocation adds intermediate state points, but controls still have
+        # exactly one value per shooting interval.
+        self.control_nodes_per_cycle = self.cycle_len
         self.pedal_turn_in_one_cycle = (
             2 * np.pi
         )  # One mhe cycle simulates on pedal turn
@@ -69,12 +72,55 @@ class MyCyclicNMPC(FesNmpcMsk):
         self.bound_first_node_all_states = True
         self.bound_first_node_wheel_qdot = True
         self.advance_wheel_q_bounds = False
+        self.anchor_terminal_wheel_to_first_node = False
         self.wheel_q_path_margin = 2.0
         self.use_signed_wheel_shift = False
         self.continuous_state_initial_guess_mode = "continuous"
         self.transfer_initial_guess_mode = "historical"
         self.repeat_cyclical_state_initial_guess = False
         self.before_window_advance = None
+
+    def _set_cyclic_bound(self, sol: Solution | None = None) -> None:
+        """Allow a static nodewise control mask in the cyclic RHO.
+
+        Bioptim's implementation only updates state terminal bounds, but it
+        rejects EACH_FRAME control bounds before doing so. Nodewise pulse-width
+        bounds remain phase-periodic and do not need to be shifted here.
+        """
+
+        if (
+            self.nlp[0].u_bounds.type
+            != InterpolationType.EACH_FRAME
+        ):
+            return super()._set_cyclic_bound(sol)
+        if (
+            self.nlp[0].x_bounds.type
+            != InterpolationType.CONSTANT_WITH_FIRST_AND_LAST_DIFFERENT
+        ):
+            raise ValueError(
+                "Cyclic bounds for x_bounds should be of type "
+                "InterpolationType.CONSTANT_WITH_FIRST_AND_LAST_DIFFERENT"
+            )
+
+        for key, state_indices in self.state_idx_to_cycle.items():
+            range_of_motion = (
+                self.nlp[0].x_bounds[key].max[state_indices, 1]
+                - self.nlp[0].x_bounds[key].min[state_indices, 1]
+            )
+            if sol is None:
+                center_min = self.nlp[0].x_bounds[key].min[state_indices, 0]
+                center_max = self.nlp[0].x_bounds[key].max[state_indices, 0]
+            else:
+                node = self.time_idx_to_cycle * self.nb_intermediate_frames
+                states = sol.decision_states(to_merge=SolutionMerge.NODES)
+                center_min = states[key][state_indices, node]
+                center_max = center_min
+            self.nlp[0].x_bounds[key].min[state_indices, 2] = (
+                center_min - range_of_motion * 0.01
+            )
+            self.nlp[0].x_bounds[key].max[state_indices, 2] = (
+                center_max + range_of_motion * 0.01
+            )
 
     def _state_slack_for(self, key: str, index: int) -> float:
         if key in self.first_node_state_slack:
@@ -121,6 +167,37 @@ class MyCyclicNMPC(FesNmpcMsk):
             return float(np.sign(delta) * abs(self.pedal_turn_in_one_cycle))
         return self.pedal_turn_in_one_cycle
 
+    def _recenter_wheel_cycle_boundary_constraints(
+        self, first_wheel_q: float, cycle_shift: float
+    ) -> list[dict[str, float | int]]:
+        """Move absolute seam bounds with the unwrapped crank coordinate."""
+
+        summaries = []
+        for penalty in getattr(self.nlp[0], "g", []):
+            if not penalty:
+                continue
+            parameters = getattr(penalty, "extra_parameters", {})
+            cycle_index = parameters.get("boundary_cycle_index")
+            slack = parameters.get("wheel_cycle_boundary_slack")
+            if cycle_index is None or slack is None:
+                continue
+            center = float(first_wheel_q + int(cycle_index) * cycle_shift)
+            lower = center - float(slack)
+            upper = center + float(slack)
+            penalty.min_bound = lower
+            penalty.max_bound = upper
+            penalty.bounds.min[:, :] = lower
+            penalty.bounds.max[:, :] = upper
+            summaries.append(
+                {
+                    "cycle_index": int(cycle_index),
+                    "center": center,
+                    "lower": lower,
+                    "upper": upper,
+                }
+            )
+        return summaries
+
     def advance_window_bounds_states(self, sol, n_cycles_simultaneous=None, **extra):
         if self.before_window_advance is not None:
             self.before_window_advance(self, sol)
@@ -151,9 +228,21 @@ class MyCyclicNMPC(FesNmpcMsk):
                         self.nlp[0].x_bounds[key].min[i, 0] = center - slack
                         self.nlp[0].x_bounds[key].max[i, 0] = center + slack
                         if key == "q" and self.advance_wheel_q_bounds:
-                            terminal_center = states[key][i][
-                                -1
-                            ] + self._wheel_cycle_shift(states)
+                            cycle_shift = self._wheel_cycle_shift(states)
+                            MyCyclicNMPC._recenter_wheel_cycle_boundary_constraints(
+                                self, float(center), cycle_shift
+                            )
+                            if self.anchor_terminal_wheel_to_first_node:
+                                simultaneous_cycles = (
+                                    n_cycles_simultaneous
+                                    if n_cycles_simultaneous is not None
+                                    else self.n_cycles_simultaneous
+                                )
+                                terminal_center = (
+                                    center + simultaneous_cycles * cycle_shift
+                                )
+                            else:
+                                terminal_center = states[key][i][-1] + cycle_shift
                             path_min = (
                                 min(center, terminal_center) - self.wheel_q_path_margin
                             )
@@ -288,8 +377,8 @@ class MyCyclicNMPC(FesNmpcMsk):
             for key in controls_keys:
                 ub = self.nlp[0].u_bounds[key]
                 self.previous_bounds[key] = {
-                    "min": ub.min[:, : self.nodes_per_cycle].copy(),
-                    "max": ub.max[:, : self.nodes_per_cycle].copy(),
+                    "min": ub.min[:, : self.control_nodes_per_cycle].copy(),
+                    "max": ub.max[:, : self.control_nodes_per_cycle].copy(),
                 }
 
         # --- Set initial guess for controls --- #
@@ -337,9 +426,16 @@ class MyCyclicNMPC(FesNmpcMsk):
         return True
 
     def set_init_cyclical(self, data, key, i, state=True):
+        nodes_per_cycle = (
+            self.nodes_per_cycle if state else self.control_nodes_per_cycle
+        )
         if self.transfer_initial_guess_mode == "historical":
-            n_plus_one_cycles = data[key][i][self.nodes_per_cycle : -1]
-            last_cycle = data[key][i][-self.nodes_per_cycle - 1 :]
+            if state:
+                n_plus_one_cycles = data[key][i][nodes_per_cycle:-1]
+                last_cycle = data[key][i][-nodes_per_cycle - 1 :]
+            else:
+                n_plus_one_cycles = data[key][i][nodes_per_cycle:]
+                last_cycle = data[key][i][-nodes_per_cycle:]
             values = (
                 last_cycle
                 if n_plus_one_cycles.size == 0
@@ -363,8 +459,8 @@ class MyCyclicNMPC(FesNmpcMsk):
                 cycle_delta = source[-1] - source[self.nodes_per_cycle]
                 appended_cycle = source[self.nodes_per_cycle + 1 :] + cycle_delta
         else:
-            retained_cycle = source[self.nodes_per_cycle :]
-            appended_cycle = source[-self.nodes_per_cycle :]
+            retained_cycle = source[nodes_per_cycle:]
+            appended_cycle = source[-nodes_per_cycle:]
         values = np.concatenate((retained_cycle, appended_cycle))
         if state:
             self.nlp[0].x_init[key].init[i, :] = values
@@ -622,6 +718,9 @@ def prepare_nmpc(
     n_cycles_simultaneous = mhe_info["n_cycles_simultaneous"]
     ode_solver = mhe_info["ode_solver"]
     use_sx = mhe_info["use_sx"]
+    n_threads = int(mhe_info.get("n_threads", os.cpu_count() or 1))
+    if n_threads < 1:
+        raise ValueError("n_threads must be a positive integer.")
     window_n_shooting = cycle_len * n_cycles_simultaneous
     window_cycle_duration = cycle_duration * n_cycles_simultaneous
     # --- Cycling info --- #
@@ -652,8 +751,26 @@ def prepare_nmpc(
     terminal_qdot_regularization_weight = simulation_conditions.get(
         "terminal_qdot_regularization_weight", 0.0
     )
+    terminal_wheel_regularization_weight = simulation_conditions.get(
+        "terminal_wheel_regularization_weight", 1e-2
+    )
     state_scaling = simulation_conditions.get("state_scaling", "none")
     pulse_width_scaling = simulation_conditions.get("pulse_width_scaling", 1 / 400)
+    pulse_width_active_set_mode = simulation_conditions.get(
+        "pulse_width_active_set_mode", "none"
+    )
+    pulse_width_active_threshold = simulation_conditions.get(
+        "pulse_width_active_threshold", 0.01
+    )
+    pulse_width_active_margin = simulation_conditions.get(
+        "pulse_width_active_margin", 3
+    )
+    pulse_width_active_reference = simulation_conditions.get(
+        "pulse_width_active_reference"
+    )
+    wheel_cycle_boundary_slack = simulation_conditions.get(
+        "wheel_cycle_boundary_slack"
+    )
     # --- Pickle file info --- #
     initial_guess_path = simulation_conditions["init_guess_file_path"]
 
@@ -707,11 +824,21 @@ def prepare_nmpc(
         window_n_shooting,
         init_file_path=initial_guess_path,
         pulse_width_scaling=pulse_width_scaling,
+        cycles_per_window=n_cycles_simultaneous,
+        active_set_mode=pulse_width_active_set_mode,
+        active_threshold=pulse_width_active_threshold,
+        active_margin=pulse_width_active_margin,
+        active_reference=pulse_width_active_reference,
     )
 
     # --- Set constraints --- #
     constraints = set_constraints(
-        model, enforce_start_constraints=enforce_start_constraints
+        model,
+        enforce_start_constraints=enforce_start_constraints,
+        x_init=x_init,
+        cycle_len=cycle_len,
+        n_cycles_simultaneous=n_cycles_simultaneous,
+        wheel_cycle_boundary_slack=wheel_cycle_boundary_slack,
     )
 
     # --- Set objective --- #
@@ -729,6 +856,7 @@ def prepare_nmpc(
         wheel_qdot_regularization_target=wheel_qdot_regularization_target,
         terminal_qdot_regularization_weight=terminal_qdot_regularization_weight,
         terminal_qdot_regularization_target=x_init["qdot"].init[:, -1],
+        terminal_wheel_regularization_weight=terminal_wheel_regularization_weight,
     )
 
     # --- Update model for resistive torque --- #
@@ -758,7 +886,7 @@ def prepare_nmpc(
         u_bounds=u_bounds,
         u_init=u_init,
         u_scaling=u_scaling,
-        n_threads=48,
+        n_threads=n_threads,
         use_sx=use_sx,
     )
 
@@ -969,14 +1097,74 @@ def set_x_scaling(bio_model, mode: str = "none") -> VariableScalingList | None:
     return x_scaling
 
 
+def periodic_pulse_width_activity_mask(
+    values,
+    *,
+    pd0: float,
+    maximum: float,
+    cycles_per_window: int,
+    relative_threshold: float,
+    margin: int,
+) -> np.ndarray:
+    """Build a conservative, phase-periodic active set from a reference pulse train."""
+
+    pulse_widths = np.asarray(values, dtype=float).reshape(-1)
+    if cycles_per_window < 1:
+        raise ValueError("cycles_per_window must be strictly positive.")
+    if pulse_widths.size % cycles_per_window:
+        raise ValueError(
+            "The pulse-width reference must contain the same number of nodes per cycle."
+        )
+    if not 0.0 <= relative_threshold <= 1.0:
+        raise ValueError("relative_threshold must be between zero and one.")
+    if margin < 0:
+        raise ValueError("margin must be non-negative.")
+
+    nodes_per_cycle = pulse_widths.size // cycles_per_window
+    threshold = float(pd0) + relative_threshold * (float(maximum) - float(pd0))
+    phase_active = np.any(
+        pulse_widths.reshape((cycles_per_window, nodes_per_cycle)) > threshold,
+        axis=0,
+    )
+    if margin:
+        phase_active = np.logical_or.reduce(
+            [
+                np.roll(phase_active, shift)
+                for shift in range(-margin, margin + 1)
+            ]
+        )
+    return np.tile(phase_active, cycles_per_window)
+
+
 def set_u_bounds_and_init(
-    bio_model, n_shooting, init_file_path, pulse_width_scaling: float = 1 / 400
+    bio_model,
+    n_shooting,
+    init_file_path,
+    pulse_width_scaling: float = 1 / 400,
+    *,
+    cycles_per_window: int = 1,
+    active_set_mode: str = "none",
+    active_threshold: float = 0.01,
+    active_margin: int = 3,
+    active_reference: dict[str, np.ndarray] | None = None,
 ):
     if pulse_width_scaling <= 0:
         raise ValueError("pulse_width_scaling must be strictly positive")
+    if active_set_mode not in ("none", "historical", "warmup"):
+        raise ValueError("active_set_mode must be one of: none, historical, warmup")
 
     u_bounds, u_init = OcpFesMsk.set_u_bounds_fes(bio_model)
     u_init = InitialGuessList()  # Controls initial guess
+    if active_set_mode != "none":
+        if not init_file_path:
+            raise ValueError(
+                "The pulse-width active set requires an initial-guess file."
+            )
+        if active_set_mode == "warmup" and active_reference is None:
+            raise ValueError(
+                "The warmup pulse-width active set requires warmup controls."
+            )
+        u_bounds = BoundsList()
     models = bio_model.muscles_dynamics_model
     if init_file_path:
         with open(init_file_path, "rb") as file:
@@ -985,9 +1173,39 @@ def set_u_bounds_and_init(
     for model in models:
         key = "last_pulse_width_" + str(model.muscle_name)
         if init_file_path:
-            initial_guess = data[key]
+            initial_guess = np.asarray(data[key], dtype=float).reshape((1, -1))
         else:
             initial_guess = np.array([[model.pd0] * n_shooting])
+        if initial_guess.shape[1] != n_shooting:
+            raise ValueError(
+                f"{key} has {initial_guess.shape[1]} reference controls; "
+                f"expected {n_shooting}."
+            )
+        if active_set_mode != "none":
+            reference = (
+                np.asarray(active_reference[key], dtype=float).reshape((1, -1))
+                if active_set_mode == "warmup"
+                else initial_guess
+            )
+            active = periodic_pulse_width_activity_mask(
+                reference,
+                pd0=float(model.pd0),
+                maximum=0.0006,
+                cycles_per_window=cycles_per_window,
+                relative_threshold=active_threshold,
+                margin=active_margin,
+            )
+            maximum = np.full((1, n_shooting), float(model.pd0))
+            maximum[0, active] = 0.0006
+            initial_guess = initial_guess.copy()
+            initial_guess[0, ~active] = float(model.pd0)
+            u_bounds.add(
+                key=key,
+                min_bound=np.full((1, n_shooting), float(model.pd0)),
+                max_bound=maximum,
+                phase=0,
+                interpolation=InterpolationType.EACH_FRAME,
+            )
         u_init.add(
             key=key,
             initial_guess=initial_guess,
@@ -1006,26 +1224,67 @@ def set_u_bounds_and_init(
     )
 
 
-def set_constraints(bio_model, enforce_start_constraints: bool = True):
+def wheel_cycle_boundary_constraint(
+    controller,
+    boundary_cycle_index: int,
+    wheel_cycle_boundary_slack: float,
+):
+    """Return the absolute crank angle at an executed-cycle boundary."""
+
+    # Retained in metadata to recenter RHO bounds.
+    del boundary_cycle_index, wheel_cycle_boundary_slack
+    return controller.states["q"].cx[2]
+
+
+def set_constraints(
+    bio_model,
+    enforce_start_constraints: bool = True,
+    *,
+    x_init: InitialGuessList | None = None,
+    cycle_len: int | None = None,
+    n_cycles_simultaneous: int = 1,
+    wheel_cycle_boundary_slack: float | None = None,
+):
     constraints = ConstraintList()
-    if not enforce_start_constraints:
+    if enforce_start_constraints:
+        # --- Constraining wheel center position to a fix position --- #
+        constraints.add(
+            ConstraintFcn.TRACK_MARKERS_VELOCITY,
+            node=Node.START,
+            marker_index=bio_model.marker_index("wheel_center"),
+            axes=[Axis.X, Axis.Y],
+        )
+        constraints.add(
+            ConstraintFcn.SUPERIMPOSE_MARKERS,
+            first_marker="wheel_center",
+            second_marker="global_wheel_center",
+            node=Node.START,
+            axes=[Axis.X, Axis.Y],
+        )
+
+    if wheel_cycle_boundary_slack is None or n_cycles_simultaneous <= 1:
         return constraints
+    if wheel_cycle_boundary_slack < 0:
+        raise ValueError("Wheel cycle-boundary slack must be non-negative.")
+    if x_init is None or cycle_len is None:
+        raise ValueError("Cycle-boundary constraints require x_init and cycle_len.")
 
-    # --- Constraining wheel center position to a fix position --- #
-    constraints.add(
-        ConstraintFcn.TRACK_MARKERS_VELOCITY,
-        node=Node.START,
-        marker_index=bio_model.marker_index("wheel_center"),
-        axes=[Axis.X, Axis.Y],
-    )
-    constraints.add(
-        ConstraintFcn.SUPERIMPOSE_MARKERS,
-        first_marker="wheel_center",
-        second_marker="global_wheel_center",
-        node=Node.START,
-        axes=[Axis.X, Axis.Y],
-    )
-
+    q_reference = np.asarray(x_init["q"].init, dtype=float)[2, :]
+    net_progress = float(q_reference[-1] - q_reference[0])
+    if np.isclose(net_progress, 0.0):
+        raise ValueError("Cannot infer the crank rotation direction from q_init.")
+    signed_cycle_shift = float(np.sign(net_progress) * 2.0 * np.pi)
+    initial_q = float(q_reference[0])
+    for cycle_index in range(1, n_cycles_simultaneous):
+        center = initial_q + cycle_index * signed_cycle_shift
+        constraints.add(
+            wheel_cycle_boundary_constraint,
+            node=cycle_index * cycle_len,
+            boundary_cycle_index=cycle_index,
+            wheel_cycle_boundary_slack=float(wheel_cycle_boundary_slack),
+            min_bound=center - float(wheel_cycle_boundary_slack),
+            max_bound=center + float(wheel_cycle_boundary_slack),
+        )
     return constraints
 
 
@@ -1043,6 +1302,7 @@ def set_objective_functions(
     wheel_qdot_regularization_target: float = -float(2 * np.pi),
     terminal_qdot_regularization_weight: float = 0.0,
     terminal_qdot_regularization_target: np.ndarray | None = None,
+    terminal_wheel_regularization_weight: float = 1e-2,
 ):
     objective_functions = ObjectiveList()
     is_quadratic = objective_shape == "quadratic"
@@ -1129,14 +1389,14 @@ def set_objective_functions(
             quadratic=is_quadratic,
         )
 
-    # --- Set regulation cost function --- #
-    else:
+    # --- Set optional terminal wheel regulation cost function --- #
+    elif terminal_wheel_regularization_weight:
         objective_functions.add(
             ObjectiveFcn.Mayer.MINIMIZE_STATE,
             key="q",
             index=2,
             node=Node.END,
-            weight=1e-2,
+            weight=terminal_wheel_regularization_weight,
             target=target,
             quadratic=is_quadratic,
         )

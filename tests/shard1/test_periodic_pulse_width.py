@@ -1,10 +1,13 @@
+import importlib.util
 import numpy as np
 from casadi import Function, SX
+from pathlib import Path
 from types import SimpleNamespace
 from bioptim import Node, Solver
 
 import examples.fes_multibody.cycling.cycling_pulse_width_mhe_acados_periodic as periodic_example
 import examples.fes_multibody.cycling.cycling_fes_solver_comparison as comparison_example
+import examples.fes_multibody.cycling.cycling_pulse_width_mhe as mhe_example
 from cocofest.optimization.receding_horizon_initial_guess import (
     audit_initial_guess,
     copy_container_values,
@@ -26,6 +29,16 @@ from examples.fes_multibody.cycling.cycling_pulse_width_mhe_acados_periodic impo
     set_acados_unsafe_option,
     tile_one_cycle_solution_to_periodic_nmpc,
 )
+
+_benchmark_report_spec = importlib.util.spec_from_file_location(
+    "cycling_benchmark_report",
+    Path(__file__).resolve().parents[2]
+    / ".github"
+    / "scripts"
+    / "summarize_cycling_benchmark.py",
+)
+benchmark_report = importlib.util.module_from_spec(_benchmark_report_spec)
+_benchmark_report_spec.loader.exec_module(benchmark_report)
 
 
 def _muscle_model():
@@ -415,6 +428,242 @@ def test_compact_rho_output_is_opt_in():
     assert parser.parse_args(["--compact-rho-output"]).compact_rho_output is True
 
 
+def test_acados_example_defaults_to_the_assisted_periodic_profile():
+    args = periodic_example.build_argument_parser().parse_args([])
+    periodic_example.apply_assisted_hot_start_defaults(args)
+    torque = periodic_example.crank_torque_diagnostics(
+        args.constant_crank_torque,
+        args.wheel_qdot_regularization_target,
+    )
+
+    assert args.constant_crank_torque == -0.2
+    assert torque["role"] == "driving"
+    assert torque["assistance_nm"] == 0.2
+    np.testing.assert_allclose(torque["expected_power_w"], 0.4 * np.pi)
+    assert args.model_formulation == "periodic_node"
+    assert args.cycles_per_window == 1
+    assert args.n_windows == 3
+    assert args.state_scaling == "full"
+    assert args.acados_standard_warmup_transfer == "advance"
+    assert args.acados_wheel_q_slack == 0.0
+    assert args.acados_terminal_wheel_q_slack == 0.002
+    assert args.warmup_ipopt_linear_solver == "mumps"
+    assert args.periodic_ipopt_refinement is True
+    assert (
+        args.acados_control_homotopy_radii
+        == periodic_example.DEFAULT_ASSISTED_CONTROL_HOMOTOPY_RADII
+    )
+    assert args.acados_control_homotopy_keep_final_radius is True
+    assert args.acados_control_homotopy_stage_iterations == 100
+    assert args.acados_control_homotopy_max_restarts == 1
+    assert args.acados_cycle_boundary_homotopy_slacks is None
+
+    ipopt_args = periodic_example.build_argument_parser().parse_args(
+        ["--solver", "ipopt"]
+    )
+    periodic_example.apply_assisted_hot_start_defaults(ipopt_args)
+    assert ipopt_args.acados_control_homotopy_radii is None
+    assert ipopt_args.acados_control_homotopy_keep_final_radius is False
+
+
+def test_solver_clis_distinguish_assistance_magnitude_from_signed_torque():
+    periodic_parser = periodic_example.build_argument_parser()
+    comparison_parser = comparison_example.build_cli()
+
+    assert (
+        periodic_parser.parse_args(["--crank-assistance", "0.2"]).constant_crank_torque
+        == -0.2
+    )
+    assert (
+        periodic_parser.parse_args(
+            ["--signed-crank-torque", "0.2"]
+        ).constant_crank_torque
+        == 0.2
+    )
+    assert (
+        comparison_parser.parse_args(["--crank-assistance", "0.2"]).resistive_torque
+        == -0.2
+    )
+    assert (
+        comparison_parser.parse_args(["--resistive-torque", "0.2"]).resistive_torque
+        == 0.2
+    )
+    with np.testing.assert_raises(SystemExit):
+        periodic_parser.parse_args(["--crank-assistance", "-0.2"])
+
+
+def test_standard_warmup_cache_metadata_rejects_a_resistance_seed(tmp_path):
+    args = periodic_example.build_argument_parser().parse_args([])
+    solution = periodic_example._WarmupSolutionAdapter(
+        states={
+            "q": np.zeros((3, 121)),
+            "qdot": np.zeros((3, 121)),
+        },
+        controls={
+            "last_pulse_width_Biceps": np.full(
+                (1, args.cycles_per_window * args.stimulations_per_cycle),
+                0.0002,
+            )
+        },
+    )
+    assisted_path = tmp_path / "assisted_warmup.npz"
+    metadata = periodic_example._standard_warmup_metadata(args)
+    periodic_example._save_warmup_cache(
+        assisted_path,
+        solution,
+        metadata=metadata,
+    )
+
+    loaded = periodic_example._load_warmup_cache(assisted_path)
+    assert loaded.metadata == metadata
+    periodic_example._validate_standard_warmup_seed(loaded, args, assisted_path)
+
+    resistance_metadata = dict(metadata)
+    resistance_metadata["signed_crank_torque_nm"] = 0.2
+    resistance_metadata["crank_torque_role"] = "resistive"
+    resistance_path = tmp_path / "resistance_warmup.npz"
+    periodic_example._save_warmup_cache(
+        resistance_path,
+        solution,
+        metadata=resistance_metadata,
+    )
+    resistance_seed = periodic_example._load_warmup_cache(resistance_path)
+
+    with np.testing.assert_raises_regex(ValueError, "cannot initialize"):
+        periodic_example._validate_standard_warmup_seed(
+            resistance_seed,
+            args,
+            resistance_path,
+        )
+
+    wrong_magnitude_metadata = dict(metadata)
+    wrong_magnitude_metadata["signed_crank_torque_nm"] = -0.21
+    wrong_magnitude_path = tmp_path / "wrong_magnitude_warmup.npz"
+    periodic_example._save_warmup_cache(
+        wrong_magnitude_path,
+        solution,
+        metadata=wrong_magnitude_metadata,
+    )
+    wrong_magnitude_seed = periodic_example._load_warmup_cache(
+        wrong_magnitude_path
+    )
+    with np.testing.assert_raises_regex(ValueError, "signed crank torque"):
+        periodic_example._validate_standard_warmup_seed(
+            wrong_magnitude_seed,
+            args,
+            wrong_magnitude_path,
+        )
+
+
+def test_legacy_warmup_requires_an_explicit_compatible_torque_assertion(tmp_path):
+    args = periodic_example.build_argument_parser().parse_args([])
+    legacy_path = tmp_path / "legacy_warmup.npz"
+    solution = periodic_example._WarmupSolutionAdapter(
+        states={
+            "q": np.zeros((3, 241)),
+            "qdot": np.zeros((3, 241)),
+        },
+        controls={
+            "last_pulse_width_Biceps": np.full(
+                (1, args.cycles_per_window * args.stimulations_per_cycle),
+                0.0002,
+            )
+        },
+    )
+    periodic_example._save_warmup_cache(legacy_path, solution)
+    loaded = periodic_example._load_warmup_cache(legacy_path)
+
+    with np.testing.assert_raises_regex(ValueError, "no physical metadata"):
+        periodic_example._validate_standard_warmup_seed(loaded, args, legacy_path)
+
+    periodic_example._attach_declared_legacy_warmup_metadata(
+        loaded,
+        args,
+        legacy_path,
+        declared_signed_torque_nm=-0.2,
+    )
+    periodic_example._validate_standard_warmup_seed(loaded, args, legacy_path)
+
+    loaded.metadata = None
+    periodic_example._attach_declared_legacy_warmup_metadata(
+        loaded,
+        args,
+        legacy_path,
+        declared_signed_torque_nm=0.2,
+    )
+    with np.testing.assert_raises_regex(ValueError, "cannot initialize"):
+        periodic_example._validate_standard_warmup_seed(loaded, args, legacy_path)
+
+
+def test_legacy_warmup_can_be_truncated_to_a_shorter_integer_cycle_horizon():
+    args = periodic_example.build_argument_parser().parse_args(
+        ["--cycles-per-window", "1"]
+    )
+    solution = periodic_example._WarmupSolutionAdapter(
+        states={"q": np.arange(241, dtype=float)[None, :]},
+        controls={"last_pulse_width_Biceps": np.arange(60, dtype=float)[None, :]},
+    )
+
+    periodic_example._attach_declared_legacy_warmup_metadata(
+        solution,
+        args,
+        Path("legacy_two_cycle_seed.npz"),
+        declared_signed_torque_nm=-0.2,
+    )
+
+    assert solution.decision_controls()["last_pulse_width_Biceps"].shape == (1, 30)
+    assert solution.decision_states()["q"].shape == (1, 121)
+    assert solution.metadata["legacy_source_control_nodes"] == 60
+    assert solution.metadata["legacy_truncated"] is True
+
+
+def test_standard_warmup_cache_signature_separates_assistance_and_resistance(
+    tmp_path,
+):
+    parser = periodic_example.build_argument_parser()
+    assisted = parser.parse_args(["--crank-assistance", "0.2"])
+    resistive = parser.parse_args(["--signed-crank-torque", "0.2"])
+    model_path = tmp_path / "model.bioMod"
+    model_path.write_text("version 4\n")
+    conditions = {"scenario": "signed-torque"}
+    cycling_info = {"resistive_torque": object()}
+
+    assisted_signature = periodic_example._warmup_cache_signature(
+        assisted,
+        model_path,
+        conditions,
+        cycling_info,
+    )
+    resistive_signature = periodic_example._warmup_cache_signature(
+        resistive,
+        model_path,
+        conditions,
+        cycling_info,
+    )
+
+    assert assisted_signature != resistive_signature
+
+
+def test_source_stamp_is_portable_and_content_addressed(tmp_path):
+    first = tmp_path / "runner_a" / "model.bioMod"
+    second = tmp_path / "runner_b" / "model.bioMod"
+    first.parent.mkdir()
+    second.parent.mkdir()
+    first.write_text("version 4\n")
+    second.write_text("version 4\n")
+    first.touch()
+    second.touch()
+
+    assert periodic_example._source_stamp(first) == periodic_example._source_stamp(
+        second
+    )
+
+    second.write_text("version 4\n// changed\n")
+    assert periodic_example._source_stamp(first) != periodic_example._source_stamp(
+        second
+    )
+
+
 def test_compact_rho_output_concatenates_trajectories_without_an_ocp():
     nmpc = object.__new__(FesNmpcMsk)
     nmpc._compact_solution_output = True
@@ -442,7 +691,7 @@ def test_acados_cyclical_transfer_extrapolates_by_default():
     args = periodic_example.build_argument_parser().parse_args([])
 
     assert args.acados_cyclical_transfer_mode == "extrapolate"
-    assert args.acados_control_homotopy_stage_iterations == 54
+    assert args.acados_control_homotopy_stage_iterations == 100
 
 
 def test_periodic_ipopt_window_cache_paths_are_window_specific(tmp_path, monkeypatch):
@@ -482,6 +731,35 @@ def test_strict_fes_continuity_uses_a_distinct_periodic_ipopt_cache(
     )
 
     assert relaxed != strict
+
+
+def test_target_integrator_uses_a_distinct_periodic_ipopt_cache(
+    tmp_path, monkeypatch
+):
+    parser = periodic_example.build_argument_parser()
+    rk4_args = parser.parse_args(
+        ["--periodic-ipopt-refinement-ode-solver", "target", "--ode-solver", "rk4"]
+    )
+    collocation_args = parser.parse_args(
+        [
+            "--periodic-ipopt-refinement-ode-solver",
+            "target",
+            "--ode-solver",
+            "collocation",
+        ]
+    )
+    model_path = tmp_path / "cycling.bioMod"
+    model_path.write_text("version 4\n")
+    monkeypatch.setattr(periodic_example, "_cache_root", lambda: tmp_path)
+
+    rk4 = periodic_example._periodic_ipopt_refinement_cache_path(
+        rk4_args, model_path
+    )
+    collocation = periodic_example._periodic_ipopt_refinement_cache_path(
+        collocation_args, model_path
+    )
+
+    assert rk4 != collocation
 
 
 def test_control_homotopy_stops_on_failure_and_restores_bounds(monkeypatch):
@@ -1282,6 +1560,7 @@ def _benchmark_result(statuses, solver_success=False, success=False):
             "A_Biceps": np.linspace(100.0, 80.0, 7)[np.newaxis, :],
             "Tau1_Biceps": np.linspace(0.05, 0.06, 7)[np.newaxis, :],
         },
+        "fatigue_capacity_scales": {"A_Biceps": 100.0},
         "control_traces": {
             "last_pulse_width_Biceps": np.array(
                 [[0.0002, 0.0006, 0.0003, 0.0004, 0.0005, 0.0006]]
@@ -1303,6 +1582,110 @@ def test_benchmark_compares_only_the_successful_prefix():
     assert limited["wheel_angle_trace"].shape == (5,)
     assert limited["state_traces"]["A_Biceps"].shape == (1, 5)
     assert limited["control_traces"]["last_pulse_width_Biceps"].shape == (1, 4)
+
+
+def test_benchmark_reports_hot_window_timing_separately():
+    result = _benchmark_result([0, 0, 0], solver_success=True, success=True)
+    result["window_solutions"] = [
+        SimpleNamespace(
+            status=0, solver_time_to_optimize=10.0, real_time_to_optimize=11.0
+        ),
+        SimpleNamespace(
+            status=0, solver_time_to_optimize=2.0, real_time_to_optimize=2.2
+        ),
+        SimpleNamespace(
+            status=0, solver_time_to_optimize=4.0, real_time_to_optimize=4.4
+        ),
+    ]
+    result["window_feasibility"] = [
+        {"passes_tolerance": True},
+        {"passes_tolerance": True},
+        {"passes_tolerance": True},
+    ]
+
+    performance = comparison_example._window_performance(result)
+
+    assert performance["hot_window_count"] == 2
+    assert performance["hot_solver_time_median_s"] == 3.0
+    np.testing.assert_allclose(performance["hot_solver_time_p90_s"], 3.8)
+    np.testing.assert_allclose(performance["hot_wall_time_median_s"], 3.3)
+
+
+def test_stimulation_snapshots_use_one_based_cycles_and_real_crank_phase():
+    cycle_count = 30
+    shooting_per_cycle = 2
+    result = {
+        "args": SimpleNamespace(
+            stimulations_per_cycle=shooting_per_cycle,
+            cycles_per_window=1,
+            ode_solver="rk4",
+        ),
+        "window_statuses": [0] * cycle_count,
+        "window_feasibility": [{"passes_tolerance": True}] * cycle_count,
+        "solver_success": True,
+        "success": True,
+        "covered_cycles": cycle_count,
+        "exported_cycles": cycle_count,
+        "wheel_angle_trace": np.linspace(
+            0.0, -2.0 * np.pi * cycle_count, cycle_count * shooting_per_cycle + 1
+        ),
+        "state_traces": {
+            "qdot": np.vstack(
+                (
+                    np.zeros(cycle_count * shooting_per_cycle + 1),
+                    np.zeros(cycle_count * shooting_per_cycle + 1),
+                    -np.ones(cycle_count * shooting_per_cycle + 1),
+                )
+            )
+        },
+        "control_traces": {
+            "last_pulse_width_Biceps": (
+                1e-6 * np.repeat(np.arange(1, cycle_count + 1), shooting_per_cycle)
+            )[np.newaxis, :]
+        },
+        "control_bounds": {
+            "last_pulse_width_Biceps": {"lower": 0.0, "upper": 50e-6}
+        },
+    }
+
+    snapshots = comparison_example.stimulation_pattern_snapshots(result)
+
+    cycle_10 = snapshots["cycle_10"]
+    assert cycle_10["available"] is True
+    assert cycle_10["rho"] == 10
+    np.testing.assert_allclose(
+        cycle_10["muscles"]["Biceps"]["pulse_width_us"], [10.0, 10.0]
+    )
+    np.testing.assert_allclose(cycle_10["crank_phase_rad"], [0.0, np.pi])
+    np.testing.assert_allclose(cycle_10["crank_velocity_rad_s"], [-1.0, -1.0])
+    np.testing.assert_allclose(
+        snapshots["cycle_30"]["muscles"]["Biceps"]["pulse_width_us"],
+        [30.0, 30.0],
+    )
+
+
+def test_stimulation_snapshot_rejects_cycle_outside_converged_prefix():
+    result = _benchmark_result([0, 0, 1], solver_success=False, success=False)
+    result["window_feasibility"] = [
+        {"passes_tolerance": True},
+        {"passes_tolerance": True},
+        {"passes_tolerance": False},
+    ]
+
+    snapshot = comparison_example._stimulation_pattern_snapshot(result, 3)
+
+    assert snapshot["available"] is False
+    assert snapshot["reason"] == "only_2_cycles_belong_to_the_converged_prefix"
+
+
+def test_benchmark_rejects_status_zero_window_above_feasibility_threshold():
+    result = _benchmark_result([0, 0], solver_success=False, success=False)
+    result["window_feasibility"] = [
+        {"passes_tolerance": True},
+        {"passes_tolerance": False},
+    ]
+
+    assert comparison_example._validated_cycle_count(result) == 1
 
 
 def test_benchmark_extracts_collocation_shooting_nodes_without_interpolation():
@@ -1385,10 +1768,15 @@ def test_endurance_metrics_report_fatigue_and_control_saturation():
     result = _benchmark_result([0, 0, 4])
 
     fatigue = comparison_example._fatigue_metrics(result, cycle_count=2)
+    executed_objective = comparison_example._executed_fatigue_objective(
+        result, cycle_count=2
+    )
     saturation = comparison_example._control_saturation_metrics(result, cycle_count=2)
 
     a_row = next(row for row in fatigue if row["key"] == "A_Biceps")
     np.testing.assert_allclose(a_row["relative_final"], (100 - 4 * 20 / 6) / 100)
+    assert a_row["mean_normalized_fatigue"] > 0
+    assert a_row["fatigue_auc_cycles"] > 0
     np.testing.assert_allclose(
         comparison_example._minimum_a_capacity_ratio(fatigue),
         a_row["relative_final"],
@@ -1396,7 +1784,103 @@ def test_endurance_metrics_report_fatigue_and_control_saturation():
     assert comparison_example._format_a_capacity_by_muscle(fatigue) == (
         f"Biceps={a_row['relative_final']:.6f}"
     )
+    assert executed_objective > 0
     assert saturation[0]["upper_fraction"] == 0.25
+
+
+def test_external_crank_power_uses_generalized_power_sign():
+    result = _benchmark_result([0, 0], solver_success=True, success=True)
+    result["args"].constant_crank_torque = -0.2
+    result["state_traces"]["qdot"] = np.vstack(
+        (
+            np.zeros(7),
+            np.zeros(7),
+            np.full(7, -2.0 * np.pi),
+        )
+    )
+
+    driving = comparison_example._external_crank_power_metrics(result, cycle_count=3)
+    result["args"].constant_crank_torque = 0.2
+    resistive = comparison_example._external_crank_power_metrics(result, cycle_count=3)
+
+    assert driving["role"] == "driving"
+    assert resistive["role"] == "resistive"
+    np.testing.assert_allclose(driving["mean_power_w"], 0.4 * np.pi)
+    np.testing.assert_allclose(resistive["mean_power_w"], -0.4 * np.pi)
+
+
+def test_cycle_boundary_wheel_angle_reports_turn_error():
+    result = _benchmark_result([0, 0], solver_success=True, success=True)
+    result["wheel_angle_trace"] = np.array(
+        [
+            0.0,
+            -np.pi,
+            -2.0 * np.pi + 0.01,
+            -3.0 * np.pi,
+            -4.0 * np.pi - 0.02,
+            -5.0 * np.pi,
+            -6.0 * np.pi + 0.03,
+        ]
+    )
+
+    metrics = comparison_example._cycle_boundary_wheel_angle_metrics(
+        result, cycle_count=3
+    )
+
+    np.testing.assert_allclose(metrics["signed_cycle_shift_rad"], -2.0 * np.pi)
+    np.testing.assert_allclose(metrics["errors_rad"], [0.0, 0.01, -0.02, 0.03])
+    np.testing.assert_allclose(metrics["maximum_absolute_error_rad"], 0.03)
+    np.testing.assert_allclose(metrics["final_error_rad"], 0.03)
+    np.testing.assert_allclose(
+        metrics["cycle_progress_errors_rad"], [0.01, -0.03, 0.05]
+    )
+    np.testing.assert_allclose(metrics["maximum_cycle_progress_error_rad"], 0.05)
+
+
+def test_wheel_trace_diagnostic_rejects_wrong_rotation_direction():
+    trace = np.linspace(0.0, 4.0 * np.pi, 5)
+
+    diagnostics = periodic_example.diagnose_wheel_trace(
+        trace,
+        requested_windows=2,
+        expected_cycle_shift=-2.0 * np.pi,
+        cycle_progress_tolerance=0.01,
+    )
+
+    assert not diagnostics["is_physical"]
+    assert "wheel_cycle_progress_out_of_bounds" in diagnostics["issues"]
+    np.testing.assert_allclose(diagnostics["maximum_cycle_progress_error"], 4.0 * np.pi)
+
+
+def test_wheel_trace_diagnostic_accepts_configured_cycle_slack():
+    trace = np.array([0.0, -3.13, -6.28, -9.42, -12.56])
+
+    diagnostics = periodic_example.diagnose_wheel_trace(
+        trace,
+        requested_windows=2,
+        expected_cycle_shift=-2.0 * np.pi,
+        cycle_progress_tolerance=0.01,
+    )
+
+    assert diagnostics["is_physical"]
+    assert diagnostics["maximum_cycle_progress_error"] < 0.01
+
+
+def test_a_capacity_metrics_use_model_scale_instead_of_initial_state():
+    result = _benchmark_result([0, 0])
+    result["state_traces"]["A_Biceps"] = np.linspace(90.0, 80.0, 7)[np.newaxis, :]
+    result["fatigue_capacity_scales"]["A_Biceps"] = 100.0
+
+    a_row = next(
+        row
+        for row in comparison_example._fatigue_metrics(result, cycle_count=3)
+        if row["key"] == "A_Biceps"
+    )
+
+    assert a_row["normalization_source"] == "a_scale"
+    assert a_row["normalization_reference"] == 100.0
+    np.testing.assert_allclose(a_row["relative_final"], 0.8)
+    assert a_row["mean_normalized_fatigue"] > 0.1
 
 
 def test_shared_capacity_limit_requires_two_independent_signals():
@@ -1429,10 +1913,21 @@ def test_receding_horizon_window_count_includes_single_cycle_horizons():
         periodic_example.receding_horizon_window_count(1, 2)
 
 
+def test_receding_horizon_objective_uses_source_windows_not_dummy_merged_cost():
+    solutions = [
+        SimpleNamespace(cost=np.array([[1.5]])),
+        SimpleNamespace(cost=np.array([[2.0], [3.0]])),
+        SimpleNamespace(cost=None),
+    ]
+
+    assert periodic_example._window_objective_values(solutions) == [1.5, 5.0, None]
+
+
 def test_endurance_cli_stops_on_failure_and_keeps_robust_irk_defaults():
     args = comparison_example.build_cli().parse_args([])
 
     assert args.max_consecutive_failing == 1
+    assert args.n_threads == (comparison_example.os.cpu_count() or 1)
     assert args.acados_integrator_type == "IRK"
     assert args.acados_sim_stages == 4
     assert args.acados_sim_steps == 5
@@ -1449,6 +1944,153 @@ def test_endurance_cli_stops_on_failure_and_keeps_robust_irk_defaults():
     assert args.continue_after_acados_transfer_failure is False
     assert args.acados_transfer_mechanical_restoration is False
     assert args.periodic_ipopt_refinement_ode_solver == "target"
+
+
+def test_solver_clis_accept_explicit_thread_count():
+    periodic_args = periodic_example.build_argument_parser().parse_args(
+        ["--n-threads", "8"]
+    )
+    comparison_args = comparison_example.build_cli().parse_args(["--n-threads", "8"])
+
+    assert periodic_args.n_threads == 8
+    assert comparison_args.n_threads == 8
+
+
+def test_solver_clis_expose_ipopt_compilation_and_madnlp_barrier_options():
+    periodic_args = periodic_example.build_argument_parser().parse_args(
+        [
+            "--ipopt-c-compile",
+            "--ipopt-hsl-library",
+            "/opt/coinhsl.dylib",
+            "--warmup-ipopt-linear-solver",
+            "mumps",
+            "--ipopt-print-level",
+            "5",
+            "--ipopt-print-timing-statistics",
+            "--ipopt-linear-system-scaling",
+            "none",
+            "--ipopt-ma57-automatic-scaling",
+            "--ipopt-ma57-pivot-order",
+            "2",
+            "--madnlp-mu-init",
+            "1e-4",
+            "--madnlp-c-compile",
+        ]
+    )
+    comparison_args = comparison_example.build_cli().parse_args(
+        [
+            "--ipopt-c-compile",
+            "--ipopt-hsl-library",
+            "/opt/coinhsl.dylib",
+            "--warmup-ipopt-linear-solver",
+            "mumps",
+            "--ipopt-print-level",
+            "5",
+            "--ipopt-print-timing-statistics",
+            "--ipopt-linear-system-scaling",
+            "none",
+            "--ipopt-ma57-automatic-scaling",
+            "--ipopt-ma57-pivot-order",
+            "2",
+            "--madnlp-mu-init",
+            "1e-4",
+            "--madnlp-c-compile",
+        ]
+    )
+
+    assert periodic_args.ipopt_c_compile is True
+    assert comparison_args.ipopt_c_compile is True
+    assert periodic_args.ipopt_hsl_library == "/opt/coinhsl.dylib"
+    assert comparison_args.ipopt_hsl_library == "/opt/coinhsl.dylib"
+    assert periodic_args.warmup_ipopt_linear_solver == "mumps"
+    assert comparison_args.warmup_ipopt_linear_solver == "mumps"
+    assert periodic_example._warmup_ipopt_linear_solver(periodic_args) == "mumps"
+    assert periodic_args.ipopt_print_level == 5
+    assert comparison_args.ipopt_print_level == 5
+    assert periodic_args.ipopt_print_timing_statistics is True
+    assert comparison_args.ipopt_print_timing_statistics is True
+    assert periodic_args.ipopt_linear_system_scaling == "none"
+    assert comparison_args.ipopt_linear_system_scaling == "none"
+    assert periodic_args.ipopt_ma57_automatic_scaling is True
+    assert comparison_args.ipopt_ma57_automatic_scaling is True
+    assert periodic_args.ipopt_ma57_pivot_order == 2
+    assert comparison_args.ipopt_ma57_pivot_order == 2
+    assert periodic_example._ipopt_advanced_options(periodic_args) == {
+        "print_timing_statistics": "yes",
+        "linear_system_scaling": "none",
+        "ma57_pivot_order": 2,
+        "ma57_automatic_scaling": "yes",
+    }
+    assert periodic_args.madnlp_mu_init == 1e-4
+    assert comparison_args.madnlp_mu_init == 1e-4
+    assert periodic_args.madnlp_c_compile is True
+    assert comparison_args.madnlp_c_compile is True
+
+
+def test_warmup_cache_signature_is_independent_from_target_linear_solver(
+    tmp_path,
+):
+    model_path = tmp_path / "model.bioMod"
+    model_path.write_text("version 4\n")
+    common = [
+        "--warmup-ipopt-linear-solver",
+        "mumps",
+        "--objective",
+        "fatigue",
+    ]
+    mumps_args = periodic_example.build_argument_parser().parse_args(
+        [*common, "--ipopt-linear-solver", "mumps"]
+    )
+    ma57_args = periodic_example.build_argument_parser().parse_args(
+        [*common, "--ipopt-linear-solver", "ma57"]
+    )
+    simulation_conditions = {"test": "shared-seed"}
+    cycling_info = {"event": object()}
+
+    mumps_signature = periodic_example._warmup_cache_signature(
+        mumps_args,
+        model_path,
+        simulation_conditions,
+        cycling_info,
+    )
+    ma57_signature = periodic_example._warmup_cache_signature(
+        ma57_args,
+        model_path,
+        simulation_conditions,
+        cycling_info,
+    )
+
+    assert ma57_signature == mumps_signature
+
+    ma57_args.warmup_ipopt_linear_solver = "ma57"
+    assert (
+        periodic_example._warmup_cache_signature(
+            ma57_args,
+            model_path,
+            simulation_conditions,
+            cycling_info,
+        )
+        != mumps_signature
+    )
+
+
+def test_standard_warmup_conditions_ignore_target_active_set():
+    baseline = {
+        "pulse_width_active_set_mode": "none",
+        "pulse_width_active_threshold": 0.01,
+        "pulse_width_active_margin": 3,
+        "state_scaling": "full",
+    }
+    masked = {
+        **baseline,
+        "pulse_width_active_set_mode": "historical",
+        "pulse_width_active_threshold": 0.1,
+        "pulse_width_active_margin": 5,
+    }
+
+    assert periodic_example._target_independent_warmup_conditions(
+        masked
+    ) == periodic_example._target_independent_warmup_conditions(baseline)
 
 
 class _DualWarmStartSolver:
@@ -1582,12 +2224,489 @@ def test_ipopt_dual_warm_start_rejects_nonfinite_or_wrong_sized_duals():
     assert wrong_size["reason"] == "invalid_constraint_multipliers"
 
 
+def test_optional_nlp_dual_warm_starts_preserve_shifted_primal():
+    nmpc, solution = _ipopt_dual_warm_start_fixture()
+    shifted_primal = np.array([[10.0, 11.0, 12.0]])
+    nmpc.nlp = [
+        SimpleNamespace(x_init={"q": SimpleNamespace(init=shifted_primal.copy())})
+    ]
+
+    madnlp = periodic_example.apply_nlp_dual_warm_start(
+        nmpc, solution, solver_name="madnlp", mode="all"
+    )
+
+    assert madnlp["solver"] == "madnlp"
+    assert madnlp["applied"] is True
+    np.testing.assert_array_equal(nmpc.nlp[0].x_init["q"].init, shifted_primal)
+    np.testing.assert_array_equal(nmpc.ocp_solver.lam_g, solution.lam_g)
+    np.testing.assert_array_equal(nmpc.ocp_solver.lam_x, solution.lam_x)
+
+    nmpc.ocp_solver.lam_g = None
+    nmpc.ocp_solver.lam_x = None
+    alpaqa = periodic_example.apply_nlp_dual_warm_start(
+        nmpc, solution, solver_name="alpaqa", mode="constraints"
+    )
+    assert alpaqa["solver"] == "alpaqa"
+    assert alpaqa["lam_g_size"] == 3
+    assert alpaqa["lam_x_size"] == 0
+    assert nmpc.ocp_solver.lam_x is None
+
+    with np.testing.assert_raises_regex(ValueError, "only supports"):
+        periodic_example.apply_nlp_dual_warm_start(
+            nmpc, solution, solver_name="alpaqa", mode="bounds"
+        )
+
+
 def test_ipopt_dual_warm_start_cli_defaults_to_bound_multipliers():
     periodic_args = periodic_example.build_argument_parser().parse_args([])
     comparison_args = comparison_example.build_cli().parse_args([])
 
     assert periodic_args.ipopt_dual_warm_start_mode == "bounds"
     assert comparison_args.ipopt_dual_warm_start_mode == "bounds"
+    assert periodic_args.madnlp_dual_warm_start_mode == "off"
+    assert periodic_args.alpaqa_dual_warm_start_mode == "constraints"
+    assert comparison_args.madnlp_dual_warm_start_mode == "off"
+    assert comparison_args.alpaqa_dual_warm_start_mode == "constraints"
+
+
+def test_nlp_solver_stats_snapshot_keeps_oracle_timing_without_iterations():
+    stats = {
+        "t_wall_total": 2.0,
+        "t_wall_nlp_hess_l": 1.0,
+        "t_proc_nlp_hess_l": 3.0,
+        "n_call_nlp_hess_l": 4,
+        "iter_count": 5,
+        "success": True,
+        "return_status": "Solve_Succeeded",
+        "iterations": {"inf_pr": [1.0, 0.0]},
+        "unrelated": object(),
+    }
+    nmpc = SimpleNamespace(
+        ocp_solver=SimpleNamespace(
+            shaked_ocp_solver=SimpleNamespace(stats=lambda: stats)
+        )
+    )
+
+    snapshot = periodic_example.snapshot_nlp_solver_stats(nmpc)
+
+    assert snapshot["t_wall_total"] == 2.0
+    assert snapshot["n_call_nlp_hess_l"] == 4
+    assert snapshot["return_status"] == "Solve_Succeeded"
+    assert "iterations" not in snapshot
+    assert "unrelated" not in snapshot
+
+
+def test_standard_warmup_seed_resolves_repository_relative_path(tmp_path, monkeypatch):
+    repository_root = tmp_path / "repository"
+    example_root = repository_root / "examples" / "fes_multibody" / "cycling"
+    seed = example_root / "result" / "cache" / "warmup.npz"
+    seed.parent.mkdir(parents=True)
+    seed.touch()
+    fake_module = example_root / "cycling_pulse_width_mhe_acados_periodic.py"
+    monkeypatch.setattr(periodic_example, "__file__", str(fake_module))
+    monkeypatch.chdir(example_root)
+
+    resolved = periodic_example._resolve_standard_warmup_seed(
+        "examples/fes_multibody/cycling/result/cache/warmup.npz"
+    )
+
+    assert resolved == seed
+
+
+def test_fatigue_benchmark_defaults_to_all_solvers_and_full_scaling():
+    args = comparison_example.build_cli().parse_args([])
+    periodic_args = periodic_example.build_argument_parser().parse_args([])
+
+    assert args.solvers == ("ipopt", "acados", "madnlp", "alpaqa")
+    assert args.objective == "fatigue"
+    assert periodic_args.objective == "fatigue"
+    assert args.objective_shape == "quadratic"
+    assert args.state_scaling == "full"
+    assert periodic_example.build_cost_fun_weight({"fatigue"}) == [0, 1, 0]
+    assert periodic_example.parse_objectives("") == {"fatigue"}
+
+
+def test_fatigue_only_objective_disables_terminal_wheel_regularization(monkeypatch):
+    class FakeObjectiveList:
+        def __init__(self):
+            self.entries = []
+
+        def add(self, objective, **kwargs):
+            self.entries.append((objective, kwargs))
+
+    monkeypatch.setattr(mhe_example, "ObjectiveList", FakeObjectiveList)
+    model = SimpleNamespace(muscles_dynamics_model=[])
+
+    objectives = mhe_example.set_objective_functions(
+        model=model,
+        minimize_force=False,
+        minimize_fatigue=True,
+        minimize_control=False,
+        cost_fun_weight=[0, 1, 0],
+        target=2 * np.pi,
+        objective_shape="quadratic",
+        terminal_wheel_regularization_weight=0.0,
+    )
+
+    assert len(objectives.entries) == 1
+    assert (
+        objectives.entries[0][0]
+        is mhe_example.CustomObjective.minimize_overall_muscle_fatigue
+    )
+    assert objectives.entries[0][1]["weight"] == 10000
+    assert objectives.entries[0][1]["quadratic"] is True
+
+
+def test_benchmark_json_summary_contains_comparable_fatigue_metrics(tmp_path):
+    result = _benchmark_result([0, 0], solver_success=True, success=True)
+    result.update(
+        physical_success=True,
+        status=0,
+        objective=12.5,
+        solver_time_s=2.0,
+        wall_time_s=2.2,
+        end_to_end_wall_time_s=2.5,
+        attempted_windows=2,
+        successful_windows=2,
+        window_solutions=[],
+        nlp_solver_stats=[
+            {
+                "window": 0,
+                "iter_count": 12,
+                "return_status": "Solve_Succeeded",
+                "t_wall_total": 1.25,
+                "t_wall_nlp_hess_l": 0.75,
+            }
+        ],
+    )
+    result["args"].objective = "fatigue"
+    result["args"].objective_shape = "quadratic"
+    result["args"].solver = "madnlp"
+    result["args"].constant_crank_torque = -0.24
+    result["args"].max_consecutive_failing = 2
+    result["args"].ipopt_dual_warm_start_mode = "all"
+    result["args"].max_ipopt_iterations = 2000
+
+    output_path = comparison_example.write_benchmark_summary(
+        tmp_path / "benchmark.json", {"madnlp": result}
+    )
+    payload = comparison_example.json.loads(output_path.read_text())
+
+    assert payload["schema_version"] == 3
+    assert payload["runtime"]["logical_cpu_count"] >= 1
+    assert "OMP_NUM_THREADS" in payload["runtime"]["thread_environment"]
+    assert payload["configurations"]["madnlp"]["objective"] == "fatigue"
+    assert payload["configurations"]["madnlp"]["constant_crank_torque"] == -0.24
+    assert payload["configurations"]["madnlp"]["max_consecutive_failing"] == 2
+    assert payload["configurations"]["madnlp"]["ipopt_dual_warm_start_mode"] == "all"
+    assert payload["configurations"]["madnlp"]["max_ipopt_iterations"] == 2000
+    row = payload["results"][0]
+    assert row["solver"] == "madnlp"
+    assert row["success"] is True
+    assert row["validated_cycles"] == 3
+    assert row["min_A_capacity_ratio"] == 0.8
+    assert row["max_mean_normalized_fatigue"] > 0
+    assert row["fatigue_auc_cycles"] > 0
+    assert row["window_objective_sum"] == 12.5
+    assert row["executed_fatigue_objective"] > 0
+    assert row["external_crank_power"]["role"] == "unavailable"
+    assert row["cycle_boundary_wheel_angle"]["maximum_absolute_error_rad"] is not None
+    assert row["stop"]["label"] == "completed_requested_horizon"
+    assert row["fatigue_by_state"]
+    assert row["control_saturation"][0]["upper_fraction"] > 0
+    assert [window["status"] for window in row["windows"]] == [0, 0]
+    assert [window["rho"] for window in row["windows"]] == [1, 2]
+    assert row["windows"][0]["native_status"] == "Solve_Succeeded"
+    assert row["nlp_solver_stats"][0]["t_wall_nlp_hess_l"] == 0.75
+
+
+def test_independent_bound_violation_accepts_infinite_bounds():
+    violation = periodic_example._maximum_bound_violation(
+        values=[12.0, 0.5],
+        lower_bounds=[-np.inf, 0.0],
+        upper_bounds=[np.inf, 1.0],
+    )
+
+    assert violation == 0.0
+
+
+def test_feasibility_rejects_solution_without_constraint_metric():
+    class FakeSolution:
+        constraints = None
+        inf_pr = None
+        vector = np.array([0.5])
+        ocp = SimpleNamespace(
+            ocp_solver=SimpleNamespace(
+                limits={
+                    "lbx": np.array([0.0]),
+                    "ubx": np.array([1.0]),
+                }
+            )
+        )
+
+        @staticmethod
+        def decision_states(to_merge=None):
+            return {"q": np.zeros((3, 2))}
+
+        @staticmethod
+        def decision_controls(to_merge=None):
+            return {"u": np.zeros((1, 1))}
+
+    feasibility = periodic_example._solution_feasibility_summary(
+        FakeSolution(), tolerance=1e-6
+    )
+
+    assert feasibility["decision_bound_violation"] == 0.0
+    assert feasibility["constraint_feasibility_available"] is False
+    assert feasibility["passes_tolerance"] is False
+    assert feasibility["failure_reason"] == "constraint_feasibility_unavailable"
+
+
+def test_feasibility_uses_constraint_and_decision_bounds():
+    class FakeSolution:
+        constraints = np.array([1.0 + 2e-5, 0.0])
+        inf_pr = None
+        vector = np.array([0.5, 1.1])
+        ocp = SimpleNamespace(
+            ocp_solver=SimpleNamespace(
+                limits={
+                    "lbg": np.array([1.0, -np.inf]),
+                    "ubg": np.array([1.0, np.inf]),
+                    "lbx": np.array([0.0, 0.0]),
+                    "ubx": np.array([1.0, 1.0]),
+                }
+            )
+        )
+
+        @staticmethod
+        def decision_states(to_merge=None):
+            return {"q": np.zeros((3, 2))}
+
+        @staticmethod
+        def decision_controls(to_merge=None):
+            return {"u": np.zeros((1, 1))}
+
+    feasibility = periodic_example._solution_feasibility_summary(
+        FakeSolution(), tolerance=1e-6
+    )
+
+    np.testing.assert_allclose(feasibility["constraint_bound_violation"], 2e-5)
+    np.testing.assert_allclose(feasibility["decision_bound_violation"], 0.1)
+    np.testing.assert_allclose(feasibility["effective_primal_infeasibility"], 0.1)
+    assert feasibility["passes_tolerance"] is False
+
+
+def test_github_benchmark_report_compares_patterns_and_writes_csv(tmp_path):
+    def entry(solver, pulse_width_us):
+        return {
+            "source": f"{solver}.json",
+            "runtime": {
+                "provenance": {
+                    "BIOPTIM_BENCHMARK_COMMIT": (
+                        "mad-commit" if solver != "alpaqa" else "alpaqa-commit"
+                    )
+                }
+            },
+            "configuration": {},
+            "result": {
+                "solver": solver,
+                "success": True,
+                "validated_cycles": 30,
+                "end_to_end_wall_time_s": 4.0,
+                "initial_guess_preparation_time_s": 1.0,
+                "hot_wall_time_median_s": 0.1,
+                "hot_wall_time_p90_s": 0.2,
+                "stop": {"label": "completed_requested_horizon"},
+                "windows": [
+                    {
+                        "rho": 1,
+                        "status": 0,
+                        "native_status": "success",
+                        "solver_converged": True,
+                        "primal_feasible": True,
+                        "validated": True,
+                        "iterations": 2,
+                        "objective": 1.0,
+                        "solver_time_s": 0.08,
+                        "wall_time_s": 0.1,
+                        "feasibility": {
+                            "effective_primal_infeasibility": 1e-8,
+                            "inf_pr_available": True,
+                        },
+                    }
+                ],
+                "stimulation_patterns": {
+                    "cycle_10": {
+                        "available": True,
+                        "cycle": 10,
+                        "rho": 10,
+                        "phase_fraction": [0.0, 0.5],
+                        "crank_angle_rad": [0.0, -np.pi],
+                        "crank_phase_rad": [0.0, np.pi],
+                        "crank_velocity_rad_s": [-1.0, -1.0],
+                        "muscles": {
+                            "Biceps": {
+                                "pulse_width_s": [
+                                    value * 1e-6 for value in pulse_width_us
+                                ],
+                                "pulse_width_us": pulse_width_us,
+                                "normalized_to_bounds": [0.2, 0.4],
+                                "minimum_s": min(pulse_width_us) * 1e-6,
+                                "mean_s": np.mean(pulse_width_us) * 1e-6,
+                                "maximum_s": max(pulse_width_us) * 1e-6,
+                                "lower_bound_fraction": 0.0,
+                                "upper_bound_fraction": 0.0,
+                            }
+                        },
+                    }
+                },
+            },
+        }
+
+    entries = [entry("ipopt", [10.0, 20.0]), entry("alpaqa", [11.0, 21.0])]
+
+    comparisons = benchmark_report.stimulation_comparisons(entries)
+    benchmark_report.write_rho_csv(tmp_path / "rho.csv", entries)
+    benchmark_report.write_stimulation_csv(tmp_path / "patterns.csv", entries)
+    markdown = benchmark_report.render_markdown(entries, [])
+
+    np.testing.assert_allclose(
+        comparisons[0]["root_mean_square_error_us"], 1.0
+    )
+    assert "branches d’intégration Bioptim différentes" in markdown
+    assert "native_status" in (tmp_path / "rho.csv").read_text()
+    assert "crank_phase_rad" in (tmp_path / "patterns.csv").read_text()
+
+
+def test_single_shot_requires_solver_and_feasibility_success():
+    class FakeSolution:
+        status = 1
+        iterations = 10
+        cost = np.array([[1.0]])
+        constraints = np.zeros(3)
+        inf_pr = 1e-8
+        solver_time_to_optimize = 0.1
+        real_time_to_optimize = 0.2
+
+        @staticmethod
+        def decision_states(to_merge=None):
+            return {"q": np.array([[0.0, 0.1], [0.0, 0.1], [0.0, -2.0 * np.pi]])}
+
+        @staticmethod
+        def decision_controls(to_merge=None):
+            return {"u": np.array([[0.2]])}
+
+    failed_status = periodic_example.build_single_shot_summary(
+        FakeSolution(), feasibility_tolerance=1e-6
+    )
+    assert failed_status["physical_success"] is True
+    assert failed_status["solver_success"] is False
+    assert failed_status["success"] is False
+
+    solution = FakeSolution()
+    solution.status = 0
+    solution.inf_pr = 1e-2
+    failed_feasibility = periodic_example.build_single_shot_summary(
+        solution, feasibility_tolerance=1e-6
+    )
+    assert failed_feasibility["window_feasibility"][0]["passes_tolerance"] is False
+    assert failed_feasibility["success"] is False
+
+
+def test_two_cycle_single_shot_checks_each_complete_turn():
+    class FakeSolution:
+        status = 0
+        iterations = 10
+        cost = np.array([[1.0]])
+        constraints = np.zeros(3)
+        inf_pr = 1e-8
+        solver_time_to_optimize = 0.1
+        real_time_to_optimize = 0.2
+
+        @staticmethod
+        def decision_states(to_merge=None):
+            return {
+                "q": np.array(
+                    [
+                        [0.0, 0.0, 0.0],
+                        [0.0, 0.0, 0.0],
+                        [0.0, -2.0 * np.pi, -4.0 * np.pi],
+                    ]
+                )
+            }
+
+        @staticmethod
+        def decision_controls(to_merge=None):
+            return {"u": np.array([[0.2, 0.2]])}
+
+    summary = periodic_example.build_single_shot_summary(
+        FakeSolution(),
+        feasibility_tolerance=1e-6,
+        cycle_count=2,
+        cycle_progress_tolerance=1e-6,
+    )
+
+    assert summary["physical_success"] is True
+    np.testing.assert_allclose(
+        summary["diagnostics"]["cycle_progress_errors"], [0.0, 0.0]
+    )
+
+
+def test_optional_nlp_config_clones_ipopt_transcription_exactly():
+    reference = SimpleNamespace(
+        solver="ipopt",
+        model_formulation="standard",
+        torque_application="external_forces",
+        ode_solver="collocation",
+        collocation_degree=3,
+        collocation_method="radau",
+        use_sx=False,
+        state_scaling="full",
+        objective="fatigue",
+        objective_shape="quadratic",
+    )
+
+    madnlp = comparison_example._nlp_solver_config(
+        "madnlp",
+        reference,
+        tolerance=1e-6,
+        max_iterations=500,
+        dual_warm_start_mode="bounds",
+        madnlp_linear_solver="LDLSolver",
+        madnlp_max_wall_time=5.0,
+        madnlp_nlp_scaling=True,
+        periodic_ipopt_hot_start=True,
+    )
+    alpaqa = comparison_example._nlp_solver_config(
+        "alpaqa",
+        reference,
+        tolerance=1e-5,
+        max_iterations=800,
+        dual_warm_start_mode="constraints",
+        alpaqa_alm_max_iterations=40,
+        alpaqa_initial_tolerance=1e-3,
+        alpaqa_penalty_update_factor=5.0,
+        periodic_ipopt_hot_start=True,
+    )
+
+    for candidate in (madnlp, alpaqa):
+        assert candidate.model_formulation == reference.model_formulation
+        assert candidate.torque_application == reference.torque_application
+        assert candidate.ode_solver == reference.ode_solver
+        assert candidate.collocation_degree == reference.collocation_degree
+        assert candidate.collocation_method == reference.collocation_method
+        assert candidate.use_sx == reference.use_sx
+        assert candidate.state_scaling == reference.state_scaling
+        assert candidate.objective == "fatigue"
+        assert candidate.objective_shape == "quadratic"
+        assert candidate.nlp_periodic_ipopt_hot_start is True
+
+    assert madnlp.madnlp_linear_solver == "LDLSolver"
+    assert madnlp.madnlp_max_wall_time == 5.0
+    assert madnlp.madnlp_nlp_scaling is True
+    assert alpaqa.alpaqa_initial_tolerance == 1e-3
+    assert alpaqa.alpaqa_penalty_update_factor == 5.0
+    assert alpaqa.alpaqa_alm_max_iterations == 40
 
 
 def test_regularized_mhe_cli_exposes_previous_window_targets_and_terminal_slack():
@@ -1605,10 +2724,152 @@ def test_regularized_mhe_cli_exposes_previous_window_targets_and_terminal_slack(
     assert args.control_regularization_target_source == "previous"
     assert args.terminal_qdot_regularization_weight == 0.1
     assert args.terminal_qdot_regularization_target_source == "first_node"
-    assert args.acados_terminal_wheel_q_slack == 0.2
+    assert args.acados_terminal_wheel_q_slack == 0.002
     assert args.wheel_qdot_bound_margin == 3.0
     assert args.acados_globalization == "FUNNEL_L1PEN_LINESEARCH"
     assert args.periodic_ipopt_refinement_each_window is False
+
+
+def test_optional_nlp_cli_exposes_cross_solver_hot_start_and_tuning():
+    periodic_args = periodic_example.build_argument_parser().parse_args(
+        [
+            "--solver",
+            "madnlp",
+            "--nlp-periodic-ipopt-hot-start",
+            "--madnlp-linear-solver",
+            "UmfpackSolver",
+            "--madnlp-max-wall-time",
+            "12",
+            "--madnlp-nlp-scaling",
+            "--madnlp-acceptable-tolerance",
+            "1e-4",
+            "--madnlp-acceptable-iterations",
+            "3",
+        ]
+    )
+    comparison_args = comparison_example.build_cli().parse_args(
+        [
+            "--alpaqa-initial-tolerance",
+            "1e-3",
+            "--alpaqa-alm-max-iter",
+            "40",
+            "--alpaqa-penalty-update-factor",
+            "5",
+            "--alpaqa-maximum-penalty",
+            "1e7",
+            "--alpaqa-panoc-max-wall-time",
+            "0.25",
+            "--alpaqa-max-no-progress",
+            "25",
+        ]
+    )
+
+    assert periodic_args.nlp_periodic_ipopt_hot_start is True
+    assert periodic_args.madnlp_linear_solver == "UmfpackSolver"
+    assert periodic_args.madnlp_max_wall_time == 12
+    assert periodic_args.madnlp_nlp_scaling is True
+    assert periodic_args.madnlp_acceptable_tolerance == 1e-4
+    assert periodic_args.madnlp_acceptable_iterations == 3
+    assert comparison_args.optional_nlp_periodic_ipopt_hot_start is True
+    assert comparison_args.alpaqa_alm_max_iter == 40
+    assert comparison_args.alpaqa_initial_tolerance == 1e-3
+    assert comparison_args.alpaqa_penalty_update_factor == 5
+    assert comparison_args.alpaqa_maximum_penalty == 1e7
+    assert comparison_args.alpaqa_panoc_max_wall_time == 0.25
+    assert comparison_args.alpaqa_max_no_progress == 25
+
+
+def test_backend_independent_terminal_wheel_slack_cli():
+    periodic_args = periodic_example.build_argument_parser().parse_args(
+        ["--terminal-wheel-q-slack", "0.02"]
+    )
+    comparison_args = comparison_example.build_cli().parse_args(
+        [
+            "--terminal-wheel-q-slack",
+            "0.02",
+            "--first-node-wheel-q-slack",
+            "0",
+        ]
+    )
+
+    assert periodic_args.terminal_wheel_q_slack == 0.02
+    assert comparison_args.acados_terminal_wheel_q_slack == 0.02
+    assert comparison_args.first_node_wheel_q_slack == 0.0
+
+
+def test_historical_pulse_width_active_set_is_periodic_and_keeps_a_guard_band():
+    pd0 = 0.000131405
+    reference = np.full(10, pd0)
+    reference[0] = 0.0006
+
+    active = mhe_example.periodic_pulse_width_activity_mask(
+        reference,
+        pd0=pd0,
+        maximum=0.0006,
+        cycles_per_window=2,
+        relative_threshold=0.01,
+        margin=1,
+    )
+
+    np.testing.assert_array_equal(
+        active,
+        [True, True, False, False, True, True, True, False, False, True],
+    )
+
+
+def test_pulse_width_activity_margin_only_adds_free_nodes():
+    pd0 = 0.000131405
+    reference = np.full(60, pd0)
+    reference[[2, 17, 32, 47]] = 0.0006
+
+    margin_three = mhe_example.periodic_pulse_width_activity_mask(
+        reference,
+        pd0=pd0,
+        maximum=0.0006,
+        cycles_per_window=2,
+        relative_threshold=0.01,
+        margin=3,
+    )
+    margin_four = mhe_example.periodic_pulse_width_activity_mask(
+        reference,
+        pd0=pd0,
+        maximum=0.0006,
+        cycles_per_window=2,
+        relative_threshold=0.01,
+        margin=4,
+    )
+
+    assert np.all(margin_three <= margin_four)
+    assert np.count_nonzero(margin_four) > np.count_nonzero(margin_three)
+    np.testing.assert_array_equal(margin_four[:30], margin_four[30:])
+
+
+def test_pulse_width_active_set_cli_is_shared_by_benchmark():
+    periodic_args = periodic_example.build_argument_parser().parse_args(
+        [
+            "--pulse-width-active-set",
+            "historical",
+            "--pulse-width-active-threshold",
+            "0.02",
+            "--pulse-width-active-margin",
+            "4",
+        ]
+    )
+    comparison_args = comparison_example.build_cli().parse_args(
+        [
+            "--pulse-width-active-set",
+            "historical",
+            "--pulse-width-active-threshold",
+            "0.02",
+            "--pulse-width-active-margin",
+            "4",
+        ]
+    )
+
+    for args in (periodic_args, comparison_args):
+        assert args.pulse_width_active_set == "historical"
+        assert args.pulse_width_active_threshold == 0.02
+        assert args.pulse_width_active_margin == 4
 
 
 def test_previous_control_and_terminal_velocity_targets_are_recentered():
@@ -2427,6 +3688,32 @@ def test_signed_wheel_transfer_preserves_seam_and_terminal_turn():
     np.testing.assert_allclose(qdot_initial_guess[0], qdot_source)
 
 
+def test_collocation_control_transfer_uses_shooting_nodes_not_state_subnodes():
+    controls = {"last_pulse_width_Biceps": np.arange(60, dtype=float)[None, :]}
+    target = np.zeros((1, 60))
+    nmpc = SimpleNamespace(
+        nodes_per_cycle=120,
+        control_nodes_per_cycle=30,
+        transfer_initial_guess_mode="anchored",
+        nlp=[
+            SimpleNamespace(
+                u_init={"last_pulse_width_Biceps": SimpleNamespace(init=target)}
+            )
+        ],
+    )
+
+    MyCyclicNMPC.set_init_cyclical(
+        nmpc,
+        controls,
+        "last_pulse_width_Biceps",
+        0,
+        state=False,
+    )
+
+    np.testing.assert_array_equal(target[0, :30], np.arange(30, 60))
+    np.testing.assert_array_equal(target[0, 30:], np.arange(30, 60))
+
+
 def test_one_cycle_transfer_preserves_profiles_instead_of_broadcasting_terminal_node():
     nodes_per_cycle = 3
     q_source = np.array([0.0, -1.0, -2.0, -2 * np.pi])
@@ -2465,6 +3752,7 @@ def test_one_cycle_transfer_preserves_profiles_instead_of_broadcasting_terminal_
 def test_cyclical_transfer_keeps_complete_state_cycle_and_repeats_controls():
     nmpc = SimpleNamespace(
         nodes_per_cycle=3,
+        control_nodes_per_cycle=3,
         transfer_initial_guess_mode="anchored",
         nlp=[
             SimpleNamespace(
@@ -2484,6 +3772,25 @@ def test_cyclical_transfer_keeps_complete_state_cycle_and_repeats_controls():
     )
     np.testing.assert_allclose(
         nmpc.nlp[0].u_init["control"].init[0], [3, 4, 5, 3, 4, 5]
+    )
+
+
+def test_historical_collocation_control_transfer_uses_control_cycle_length():
+    source = np.arange(60, dtype=float)[None, :]
+    nmpc = SimpleNamespace(
+        nodes_per_cycle=120,
+        control_nodes_per_cycle=30,
+        transfer_initial_guess_mode="historical",
+        nlp=[
+            SimpleNamespace(u_init={"control": SimpleNamespace(init=np.zeros((1, 60)))})
+        ],
+    )
+
+    MyCyclicNMPC.set_init_cyclical(nmpc, {"control": source}, "control", 0, state=False)
+
+    np.testing.assert_allclose(
+        nmpc.nlp[0].u_init["control"].init[0],
+        np.concatenate((np.arange(30, 60), np.arange(30, 60))),
     )
 
 
@@ -2538,6 +3845,270 @@ def test_window_cache_callback_runs_before_window_is_advanced():
     MyCyclicNMPC.advance_window_bounds_states(nmpc, solution)
 
     assert events == ["before_window_advance", "decision_states"]
+
+
+def test_terminal_wheel_target_is_anchored_to_new_window_start():
+    q = np.zeros((3, 3))
+    q[2] = [0.0, -6.0, -12.0]
+    qdot = np.zeros((3, 3))
+    qdot[2] = [-6.0, -6.0, -6.0]
+    solution = SimpleNamespace(
+        decision_states=lambda to_merge=None: {"q": q, "qdot": qdot}
+    )
+    q_bounds = SimpleNamespace(
+        min=np.full((3, 3), -100.0),
+        max=np.full((3, 3), 100.0),
+    )
+    qdot_bounds = SimpleNamespace(
+        min=np.full((3, 3), -100.0),
+        max=np.full((3, 3), 100.0),
+    )
+    nmpc = SimpleNamespace(
+        before_window_advance=None,
+        nodes_per_cycle=1,
+        n_cycles_simultaneous=2,
+        debugg_bounds=False,
+        transfer_debug=False,
+        bound_first_node_all_states=True,
+        bound_first_node_wheel_qdot=False,
+        advance_wheel_q_bounds=True,
+        anchor_terminal_wheel_to_first_node=True,
+        wheel_q_path_margin=2.0,
+        use_signed_wheel_shift=True,
+        first_node_state_slack={"q": [0.0, 0.0, 0.02]},
+        terminal_state_slack={"q": [0.0, 0.0, 0.01]},
+        nlp=[SimpleNamespace(x_bounds={"q": q_bounds, "qdot": qdot_bounds})],
+        _wheel_cycle_shift=lambda states: -2.0 * np.pi,
+        _state_slack_for=lambda key, index: (
+            0.02 if key == "q" and index == 2 else 0.0
+        ),
+        _terminal_state_slack_for=lambda key, index: (
+            0.01 if key == "q" and index == 2 else 0.0
+        ),
+        update_stim=lambda: None,
+        _sync_acados_state_bounds=lambda: None,
+    )
+
+    MyCyclicNMPC.advance_window_bounds_states(nmpc, solution, n_cycles_simultaneous=2)
+
+    expected_terminal = -6.0 - 4.0 * np.pi
+    np.testing.assert_allclose(q_bounds.min[2, 2], expected_terminal - 0.01)
+    np.testing.assert_allclose(q_bounds.max[2, 2], expected_terminal + 0.01)
+
+
+def test_wheel_cycle_boundary_constraint_is_recentered_with_unwrapped_angle():
+    penalty = SimpleNamespace(
+        extra_parameters={
+            "boundary_cycle_index": 1,
+            "wheel_cycle_boundary_slack": 0.02,
+        },
+        min_bound=0.0,
+        max_bound=0.0,
+        bounds=SimpleNamespace(
+            min=np.zeros((1, 1)),
+            max=np.zeros((1, 1)),
+        ),
+    )
+    nmpc = SimpleNamespace(nlp=[SimpleNamespace(g=[penalty])])
+
+    summary = MyCyclicNMPC._recenter_wheel_cycle_boundary_constraints(
+        nmpc,
+        first_wheel_q=100.0,
+        cycle_shift=-2.0 * np.pi,
+    )
+
+    center = 100.0 - 2.0 * np.pi
+    np.testing.assert_allclose(penalty.bounds.min, center - 0.02)
+    np.testing.assert_allclose(penalty.bounds.max, center + 0.02)
+    np.testing.assert_allclose(summary[0]["center"], center)
+
+
+def test_acados_cycle_boundary_is_applied_as_scaled_stage_state_bound():
+    calls = []
+    path_lower = np.array([-10.0, -20.0, -30.0, -40.0])
+    path_upper = np.array([10.0, 20.0, 30.0, 40.0])
+    q_min = np.array(
+        [
+            [-5.0, -5.0, -5.0],
+            [-5.0, -5.0, -5.0],
+            [-1.0, -20.0, -20.0],
+        ]
+    )
+    q_max = np.array(
+        [
+            [5.0, 5.0, 5.0],
+            [5.0, 5.0, 5.0],
+            [-1.0, 20.0, 20.0],
+        ]
+    )
+    interface = SimpleNamespace(
+        ocp=SimpleNamespace(
+            _cocofest_wheel_cycle_boundary_slack=0.02,
+            _cocofest_cycle_len=3,
+            _cocofest_cycles_per_window=2,
+            _cocofest_wheel_cycle_shift=-2 * np.pi,
+            nlp=[
+                SimpleNamespace(
+                    x_bounds={"q": SimpleNamespace(min=q_min, max=q_max)},
+                    states={"q": SimpleNamespace(index=np.array([0, 1, 2]))},
+                    x_scaling={
+                        "q": SimpleNamespace(
+                            scaling=np.array([[1.0], [1.0], [2.0]])
+                        )
+                    },
+                )
+            ],
+        ),
+        ocp_solver=SimpleNamespace(
+            constraints_set=lambda stage, field, values: calls.append(
+                (stage, field, np.asarray(values, dtype=float).copy())
+            )
+        ),
+        nparams=1,
+        x_bound_min=np.column_stack((path_lower, path_lower, path_lower)),
+        x_bound_max=np.column_stack((path_upper, path_upper, path_upper)),
+        acados_ocp=SimpleNamespace(
+            solver_options=SimpleNamespace(N_horizon=6)
+        ),
+    )
+
+    summary = periodic_example.apply_acados_wheel_cycle_boundary_bounds(interface)
+
+    assert [item[:2] for item in calls] == [(3, "lbx"), (3, "ubx")]
+    expected_center = -1.0 - 2 * np.pi
+    np.testing.assert_allclose(calls[0][2][:3], path_lower[:3])
+    np.testing.assert_allclose(calls[1][2][:3], path_upper[:3])
+    np.testing.assert_allclose(calls[0][2][3], (expected_center - 0.02) / 2.0)
+    np.testing.assert_allclose(calls[1][2][3], (expected_center + 0.02) / 2.0)
+    assert summary[0]["cycle_index"] == 1
+    assert summary[0]["stage"] == 3
+    np.testing.assert_allclose(summary[0]["center"], expected_center)
+    np.testing.assert_allclose(summary[0]["lower"], expected_center - 0.02)
+    np.testing.assert_allclose(summary[0]["upper"], expected_center + 0.02)
+
+
+def test_acados_cycle_boundary_bounds_cover_every_internal_seam():
+    calls = []
+    interface = SimpleNamespace(
+        ocp=SimpleNamespace(
+            _cocofest_wheel_cycle_boundary_slack=0.02,
+            _cocofest_cycle_len=3,
+            _cocofest_cycles_per_window=3,
+            _cocofest_wheel_cycle_shift=-2 * np.pi,
+            nlp=[
+                SimpleNamespace(
+                    x_bounds={
+                        "q": SimpleNamespace(
+                            min=np.array(
+                                [[-5.0] * 3, [-5.0] * 3, [-1.0, -20.0, -20.0]]
+                            ),
+                            max=np.array(
+                                [[5.0] * 3, [5.0] * 3, [-1.0, 20.0, 20.0]]
+                            ),
+                        )
+                    },
+                    states={"q": SimpleNamespace(index=np.array([0, 1, 2]))},
+                    x_scaling={
+                        "q": SimpleNamespace(
+                            scaling=np.array([[1.0], [1.0], [2.0]])
+                        )
+                    },
+                )
+            ],
+        ),
+        ocp_solver=SimpleNamespace(
+            constraints_set=lambda stage, field, values: calls.append(
+                (stage, field, np.asarray(values, dtype=float).copy())
+            )
+        ),
+        nparams=1,
+        x_bound_min=np.tile(np.array([[-10.0], [-20.0], [-30.0], [-40.0]]), (1, 3)),
+        x_bound_max=np.tile(np.array([[10.0], [20.0], [30.0], [40.0]]), (1, 3)),
+        acados_ocp=SimpleNamespace(
+            solver_options=SimpleNamespace(N_horizon=9),
+            dims=SimpleNamespace(nbx=4),
+            constraints=SimpleNamespace(idxbx=np.arange(4)),
+        ),
+    )
+
+    summary = periodic_example.apply_acados_wheel_cycle_boundary_bounds(interface)
+
+    assert [(item["cycle_index"], item["stage"]) for item in summary] == [
+        (1, 3),
+        (2, 6),
+    ]
+    assert [item[:2] for item in calls] == [
+        (3, "lbx"),
+        (3, "ubx"),
+        (6, "lbx"),
+        (6, "ubx"),
+    ]
+    assert all(stage != 9 for stage, _, _ in calls)
+
+
+def test_cycle_boundary_schedule_contains_seed_and_densifies_large_steps():
+    nmpc = SimpleNamespace(
+        cycle_len=3,
+        n_cycles_simultaneous=2,
+        _cocofest_cycles_per_window=2,
+        _cocofest_wheel_cycle_shift=-2 * np.pi,
+        nlp=[
+            SimpleNamespace(
+                x_init={
+                    "q": SimpleNamespace(
+                        init=np.array(
+                            [
+                                [0.0] * 7,
+                                [0.0] * 7,
+                                [-1.0, -2.0, -3.0, -6.0, -7.0, -8.0, -9.0],
+                            ]
+                        )
+                    )
+                }
+            )
+        ],
+    )
+
+    slacks = periodic_example.resolve_cycle_boundary_homotopy_slacks(
+        nmpc, (1.0, 0.5, 0.002), maximum_step=0.05
+    )
+
+    assert slacks[0] >= abs((-6.0) - (-1.0 - 2 * np.pi)) + 0.02
+    assert slacks[-1] == 0.002
+    assert max(a - b for a, b in zip(slacks, slacks[1:])) <= 0.05 + 1e-12
+
+
+def test_periodic_refinement_requires_measured_primal_feasibility():
+    high_violation = {
+        "inf_pr_available": True,
+        "passes_tolerance": False,
+    }
+    missing_measurement = {
+        "inf_pr_available": False,
+        "passes_tolerance": True,
+    }
+    feasible_nonconverged = {
+        "inf_pr_available": True,
+        "passes_tolerance": True,
+    }
+
+    assert (
+        periodic_example.periodic_refinement_acceptance(0, high_violation)[
+            "accepted"
+        ]
+        is False
+    )
+    assert (
+        periodic_example.periodic_refinement_acceptance(0, missing_measurement)[
+            "accepted"
+        ]
+        is False
+    )
+    provisional = periodic_example.periodic_refinement_acceptance(
+        1, feasible_nonconverged
+    )
+    assert provisional["accepted"] is True
+    assert provisional["provisional"] is True
 
 
 def test_horizon_seed_recenters_kinematic_boundary_bounds():
@@ -2614,7 +4185,11 @@ def test_full_dynamics_transfer_rollout_reintegrates_appended_cycle():
         ),
     )
     nmpc = SimpleNamespace(
-        nlp=[nlp], nodes_per_cycle=2, cycle_duration=1.0, cycle_len=2
+        nlp=[nlp],
+        nodes_per_cycle=2,
+        control_nodes_per_cycle=2,
+        cycle_duration=1.0,
+        cycle_len=2,
     )
 
     summary = periodic_example.rollout_transferred_cycle_full_dynamics(
@@ -2645,6 +4220,7 @@ def test_appended_pulse_width_scaling_preserves_retained_cycle_and_clips():
     values = np.array([[0.1, 0.2, 0.2, 0.3]])
     nmpc = SimpleNamespace(
         nodes_per_cycle=2,
+        control_nodes_per_cycle=2,
         nlp=[
             SimpleNamespace(
                 u_init={"last_pulse_width_Biceps": SimpleNamespace(init=values)},
@@ -2718,6 +4294,7 @@ def test_acados_irk_transfer_rollout_uses_scaled_variables_and_stage_data():
     nmpc = SimpleNamespace(
         nlp=[nlp],
         nodes_per_cycle=2,
+        control_nodes_per_cycle=2,
         cycle_duration=1.0,
         cycle_len=2,
         _cocofest_acados_sim_solver=simulator,
@@ -2760,7 +4337,10 @@ def test_acados_irk_transfer_rejects_dimension_mismatch_without_mutating_guess()
         u_scaling={"u": SimpleNamespace(scaling=np.ones((1, 1)))},
     )
     nmpc = SimpleNamespace(
-        nlp=[nlp], nodes_per_cycle=1, _cocofest_acados_sim_solver=simulator
+        nlp=[nlp],
+        nodes_per_cycle=1,
+        control_nodes_per_cycle=1,
+        _cocofest_acados_sim_solver=simulator,
     )
 
     with np.testing.assert_raises_regex(ValueError, "dimensions do not match"):

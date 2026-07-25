@@ -1,0 +1,402 @@
+name: Cycling fatigue solvers — assisted 30 RHO
+
+on:
+  workflow_dispatch:
+    inputs:
+      runner_label:
+        description: GitHub-hosted image or label of a larger Linux runner
+        required: true
+        default: ubuntu-22.04
+        type: string
+      cycles:
+        description: Maximum number of one-cycle RHO windows
+        required: true
+        default: "30"
+        type: string
+      crank_assistance_nm:
+        description: Driving crank assistance magnitude in N.m
+        required: true
+        default: "0.20"
+        type: string
+      terminal_wheel_q_slack:
+        description: Local cycle-boundary crank-angle slack in radians
+        required: true
+        default: "0.002"
+        type: string
+      solver_max_iterations:
+        description: Maximum NLP iterations for each RHO
+        required: true
+        default: "2000"
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cycling-fatigue-${{ github.ref }}-${{ github.run_id }}
+  cancel-in-progress: false
+
+env:
+  CASADI_VERSION: "3.7.2"
+  CASADI_COMMIT: f959d3175a444d763e4eda4aece48f4c5f4a6f90
+  ALPAQA_COMMIT: 9c0dde81c0787f95b7ebaff12aa6447dad06ef9e
+  BIOPTIM_REPOSITORY: mickaelbegon/BiorbdOptim
+  BIOPTIM_MADNLP_COMMIT: 346eb1d445e6ba67010b96c6f16ba830185119e7
+  BIOPTIM_ALPAQA_COMMIT: d84e7e43534360fc048e0be26a3bd69a2abc2d77
+  MADNLP_ARCHIVE: madnlp-jl1.10.4-ubuntu-20.04-x64.zip
+  MADNLP_SHA256: 333c42a1beb04fdba84410cc861927a74c3591c3b9cffd15323cbfeb44fbc8a0
+  MADNLP_URL: https://github.com/tmmsartor/madnlp_c/releases/download/nightly-cpu_only/madnlp-jl1.10.4-ubuntu-20.04-x64.zip
+  OMP_NUM_THREADS: "1"
+  OPENBLAS_NUM_THREADS: "1"
+  MKL_NUM_THREADS: "1"
+  NUMEXPR_NUM_THREADS: "1"
+  JULIA_NUM_THREADS: "1"
+  MPLCONFIGDIR: /tmp/cocofest-matplotlib
+
+jobs:
+  prepare-seed:
+    name: Prepare the common assisted IPOPT seed
+    runs-on: ${{ inputs.runner_label }}
+    timeout-minutes: 120
+    defaults:
+      run:
+        shell: bash -el {0}
+
+    steps:
+      - name: Checkout Cocofest
+        uses: actions/checkout@v4
+
+      - name: Checkout the pinned Bioptim integration
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.BIOPTIM_REPOSITORY }}
+          ref: ${{ env.BIOPTIM_MADNLP_COMMIT }}
+          path: .benchmark-deps/bioptim
+
+      - name: Set up the Linux benchmark environment
+        uses: conda-incubator/setup-miniconda@v3
+        with:
+          miniforge-version: latest
+          activate-environment: cocofest-cycling-benchmark
+          environment-file: .github/cycling-benchmark-linux-environment.yml
+          conda-remove-defaults: true
+
+      - name: Detect the CPU allocation
+        run: |
+          available_cores="$(nproc)"
+          echo "BENCHMARK_THREADS=$available_cores" >> "$GITHUB_ENV"
+          echo "CMAKE_BUILD_PARALLEL_LEVEL=$available_cores" >> "$GITHUB_ENV"
+          lscpu
+
+      - name: Install the reference numerical stack
+        run: |
+          python -m pip install --no-deps "casadi==$CASADI_VERSION"
+          bash .github/scripts/install_biorbd_casadi_linux.sh
+          python -m pip install --no-deps -e .benchmark-deps/bioptim
+
+      - name: Build and certify the common physical seed
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+        run: |
+          mkdir -p benchmark-seed-result
+          python examples/fes_multibody/cycling/cycling_fes_solver_comparison.py \
+            --solvers ipopt \
+            --objective fatigue \
+            --ipopt-profile periodic_collocation \
+            --cycles-per-window 1 \
+            --stimulations-per-cycle 30 \
+            --n-windows 1 \
+            --n-threads "$BENCHMARK_THREADS" \
+            --crank-assistance "${{ inputs.crank_assistance_nm }}" \
+            --warmup-ipopt-linear-solver mumps \
+            --ipopt-linear-solver mumps \
+            --ipopt-max-iter "${{ inputs.solver_max_iterations }}" \
+            --ipopt-disable-historical-initial-guess \
+            --state-scaling full \
+            --first-node-wheel-q-slack 0 \
+            --terminal-wheel-q-slack "${{ inputs.terminal_wheel_q_slack }}" \
+            --compact-rho-output \
+            --output-json benchmark-seed-result/seed-check.json
+          seed_path="$(find examples/fes_multibody/cycling/result/cache -name 'warmup_*.npz' -print -quit)"
+          if [[ -z "$seed_path" ]]; then
+            echo "The standard assisted IPOPT seed was not created." >&2
+            exit 1
+          fi
+          cp "$seed_path" benchmark-seed-result/common-assisted-warmup.npz
+
+      - name: Upload the immutable common seed
+        uses: actions/upload-artifact@v4
+        with:
+          name: cycling-assisted-common-seed-${{ github.run_id }}
+          path: benchmark-seed-result/common-assisted-warmup.npz
+          if-no-files-found: error
+          retention-days: 30
+
+  benchmark:
+    name: ${{ matrix.solver }} — ${{ inputs.cycles }} RHO
+    needs: prepare-seed
+    runs-on: ${{ inputs.runner_label }}
+    timeout-minutes: 350
+    strategy:
+      fail-fast: false
+      max-parallel: 3
+      matrix:
+        include:
+          - solver: ipopt
+            bioptim_commit: 346eb1d445e6ba67010b96c6f16ba830185119e7
+            integration_branch: codex/madnlp-integration-master
+          - solver: madnlp
+            bioptim_commit: 346eb1d445e6ba67010b96c6f16ba830185119e7
+            integration_branch: codex/madnlp-integration-master
+          - solver: alpaqa
+            bioptim_commit: d84e7e43534360fc048e0be26a3bd69a2abc2d77
+            integration_branch: codex/alpaqa-integration
+    defaults:
+      run:
+        shell: bash -el {0}
+
+    steps:
+      - name: Checkout Cocofest
+        uses: actions/checkout@v4
+
+      - name: Checkout the pinned Bioptim solver integration
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.BIOPTIM_REPOSITORY }}
+          ref: ${{ matrix.bioptim_commit }}
+          path: .benchmark-deps/bioptim
+
+      - name: Set up the Linux benchmark environment
+        uses: conda-incubator/setup-miniconda@v3
+        with:
+          miniforge-version: latest
+          activate-environment: cocofest-cycling-benchmark
+          environment-file: .github/cycling-benchmark-linux-environment.yml
+          conda-remove-defaults: true
+
+      - name: Detect the CPU allocation
+        run: |
+          available_cores="$(nproc)"
+          if [[ "$available_cores" -lt 1 ]]; then
+            echo "No CPU was reported by nproc." >&2
+            exit 1
+          fi
+          echo "BENCHMARK_THREADS=$available_cores" >> "$GITHUB_ENV"
+          echo "CMAKE_BUILD_PARALLEL_LEVEL=$available_cores" >> "$GITHUB_ENV"
+          lscpu
+          grep '^Cpus_allowed_list' /proc/self/status || true
+
+      - name: Cache the MadNLP runtime
+        if: matrix.solver != 'alpaqa'
+        id: madnlp-cache
+        uses: actions/cache@v4
+        with:
+          path: .cache/madnlp
+          key: madnlp-cpu-jl1.10.4-linux-${{ env.MADNLP_SHA256 }}
+
+      - name: Install the MadNLP runtime
+        if: matrix.solver != 'alpaqa' && steps.madnlp-cache.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p .cache/madnlp
+          curl --fail --location --retry 3 "$MADNLP_URL" \
+            --output "/tmp/$MADNLP_ARCHIVE"
+          echo "$MADNLP_SHA256  /tmp/$MADNLP_ARCHIVE" | sha256sum --check
+          unzip -q "/tmp/$MADNLP_ARCHIVE" -d .cache/madnlp
+
+      - name: Configure the MadNLP runtime
+        if: matrix.solver != 'alpaqa'
+        run: |
+          echo "LD_LIBRARY_PATH=$GITHUB_WORKSPACE/.cache/madnlp/foo/lib:${LD_LIBRARY_PATH:-}" \
+            >> "$GITHUB_ENV"
+
+      - name: Install CasADi with IPOPT and MadNLP
+        if: matrix.solver != 'alpaqa'
+        run: python -m pip install --no-deps "casadi==$CASADI_VERSION"
+
+      - name: Build CasADi with IPOPT and Alpaqa
+        if: matrix.solver == 'alpaqa'
+        run: bash .github/scripts/install_casadi_alpaqa_linux.sh
+
+      - name: Install biorbd and Bioptim
+        run: |
+          bash .github/scripts/install_biorbd_casadi_linux.sh
+          python -m pip install --no-deps -e .benchmark-deps/bioptim
+
+      - name: Download the common assisted IPOPT seed
+        uses: actions/download-artifact@v4
+        with:
+          name: cycling-assisted-common-seed-${{ github.run_id }}
+          path: benchmark-seed
+
+      - name: Verify the solver environment
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+          BENCHMARK_SOLVER: ${{ matrix.solver }}
+        run: |
+          python - <<'PY'
+          import os
+          import casadi as cas
+          import bioptim
+          import biorbd_casadi as biorbd
+
+          target = os.environ["BENCHMARK_SOLVER"]
+          print(f"CasADi {cas.__version__}")
+          print(f"Bioptim {bioptim.__version__}")
+          print(f"biorbd {biorbd.__version__}")
+          for solver in ("ipopt", target):
+              available = cas.has_nlpsol(solver)
+              print(f"{solver}: {available}")
+              assert available, solver
+          if target == "madnlp":
+              assert hasattr(bioptim.Solver, "MADNLP")
+          if target == "alpaqa":
+              assert hasattr(bioptim.Solver, "ALPAQA")
+          PY
+          python -m pytest -q tests/shard1/test_solver_backends.py
+
+      - name: Run the ${{ matrix.solver }} assisted benchmark
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+          BENCHMARK_CYCLES: ${{ inputs.cycles }}
+          BENCHMARK_ASSISTANCE: ${{ inputs.crank_assistance_nm }}
+          BENCHMARK_Q_SLACK: ${{ inputs.terminal_wheel_q_slack }}
+          BENCHMARK_MAX_ITER: ${{ inputs.solver_max_iterations }}
+          BENCHMARK_SOLVER: ${{ matrix.solver }}
+          COCOFEST_BENCHMARK_COMMIT: ${{ github.sha }}
+          BIOPTIM_BENCHMARK_COMMIT: ${{ matrix.bioptim_commit }}
+          BIOPTIM_INTEGRATION_BRANCH: ${{ matrix.integration_branch }}
+        run: |
+          mkdir -p benchmark-results
+          solver_options=()
+          if [[ "$BENCHMARK_SOLVER" == "ipopt" ]]; then
+            solver_options+=(
+              --ipopt-max-iter "$BENCHMARK_MAX_ITER"
+              --ipopt-linear-solver mumps
+              --ipopt-dual-warm-start-mode bounds
+            )
+          elif [[ "$BENCHMARK_SOLVER" == "madnlp" ]]; then
+            solver_options+=(
+              --madnlp-max-iter "$BENCHMARK_MAX_ITER"
+              --madnlp-max-wall-time 600
+              --madnlp-mu-init 0.01
+              --madnlp-dual-warm-start-mode off
+              --optional-nlp-periodic-ipopt-hot-start
+            )
+          else
+            solver_options+=(
+              --alpaqa-max-iter "$BENCHMARK_MAX_ITER"
+              --alpaqa-alm-max-iter "$BENCHMARK_MAX_ITER"
+              --alpaqa-max-wall-time 600
+              --alpaqa-dual-warm-start-mode constraints
+              --optional-nlp-periodic-ipopt-hot-start
+            )
+          fi
+
+          set -o pipefail
+          python examples/fes_multibody/cycling/cycling_fes_solver_comparison.py \
+            --solvers "$BENCHMARK_SOLVER" \
+            --objective fatigue \
+            --ipopt-profile periodic_collocation \
+            --cycles-per-window 1 \
+            --stimulations-per-cycle 30 \
+            --n-windows "$BENCHMARK_CYCLES" \
+            --n-threads "$BENCHMARK_THREADS" \
+            --crank-assistance "$BENCHMARK_ASSISTANCE" \
+            --nlp-tolerance 1e-6 \
+            --max-consecutive-failing 2 \
+            --standard-warmup-seed benchmark-seed/common-assisted-warmup.npz \
+            --warmup-ipopt-linear-solver mumps \
+            --ipopt-disable-historical-initial-guess \
+            --state-scaling full \
+            --first-node-wheel-q-slack 0 \
+            --terminal-wheel-q-slack "$BENCHMARK_Q_SLACK" \
+            --compact-rho-output \
+            --output-json "benchmark-results/${BENCHMARK_SOLVER}.json" \
+            "${solver_options[@]}" \
+            2>&1 | tee "benchmark-results/${BENCHMARK_SOLVER}.log"
+
+      - name: Add the result to the job summary
+        if: always()
+        env:
+          BENCHMARK_SOLVER: ${{ matrix.solver }}
+        run: |
+          result="benchmark-results/${BENCHMARK_SOLVER}.json"
+          if [[ ! -f "$result" ]]; then
+            echo "### ${BENCHMARK_SOLVER}: no JSON result" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          {
+            echo "### ${BENCHMARK_SOLVER}"
+            echo
+            echo "| Field | Value |"
+            echo "|---|---:|"
+            jq -r '
+              .results[0] |
+              "| Success | \(.success) |",
+              "| Validated cycles | \(.validated_cycles) |",
+              "| Attempted RHO | \(.attempted_windows) |",
+              "| End-to-end wall (s) | \(.end_to_end_wall_time_s) |",
+              "| Setup + initial guess (s) | \(.initial_guess_preparation_time_s) |",
+              "| Sum attempted RHO wall (s) | \(.attempted_rho_wall_time_sum_s) |",
+              "| Unattributed pipeline wall (s) | \(.unattributed_wall_time_s) |",
+              "| Hot RHO wall median (s) | \(.hot_wall_time_median_s) |",
+              "| Hot RHO wall P90 (s) | \(.hot_wall_time_p90_s) |",
+              "| First failed RHO | \(.first_failed_rho) |",
+              "| Minimum A/A_scale | \(.min_A_capacity_ratio) |",
+              "| Stop | \(.stop.label) |"
+            ' "$result"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload benchmark JSON and log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cycling-fatigue-linux-${{ matrix.solver }}-${{ github.run_id }}
+          path: benchmark-results/
+          if-no-files-found: warn
+          retention-days: 30
+
+  report:
+    name: Aggregate Kevin benchmark
+    if: always()
+    needs: benchmark
+    runs-on: ubuntu-22.04
+    permissions:
+      actions: read
+      contents: read
+
+    steps:
+      - name: Checkout Cocofest
+        uses: actions/checkout@v4
+
+      - name: Download every available solver artifact
+        uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          pattern: cycling-fatigue-linux-*-${{ github.run_id }}
+          path: benchmark-results-all
+          merge-multiple: true
+
+      - name: Build the comparison report
+        run: |
+          mkdir -p benchmark-results-all
+          mapfile -t result_files < <(find benchmark-results-all -name '*.json' -type f | sort)
+          if [[ "${#result_files[@]}" -eq 0 ]]; then
+            echo "No solver JSON was produced." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          python .github/scripts/summarize_cycling_benchmark.py \
+            --output-dir benchmark-report \
+            "${result_files[@]}"
+          cat benchmark-report/benchmark-comparison.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload the combined Kevin report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cycling-fatigue-kevin-report-${{ github.run_id }}
+          path: |
+            benchmark-report/
+            benchmark-results-all/
+          if-no-files-found: warn
+          retention-days: 30
