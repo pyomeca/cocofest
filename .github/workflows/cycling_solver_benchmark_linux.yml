@@ -51,6 +51,7 @@ env:
   MKL_NUM_THREADS: "1"
   NUMEXPR_NUM_THREADS: "1"
   JULIA_NUM_THREADS: "1"
+  MPLBACKEND: Agg
   MPLCONFIGDIR: /tmp/cocofest-matplotlib
 
 jobs:

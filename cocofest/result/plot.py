@@ -1,7 +1,9 @@
+import os
+
 import numpy as np
 import matplotlib
 
-matplotlib.use("TkAgg")
+matplotlib.use(os.environ.get("MPLBACKEND", "TkAgg"))
 import matplotlib.pyplot as plt
 
 from bioptim import Solution
