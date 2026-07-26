@@ -23,6 +23,46 @@ casadi_package_dir="$(
 python_site_packages="$(
   python -c 'import sysconfig; print(sysconfig.get_paths()["purelib"])'
 )"
+
+first_existing_path() {
+  local candidate
+  for candidate in "$@"; do
+    if [[ -e "$candidate" ]]; then
+      printf '%s\n' "$candidate"
+      return 0
+    fi
+  done
+  printf 'None of the required CasADi paths exists:\n' >&2
+  printf '  %s\n' "$@" >&2
+  return 1
+}
+
+# The PyPI wheel keeps its CMake package, headers, and shared library inside
+# site-packages/casadi. A source install (used for Alpaqa) places them under
+# the active Conda prefix instead.
+casadi_config="$(
+  first_existing_path \
+    "$casadi_package_dir/cmake/casadi-config.cmake" \
+    "$CONDA_PREFIX/lib/cmake/casadi/casadi-config.cmake" \
+    "$CONDA_PREFIX/share/casadi/cmake/casadi-config.cmake"
+)"
+casadi_cmake_dir="$(dirname "$casadi_config")"
+casadi_header="$(
+  first_existing_path \
+    "$casadi_package_dir/include/casadi/casadi.hpp" \
+    "$CONDA_PREFIX/include/casadi/casadi.hpp"
+)"
+casadi_include_dir="$(dirname "$casadi_header")"
+casadi_library="$(
+  first_existing_path \
+    "$casadi_package_dir/libcasadi.so" \
+    "$CONDA_PREFIX/lib/libcasadi.so"
+)"
+
+echo "Using CasADi CMake package: $casadi_cmake_dir"
+echo "Using CasADi headers: $casadi_include_dir"
+echo "Using CasADi library: $casadi_library"
+
 build_root="$(mktemp -d)"
 trap 'rm -rf "$build_root"' EXIT
 
@@ -37,9 +77,10 @@ cmake \
   -DCMAKE_INSTALL_PREFIX="$CONDA_PREFIX" \
   -DCMAKE_CXX_FLAGS="-D_GLIBCXX_USE_CXX11_ABI=0 -I$CONDA_PREFIX/include/eigen3" \
   -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
-  -Dcasadi_DIR="$casadi_package_dir" \
-  -DCasadi_INCLUDE_DIR="$casadi_package_dir/include/casadi" \
-  -DCasadi_LIBRARY="$casadi_package_dir/libcasadi.so" \
+  -Dcasadi_DIR="$casadi_cmake_dir" \
+  -DCasadi_DIR="$casadi_cmake_dir" \
+  -DCasadi_INCLUDE_DIR="$casadi_include_dir" \
+  -DCasadi_LIBRARY="$casadi_library" \
   -DRBDL_BUILD_CASADI=ON \
   -DRBDL_BUILD_EXECUTABLES=OFF \
   -DRBDL_BUILD_TESTS=OFF
@@ -62,7 +103,7 @@ cmake \
   -DCMAKE_BUILD_TYPE=Release \
   -DCMAKE_INSTALL_PREFIX="$CONDA_PREFIX" \
   -DCMAKE_CXX_FLAGS="-D_GLIBCXX_USE_CXX11_ABI=0 -I$CONDA_PREFIX/include/eigen3" \
-  -Dcasadi_DIR="$casadi_package_dir/cmake" \
+  -DCasadi_DIR="$casadi_cmake_dir" \
   -DINSTALL_DEPENDENCIES_PREFIX="$CONDA_PREFIX" \
   -DMATH_LIBRARY_BACKEND=Casadi \
   -DMODULE_KALMAN=OFF \

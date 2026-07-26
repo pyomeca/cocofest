@@ -83,7 +83,9 @@ jobs:
 
       - name: Detect the CPU allocation
         run: |
-          available_cores="$(nproc)"
+          # GNU nproc honors OMP_NUM_THREADS. Ignore that solver safeguard
+          # while detecting the CPU allocation used for builds and OCP threads.
+          available_cores="$(env -u OMP_NUM_THREADS -u OMP_THREAD_LIMIT nproc)"
           echo "BENCHMARK_THREADS=$available_cores" >> "$GITHUB_ENV"
           echo "CMAKE_BUILD_PARALLEL_LEVEL=$available_cores" >> "$GITHUB_ENV"
           lscpu
@@ -176,7 +178,9 @@ jobs:
 
       - name: Detect the CPU allocation
         run: |
-          available_cores="$(nproc)"
+          # GNU nproc honors OMP_NUM_THREADS. Ignore that solver safeguard
+          # while detecting the CPU allocation used for builds and OCP threads.
+          available_cores="$(env -u OMP_NUM_THREADS -u OMP_THREAD_LIMIT nproc)"
           if [[ "$available_cores" -lt 1 ]]; then
             echo "No CPU was reported by nproc." >&2
             exit 1
