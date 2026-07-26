@@ -7,6 +7,7 @@ readonly CASADI_EXPECTED_COMMIT="${CASADI_COMMIT:-f959d3175a444d763e4eda4aece48f
 readonly ALPAQA_REPOSITORY="https://github.com/kul-optec/alpaqa.git"
 readonly ALPAQA_REVISION="${ALPAQA_COMMIT:-9c0dde81c0787f95b7ebaff12aa6447dad06ef9e}"
 readonly BUILD_JOBS="${CMAKE_BUILD_PARALLEL_LEVEL:-$(nproc)}"
+readonly CASADI_CXX_ABI_FLAG="-D_GLIBCXX_USE_CXX11_ABI=0"
 
 if [[ "$(uname -s)" != "Linux" ]]; then
   echo "This installer is intended for Linux." >&2
@@ -16,6 +17,11 @@ if [[ -z "${CONDA_PREFIX:-}" ]]; then
   echo "CONDA_PREFIX must point to the active benchmark environment." >&2
   exit 1
 fi
+
+# The official CasADi wheel, RBDL-CasADi, and biorbd-casadi all use the
+# pre-C++11 libstdc++ ABI. Exporting CXXFLAGS also propagates the same ABI to
+# CasADi's Alpaqa ExternalProject, unlike a top-level CMAKE_CXX_FLAGS alone.
+export CXXFLAGS="${CXXFLAGS:+$CXXFLAGS }$CASADI_CXX_ABI_FLAG"
 
 build_root="$(mktemp -d)"
 trap 'rm -rf "$build_root"' EXIT
@@ -32,6 +38,7 @@ cmake \
   -B "$build_root/casadi-build" \
   -G Ninja \
   -DCMAKE_BUILD_TYPE=Release \
+  -DCMAKE_CXX_FLAGS="$CXXFLAGS" \
   -DCMAKE_INSTALL_PREFIX="$CONDA_PREFIX" \
   -DCMAKE_PREFIX_PATH="$CONDA_PREFIX" \
   -DPYTHON_EXECUTABLE="$(command -v python)" \
