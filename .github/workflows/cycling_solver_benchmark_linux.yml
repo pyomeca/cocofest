@@ -44,7 +44,8 @@ concurrency:
 env:
   CASADI_VERSION: "3.7.2"
   CASADI_COMMIT: f959d3175a444d763e4eda4aece48f4c5f4a6f90
-  ALPAQA_COMMIT: 9c0dde81c0787f95b7ebaff12aa6447dad06ef9e
+  # CasADi 3.7.2's sparse Alpaqa interface targets this compatibility fork.
+  ALPAQA_COMMIT: bf9f87d59640501ea72f94aa6e2d4e62b20c677b
   BIOPTIM_REPOSITORY: mickaelbegon/BiorbdOptim
   BIOPTIM_MADNLP_COMMIT: 346eb1d445e6ba67010b96c6f16ba830185119e7
   BIOPTIM_ALPAQA_COMMIT: d84e7e43534360fc048e0be26a3bd69a2abc2d77
@@ -289,11 +290,11 @@ jobs:
               --ipopt-dual-warm-start-mode bounds
             )
           elif [[ "$BENCHMARK_SOLVER" == "madnlp" ]]; then
-            # The pinned CasADi plugin rejects MadNLP's max_wall_time option.
-            # The job timeout remains the outer safety limit.
+            # The pinned madnlp_c runtime rejects max_wall_time, mu_init and
+            # dual_initialized. Cocofest still supplies the shifted/projected
+            # primal trajectory; the job timeout is the outer safety limit.
             solver_options+=(
               --madnlp-max-iter "$BENCHMARK_MAX_ITER"
-              --madnlp-mu-init 0.01
               --madnlp-dual-warm-start-mode off
               --optional-nlp-periodic-ipopt-hot-start
             )

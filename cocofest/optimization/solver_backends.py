@@ -179,11 +179,10 @@ def configure_nlp_solver(
 
     if solver_name == "madnlp":
         solver.set_print_level("ERROR" if print_level == 0 else print_level)
-        # The pinned CasADi MadNLP plugin accepts ``mu_init`` but rejects the
-        # ``dual_initialized`` option added by Bioptim's convenience method.
-        # Dual transfer is configured independently by Cocofest and is off by
-        # default, so keep this backend configuration primal-only.
-        solver.set_option_unsafe(madnlp_mu_init, "mu_init")
+        # The pinned madnlp_c runtime rejects both ``dual_initialized`` and
+        # ``mu_init``.  The reliable hot start is therefore the shifted,
+        # projected primal trajectory supplied by Cocofest, without a
+        # solver-specific barrier or multiplier initialization.
         for name, value in (
             ("linear_solver", madnlp_linear_solver),
             ("max_wall_time", madnlp_max_wall_time),

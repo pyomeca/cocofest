@@ -4,8 +4,10 @@ set -euo pipefail
 readonly CASADI_REPOSITORY="https://github.com/casadi/casadi.git"
 readonly CASADI_TAG="${CASADI_VERSION:-3.7.2}"
 readonly CASADI_EXPECTED_COMMIT="${CASADI_COMMIT:-f959d3175a444d763e4eda4aece48f4c5f4a6f90}"
-readonly ALPAQA_REPOSITORY="https://github.com/kul-optec/alpaqa.git"
-readonly ALPAQA_REVISION="${ALPAQA_COMMIT:-9c0dde81c0787f95b7ebaff12aa6447dad06ef9e}"
+# CasADi 3.7.2 defaults to jgillis/alpaqa because that compatibility fork
+# preserves the sparse Jacobian/Hessian signatures used by its plugin.
+readonly ALPAQA_REPOSITORY="https://github.com/jgillis/alpaqa.git"
+readonly ALPAQA_REVISION="${ALPAQA_COMMIT:-bf9f87d59640501ea72f94aa6e2d4e62b20c677b}"
 readonly BUILD_JOBS="${CMAKE_BUILD_PARALLEL_LEVEL:-$(nproc)}"
 readonly CASADI_CXX_ABI_FLAG="-D_GLIBCXX_USE_CXX11_ABI=0"
 

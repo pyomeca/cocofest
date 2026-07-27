@@ -73,7 +73,10 @@ def test_configure_madnlp_uses_supported_primal_hot_start():
     assert ("set_constraint_tolerance", 2e-6) in solver.calls
     assert ("set_maximum_iterations", 321) in solver.calls
     assert ("set_print_level", "ERROR") in solver.calls
-    assert ("set_option_unsafe", 1e-2, "mu_init") in solver.calls
+    assert not any(
+        call[0] == "set_option_unsafe" and call[-1] == "mu_init"
+        for call in solver.calls
+    )
     assert not any(call[0] == "set_warm_start_options" for call in solver.calls)
     assert ("set_option_unsafe", "UmfpackSolver", "linear_solver") in solver.calls
     assert ("set_option_unsafe", 12.5, "max_wall_time") in solver.calls
