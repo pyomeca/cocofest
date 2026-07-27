@@ -341,50 +341,88 @@ first failed or infeasible RHO. Status-zero count, independent bound
 violations, native status, and both failed attempts remain available for
 diagnosis.
 
+The focused Linux option screen
+[`30292129183`](https://github.com/mickaelbegon/cocofest/actions/runs/30292129183)
+applied one common independent `1e-5` feasibility threshold while keeping each
+solver's internal tolerance visible:
+
+| Variant | Common valid prefix | Maximum infeasibility | Median RHO wall |
+|---|---:|---:|---:|
+| MadNLP, tolerance `1e-8`, default linear solver | 4/4 | `1.69e-8` | 6.68 s |
+| MadNLP, tolerance `1e-7`, default linear solver | 4/4 | `6.66e-7` | 6.71 s |
+| MadNLP, tolerance `1e-7`, explicit MUMPS | 4/4 | `6.66e-7` | 6.78 s |
+| MadNLP, tolerance `1e-7`, UMFPACK | 4/4 | `9.58e-7` | 11.0 s |
+| MadNLP, tolerance `1e-6`, default linear solver | 3/4 | `1.28e-5` | 5.60 s |
+| Alpaqa, automatic penalty, 20 s inner PANOC budget | 0/1 | `4.09e-4` | 60.0 s |
+| Alpaqa, default penalty, 20 s inner PANOC budget | 0/1 | `2.91e-2` | 60.0 s |
+
+The identical `1e-7` default and explicit-MUMPS trajectories confirm that
+MUMPS is the pinned MadNLP runtime's default for this case. UMFPACK is about
+64 percent slower here. Tightening MadNLP to `1e-8` costs essentially nothing
+over four RHO and avoids the physical-threshold miss seen at `1e-6`; it is now
+the endurance default. For Alpaqa, the automatic initial penalty improves the
+one-minute residual by about 71 times over the tested default, but remains
+about 41 times above the acceptance threshold. It is the least-bad tested
+setting, not a demonstrated convergent configuration.
+
 The final Linux run
-[`30287669771`](https://github.com/mickaelbegon/cocofest/actions/runs/30287669771)
-uses four available CPU cores and provides the first directly comparable
-measurement on the corrected one-cycle assisted formulation:
+[`30297904541`](https://github.com/mickaelbegon/cocofest/actions/runs/30297904541)
+uses four available CPU cores and applies the screened settings on the
+corrected one-cycle assisted formulation:
 
 | Solver | Validated / requested RHO | Attempted RHO | Preparation | Hot median | Hot P90 | End-to-end |
 |---|---:|---:|---:|---:|---:|---:|
-| IPOPT-MUMPS | 30 / 30 | 30 | 23.40 s | 6.130 s | 8.116 s | 233.53 s |
-| MadNLP | 3 / 30 | 11 | 53.69 s | 5.353 s | 5.472 s | 118.38 s |
-| Alpaqa | 0 / 30 | 2 | 52.96 s | — | — | 1254.47 s |
+| IPOPT-MUMPS, internal tolerance `1e-6` | 30 / 30 | 30 | 23.58 s | 6.232 s | 8.243 s | 236.40 s |
+| MadNLP-MUMPS, internal tolerance `1e-8` | 30 / 30 | 30 | 56.60 s | 5.853 s | 7.806 s | 252.69 s |
+| Alpaqa, automatic penalty | 0 / 30 | 2 | 58.76 s | — | — | 1260.25 s |
 
-All 30 IPOPT windows pass the independent `1e-5` feasibility screen. MadNLP
-returns a native success status for every attempted window, but its
-independently recomputed violation first reaches `1.2766e-5` at RHO 4. Its
-strictly comparable prefix therefore ends at RHO 3. RHO 10 and 11 then exceed
-the threshold consecutively, activating the requested two-chance stop. The
-MadNLP end-to-end total must not be compared with IPOPT's because MadNLP
-attempted only 11 windows.
+All 30 IPOPT and MadNLP windows pass the same independent `1e-5` feasibility
+screen. Their maximum independently reconstructed violations are respectively
+`9.64e-7` and `2.57e-7`; MadNLP's tighter result is partly explained by its
+100-times tighter internal tolerance. Compared with the former `1e-6`
+MadNLP run, this confirms that the earlier 3-RHO strict prefix was a
+termination-accuracy problem, not an intrinsic inability to continue the MHE.
 
-GitHub-hosted runner timing is noisy enough to reverse the raw ranking. Across
-three corrected runs, IPOPT's hot medians range from 3.83 to 6.13 seconds and
-MadNLP's from 5.32 to 5.82 seconds. The median of those three run medians is
-4.43 seconds for IPOPT and 5.35 seconds for MadNLP. They should therefore be
-treated as the same timing order of magnitude until paired repetitions are run
-on a controlled machine; the 30/30 versus 3/30 robustness distinction is much
-stronger than the timing distinction.
+In this single run, MadNLP's hot median, P90 and attempted-RHO sum are about
+6, 5 and 8 percent lower than IPOPT's. Its additional certified periodic IPOPT
+refinement increases preparation by about 33 seconds, so IPOPT remains
+16.3 seconds faster end-to-end at 30 RHO. The observed per-RHO saving would
+amortize the preparation difference only around 60 RHO. This crossover is an
+estimate, not a stable claim: at least three paired repetitions on a
+controlled runner are required.
 
-The source-built CasADi used by Alpaqa now has `WITH_THREAD=ON`, and the
-workflow rejects a runtime whose compiler flags do not expose that feature.
-The Alpaqa evaluation counters report about 2080 seconds of aggregate CPU time
-per 600-second wall-time solve, confirming that roughly 3.5 of the four
-available cores are used. The first limited RHO performs about 69,000 `psi`
-evaluations and ends at `8.7335e-5` infeasibility; the second ends at
-`6.3190e-3`. Both are above the independent `1e-5` threshold and both return
-`SOLVER_RET_LIMITED`.
+At cycle 10, the angle-aligned pulse-width RMSE between MadNLP and IPOPT is
+below `0.8 us` for every muscle. At cycle 30, biceps and triceps diverge to
+`100.09 us` and `149.05 us` angle-aligned RMSE, even though the executed
+fatigue objectives differ by only 0.24 percent (`162.720` versus `163.110`).
+The divergence survives interpolation onto IPOPT's real crank-angle grid, so
+it is not just the observed `0.163 rad` intra-cycle phase difference. With no
+control or cadence regularization, the most defensible interpretation is
+distinct local muscle-sharing strategies with nearly equivalent scalar
+fatigue. Seed exchanges, seed perturbations and inspection of crank speed,
+muscle forces and fatigue states are required before assigning physiological
+meaning to either pattern.
+
+The source-built CasADi used by Alpaqa has `WITH_THREAD=ON`, and the workflow
+rejects a runtime whose compiler flags do not expose that feature. Its two
+600-second windows report roughly 2100 seconds of aggregate CPU time each,
+confirming use of about 3.5 of the four available cores. With the screened
+automatic initial penalty, the first limited candidate reaches
+`3.51e-6` infeasibility and an IPOPT-like objective. It is physically feasible
+at the common threshold, but remains invalidated because Alpaqa returns
+`SOLVER_RET_LIMITED` and does not certify convergence or stationarity. The
+second shifted-primal attempt degrades to `4.57e-2` infeasibility. Both perform
+about 48,000 `psi` evaluations.
 
 Constraint multiplier reuse is disabled in this final Alpaqa run. The second
 RHO therefore reuses only the shifted/projected primal trajectory, not duals
-from the first limited solve. Its remaining degradation means that
-multithreading and removal of the invalid dual hot start are insufficient.
-Further work should screen ALM and PANOC budgets separately, constraint
-scaling and problem-size reductions before another endurance run. These
-results apply to CasADi 3.7.2's 2023 compatibility fork, not to current
-upstream Alpaqa.
+from the first limited solve. The feasible-but-limited first candidate shows
+that automatic penalty selection matters, while the failed continuation shows
+that tuning alone has not made this collocation MHE usable. Further work
+should prioritize constraint scaling and a smaller, less redundant
+multiple-shooting or reduced formulation before another endurance run. These
+results apply to CasADi 3.7.2's compatibility fork, not to current upstream
+Alpaqa.
 
 At RHO 30, IPOPT still has `min(A/A_scale)=0.98334`. This 30-cycle job is a
 solver-throughput and stimulation-pattern benchmark, not a fatigue-to-failure
@@ -690,25 +728,30 @@ muscle moment arm or the instantaneous sign at the stimulation node.
 ## Interpretation
 
 MadNLP is relevant for this problem. On the direct Cocofest formulation it
-converges from the robust historical seed. The related Bioptim Linux benchmark
-also reports 17.397 s hot for a 50-interval exact-Hessian muscle-fatigue problem
-versus 23.002 s for IPOPT, with 57 versus 67 iterations. This is a useful
-indication for large collocation horizons, although repeated Cocofest runs are
-still required before treating the timing difference as a stable speedup.
+now validates 30/30 assisted RHO from the certified periodic seed when its
+internal tolerance is tightened to `1e-8`. It is modestly faster after
+construction in the current run, but slower end-to-end at 30 RHO because of
+the additional IPOPT refinement. The related Bioptim Linux benchmark also
+reports 17.397 s hot for a 50-interval exact-Hessian muscle-fatigue problem
+versus 23.002 s for IPOPT, with 57 versus 67 iterations. These are useful
+indications for long collocation sequences, although paired repetitions and
+longer endurance runs remain necessary before claiming a stable speedup.
 
-Alpaqa is currently exploratory. It supports the model and consumes the same
-primal/constraint-dual initialization, but it did not converge within 60 s on
-the direct Cocofest fatigue horizon. The integration-branch benchmarks also show
-that Alpaqa is slower than IPOPT on a small cube problem and misses a 0.5 s
-deadline on shifted NMPC windows. Its augmented-Lagrangian/PANOC method appears
-more sensitive to scaling, redundant collocation constraints, and shifted
-feasibility than the interior-point solvers.
+Alpaqa remains exploratory. Automatic penalty selection can produce a
+physically feasible first candidate after 600 seconds, but the solver still
+returns a time-limit status and the next shifted window is strongly
+infeasible. The integration-branch benchmarks also show that Alpaqa is slower
+than IPOPT on a small cube problem and misses a 0.5 s deadline on shifted NMPC
+windows. Its augmented-Lagrangian/PANOC method appears much more sensitive to
+scaling, redundant collocation constraints, and shifted feasibility than the
+interior-point solvers.
 
 Recommended use:
 
 - keep IPOPT as the reference solver;
-- use MadNLP as the first optional alternative for large, Hessian-heavy fatigue
-  horizons and benchmark both cold and hot execution;
+- use MadNLP-MUMPS at `1e-8` as the first optional alternative for large,
+  Hessian-heavy fatigue horizons, reporting preparation and hot execution
+  separately;
 - keep Alpaqa behind an explicit solver selection until a dedicated
-  multiple-shooting or less redundant formulation, penalty tuning, and
+  multiple-shooting or less redundant formulation, constraint scaling, and
   multi-window feasibility study demonstrate reliable convergence.

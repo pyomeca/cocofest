@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import bisect
 import csv
 import json
 import math
@@ -45,6 +46,11 @@ def _finite(value) -> float | None:
 def _fmt(value, digits: int = 3) -> str:
     value = _finite(value)
     return "—" if value is None else f"{value:.{digits}f}"
+
+
+def _fmt_scientific(value, digits: int = 1) -> str:
+    value = _finite(value)
+    return "—" if value is None else f"{value:.{digits}e}"
 
 
 def load_benchmark_files(paths: list[Path]) -> list[dict]:
@@ -135,6 +141,76 @@ def _pattern_comparison(reference: dict, compared: dict) -> dict | None:
     }
 
 
+def _periodic_linear_interpolation(
+    source_phase: list[float],
+    source_values: list[float],
+    target_phase: list[float],
+) -> list[float] | None:
+    if (
+        len(source_phase) != len(source_values)
+        or len(source_phase) < 2
+        or not target_phase
+    ):
+        return None
+    period = 2.0 * math.pi
+    pairs = sorted(
+        (float(phase) % period, float(value))
+        for phase, value in zip(source_phase, source_values)
+    )
+    phases: list[float] = []
+    values: list[float] = []
+    for phase, value in pairs:
+        if phases and math.isclose(phase, phases[-1], abs_tol=1e-12):
+            values[-1] = 0.5 * (values[-1] + value)
+        else:
+            phases.append(phase)
+            values.append(value)
+    if len(phases) < 2:
+        return None
+
+    extended_phase = [phases[-1] - period, *phases, phases[0] + period]
+    extended_values = [values[-1], *values, values[0]]
+    interpolated = []
+    for target in target_phase:
+        target = float(target) % period
+        upper = bisect.bisect_right(extended_phase, target)
+        lower = max(0, upper - 1)
+        upper = min(upper, len(extended_phase) - 1)
+        phase_span = extended_phase[upper] - extended_phase[lower]
+        if phase_span <= 0.0:
+            interpolated.append(extended_values[lower])
+            continue
+        fraction = (target - extended_phase[lower]) / phase_span
+        interpolated.append(
+            extended_values[lower]
+            + fraction * (extended_values[upper] - extended_values[lower])
+        )
+    return interpolated
+
+
+def _phase_aligned_pattern_comparison(
+    reference: dict,
+    compared: dict,
+    reference_phase: list[float],
+    compared_phase: list[float],
+) -> dict | None:
+    reference_values = reference.get("pulse_width_s") or []
+    compared_values = compared.get("pulse_width_s") or []
+    if len(reference_phase) != len(reference_values):
+        return None
+    aligned_values = _periodic_linear_interpolation(
+        compared_phase,
+        compared_values,
+        reference_phase,
+    )
+    if aligned_values is None:
+        return None
+    return _pattern_comparison(
+        {"pulse_width_s": reference_values},
+        {"pulse_width_s": aligned_values},
+    )
+
+
 def stimulation_comparisons(entries: list[dict]) -> list[dict]:
     reference_entry = next(
         (
@@ -200,6 +276,12 @@ def stimulation_comparisons(entries: list[dict]) -> list[dict]:
                     reference_snapshot["muscles"][muscle],
                     compared_snapshot["muscles"][muscle],
                 )
+                phase_aligned_metrics = _phase_aligned_pattern_comparison(
+                    reference_snapshot["muscles"][muscle],
+                    compared_snapshot["muscles"][muscle],
+                    reference_phase,
+                    compared_phase,
+                )
                 rows.append(
                     {
                         "reference_solver": "ipopt",
@@ -210,6 +292,14 @@ def stimulation_comparisons(entries: list[dict]) -> list[dict]:
                         "available": metrics is not None,
                         "crank_phase_root_mean_square_error_rad": crank_phase_rmse,
                         **(metrics or {"reason": "incompatible_pattern_dimensions"}),
+                        **(
+                            {
+                                f"phase_aligned_{key}": value
+                                for key, value in phase_aligned_metrics.items()
+                            }
+                            if phase_aligned_metrics
+                            else {}
+                        ),
                     }
                 )
     return rows
@@ -360,10 +450,10 @@ def render_markdown(
         lines.append(
             "| {solver} | {solver_tolerance} | {physical_threshold} | {success} | {validated}/{requested} | {e2e} | {prep} | {median} | {p90} | {stop} |".format(
                 solver=row["solver"].upper(),
-                solver_tolerance=_fmt(
+                solver_tolerance=_fmt_scientific(
                     entry["configuration"].get("nlp_tolerance")
                 ),
-                physical_threshold=_fmt(
+                physical_threshold=_fmt_scientific(
                     entry["configuration"].get("primal_feasibility_threshold")
                 ),
                 success="oui" if row.get("success") else "non",
@@ -450,8 +540,10 @@ def render_markdown(
             "",
             "### Écarts des patrons par rapport à IPOPT",
             "",
-            "| Solveur | Cycle | Muscle | RMSE (µs) | Max abs. (µs) | Corrélation | RMSE phase (rad) |",
-            "|---|---:|---|---:|---:|---:|---:|",
+            "La comparaison brute est faite par indice de stimulation. La comparaison réalignée interpole le patron du solveur selon l’angle réel du pédalier sur la grille angulaire IPOPT.",
+            "",
+            "| Solveur | Cycle | Muscle | RMSE brute (µs) | RMSE réalignée (µs) | Max abs. brut (µs) | Corr. brute | Corr. réalignée | RMSE phase (rad) |",
+            "|---|---:|---|---:|---:|---:|---:|---:|---:|",
         ]
     )
     for comparison in stimulation_comparisons(entries):
@@ -459,15 +551,17 @@ def render_markdown(
             lines.append(
                 f"| {comparison['solver'].upper()} | "
                 f"{comparison.get('cycle', '—')} | indisponible: "
-                f"{comparison.get('reason')} | — | — | — | — |"
+                f"{comparison.get('reason')} | — | — | — | — | — | — |"
             )
             continue
         lines.append(
             f"| {comparison['solver'].upper()} | {comparison['cycle']} | "
             f"{comparison['muscle']} | "
             f"{_fmt(comparison['root_mean_square_error_us'])} | "
+            f"{_fmt(comparison.get('phase_aligned_root_mean_square_error_us'))} | "
             f"{_fmt(comparison['maximum_absolute_error_us'])} | "
             f"{_fmt(comparison.get('correlation'))} | "
+            f"{_fmt(comparison.get('phase_aligned_correlation'))} | "
             f"{_fmt(comparison.get('crank_phase_root_mean_square_error_rad'))} |"
         )
     return "\n".join(lines) + "\n"

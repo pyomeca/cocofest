@@ -263,6 +263,7 @@ jobs:
           PY
           python -m pytest -q \
             tests/shard1/test_solver_backends.py \
+            tests/test_cycling_benchmark_summary.py \
             tests/test_solver_option_screen_summary.py \
             tests/shard1/test_periodic_pulse_width.py::test_common_primal_threshold_is_independent_of_nlp_solver_tolerance \
             tests/shard1/test_periodic_pulse_width.py::test_github_benchmark_compares_physical_threshold_not_solver_tolerance
@@ -531,6 +532,7 @@ jobs:
             tests/shard1/test_solver_backends.py \
             tests/shard1/test_biorbd_backend_conversion.py \
             tests/shard1/test_plot_backend.py \
+            tests/test_cycling_benchmark_summary.py \
             tests/test_solver_option_screen_summary.py \
             tests/shard1/test_periodic_pulse_width.py::test_common_primal_threshold_is_independent_of_nlp_solver_tolerance \
             tests/shard1/test_periodic_pulse_width.py::test_github_benchmark_compares_physical_threshold_not_solver_tolerance
