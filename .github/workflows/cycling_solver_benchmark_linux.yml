@@ -70,17 +70,17 @@ jobs:
 
     steps:
       - name: Checkout Cocofest
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Checkout the pinned Bioptim integration
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           repository: ${{ env.BIOPTIM_REPOSITORY }}
           ref: ${{ env.BIOPTIM_MADNLP_COMMIT }}
           path: .benchmark-deps/bioptim
 
       - name: Set up the Linux benchmark environment
-        uses: conda-incubator/setup-miniconda@v3
+        uses: conda-incubator/setup-miniconda@v4
         with:
           miniforge-version: latest
           activate-environment: cocofest-cycling-benchmark
@@ -128,8 +128,9 @@ jobs:
             --terminal-wheel-q-slack "${{ inputs.terminal_wheel_q_slack }}" \
             --compact-rho-output \
             --print-traces \
-            --output-json benchmark-seed-result/seed-check.json
-          jq -e '.results[0].success == true' benchmark-seed-result/seed-check.json
+            --output-json "$GITHUB_WORKSPACE/benchmark-seed-result/seed-check.json"
+          jq -e '.results[0].success == true' \
+            "$GITHUB_WORKSPACE/benchmark-seed-result/seed-check.json"
           cp .github/benchmark-seeds/legacy-resistive-0p22-warmup.npz \
             benchmark-seed-result/common-continuation-warmup.npz
 
@@ -166,17 +167,17 @@ jobs:
 
     steps:
       - name: Checkout Cocofest
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Checkout the pinned Bioptim solver integration
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           repository: ${{ env.BIOPTIM_REPOSITORY }}
           ref: ${{ matrix.bioptim_commit }}
           path: .benchmark-deps/bioptim
 
       - name: Set up the Linux benchmark environment
-        uses: conda-incubator/setup-miniconda@v3
+        uses: conda-incubator/setup-miniconda@v4
         with:
           miniforge-version: latest
           activate-environment: cocofest-cycling-benchmark
@@ -328,7 +329,7 @@ jobs:
             --terminal-wheel-q-slack "$BENCHMARK_Q_SLACK" \
             --compact-rho-output \
             --print-traces \
-            --output-json "benchmark-results/${BENCHMARK_SOLVER}.json" \
+            --output-json "$GITHUB_WORKSPACE/benchmark-results/${BENCHMARK_SOLVER}.json" \
             "${solver_options[@]}" \
             2>&1 | tee "benchmark-results/${BENCHMARK_SOLVER}.log"
 
@@ -384,7 +385,7 @@ jobs:
 
     steps:
       - name: Checkout Cocofest
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Download every available solver artifact
         uses: actions/download-artifact@v4
