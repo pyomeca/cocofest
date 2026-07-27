@@ -59,7 +59,6 @@ def test_configure_madnlp_uses_supported_primal_hot_start():
         "madnlp",
         max_iterations=321,
         tolerance=2e-6,
-        madnlp_mu_init=1e-2,
         madnlp_linear_solver="UmfpackSolver",
         madnlp_max_wall_time=12.5,
         madnlp_nlp_scaling=True,

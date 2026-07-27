@@ -98,7 +98,6 @@ BENCHMARK_CONFIGURATION_FIELDS = (
     "standard_warmup_max_iterations",
     "disable_historical_ipopt_initial_guess",
     "madnlp_dual_warm_start_mode",
-    "madnlp_mu_init",
     "madnlp_c_compile",
     "madnlp_linear_solver",
     "madnlp_max_wall_time",
@@ -2152,7 +2151,6 @@ def main(
     nlp_tolerance: float = 1e-6,
     madnlp_max_iter: int = 2000,
     madnlp_dual_warm_start_mode: str = "off",
-    madnlp_mu_init: float = 1e-2,
     madnlp_c_compile: bool = False,
     madnlp_linear_solver: str | None = None,
     madnlp_max_wall_time: float | None = None,
@@ -2668,7 +2666,6 @@ def main(
     ipopt_args.ipopt_hsl_library = ipopt_hsl_library
     madnlp_args.ipopt_c_compile = False
     madnlp_args.ipopt_hsl_library = None
-    madnlp_args.madnlp_mu_init = madnlp_mu_init
     madnlp_args.madnlp_c_compile = madnlp_c_compile
     alpaqa_args = _nlp_solver_config(
         "alpaqa",
@@ -2912,7 +2909,6 @@ def build_cli() -> argparse.ArgumentParser:
     )
     parser.add_argument("--nlp-tolerance", type=float, default=1e-6)
     parser.add_argument("--madnlp-max-iter", type=int, default=2000)
-    parser.add_argument("--madnlp-mu-init", type=float, default=1e-2)
     parser.add_argument(
         "--madnlp-linear-solver",
         default=None,
@@ -3568,7 +3564,6 @@ if __name__ == "__main__":
         nlp_tolerance=args.nlp_tolerance,
         madnlp_max_iter=args.madnlp_max_iter,
         madnlp_dual_warm_start_mode=args.madnlp_dual_warm_start_mode,
-        madnlp_mu_init=args.madnlp_mu_init,
         madnlp_c_compile=args.madnlp_c_compile,
         madnlp_linear_solver=args.madnlp_linear_solver,
         madnlp_max_wall_time=args.madnlp_max_wall_time,

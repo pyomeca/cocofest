@@ -1983,7 +1983,7 @@ def test_solver_clis_accept_explicit_thread_count():
     assert comparison_args.n_threads == 8
 
 
-def test_solver_clis_expose_ipopt_compilation_and_madnlp_barrier_options():
+def test_solver_clis_expose_ipopt_and_madnlp_compilation_options():
     periodic_args = periodic_example.build_argument_parser().parse_args(
         [
             "--ipopt-c-compile",
@@ -1999,8 +1999,6 @@ def test_solver_clis_expose_ipopt_compilation_and_madnlp_barrier_options():
             "--ipopt-ma57-automatic-scaling",
             "--ipopt-ma57-pivot-order",
             "2",
-            "--madnlp-mu-init",
-            "1e-4",
             "--madnlp-c-compile",
         ]
     )
@@ -2019,8 +2017,6 @@ def test_solver_clis_expose_ipopt_compilation_and_madnlp_barrier_options():
             "--ipopt-ma57-automatic-scaling",
             "--ipopt-ma57-pivot-order",
             "2",
-            "--madnlp-mu-init",
-            "1e-4",
             "--madnlp-c-compile",
         ]
     )
@@ -2048,8 +2044,6 @@ def test_solver_clis_expose_ipopt_compilation_and_madnlp_barrier_options():
         "ma57_pivot_order": 2,
         "ma57_automatic_scaling": "yes",
     }
-    assert periodic_args.madnlp_mu_init == 1e-4
-    assert comparison_args.madnlp_mu_init == 1e-4
     assert periodic_args.madnlp_c_compile is True
     assert comparison_args.madnlp_c_compile is True
 

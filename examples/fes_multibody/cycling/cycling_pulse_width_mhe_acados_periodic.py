@@ -1711,12 +1711,6 @@ def build_argument_parser() -> argparse.ArgumentParser:
         help="Maximum number of MadNLP iterations per MHE window.",
     )
     parser.add_argument(
-        "--madnlp-mu-init",
-        type=float,
-        default=1e-2,
-        help="Initial barrier parameter used by MadNLP's dual hot start.",
-    )
-    parser.add_argument(
         "--madnlp-linear-solver",
         default=None,
         help=(
@@ -3304,7 +3298,6 @@ def configure_cycle_nlp_solver(args: argparse.Namespace):
             "madnlp",
             max_iterations=args.max_madnlp_iterations,
             tolerance=args.nlp_tolerance,
-            madnlp_mu_init=args.madnlp_mu_init,
             madnlp_c_compile=args.madnlp_c_compile,
             madnlp_linear_solver=args.madnlp_linear_solver,
             madnlp_max_wall_time=args.madnlp_max_wall_time,

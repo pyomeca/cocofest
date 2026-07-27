@@ -82,7 +82,6 @@ def configure_nlp_solver(
     alpaqa_maximum_penalty: float | None = None,
     alpaqa_panoc_max_wall_time: float | None = None,
     alpaqa_max_no_progress: int | None = None,
-    madnlp_mu_init: float = 1e-2,
     solver_namespace=None,
     check_availability: bool = True,
 ) -> Any:
@@ -100,8 +99,6 @@ def configure_nlp_solver(
         raise ValueError("tolerance must be strictly positive.")
     if alpaqa_lbfgs_memory < 1:
         raise ValueError("alpaqa_lbfgs_memory must be strictly positive.")
-    if madnlp_mu_init <= 0:
-        raise ValueError("madnlp_mu_init must be strictly positive.")
     if madnlp_max_wall_time is not None and madnlp_max_wall_time <= 0:
         raise ValueError("madnlp_max_wall_time must be strictly positive.")
     if (
