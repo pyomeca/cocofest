@@ -264,6 +264,9 @@ jobs:
           print(f"CasADi {cas.__version__}")
           print(f"Bioptim {bioptim.__version__}")
           print(f"biorbd {biorbd.__version__}")
+          compiler_flags = cas.CasadiMeta.compiler_flags()
+          print(f"CasADi compiler flags: {compiler_flags}")
+          assert "-DCASADI_WITH_THREAD" in compiler_flags
           for solver in ("ipopt", target):
               available = cas.has_nlpsol(solver)
               print(f"{solver}: {available}")

@@ -21,9 +21,9 @@ if [[ -z "${CONDA_PREFIX:-}" ]]; then
   exit 1
 fi
 
-# The official CasADi wheel, RBDL-CasADi, and biorbd-casadi all use the
-# pre-C++11 libstdc++ ABI. Exporting CXXFLAGS also propagates the same ABI to
-# CasADi's Alpaqa ExternalProject, unlike a top-level CMAKE_CXX_FLAGS alone.
+# Exporting CXXFLAGS propagates the selected libstdc++ ABI to CasADi's Alpaqa
+# ExternalProject, unlike a top-level CMAKE_CXX_FLAGS alone. The source-built
+# Alpaqa job uses ABI 1 to match the Conda IPOPT libraries.
 export CXXFLAGS="${CXXFLAGS:+$CXXFLAGS }$CASADI_CXX_ABI_FLAG"
 
 build_root="$(mktemp -d)"
@@ -47,6 +47,7 @@ cmake \
   -DPYTHON_EXECUTABLE="$(command -v python)" \
   -DWITH_PYTHON=ON \
   -DWITH_PYTHON3=ON \
+  -DWITH_THREAD=ON \
   -DWITH_IPOPT=ON \
   -DWITH_ALPAQA=ON \
   -DWITH_BUILD_EIGEN3=ON \
