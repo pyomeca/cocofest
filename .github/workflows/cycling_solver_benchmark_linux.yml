@@ -48,7 +48,7 @@ env:
   # CasADi 3.7.2's sparse Alpaqa interface targets this compatibility fork.
   ALPAQA_COMMIT: bf9f87d59640501ea72f94aa6e2d4e62b20c677b
   BIOPTIM_REPOSITORY: mickaelbegon/BiorbdOptim
-  BIOPTIM_MADNLP_COMMIT: 346eb1d445e6ba67010b96c6f16ba830185119e7
+  BIOPTIM_PRODUCTION_COMMIT: 3523f1745e315f07761159d7e06bd2d876026704
   BIOPTIM_ALPAQA_COMMIT: d84e7e43534360fc048e0be26a3bd69a2abc2d77
   MADNLP_ARCHIVE: madnlp-jl1.10.4-ubuntu-20.04-x64.zip
   MADNLP_SHA256: 333c42a1beb04fdba84410cc861927a74c3591c3b9cffd15323cbfeb44fbc8a0
@@ -78,7 +78,7 @@ jobs:
         uses: actions/checkout@v6
         with:
           repository: ${{ env.BIOPTIM_REPOSITORY }}
-          ref: ${{ env.BIOPTIM_MADNLP_COMMIT }}
+          ref: ${{ env.BIOPTIM_PRODUCTION_COMMIT }}
           path: .benchmark-deps/bioptim
 
       - name: Set up the Linux benchmark environment
@@ -375,19 +375,23 @@ jobs:
     timeout-minutes: 350
     strategy:
       fail-fast: false
-      max-parallel: 2
+      max-parallel: 3
       matrix:
         include:
           - solver: ipopt
-            bioptim_commit: 346eb1d445e6ba67010b96c6f16ba830185119e7
-            integration_branch: codex/madnlp-integration-master
+            bioptim_commit: 3523f1745e315f07761159d7e06bd2d876026704
+            integration_branch: codex/fatrop-cocofest-benchmark
+            casadi_cxx_abi: 0
+          - solver: fatrop
+            bioptim_commit: 3523f1745e315f07761159d7e06bd2d876026704
+            integration_branch: codex/fatrop-cocofest-benchmark
             casadi_cxx_abi: 0
           - solver: madnlp
-            bioptim_commit: 346eb1d445e6ba67010b96c6f16ba830185119e7
-            integration_branch: codex/madnlp-integration-master
+            bioptim_commit: 3523f1745e315f07761159d7e06bd2d876026704
+            integration_branch: codex/fatrop-cocofest-benchmark
             casadi_cxx_abi: 0
     env:
-      # Both production backends use the official CasADi wheel (C++ ABI 0).
+      # All production backends use the official CasADi wheel (C++ ABI 0).
       CASADI_CXX_ABI: ${{ matrix.casadi_cxx_abi }}
     defaults:
       run:
@@ -427,6 +431,7 @@ jobs:
           grep '^Cpus_allowed_list' /proc/self/status || true
 
       - name: Cache the MadNLP runtime
+        if: matrix.solver == 'madnlp'
         id: madnlp-cache
         uses: actions/cache@v6
         with:
@@ -434,7 +439,7 @@ jobs:
           key: madnlp-cpu-jl1.10.4-linux-${{ env.MADNLP_SHA256 }}
 
       - name: Install the MadNLP runtime
-        if: steps.madnlp-cache.outputs.cache-hit != 'true'
+        if: matrix.solver == 'madnlp' && steps.madnlp-cache.outputs.cache-hit != 'true'
         run: |
           mkdir -p .cache/madnlp
           curl --fail --location --retry 3 "$MADNLP_URL" \
@@ -443,11 +448,12 @@ jobs:
           unzip -q "/tmp/$MADNLP_ARCHIVE" -d .cache/madnlp
 
       - name: Configure the MadNLP runtime
+        if: matrix.solver == 'madnlp'
         run: |
           echo "LD_LIBRARY_PATH=$GITHUB_WORKSPACE/.cache/madnlp/foo/lib:${LD_LIBRARY_PATH:-}" \
             >> "$GITHUB_ENV"
 
-      - name: Install CasADi with IPOPT and MadNLP
+      - name: Install CasADi with IPOPT, Fatrop and MadNLP
         run: python -m pip install --no-deps "casadi==$CASADI_VERSION"
 
       - name: Install biorbd and Bioptim
@@ -486,11 +492,23 @@ jobs:
               assert available, solver
           if target == "madnlp":
               assert hasattr(bioptim.Solver, "MADNLP")
+          elif target == "fatrop":
+              assert hasattr(bioptim.Solver, "FATROP")
 
           x = cas.MX.sym("x")
           plugin_options = {"print_time": False}
           if target == "ipopt":
               plugin_options["ipopt"] = {"print_level": 0, "max_iter": 50}
+          elif target == "fatrop":
+              plugin_options["structure_detection"] = "auto"
+              plugin_options["equality"] = [True]
+              plugin_options["fatrop"] = {
+                  "print_level": 0,
+                  "max_iter": 50,
+                  "tol": 1e-8,
+                  "constr_viol_tol": 1e-8,
+                  "acceptable_tol": 1e-8,
+              }
           elif target == "madnlp":
               plugin_options["madnlp"] = {
                   "print_level": 0,
@@ -544,6 +562,18 @@ jobs:
             solver_options+=(
               --ipopt-max-iter "$BENCHMARK_MAX_ITER"
               --ipopt-dual-warm-start-mode bounds
+            )
+          elif [[ "$BENCHMARK_SOLVER" == "fatrop" ]]; then
+            # Fatrop exploits the time-major OCP structure. Cocofest transfers
+            # the shifted/projected primal trajectory but not dual blocks.
+            # CasADi 3.7.2 bounds Fatrop's native max_iter option to 1000.
+            solver_options+=(
+              --fatrop-max-iter 1000
+              --fatrop-structure-detection auto
+              --fatrop-bound-tightening-factor 1e-8
+              --fatrop-state-scaling none
+              --fatrop-dual-warm-start-mode off
+              --optional-nlp-periodic-ipopt-hot-start
             )
           elif [[ "$BENCHMARK_SOLVER" == "madnlp" ]]; then
             solver_tolerance=1e-8
@@ -727,7 +757,7 @@ jobs:
           fi
           python .github/scripts/summarize_cycling_benchmark.py \
             --output-dir benchmark-report \
-            --expected-solvers ipopt,madnlp \
+            --expected-solvers ipopt,fatrop,madnlp \
             "${result_files[@]}"
           cat benchmark-report/benchmark-comparison.md >> "$GITHUB_STEP_SUMMARY"
 

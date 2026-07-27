@@ -21,7 +21,17 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from bioptim import MultiCyclicCycleSolutions, Node, OdeSolver, SolutionMerge, Solver
+from bioptim import (
+    MultiCyclicCycleSolutions,
+    Node,
+    OdeSolver,
+    SolutionMerge,
+    Solver,
+)
+try:
+    from bioptim import OrderingStrategy
+except ImportError:  # Bioptim releases before the Fatrop time-major interface
+    OrderingStrategy = None
 from bioptim.optimization.receding_horizon_optimization import (
     RecedingHorizonOptimization,
 )
@@ -1689,6 +1699,46 @@ def build_argument_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--fatrop-dual-warm-start-mode",
+        choices=("off", "constraints", "bounds", "all"),
+        default="off",
+        help=(
+            "Reuse Fatrop multipliers after shifting the primal MHE guess. "
+            "Disabled by default until time-major multiplier blocks are shifted "
+            "and independently validated."
+        ),
+    )
+    parser.add_argument(
+        "--max-fatrop-iterations",
+        type=int,
+        default=1000,
+        help="Maximum number of Fatrop iterations per MHE window (native maximum: 1000).",
+    )
+    parser.add_argument(
+        "--fatrop-structure-detection",
+        choices=("auto", "manual"),
+        default="auto",
+        help=(
+            "CasADi Fatrop OCP-structure detection. Automatic detection is the "
+            "portable benchmark default."
+        ),
+    )
+    parser.add_argument(
+        "--fatrop-bound-tightening-factor",
+        type=float,
+        default=1e-8,
+        help=(
+            "Compensatory tightening of interval bounds before the Fatrop "
+            "call. The default offsets its native relative relaxation."
+        ),
+    )
+    parser.add_argument(
+        "--fatrop-c-compile",
+        action="store_true",
+        help="Experimentally generate and compile the CasADi NLP used by Fatrop.",
+    )
+    parser.add_argument("--fatrop-print-level", type=int, default=0)
+    parser.add_argument(
         "--madnlp-dual-warm-start-mode",
         choices=("off", "constraints", "bounds", "all"),
         default="off",
@@ -1708,7 +1758,7 @@ def build_argument_parser() -> argparse.ArgumentParser:
         "--nlp-tolerance",
         type=float,
         default=1e-6,
-        help="Common convergence and constraint tolerance for IPOPT, MadNLP, and Alpaqa.",
+        help="Common convergence and constraint tolerance for IPOPT, Fatrop, MadNLP, and Alpaqa.",
     )
     parser.add_argument(
         "--primal-feasibility-threshold",
@@ -1716,7 +1766,7 @@ def build_argument_parser() -> argparse.ArgumentParser:
         default=None,
         help=(
             "Optional common absolute primal-feasibility threshold used to "
-            "validate IPOPT, MadNLP, and Alpaqa windows independently of each "
+            "validate IPOPT, Fatrop, MadNLP, and Alpaqa windows independently of each "
             "solver's internal tolerance. The legacy default is ten times "
             "--nlp-tolerance."
         ),
@@ -3292,6 +3342,16 @@ def configure_cycle_nlp_solver(args: argparse.Namespace):
             tolerance=args.nlp_tolerance,
             madnlp_c_compile=args.madnlp_c_compile,
             madnlp_linear_solver=args.madnlp_linear_solver,
+        )
+    if args.solver == "fatrop":
+        return configure_nlp_solver(
+            "fatrop",
+            max_iterations=args.max_fatrop_iterations,
+            tolerance=args.nlp_tolerance,
+            print_level=args.fatrop_print_level,
+            fatrop_c_compile=args.fatrop_c_compile,
+            fatrop_structure_detection=args.fatrop_structure_detection,
+            fatrop_bound_tightening_factor=args.fatrop_bound_tightening_factor,
         )
     if args.solver == "alpaqa":
         return configure_nlp_solver(
@@ -4957,36 +5017,107 @@ def _window_objective_values(source_window_solutions: list) -> list[float | None
     return values
 
 
-def _maximum_bound_violation(values, lower_bounds, upper_bounds) -> float | None:
-    """Return a backend-independent maximum bound violation when dimensions match."""
+def _maximum_bound_violation_details(
+    values, lower_bounds, upper_bounds
+) -> dict[str, float | int | None]:
+    """Return the largest bound violation and the corresponding vector entry."""
 
     if values is None or lower_bounds is None or upper_bounds is None:
-        return None
+        return {
+            "violation": None,
+            "index": None,
+            "value": None,
+            "lower_bound": None,
+            "upper_bound": None,
+        }
     values = np.asarray(values, dtype=float).reshape(-1)
     lower_bounds = np.asarray(lower_bounds, dtype=float).reshape(-1)
     upper_bounds = np.asarray(upper_bounds, dtype=float).reshape(-1)
     if not (values.size == lower_bounds.size == upper_bounds.size):
-        return None
+        return {
+            "violation": None,
+            "index": None,
+            "value": None,
+            "lower_bound": None,
+            "upper_bound": None,
+        }
     if (
         not np.all(np.isfinite(values))
         or np.any(np.isnan(lower_bounds))
         or np.any(np.isnan(upper_bounds))
         or np.any(lower_bounds > upper_bounds)
     ):
-        return None
+        return {
+            "violation": None,
+            "index": None,
+            "value": None,
+            "lower_bound": None,
+            "upper_bound": None,
+        }
     if values.size == 0:
-        return 0.0
-    return float(
-        np.max(
-            np.maximum.reduce(
-                (
-                    lower_bounds - values,
-                    values - upper_bounds,
-                    np.zeros(values.size),
-                )
-            )
+        return {
+            "violation": 0.0,
+            "index": None,
+            "value": None,
+            "lower_bound": None,
+            "upper_bound": None,
+        }
+    violations = np.maximum.reduce(
+        (
+            lower_bounds - values,
+            values - upper_bounds,
+            np.zeros(values.size),
         )
     )
+    index = int(np.argmax(violations))
+    if violations[index] == 0:
+        return {
+            "violation": 0.0,
+            "index": None,
+            "value": None,
+            "lower_bound": None,
+            "upper_bound": None,
+        }
+    return {
+        "violation": float(violations[index]),
+        "index": index,
+        "value": float(values[index]),
+        "lower_bound": float(lower_bounds[index]),
+        "upper_bound": float(upper_bounds[index]),
+    }
+
+
+def _maximum_bound_violation(values, lower_bounds, upper_bounds) -> float | None:
+    """Return a backend-independent maximum bound violation when dimensions match."""
+
+    return _maximum_bound_violation_details(
+        values, lower_bounds, upper_bounds
+    )["violation"]
+
+
+def _decision_vector_block(solution, index: int | None) -> str | None:
+    """Describe the Bioptim vector-layout block containing a decision index."""
+
+    if index is None:
+        return None
+    layout = getattr(getattr(solution, "ocp", None), "vector_layout", None)
+    index_map = getattr(layout, "index_map", None)
+    if not isinstance(index_map, dict):
+        return None
+    for key, block in index_map.items():
+        try:
+            block_slice, n_columns = block
+        except (TypeError, ValueError):
+            continue
+        if block_slice.start <= index < block_slice.stop:
+            block_size = block_slice.stop - block_slice.start
+            n_rows = block_size // n_columns if n_columns else block_size
+            local_index = index - block_slice.start
+            row = local_index % n_rows if n_rows else None
+            column = local_index // n_rows if n_rows else None
+            key_label = ":".join(str(part) for part in key)
+            return f"{key_label}:row={row}:column={column}"
+    return None
 
 
 def _independent_solution_bound_violations(solution) -> dict[str, float | None]:
@@ -4996,16 +5127,18 @@ def _independent_solution_bound_violations(solution) -> dict[str, float | None]:
     limits = getattr(interface, "limits", None)
     if not isinstance(limits, dict):
         limits = {}
-    constraint_violation = _maximum_bound_violation(
+    constraint_details = _maximum_bound_violation_details(
         getattr(solution, "constraints", None),
         limits.get("lbg"),
         limits.get("ubg"),
     )
-    decision_violation = _maximum_bound_violation(
+    decision_details = _maximum_bound_violation_details(
         getattr(solution, "vector", None),
         limits.get("lbx"),
         limits.get("ubx"),
     )
+    constraint_violation = constraint_details["violation"]
+    decision_violation = decision_details["violation"]
     available = [
         value
         for value in (constraint_violation, decision_violation)
@@ -5013,7 +5146,15 @@ def _independent_solution_bound_violations(solution) -> dict[str, float | None]:
     ]
     return {
         "constraint_bound_violation": constraint_violation,
+        "constraint_bound_violation_index": constraint_details["index"],
         "decision_bound_violation": decision_violation,
+        "decision_bound_violation_index": decision_details["index"],
+        "decision_bound_violation_value": decision_details["value"],
+        "decision_bound_lower": decision_details["lower_bound"],
+        "decision_bound_upper": decision_details["upper_bound"],
+        "decision_bound_block": _decision_vector_block(
+            solution, decision_details["index"]
+        ),
         "maximum_bound_violation": max(available) if available else None,
     }
 
@@ -5159,6 +5300,7 @@ def snapshot_nlp_solver_stats(nmpc) -> dict:
             "success",
             "return_status",
             "unified_return_status",
+            "fatrop",
             "madnlp",
         }
     }
@@ -9991,16 +10133,16 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
         args.periodic_ipopt_refinement and not args.disable_periodic_ipopt_refinement
     )
     nlp_periodic_ipopt_hot_start_enabled = bool(
-        args.solver in {"madnlp", "alpaqa"}
+        args.solver in {"fatrop", "madnlp", "alpaqa"}
         and args.nlp_periodic_ipopt_hot_start
         and not args.disable_periodic_ipopt_refinement
     )
     if (
         args.nlp_periodic_ipopt_hot_start
-        and args.solver not in {"madnlp", "alpaqa"}
+        and args.solver not in {"fatrop", "madnlp", "alpaqa"}
     ):
         raise ValueError(
-            "--nlp-periodic-ipopt-hot-start is only available with MadNLP or Alpaqa."
+            "--nlp-periodic-ipopt-hot-start is only available with Fatrop, MadNLP or Alpaqa."
         )
     cycle_boundary_homotopy_enabled = bool(
         args.solver == "acados"
@@ -10025,7 +10167,7 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
     if args.periodic_ipopt_refinement_each_window and args.solver != "acados":
         raise ValueError(
             "--periodic-ipopt-refinement-each-window is currently restricted "
-            "to ACADOS. MadNLP and Alpaqa use the certified seed only for the "
+            "to ACADOS. Fatrop, MadNLP and Alpaqa use the certified seed only for the "
             "first window, then warm-start from their own shifted solution."
         )
     if (
@@ -10092,6 +10234,19 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
         for muscle_model in model.muscles_dynamics_model
     }
 
+    if args.solver == "fatrop" and OrderingStrategy is None:
+        raise SolverBackendUnavailable(
+            "Fatrop requires a Bioptim revision exposing OrderingStrategy.TIME_MAJOR."
+        )
+    ordering_strategy = (
+        OrderingStrategy.TIME_MAJOR
+        if args.solver == "fatrop"
+        else (
+            OrderingStrategy.VARIABLE_MAJOR
+            if OrderingStrategy is not None
+            else None
+        )
+    )
     mhe_info = {
         "cycle_duration": cycle_duration,
         "n_cycles_to_advance": 1,
@@ -10102,6 +10257,13 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
         "cycle_len": args.stimulations_per_cycle,
         "n_cycles_simultaneous": args.cycles_per_window,
     }
+    if ordering_strategy is not None:
+        mhe_info["ordering_strategy"] = ordering_strategy
+    args.nlp_ordering_strategy = (
+        "time_major"
+        if args.solver == "fatrop"
+        else ("variable_major" if ordering_strategy is not None else "bioptim_default")
+    )
     cycling_info = {
         "turn_number": args.cycles_per_window,
         "pedal_config": {"x_center": 0.35, "y_center": 0.0, "radius": 0.1},
@@ -10274,6 +10436,7 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
             print(f"collocation_degree: {args.collocation_degree}")
             print(f"collocation_method: {args.collocation_method}")
         print(f"use_sx: {args.use_sx}")
+        print(f"nlp_ordering_strategy: {args.nlp_ordering_strategy}")
         print(f"enforce_start_constraints: {args.enforce_start_constraints}")
         print(f"control_regularization_weight: {args.control_regularization_weight}")
         print(f"control_regularization_target: {args.control_regularization_target}")
@@ -10643,10 +10806,19 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
                 f"{args.solver}_dual_warm_start_mode: "
                 f"{getattr(args, f'{args.solver}_dual_warm_start_mode')}"
             )
-            if args.solver in {"madnlp", "alpaqa"}:
+            if args.solver in {"fatrop", "madnlp", "alpaqa"}:
                 print(
                     "nlp_periodic_ipopt_hot_start: "
                     f"{args.nlp_periodic_ipopt_hot_start}"
+                )
+            if args.solver == "fatrop":
+                print(
+                    "fatrop_structure_detection: "
+                    f"{args.fatrop_structure_detection}"
+                )
+                print(
+                    "fatrop_bound_tightening_factor: "
+                    f"{args.fatrop_bound_tightening_factor}"
                 )
             if args.solver == "madnlp":
                 print(f"madnlp_linear_solver: {args.madnlp_linear_solver}")

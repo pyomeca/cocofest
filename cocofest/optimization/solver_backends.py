@@ -1,6 +1,6 @@
 """Optional nonlinear solver backends used by Cocofest benchmarks.
 
-MadNLP and Alpaqa are exposed by their Bioptim integration branches through
+Fatrop, MadNLP and Alpaqa are exposed by compatible Bioptim revisions through
 CasADi's ``nlpsol`` API.  They are optional on purpose: importing Cocofest must
 continue to work with a standard Bioptim/CasADi installation.
 """
@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import Any
 
-NLP_SOLVER_NAMES = ("ipopt", "madnlp", "alpaqa")
+NLP_SOLVER_NAMES = ("ipopt", "fatrop", "madnlp", "alpaqa")
 MADNLP_LINEAR_SOLVER_NAMES = (
     "mumps",
     "umfpack",
@@ -75,6 +75,9 @@ def configure_nlp_solver(
     ipopt_hsl_library: str | None = None,
     ipopt_c_compile: bool = False,
     ipopt_options: dict[str, Any] | None = None,
+    fatrop_c_compile: bool = False,
+    fatrop_structure_detection: str = "auto",
+    fatrop_bound_tightening_factor: float = 1e-8,
     madnlp_c_compile: bool = False,
     madnlp_linear_solver: str | None = None,
     alpaqa_alm_max_iterations: int | None = None,
@@ -99,8 +102,16 @@ def configure_nlp_solver(
     solver_name = solver_name.lower()
     if max_iterations < 1:
         raise ValueError("max_iterations must be strictly positive.")
+    if solver_name == "fatrop" and max_iterations > 1000:
+        raise ValueError(
+            "Fatrop's native max_iter option is bounded to 1000 in CasADi 3.7.2."
+        )
     if tolerance <= 0:
         raise ValueError("tolerance must be strictly positive.")
+    if fatrop_structure_detection not in {"auto", "manual"}:
+        raise ValueError("fatrop_structure_detection must be 'auto' or 'manual'.")
+    if fatrop_bound_tightening_factor < 0:
+        raise ValueError("fatrop_bound_tightening_factor must be non-negative.")
     if alpaqa_lbfgs_memory < 1:
         raise ValueError("alpaqa_lbfgs_memory must be strictly positive.")
     if (
@@ -165,10 +176,34 @@ def configure_nlp_solver(
         solver.set_c_compile(ipopt_c_compile)
         return solver
 
-    solver = factory()
+    if solver_name == "fatrop":
+        solver = factory(
+            _structure_detection=fatrop_structure_detection,
+            _c_compile=fatrop_c_compile,
+        )
+    else:
+        solver = factory()
     solver.set_convergence_tolerance(tolerance)
     solver.set_constraint_tolerance(tolerance)
     solver.set_maximum_iterations(max_iterations)
+
+    if solver_name == "fatrop":
+        solver.set_print_level(print_level)
+        # Fatrop relaxes each bound relatively. For large fatigue capacity
+        # states (~7000), the native 1e-8 relaxation permits about 7e-5
+        # absolute overshoot. The Bioptim integration tightens only the solver
+        # call bounds while retaining the physical limits for the audit.
+        set_bound_tightening = getattr(
+            solver, "set_bound_tightening_factor", None
+        )
+        if set_bound_tightening is None:
+            raise SolverBackendUnavailable(
+                "This Fatrop benchmark requires the Bioptim interface with "
+                "set_bound_tightening_factor()."
+            )
+        set_bound_tightening(fatrop_bound_tightening_factor)
+        solver.set_c_compile(fatrop_c_compile)
+        return solver
 
     if solver_name == "madnlp":
         # Bioptim's symbolic MadNLP levels are reversed relative to the pinned

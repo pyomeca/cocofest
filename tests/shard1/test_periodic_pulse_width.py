@@ -1988,7 +1988,7 @@ def test_solver_clis_accept_explicit_thread_count():
     assert comparison_args.n_threads == 8
 
 
-def test_solver_clis_expose_ipopt_and_madnlp_compilation_options():
+def test_solver_clis_expose_ipopt_fatrop_and_madnlp_compilation_options():
     periodic_args = periodic_example.build_argument_parser().parse_args(
         [
             "--ipopt-c-compile",
@@ -2005,6 +2005,7 @@ def test_solver_clis_expose_ipopt_and_madnlp_compilation_options():
             "--ipopt-ma57-pivot-order",
             "2",
             "--madnlp-c-compile",
+            "--fatrop-c-compile",
         ]
     )
     comparison_args = comparison_example.build_cli().parse_args(
@@ -2023,6 +2024,7 @@ def test_solver_clis_expose_ipopt_and_madnlp_compilation_options():
             "--ipopt-ma57-pivot-order",
             "2",
             "--madnlp-c-compile",
+            "--fatrop-c-compile",
         ]
     )
 
@@ -2051,6 +2053,8 @@ def test_solver_clis_expose_ipopt_and_madnlp_compilation_options():
     }
     assert periodic_args.madnlp_c_compile is True
     assert comparison_args.madnlp_c_compile is True
+    assert periodic_args.fatrop_c_compile is True
+    assert comparison_args.fatrop_c_compile is True
 
 
 def test_warmup_cache_signature_is_independent_from_target_linear_solver(
@@ -2303,6 +2307,8 @@ def test_ipopt_dual_warm_start_cli_defaults_to_bound_multipliers():
 
     assert periodic_args.ipopt_dual_warm_start_mode == "bounds"
     assert comparison_args.ipopt_dual_warm_start_mode == "bounds"
+    assert periodic_args.fatrop_dual_warm_start_mode == "off"
+    assert comparison_args.fatrop_dual_warm_start_mode == "off"
     assert periodic_args.madnlp_dual_warm_start_mode == "off"
     assert periodic_args.alpaqa_dual_warm_start_mode == "constraints"
     assert comparison_args.madnlp_dual_warm_start_mode == "off"
@@ -2371,7 +2377,7 @@ def test_fatigue_benchmark_defaults_to_all_solvers_and_full_scaling():
     args = comparison_example.build_cli().parse_args([])
     periodic_args = periodic_example.build_argument_parser().parse_args([])
 
-    assert args.solvers == ("ipopt", "acados", "madnlp", "alpaqa")
+    assert args.solvers == ("ipopt", "acados", "fatrop", "madnlp")
     assert args.objective == "fatigue"
     assert periodic_args.objective == "fatigue"
     assert args.objective_shape == "quadratic"
@@ -2511,6 +2517,8 @@ def test_feasibility_rejects_solution_without_constraint_metric():
     )
 
     assert feasibility["decision_bound_violation"] == 0.0
+    assert feasibility["decision_bound_violation_index"] is None
+    assert feasibility["decision_bound_block"] is None
     assert feasibility["constraint_feasibility_available"] is False
     assert feasibility["passes_tolerance"] is False
     assert feasibility["failure_reason"] == "constraint_feasibility_unavailable"
@@ -2546,6 +2554,10 @@ def test_feasibility_uses_constraint_and_decision_bounds():
 
     np.testing.assert_allclose(feasibility["constraint_bound_violation"], 2e-5)
     np.testing.assert_allclose(feasibility["decision_bound_violation"], 0.1)
+    assert feasibility["decision_bound_violation_index"] == 1
+    assert feasibility["decision_bound_violation_value"] == 1.1
+    assert feasibility["decision_bound_lower"] == 0.0
+    assert feasibility["decision_bound_upper"] == 1.0
     np.testing.assert_allclose(feasibility["effective_primal_infeasibility"], 0.1)
     assert feasibility["passes_tolerance"] is False
 
@@ -2802,6 +2814,16 @@ def test_optional_nlp_config_clones_ipopt_transcription_exactly():
         madnlp_linear_solver="umfpack",
         periodic_ipopt_hot_start=True,
     )
+    fatrop = comparison_example._nlp_solver_config(
+        "fatrop",
+        reference,
+        tolerance=1e-7,
+        max_iterations=600,
+        dual_warm_start_mode="off",
+        fatrop_structure_detection="auto",
+        fatrop_bound_tightening_factor=2e-8,
+        periodic_ipopt_hot_start=True,
+    )
     alpaqa = comparison_example._nlp_solver_config(
         "alpaqa",
         reference,
@@ -2814,7 +2836,7 @@ def test_optional_nlp_config_clones_ipopt_transcription_exactly():
         periodic_ipopt_hot_start=True,
     )
 
-    for candidate in (madnlp, alpaqa):
+    for candidate in (fatrop, madnlp, alpaqa):
         assert candidate.model_formulation == reference.model_formulation
         assert candidate.torque_application == reference.torque_application
         assert candidate.ode_solver == reference.ode_solver
@@ -2827,6 +2849,9 @@ def test_optional_nlp_config_clones_ipopt_transcription_exactly():
         assert candidate.nlp_periodic_ipopt_hot_start is True
 
     assert madnlp.madnlp_linear_solver == "umfpack"
+    assert fatrop.fatrop_structure_detection == "auto"
+    assert fatrop.fatrop_bound_tightening_factor == 2e-8
+    assert fatrop.max_fatrop_iterations == 600
     assert alpaqa.alpaqa_initial_tolerance == 1e-3
     assert alpaqa.alpaqa_penalty_update_factor == 5.0
     assert alpaqa.alpaqa_alm_max_iterations == 40
@@ -2889,6 +2914,29 @@ def test_optional_nlp_cli_exposes_cross_solver_hot_start_and_tuning():
     assert comparison_args.alpaqa_maximum_penalty == 1e7
     assert comparison_args.alpaqa_panoc_max_wall_time == 0.25
     assert comparison_args.alpaqa_max_no_progress == 25
+
+    fatrop_args = comparison_example.build_cli().parse_args(
+        [
+            "--solvers",
+            "fatrop",
+            "--fatrop-max-iter",
+            "750",
+            "--fatrop-structure-detection",
+            "auto",
+            "--fatrop-bound-tightening-factor",
+            "2e-8",
+            "--fatrop-state-scaling",
+            "none",
+            "--fatrop-dual-warm-start-mode",
+            "off",
+        ]
+    )
+    assert fatrop_args.solvers == ("fatrop",)
+    assert fatrop_args.fatrop_max_iter == 750
+    assert fatrop_args.fatrop_structure_detection == "auto"
+    assert fatrop_args.fatrop_bound_tightening_factor == 2e-8
+    assert fatrop_args.fatrop_state_scaling == "none"
+    assert fatrop_args.fatrop_dual_warm_start_mode == "off"
 
 
 def test_backend_independent_terminal_wheel_slack_cli():

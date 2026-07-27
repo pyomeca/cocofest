@@ -871,7 +871,7 @@ def prepare_nmpc(
         ),
     )
 
-    return MyCyclicNMPC(
+    nmpc_options = dict(
         bio_model=[model],
         dynamics=dynamics_options,
         cycle_len=cycle_len,
@@ -889,6 +889,9 @@ def prepare_nmpc(
         n_threads=n_threads,
         use_sx=use_sx,
     )
+    if "ordering_strategy" in mhe_info:
+        nmpc_options["ordering_strategy"] = mhe_info["ordering_strategy"]
+    return MyCyclicNMPC(**nmpc_options)
 
 
 def set_external_forces(n_shooting, external_force_dict, force_name):

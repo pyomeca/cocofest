@@ -2,8 +2,8 @@
 
 Salut Kevin,
 
-J’ai adapté et durci le benchmark du MHE de pédalage pour comparer IPOPT et
-MadNLP sur le même problème assisté. Alpaqa est désormais retiré de la matrice
+J’ai adapté et durci le benchmark du MHE de pédalage pour comparer IPOPT,
+Fatrop et MadNLP sur le même problème assisté. Alpaqa est désormais retiré de la matrice
 d’endurance : le meilleur réglage testé n’a validé aucun RHO, a atteint deux
 limites de 600 s et a fini le second RHO à `4.57e-2` d’infaisabilité. Son
 intégration et ses résultats historiques restent documentés pour la
@@ -19,12 +19,12 @@ Le problème commun utilise :
 - la dynamique `periodic_node` ;
 - une collocation directe Radau de degré 3 ;
 - un horizon MHE d’un cycle par RHO, avec 30 stimulations par cycle ;
-- le scaling complet des états ;
+- le scaling complet des états pour IPOPT et MadNLP ;
 - une tolérance de `0.002 rad` sur la progression angulaire terminale ;
 - 100 RHO demandés et un arrêt après deux échecs consécutifs.
 
 Le workflow construit d’abord un seed IPOPT sur le problème assisté cible et
-le certifie physiquement. IPOPT et MadNLP téléchargent ensuite le même artifact
+le certifie physiquement. IPOPT, Fatrop et MadNLP téléchargent ensuite le même artifact
 immuable et utilisent le même commit Bioptim. Le vieux seed résistif n’est
 qu’une trajectoire de continuation et n’est jamais présenté comme solution du
 problème assisté.
@@ -35,6 +35,22 @@ d’un cycle, extrapolés puis projetés dans leurs bornes, avec continuité des
 RHO. La réutilisation des multiplicateurs MadNLP reste désactivée, car le
 runtime épinglé ne la supporte pas proprement. IPOPT réutilise les
 multiplicateurs de bornes.
+
+Fatrop reçoit le même hot start primal et le même raffinement IPOPT initial,
+mais impose deux adaptations numériques visibles dans le rapport. Il utilise
+un ordre temporel des variables (`time_major`) et aucun scaling des états :
+avec le scaling complet, sa détection automatique refuse les gaps de
+collocation. Il applique aussi une relaxation relative interne des bornes. Sur
+les états de capacité proches de 7000, cela autorisait environ `7e-5` de
+dépassement malgré une convergence native. L’interface Bioptim épinglée
+resserre donc uniquement les bornes envoyées à Fatrop de `1e-8`, puis Cocofest
+audite la solution contre les bornes physiques originales. On ne desserre pas
+le seuil commun.
+
+Le smoke test local de cinq RHO valide les cinq fenêtres Fatrop : violation
+de contrainte maximale `3.25e-9`, aucune violation de borne physique, 81 à 88
+itérations et `4.80--5.93 s` par résolution (`5.24 s` de médiane). C’est
+prometteur, mais insuffisant pour conclure sur 100 cycles.
 
 Le criblage d’options est ici :
 
@@ -53,7 +69,7 @@ Les deux jobs ont utilisé les quatre cœurs exposés par le runner pour
 l’évaluation CasADi/Bioptim. Les pools OpenMP, BLAS, MKL, NumExpr et Julia
 imbriqués restent à un thread pour éviter la sur-souscription.
 
-## Résultats à 100 RHO
+## Résultats à 100 RHO déjà établis
 
 | Solveur | RHO résolus | Préfixe strict | Préparation | Somme des RHO | Médiane chaude | P90 chaud | Mur-à-mur |
 |---|---:|---:|---:|---:|---:|---:|---:|
@@ -130,3 +146,10 @@ plus rapide, son hot start fonctionne jusqu’à un horizon significatif et il
 récupère après l’échec, mais une seule fenêtre pathologique suffit à effacer
 le gain. **Alpaqa est laissé de côté** pour cette formulation de collocation,
 car aucun réglage testé n’a fourni une continuation MHE convergente.
+
+**Fatrop est maintenant inclus dans le prochain lancement 100 RHO**, mais je
+ne le classe pas encore face aux deux résultats ci-dessus. Son résultat local
+court valide l’intégration et la faisabilité, pas sa robustesse à la fatigue.
+Le rapport GitHub signalera aussi explicitement que son ordre et son scaling
+numériques diffèrent, afin que son temps ne soit pas présenté comme un simple
+changement de backend à NLP numérique strictement identique.

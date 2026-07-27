@@ -45,7 +45,7 @@ except ImportError:
     )
 
 EXAMPLE_DIR = Path(__file__).resolve().parent
-BENCHMARK_SOLVERS = ("ipopt", "acados", "madnlp", "alpaqa")
+BENCHMARK_SOLVERS = ("ipopt", "acados", "fatrop", "madnlp")
 BENCHMARK_STIMULATION_PATTERN_CYCLES = (10, 30, 100)
 BENCHMARK_CONFIGURATION_FIELDS = (
     "solver",
@@ -57,6 +57,7 @@ BENCHMARK_CONFIGURATION_FIELDS = (
     "collocation_degree",
     "collocation_method",
     "use_sx",
+    "nlp_ordering_strategy",
     "state_scaling",
     "pulse_width_scaling",
     "pulse_width_active_set",
@@ -98,6 +99,12 @@ BENCHMARK_CONFIGURATION_FIELDS = (
     "max_ipopt_iterations",
     "standard_warmup_max_iterations",
     "disable_historical_ipopt_initial_guess",
+    "fatrop_dual_warm_start_mode",
+    "fatrop_c_compile",
+    "fatrop_structure_detection",
+    "fatrop_bound_tightening_factor",
+    "fatrop_print_level",
+    "max_fatrop_iterations",
     "madnlp_dual_warm_start_mode",
     "madnlp_c_compile",
     "madnlp_linear_solver",
@@ -1319,18 +1326,29 @@ def _nlp_solver_config(
     alpaqa_maximum_penalty: float | None = None,
     alpaqa_panoc_max_wall_time: float | None = None,
     alpaqa_max_no_progress: int | None = None,
+    fatrop_c_compile: bool = False,
+    fatrop_structure_detection: str = "auto",
+    fatrop_bound_tightening_factor: float = 1e-8,
+    fatrop_print_level: int = 0,
     periodic_ipopt_hot_start: bool = False,
 ) -> argparse.Namespace:
     """Clone the IPOPT transcription so only the nonlinear solver changes."""
 
-    if solver_name not in {"madnlp", "alpaqa"}:
-        raise ValueError("The optional NLP solver must be 'madnlp' or 'alpaqa'.")
+    if solver_name not in {"fatrop", "madnlp", "alpaqa"}:
+        raise ValueError(
+            "The optional NLP solver must be 'fatrop', 'madnlp' or 'alpaqa'."
+        )
     args = argparse.Namespace(**vars(reference_args))
     args.solver = solver_name
     args.nlp_tolerance = tolerance
     setattr(args, f"max_{solver_name}_iterations", max_iterations)
     setattr(args, f"{solver_name}_dual_warm_start_mode", dual_warm_start_mode)
     args.nlp_periodic_ipopt_hot_start = periodic_ipopt_hot_start
+    if solver_name == "fatrop":
+        args.fatrop_c_compile = fatrop_c_compile
+        args.fatrop_structure_detection = fatrop_structure_detection
+        args.fatrop_bound_tightening_factor = fatrop_bound_tightening_factor
+        args.fatrop_print_level = fatrop_print_level
     if solver_name == "madnlp":
         args.madnlp_linear_solver = madnlp_linear_solver
     if solver_name == "alpaqa":
@@ -1624,7 +1642,11 @@ def _run_benchmark_case(
     try:
         uses_c_codegen = (
             solver_name == "ipopt" and getattr(args, "ipopt_c_compile", False)
-        ) or (solver_name == "madnlp" and getattr(args, "madnlp_c_compile", False))
+        ) or (
+            solver_name == "fatrop" and getattr(args, "fatrop_c_compile", False)
+        ) or (
+            solver_name == "madnlp" and getattr(args, "madnlp_c_compile", False)
+        )
         if uses_c_codegen:
             previous_cwd = Path.cwd()
             with TemporaryDirectory(
@@ -2139,6 +2161,13 @@ def main(
     ipopt_dual_warm_start_mode: str = "bounds",
     nlp_tolerance: float = 1e-6,
     primal_feasibility_threshold: float | None = None,
+    fatrop_max_iter: int = 1000,
+    fatrop_dual_warm_start_mode: str = "off",
+    fatrop_c_compile: bool = False,
+    fatrop_structure_detection: str = "auto",
+    fatrop_bound_tightening_factor: float = 1e-8,
+    fatrop_print_level: int = 0,
+    fatrop_state_scaling: str = "none",
     madnlp_max_iter: int = 2000,
     madnlp_dual_warm_start_mode: str = "off",
     madnlp_c_compile: bool = False,
@@ -2636,6 +2665,19 @@ def main(
         acados_transfer_phase_one_max_fes_change
     )
 
+    fatrop_args = _nlp_solver_config(
+        "fatrop",
+        ipopt_args,
+        tolerance=nlp_tolerance,
+        max_iterations=fatrop_max_iter,
+        dual_warm_start_mode=fatrop_dual_warm_start_mode,
+        fatrop_c_compile=fatrop_c_compile,
+        fatrop_structure_detection=fatrop_structure_detection,
+        fatrop_bound_tightening_factor=fatrop_bound_tightening_factor,
+        fatrop_print_level=fatrop_print_level,
+        periodic_ipopt_hot_start=optional_nlp_periodic_ipopt_hot_start,
+    )
+    fatrop_args.state_scaling = fatrop_state_scaling
     madnlp_args = _nlp_solver_config(
         "madnlp",
         ipopt_args,
@@ -2647,6 +2689,8 @@ def main(
     )
     ipopt_args.ipopt_c_compile = ipopt_c_compile
     ipopt_args.ipopt_hsl_library = ipopt_hsl_library
+    fatrop_args.ipopt_c_compile = False
+    fatrop_args.ipopt_hsl_library = None
     madnlp_args.ipopt_c_compile = False
     madnlp_args.ipopt_hsl_library = None
     madnlp_args.madnlp_c_compile = madnlp_c_compile
@@ -2670,6 +2714,7 @@ def main(
     for solver_args_for_threads in (
         ipopt_args,
         acados_args,
+        fatrop_args,
         madnlp_args,
         alpaqa_args,
     ):
@@ -2687,6 +2732,7 @@ def main(
     solver_args = {
         "ipopt": ipopt_args,
         "acados": acados_args,
+        "fatrop": fatrop_args,
         "madnlp": madnlp_args,
         "alpaqa": alpaqa_args,
     }
@@ -2722,7 +2768,7 @@ def build_cli() -> argparse.ArgumentParser:
         "--solvers",
         type=parse_solver_names,
         default=BENCHMARK_SOLVERS,
-        help="Comma-separated solver matrix: ipopt,acados,madnlp,alpaqa.",
+        help="Comma-separated solver matrix: ipopt,acados,fatrop,madnlp.",
     )
     parser.add_argument(
         "--objective",
@@ -2900,6 +2946,54 @@ def build_cli() -> argparse.ArgumentParser:
             "windows independently of solver-specific convergence tolerances."
         ),
     )
+    parser.add_argument(
+        "--fatrop-max-iter",
+        type=int,
+        default=1000,
+        help="Maximum Fatrop iterations per RHO (CasADi 3.7.2 limits this to 1000).",
+    )
+    parser.add_argument(
+        "--fatrop-structure-detection",
+        choices=("auto", "manual"),
+        default="auto",
+        help=(
+            "CasADi Fatrop OCP-structure detection. Automatic detection is the "
+            "portable benchmark default."
+        ),
+    )
+    parser.add_argument(
+        "--fatrop-c-compile",
+        action="store_true",
+        help="Experimentally generate and compile the CasADi NLP used by Fatrop.",
+    )
+    parser.add_argument(
+        "--fatrop-bound-tightening-factor",
+        type=float,
+        default=1e-8,
+        help=(
+            "Compensatory tightening of Fatrop interval bounds. The default "
+            "offsets its native 1e-8 relative relaxation."
+        ),
+    )
+    parser.add_argument("--fatrop-print-level", type=int, default=0)
+    parser.add_argument(
+        "--fatrop-state-scaling",
+        choices=("none", "full"),
+        default="none",
+        help=(
+            "Fatrop-specific state scaling. Automatic OCP structure detection "
+            "currently requires 'none'; 'full' is retained for diagnostics."
+        ),
+    )
+    parser.add_argument(
+        "--fatrop-dual-warm-start-mode",
+        choices=("off", "constraints", "bounds", "all"),
+        default="off",
+        help=(
+            "Reuse no Fatrop multipliers by default; the shifted time-major "
+            "multiplier blocks have not yet been independently validated."
+        ),
+    )
     parser.add_argument("--madnlp-max-iter", type=int, default=2000)
     parser.add_argument(
         "--madnlp-linear-solver",
@@ -2956,7 +3050,7 @@ def build_cli() -> argparse.ArgumentParser:
         dest="optional_nlp_periodic_ipopt_hot_start",
         action="store_true",
         help=(
-            "Seed the first MadNLP/Alpaqa window with a feasibility-certified "
+            "Seed the first Fatrop/MadNLP/Alpaqa window with a feasibility-certified "
             "periodic IPOPT solution (default)."
         ),
     )
@@ -2964,7 +3058,7 @@ def build_cli() -> argparse.ArgumentParser:
         "--no-optional-nlp-periodic-ipopt-hot-start",
         dest="optional_nlp_periodic_ipopt_hot_start",
         action="store_false",
-        help="Start MadNLP/Alpaqa directly from the projected standard warmup.",
+        help="Start Fatrop/MadNLP/Alpaqa directly from the projected standard warmup.",
     )
     parser.set_defaults(optional_nlp_periodic_ipopt_hot_start=True)
     parser.add_argument(
@@ -3543,6 +3637,13 @@ if __name__ == "__main__":
         ipopt_dual_warm_start_mode=args.ipopt_dual_warm_start_mode,
         nlp_tolerance=args.nlp_tolerance,
         primal_feasibility_threshold=args.primal_feasibility_threshold,
+        fatrop_max_iter=args.fatrop_max_iter,
+        fatrop_dual_warm_start_mode=args.fatrop_dual_warm_start_mode,
+        fatrop_c_compile=args.fatrop_c_compile,
+        fatrop_structure_detection=args.fatrop_structure_detection,
+        fatrop_bound_tightening_factor=args.fatrop_bound_tightening_factor,
+        fatrop_print_level=args.fatrop_print_level,
+        fatrop_state_scaling=args.fatrop_state_scaling,
         madnlp_max_iter=args.madnlp_max_iter,
         madnlp_dual_warm_start_mode=args.madnlp_dual_warm_start_mode,
         madnlp_c_compile=args.madnlp_c_compile,

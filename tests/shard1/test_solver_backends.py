@@ -78,6 +78,33 @@ def test_configure_madnlp_uses_supported_primal_hot_start():
     assert ("set_c_compile", False) in solver.calls
 
 
+def test_configure_fatrop_uses_time_structured_native_options():
+    namespace = _solver_namespace("FATROP")
+
+    solver = configure_nlp_solver(
+        "fatrop",
+        max_iterations=432,
+        tolerance=3e-7,
+        print_level=2,
+        fatrop_c_compile=True,
+        fatrop_structure_detection="auto",
+        solver_namespace=namespace,
+        check_availability=False,
+    )
+
+    assert solver.constructor_options == {
+        "_structure_detection": "auto",
+        "_c_compile": True,
+    }
+    assert ("set_convergence_tolerance", 3e-7) in solver.calls
+    assert ("set_constraint_tolerance", 3e-7) in solver.calls
+    assert ("set_maximum_iterations", 432) in solver.calls
+    assert ("set_print_level", 2) in solver.calls
+    assert ("set_bound_tightening_factor", 1e-8) in solver.calls
+    assert ("set_c_compile", True) in solver.calls
+    assert not any(call[0] == "set_warm_start_options" for call in solver.calls)
+
+
 def test_configure_alpaqa_sets_both_iteration_budgets_and_lbfgs():
     namespace = _solver_namespace("ALPAQA")
 
@@ -160,6 +187,14 @@ def test_configure_ipopt_retains_robust_cocofest_settings():
             "madnlp_linear_solver",
         ),
         (
+            {"max_iterations": 1, "fatrop_structure_detection": "none"},
+            "fatrop_structure_detection",
+        ),
+        (
+            {"max_iterations": 1, "fatrop_bound_tightening_factor": -1e-8},
+            "fatrop_bound_tightening_factor",
+        ),
+        (
             {"max_iterations": 1, "alpaqa_penalty_update_factor": 1},
             "alpaqa_penalty_update_factor",
         ),
@@ -176,6 +211,16 @@ def test_solver_configuration_rejects_invalid_common_options(kwargs, message):
             solver_namespace=_solver_namespace("ALPAQA"),
             check_availability=False,
             **kwargs,
+        )
+
+
+def test_fatrop_rejects_iteration_budget_above_native_limit():
+    with pytest.raises(ValueError, match="bounded to 1000"):
+        configure_nlp_solver(
+            "fatrop",
+            max_iterations=1001,
+            solver_namespace=_solver_namespace("FATROP"),
+            check_availability=False,
         )
 
 

@@ -32,7 +32,7 @@ COMPARABILITY_FIELDS = (
     "crank_torque_role",
     "primal_feasibility_threshold",
 )
-DEFAULT_EXPECTED_SOLVERS = ("ipopt", "madnlp", "alpaqa")
+DEFAULT_EXPECTED_SOLVERS = ("ipopt", "fatrop", "madnlp")
 
 
 def _finite(value) -> float | None:
