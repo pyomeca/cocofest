@@ -11,7 +11,7 @@ on:
       cycles:
         description: Maximum one-cycle RHO windows, or "screen" for the option matrix
         required: true
-        default: "30"
+        default: "100"
         type: string
       crank_assistance_nm:
         description: Driving crank assistance magnitude in N.m

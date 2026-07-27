@@ -315,7 +315,7 @@ gh workflow run cycling_solver_benchmark_linux.yml \
   --repo mickaelbegon/cocofest \
   --ref codex/acados-pr-refresh \
   -f runner_label=ubuntu-22.04 \
-  -f cycles=30 \
+  -f cycles=100 \
   -f crank_assistance_nm=0.20 \
   -f terminal_wheel_q_slack=0.002 \
   -f solver_max_iterations=2000
@@ -332,8 +332,8 @@ the endurance matrix.
 Each solver artifact contains its JSON and complete log. A final report job
 adds a side-by-side Markdown summary, `rho-timings.csv`, the raw stimulation
 profiles in `stimulation-patterns.csv`, and one combined JSON. The checkpoints
-called “10” and “30” are the executed cycles/RHO 10 and 30 of the same run,
-not OCPs containing 10 or 30 simultaneous cycles. Patterns are exported only
+called “10”, “30” and “100” are the executed cycles/RHO of the same run, not
+OCPs containing that many simultaneous cycles. Patterns are exported only
 when the checkpoint belongs to the strictly converged prefix, and include the
 real crank phase and velocity so that a kinematic phase shift is not mistaken
 for a stimulation-strategy difference.
@@ -405,6 +405,41 @@ distinct local muscle-sharing strategies with nearly equivalent scalar
 fatigue. Seed exchanges, seed perturbations and inspection of crank speed,
 muscle forces and fatigue states are required before assigning physiological
 meaning to either pattern.
+
+The 100-RHO extension
+[`30304318862`](https://github.com/mickaelbegon/cocofest/actions/runs/30304318862)
+uses the same formulation, solver options and four-core runner:
+
+| Solver | Certified windows | Strict prefix | Preparation | Attempted-RHO sum | Hot median | Hot P90 | End-to-end |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| IPOPT-MUMPS | 100 / 100 | 100 / 100 | 23.03 s | 818.74 s | 8.241 s | 11.130 s | 866.22 s |
+| MadNLP-MUMPS | 99 / 100 | 85 / 100 | 45.72 s | 815.33 s | 5.623 s | 7.745 s | 881.48 s |
+
+MadNLP reaches its 2000-iteration limit on RHO 86 after 187.12 seconds and
+ends that window at `4.85e-2` independently reconstructed infeasibility.
+IPOPT solves the corresponding window in 76 iterations and 8.59 seconds.
+MadNLP then recovers: RHO 87 through 100 all return success and pass the
+common physical threshold, so there is no pair of consecutive failures. The
+strict prefix nevertheless remains 85 by design, because the executed
+trajectory cannot skip the uncertified window. The event is therefore a
+local robustness/outlier problem, not evidence that the physiological fatigue
+limit occurs at cycle 86.
+
+Over the first 85 paired windows, MadNLP's median wall-time ratio relative to
+IPOPT is `0.824`. Its normal hot path is faster, but the single 187-second
+outlier and its extra preparation erase that advantage: IPOPT is 15.26 seconds
+faster end-to-end. The relevant deployment conclusion is consequently about
+tail latency and robustness, not only median throughput.
+
+IPOPT ends 100 validated cycles at `min(A/A_scale)=0.92495`; the physiological
+failure point is still not reached. Its maximum per-cycle crank-progress error
+is only `0.002006 rad`, but the terminal slack is selected with a persistent
+sign and accumulates to `0.1587 rad` after 100 cycles. A future scientific
+endurance run should screen exact terminal progression and a much tighter
+slack (for example `0` and `1e-4 rad`) before extending toward 1000 cycles.
+The cycle-100 stimulation pattern is reported only for IPOPT; the MadNLP
+pattern is deliberately suppressed because it follows the break in the strict
+prefix.
 
 The source-built CasADi used by Alpaqa has `WITH_THREAD=ON`, and the workflow
 rejects a runtime whose compiler flags do not expose that feature. Its two
@@ -730,17 +765,20 @@ muscle moment arm or the instantaneous sign at the stimulation node.
 
 ## Interpretation
 
-MadNLP is relevant for this problem. On the direct Cocofest formulation it
-now validates 30/30 assisted RHO from the certified periodic seed when its
-internal tolerance is tightened to `1e-8`. It is modestly faster after
-construction in the current run, but slower end-to-end at 30 RHO because of
-the additional IPOPT refinement. The related Bioptim Linux benchmark also
+MadNLP remains relevant but is not yet robust enough to replace IPOPT. On the
+direct Cocofest formulation it certifies 99 of 100 assisted RHO when its
+internal tolerance is tightened to `1e-8`, but one isolated 2000-iteration
+failure breaks the strict executable prefix at 85. Its normal hot path is
+faster, while its tail latency and additional IPOPT refinement make it slower
+end-to-end in the 100-RHO run. The related Bioptim Linux benchmark also
 reports 17.397 s hot for a 50-interval exact-Hessian muscle-fatigue problem
 versus 23.002 s for IPOPT, with 57 versus 67 iterations. These are useful
 indications for long collocation sequences, although paired repetitions and
-longer endurance runs remain necessary before claiming a stable speedup.
+repeated paired runs and a recovery strategy are necessary before claiming a
+stable speedup.
 
-Alpaqa remains exploratory. Automatic penalty selection can produce a
+Alpaqa is not usable for the present collocation MHE. Automatic penalty
+selection can produce a
 physically feasible first candidate after 600 seconds, but the solver still
 returns a time-limit status and the next shifted window is strongly
 infeasible. The integration-branch benchmarks also show that Alpaqa is slower
@@ -752,9 +790,9 @@ interior-point solvers.
 Recommended use:
 
 - keep IPOPT as the reference solver;
-- use MadNLP-MUMPS at `1e-8` as the first optional alternative for large,
-  Hessian-heavy fatigue horizons, reporting preparation and hot execution
-  separately;
-- keep Alpaqa behind an explicit solver selection until a dedicated
-  multiple-shooting or less redundant formulation, constraint scaling, and
-  multi-window feasibility study demonstrate reliable convergence.
+- use MadNLP-MUMPS at `1e-8` as an experimental alternative for large,
+  Hessian-heavy fatigue horizons, reporting preparation, hot execution,
+  outliers and strict-prefix length separately;
+- leave Alpaqa out of production and endurance matrices. Retain only the
+  explicit diagnostic path until a dedicated multiple-shooting or less
+  redundant formulation demonstrates reliable multi-window convergence.

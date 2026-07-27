@@ -95,3 +95,36 @@ def test_stimulation_comparison_exports_raw_and_phase_aligned_metrics():
         1.0,
     )
     assert comparison["crank_phase_root_mean_square_error_rad"] == 0.0
+
+
+def test_markdown_distinguishes_successful_windows_from_strict_prefix():
+    entry = {
+        "runtime": {"provenance": {"BIOPTIM_BENCHMARK_COMMIT": "abc"}},
+        "configuration": {
+            "n_windows": 100,
+            "nlp_tolerance": 1e-8,
+            "primal_feasibility_threshold": 1e-5,
+        },
+        "result": {
+            "solver": "madnlp",
+            "success": False,
+            "successful_windows": 99,
+            "attempted_windows": 100,
+            "validated_cycles": 85,
+            "first_failed_rho": 86,
+            "end_to_end_wall_time_s": 881.48,
+            "initial_guess_preparation_time_s": 45.72,
+            "hot_wall_time_median_s": 5.62,
+            "hot_wall_time_p90_s": 7.75,
+            "stop": {"label": "solver_failure_after_valid_cycles"},
+            "windows": [],
+            "stimulation_patterns": {},
+        },
+    }
+
+    markdown = summary.render_markdown([entry], [])
+
+    assert "RHO résolus" in markdown
+    assert "Préfixe strict" in markdown
+    assert "| MADNLP | 1.0e-08 | 1.0e-05 | non | 99/100 | 85/100 | 86 |" in markdown
+    assert "même si les fenêtres suivantes récupèrent" in markdown

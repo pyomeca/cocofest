@@ -441,14 +441,14 @@ def render_markdown(
             else "**Attention : branches d’intégration Bioptim différentes selon le backend.**"
         ),
         "",
-        "| Solveur | Tol. interne | Seuil physique | Convergence | Cycles validés | Mur-à-mur (s) | Préparation (s) | Mur/RHO médian (s) | Mur/RHO P90 (s) | Arrêt |",
-        "|---|---:|---:|---:|---:|---:|---:|---:|---:|---|",
+        "| Solveur | Tol. interne | Seuil physique | Convergence | RHO résolus | Préfixe strict | 1er échec | Mur-à-mur (s) | Préparation (s) | Mur/RHO médian (s) | Mur/RHO P90 (s) | Arrêt |",
+        "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|",
     ]
     for entry in entries:
         row = entry["result"]
         requested = entry["configuration"].get("n_windows")
         lines.append(
-            "| {solver} | {solver_tolerance} | {physical_threshold} | {success} | {validated}/{requested} | {e2e} | {prep} | {median} | {p90} | {stop} |".format(
+            "| {solver} | {solver_tolerance} | {physical_threshold} | {success} | {successful}/{attempted} | {validated}/{requested} | {first_failed_rho} | {e2e} | {prep} | {median} | {p90} | {stop} |".format(
                 solver=row["solver"].upper(),
                 solver_tolerance=_fmt_scientific(
                     entry["configuration"].get("nlp_tolerance")
@@ -457,8 +457,11 @@ def render_markdown(
                     entry["configuration"].get("primal_feasibility_threshold")
                 ),
                 success="oui" if row.get("success") else "non",
+                successful=row.get("successful_windows", 0),
+                attempted=row.get("attempted_windows", 0),
                 validated=row.get("validated_cycles", 0),
                 requested=requested if requested is not None else "—",
+                first_failed_rho=row.get("first_failed_rho") or "—",
                 e2e=_fmt(row.get("end_to_end_wall_time_s")),
                 prep=_fmt(row.get("initial_guess_preparation_time_s")),
                 median=_fmt(row.get("hot_wall_time_median_s")),
@@ -466,6 +469,14 @@ def render_markdown(
                 stop=(row.get("stop") or {}).get("label", "—"),
             )
         )
+
+    lines.extend(
+        [
+            "",
+            "`RHO résolus` compte chaque fenêtre dont le solveur converge et dont la faisabilité indépendante est certifiée. "
+            "Le `préfixe strict` s’arrête au premier échec, même si les fenêtres suivantes récupèrent.",
+        ]
+    )
 
     if mismatches:
         lines.extend(
