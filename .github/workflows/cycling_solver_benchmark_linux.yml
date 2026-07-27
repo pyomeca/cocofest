@@ -265,6 +265,7 @@ jobs:
             tests/shard1/test_solver_backends.py \
             tests/test_cycling_benchmark_summary.py \
             tests/test_solver_option_screen_summary.py \
+            tests/shard1/test_periodic_pulse_width.py::test_stimulation_snapshots_use_one_based_cycles_and_real_crank_phase \
             tests/shard1/test_periodic_pulse_width.py::test_common_primal_threshold_is_independent_of_nlp_solver_tolerance \
             tests/shard1/test_periodic_pulse_width.py::test_github_benchmark_compares_physical_threshold_not_solver_tolerance
 
@@ -374,7 +375,7 @@ jobs:
     timeout-minutes: 350
     strategy:
       fail-fast: false
-      max-parallel: 3
+      max-parallel: 2
       matrix:
         include:
           - solver: ipopt
@@ -385,13 +386,8 @@ jobs:
             bioptim_commit: 346eb1d445e6ba67010b96c6f16ba830185119e7
             integration_branch: codex/madnlp-integration-master
             casadi_cxx_abi: 0
-          - solver: alpaqa
-            bioptim_commit: d84e7e43534360fc048e0be26a3bd69a2abc2d77
-            integration_branch: codex/alpaqa-integration
-            casadi_cxx_abi: 1
     env:
-      # The official CasADi wheel uses ABI 0. The source-built Alpaqa stack
-      # links Conda IPOPT (ABI 1), so CasADi, RBDL and biorbd must all use 1.
+      # Both production backends use the official CasADi wheel (C++ ABI 0).
       CASADI_CXX_ABI: ${{ matrix.casadi_cxx_abi }}
     defaults:
       run:
@@ -431,7 +427,6 @@ jobs:
           grep '^Cpus_allowed_list' /proc/self/status || true
 
       - name: Cache the MadNLP runtime
-        if: matrix.solver != 'alpaqa'
         id: madnlp-cache
         uses: actions/cache@v6
         with:
@@ -439,7 +434,7 @@ jobs:
           key: madnlp-cpu-jl1.10.4-linux-${{ env.MADNLP_SHA256 }}
 
       - name: Install the MadNLP runtime
-        if: matrix.solver != 'alpaqa' && steps.madnlp-cache.outputs.cache-hit != 'true'
+        if: steps.madnlp-cache.outputs.cache-hit != 'true'
         run: |
           mkdir -p .cache/madnlp
           curl --fail --location --retry 3 "$MADNLP_URL" \
@@ -448,18 +443,12 @@ jobs:
           unzip -q "/tmp/$MADNLP_ARCHIVE" -d .cache/madnlp
 
       - name: Configure the MadNLP runtime
-        if: matrix.solver != 'alpaqa'
         run: |
           echo "LD_LIBRARY_PATH=$GITHUB_WORKSPACE/.cache/madnlp/foo/lib:${LD_LIBRARY_PATH:-}" \
             >> "$GITHUB_ENV"
 
       - name: Install CasADi with IPOPT and MadNLP
-        if: matrix.solver != 'alpaqa'
         run: python -m pip install --no-deps "casadi==$CASADI_VERSION"
-
-      - name: Build CasADi with IPOPT and Alpaqa
-        if: matrix.solver == 'alpaqa'
-        run: bash .github/scripts/install_casadi_alpaqa_linux.sh
 
       - name: Install biorbd and Bioptim
         run: |
@@ -497,8 +486,6 @@ jobs:
               assert available, solver
           if target == "madnlp":
               assert hasattr(bioptim.Solver, "MADNLP")
-          if target == "alpaqa":
-              assert hasattr(bioptim.Solver, "ALPAQA")
 
           x = cas.MX.sym("x")
           plugin_options = {"print_time": False}
@@ -519,7 +506,7 @@ jobs:
           smoke_result = smoke(x0=0, lbg=1, ubg=1)
           smoke_x = float(smoke_result["x"])
           smoke_error = abs(smoke_x - 1.0)
-          smoke_tolerance = 1e-3 if target == "alpaqa" else 1e-6
+          smoke_tolerance = 1e-6
           print(
               f"{target} minimal solution: x={smoke_x:.12g}, "
               f"error={smoke_error:.3e}, tolerance={smoke_tolerance:.1e}"
@@ -534,6 +521,7 @@ jobs:
             tests/shard1/test_plot_backend.py \
             tests/test_cycling_benchmark_summary.py \
             tests/test_solver_option_screen_summary.py \
+            tests/shard1/test_periodic_pulse_width.py::test_stimulation_snapshots_use_one_based_cycles_and_real_crank_phase \
             tests/shard1/test_periodic_pulse_width.py::test_common_primal_threshold_is_independent_of_nlp_solver_tolerance \
             tests/shard1/test_periodic_pulse_width.py::test_github_benchmark_compares_physical_threshold_not_solver_tolerance
 
@@ -565,18 +553,6 @@ jobs:
             solver_options+=(
               --madnlp-max-iter "$BENCHMARK_MAX_ITER"
               --madnlp-dual-warm-start-mode off
-              --optional-nlp-periodic-ipopt-hot-start
-            )
-          else
-            solver_options+=(
-              --alpaqa-max-iter "$BENCHMARK_MAX_ITER"
-              --alpaqa-alm-max-iter "$BENCHMARK_MAX_ITER"
-              --alpaqa-max-wall-time 600
-              --alpaqa-panoc-max-wall-time 20
-              --alpaqa-initial-penalty 0
-              # Do not reuse multipliers from a time-limited or otherwise
-              # invalid RHO. The shifted/projected primal remains enabled.
-              --alpaqa-dual-warm-start-mode off
               --optional-nlp-periodic-ipopt-hot-start
             )
           fi
@@ -751,6 +727,7 @@ jobs:
           fi
           python .github/scripts/summarize_cycling_benchmark.py \
             --output-dir benchmark-report \
+            --expected-solvers ipopt,madnlp \
             "${result_files[@]}"
           cat benchmark-report/benchmark-comparison.md >> "$GITHUB_STEP_SUMMARY"
 

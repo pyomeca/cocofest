@@ -1640,7 +1640,7 @@ def test_benchmark_reports_hot_window_timing_separately():
 
 
 def test_stimulation_snapshots_use_one_based_cycles_and_real_crank_phase():
-    cycle_count = 30
+    cycle_count = 100
     shooting_per_cycle = 2
     result = {
         "args": SimpleNamespace(
@@ -1689,6 +1689,10 @@ def test_stimulation_snapshots_use_one_based_cycles_and_real_crank_phase():
     np.testing.assert_allclose(
         snapshots["cycle_30"]["muscles"]["Biceps"]["pulse_width_us"],
         [30.0, 30.0],
+    )
+    np.testing.assert_allclose(
+        snapshots["cycle_100"]["muscles"]["Biceps"]["pulse_width_us"],
+        [100.0, 100.0],
     )
 
 

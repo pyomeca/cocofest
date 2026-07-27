@@ -2,9 +2,14 @@
 
 Salut Kevin,
 
-J’ai adapté et durci le benchmark du MHE de pédalage pour comparer IPOPT,
-MadNLP et Alpaqa sur exactement le même problème assisté. Le couple externe
-est une **assistance de 0,20 N·m** : comme le pédalier tourne avec
+J’ai adapté et durci le benchmark du MHE de pédalage pour comparer IPOPT et
+MadNLP sur exactement le même problème assisté. Alpaqa a été retiré de la
+matrice d’endurance : malgré le meilleur réglage testé, il n’a validé aucun
+RHO, a consommé deux limites de 600 s et son second RHO a terminé à
+`4.57e-2` d’infaisabilité. Son intégration et ses résultats restent documentés,
+mais nous ne lui consacrons plus de calcul d’endurance.
+
+Le couple externe est une **assistance de 0,20 N·m** : comme le pédalier tourne avec
 `qdot < 0`, le couple généralisé constant vaut `-0.20 N.m`, soit environ
 `+1.2566 W` de puissance mécanique à la cadence nominale. L’objectif est
 uniquement la minimisation de la fatigue.
@@ -21,13 +26,13 @@ Le NLP commun utilise :
 Le workflow prépare d’abord un seed IPOPT sur le **problème assisté cible** et
 le certifie physiquement. Le vieux seed à `+0.22 N.m` résistif n’est utilisé
 que comme trajectoire primale de continuation vers `-0.20 N.m`; il n’est
-jamais présenté comme une solution assistée. Les trois jobs téléchargent
+jamais présenté comme une solution assistée. Les deux jobs téléchargent
 ensuite exactement le même artifact immuable.
 
-MadNLP et Alpaqa reçoivent un hot start primal complet : états et contrôles
-sont décalés d’un cycle, extrapolés, projetés dans leurs bornes et les états de
-fatigue restent continus. Un raffinement IPOPT périodique certifié initialise
-leur premier RHO. MadNLP ne réutilise pas les multiplicateurs, car le runtime
+MadNLP reçoit un hot start primal complet : états et contrôles sont décalés
+d’un cycle, extrapolés, projetés dans leurs bornes et les états de fatigue
+restent continus. Un raffinement IPOPT périodique certifié initialise son
+premier RHO. MadNLP ne réutilise pas les multiplicateurs, car le runtime
 épinglé ne supporte pas proprement cette option. IPOPT réutilise les
 multiplicateurs de bornes.
 

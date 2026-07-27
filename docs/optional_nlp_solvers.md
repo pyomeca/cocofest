@@ -282,18 +282,24 @@ is never presented as an assisted solution.
 
 The manually triggered
 [`cycling_solver_benchmark_linux.yml`](../.github/workflows/cycling_solver_benchmark_linux.yml)
-workflow runs IPOPT-MUMPS, MadNLP, and Alpaqa in parallel on separate Linux runners.
-The default Kevin experiment compares IPOPT-MUMPS, MadNLP, and Alpaqa over
-30 one-cycle RHO windows and stops after two consecutive failed windows. It
-uses the assisted physical case (`-0.20 N.m` signed crank torque), 30
-stimulations per cycle, the fatigue-only objective, periodic Radau
-collocation, and a `0.002 rad` terminal crank-angle slack.
+now runs only IPOPT-MUMPS and MadNLP in parallel on separate Linux runners.
+Alpaqa was removed from the endurance matrix after the option screen and the
+30-RHO confirmation: it validated no RHO, consumed two 600-second limits, and
+its second shifted window reached `4.57e-2` infeasibility. Its integration,
+historical results and explicit `cycles=screen` diagnostic remain documented
+for reproducibility, but no further endurance compute is allocated to it.
+
+The production experiment compares IPOPT-MUMPS and MadNLP over one-cycle RHO
+windows and stops after two consecutive failed windows. It uses the assisted
+physical case (`-0.20 N.m` signed crank torque), 30 stimulations per cycle,
+the fatigue-only objective, periodic Radau collocation, and a `0.002 rad`
+terminal crank-angle slack.
 
 A preliminary IPOPT job builds one content-addressed, physically certified
-assisted seed. The three benchmark jobs download exactly that immutable
-artifact. MadNLP and Alpaqa additionally run the periodic IPOPT hot start, and
-its cost remains visible in `initial_guess_preparation_time_s`; the warm RHO
-wall times are therefore reported separately from end-to-end time.
+assisted seed. Both benchmark jobs download exactly that immutable artifact.
+MadNLP additionally runs the periodic IPOPT hot start, and its cost remains
+visible in `initial_guess_preparation_time_s`; the warm RHO wall times are
+therefore reported separately from end-to-end time.
 
 Each job determines its effective CPU allocation with `nproc` and passes that
 value to `--n-threads`. Nested OpenMP, BLAS, NumExpr, and Julia pools stay at
@@ -315,16 +321,13 @@ gh workflow run cycling_solver_benchmark_linux.yml \
   -f solver_max_iterations=2000
 ```
 
-The action pins the validated MadNLP and Alpaqa Bioptim integration commits.
-Because those integrations currently live on separate branches, the combined
-report records both SHAs and flags that provenance explicitly. Each job first
-asserts that IPOPT and its target plugin coexist in the same CasADi runtime.
-The Alpaqa job builds CasADi 3.7.2 with the pinned compatibility fork declared
-by that CasADi release (`jgillis/alpaqa` at
-`bf9f87d59640501ea72f94aa6e2d4e62b20c677b`). The upstream
-`kul-optec/alpaqa` 1.0.0a16 API is not interchangeable: its sparse
-Jacobian/Hessian callbacks have different signatures and fail compilation.
-The other two jobs use the validated MadNLP runtime archive.
+The production action pins the validated MadNLP Bioptim integration commit, so
+IPOPT and MadNLP now use the same Bioptim revision. Each job first asserts
+that IPOPT and its target plugin coexist in the same CasADi runtime. The
+archived Alpaqa screen still builds CasADi 3.7.2 with the pinned compatibility
+fork declared by that release (`jgillis/alpaqa` at
+`bf9f87d59640501ea72f94aa6e2d4e62b20c677b`); this path is no longer part of
+the endurance matrix.
 
 Each solver artifact contains its JSON and complete log. A final report job
 adds a side-by-side Markdown summary, `rho-timings.csv`, the raw stimulation

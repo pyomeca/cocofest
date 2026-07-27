@@ -46,7 +46,7 @@ except ImportError:
 
 EXAMPLE_DIR = Path(__file__).resolve().parent
 BENCHMARK_SOLVERS = ("ipopt", "acados", "madnlp", "alpaqa")
-BENCHMARK_STIMULATION_PATTERN_CYCLES = (10, 30)
+BENCHMARK_STIMULATION_PATTERN_CYCLES = (10, 30, 100)
 BENCHMARK_CONFIGURATION_FIELDS = (
     "solver",
     "objective",

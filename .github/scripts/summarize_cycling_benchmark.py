@@ -508,7 +508,7 @@ def render_markdown(
             "",
             "## Patrons de stimulation",
             "",
-            "Les points de contrôle 10 et 30 sont les cycles/RHO 10 et 30 du même run, pas des OCP de 10 et 30 cycles.",
+            "Les points de contrôle sont des cycles/RHO du même run, pas des OCP contenant simultanément ce nombre de cycles.",
             "",
             "| Solveur | Cycle | Muscle | Min (µs) | Moyenne (µs) | Max (µs) | Borne basse | Borne haute |",
             "|---|---:|---|---:|---:|---:|---:|---:|",
