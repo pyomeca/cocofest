@@ -8,6 +8,19 @@ except ImportError:  # Source-built Linux CasADi backend.
     import biorbd_casadi as biorbd
 
 
+def _biorbd_vector_to_numpy(value) -> np.ndarray:
+    """Convert a biorbd Eigen or CasADi vector to a flat NumPy array."""
+    if hasattr(value, "to_array"):
+        converted = value.to_array()
+    elif hasattr(value, "to_mx"):
+        from casadi import evalf
+
+        converted = evalf(value.to_mx())
+    else:
+        converted = value
+    return np.asarray(converted, dtype=float).reshape(-1)
+
+
 # This function gets the x, y, z circle coordinates based on the angle theta
 def get_circle_coord(
     theta: int | float,
@@ -96,9 +109,13 @@ def inverse_kinematics_cycling(
 
     model = biorbd.Model(model_path)
 
-    z = model.markers(np.array([0] * model.nbQ()))[0].to_array()[2]
+    z = _biorbd_vector_to_numpy(model.markers(np.array([0] * model.nbQ()))[0])[2]
     if not np.isclose(
-        z, model.markers(np.array([np.pi / 2] * model.nbQ()))[0].to_array()[2], rtol=1e-05, atol=1e-08, equal_nan=False
+        z,
+        _biorbd_vector_to_numpy(model.markers(np.array([np.pi / 2] * model.nbQ()))[0])[2],
+        rtol=1e-05,
+        atol=1e-08,
+        equal_nan=False,
     ):
         print("The model not strictly 2d. Warm start not optimal.")
 
@@ -157,7 +174,7 @@ def inverse_dynamics_cycling(
     tau = np.zeros(tau_shape)
     for i in range(tau.shape[1]):
         tau_i = model.InverseDynamics(q[:, i], qdot[:, i], qddot[:, i])
-        tau[:, i] = tau_i.to_array()
+        tau[:, i] = _biorbd_vector_to_numpy(tau_i)
     return tau[:, :-1]
 
 
@@ -194,8 +211,8 @@ def extended_kalman_filter(
     """
     model = biorbd.Model(model_path)
 
-    z = model.markers(np.array([0] * model.nbQ()))[0].to_array()[2]
-    if z != model.markers(np.array([np.pi / 2] * model.nbQ()))[0].to_array()[2]:
+    z = _biorbd_vector_to_numpy(model.markers(np.array([0] * model.nbQ()))[0])[2]
+    if z != _biorbd_vector_to_numpy(model.markers(np.array([np.pi / 2] * model.nbQ()))[0])[2]:
         print("The model not strictly 2d. Warm start not optimal.")
 
     f = interp1d(
@@ -229,8 +246,8 @@ def extended_kalman_filter(
     qddot_out = np.ndarray((model.nbQddot(), n_shooting))
     for i in range(n_shooting):
         kalman.reconstructFrame(model, np.reshape(target_marker[:, :, i].T, -1), q, qdot, qddot)
-        q_out[:, i] = q.to_array()
-        qdot_out[:, i] = qdot.to_array()
-        qddot_out[:, i] = qddot.to_array()
+        q_out[:, i] = _biorbd_vector_to_numpy(q)
+        qdot_out[:, i] = _biorbd_vector_to_numpy(qdot)
+        qddot_out[:, i] = _biorbd_vector_to_numpy(qddot)
 
     return q_out, qdot_out, qddot_out
