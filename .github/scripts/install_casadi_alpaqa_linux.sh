@@ -9,7 +9,8 @@ readonly CASADI_EXPECTED_COMMIT="${CASADI_COMMIT:-f959d3175a444d763e4eda4aece48f
 readonly ALPAQA_REPOSITORY="https://github.com/jgillis/alpaqa.git"
 readonly ALPAQA_REVISION="${ALPAQA_COMMIT:-bf9f87d59640501ea72f94aa6e2d4e62b20c677b}"
 readonly BUILD_JOBS="${CMAKE_BUILD_PARALLEL_LEVEL:-$(nproc)}"
-readonly CASADI_CXX_ABI_FLAG="-D_GLIBCXX_USE_CXX11_ABI=0"
+readonly CASADI_CXX_ABI="${CASADI_CXX_ABI:-1}"
+readonly CASADI_CXX_ABI_FLAG="-D_GLIBCXX_USE_CXX11_ABI=${CASADI_CXX_ABI}"
 
 if [[ "$(uname -s)" != "Linux" ]]; then
   echo "This installer is intended for Linux." >&2

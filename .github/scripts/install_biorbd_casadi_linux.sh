@@ -6,6 +6,8 @@ readonly BIORBD_TAG="Release_1.12.2"
 readonly RBDL_REPOSITORY="https://github.com/pariterre/rbdl.git"
 readonly RBDL_COMMIT="93475e2ea9bc87f37709a2312533ce3187f054b9"
 readonly BUILD_JOBS="${CMAKE_BUILD_PARALLEL_LEVEL:-$(nproc)}"
+readonly CASADI_CXX_ABI="${CASADI_CXX_ABI:-0}"
+readonly CASADI_CXX_ABI_FLAG="-D_GLIBCXX_USE_CXX11_ABI=${CASADI_CXX_ABI}"
 
 if [[ "$(uname -s)" != "Linux" ]]; then
   echo "This installer is intended for Linux." >&2
@@ -75,7 +77,7 @@ cmake \
   -G Ninja \
   -DCMAKE_BUILD_TYPE=Release \
   -DCMAKE_INSTALL_PREFIX="$CONDA_PREFIX" \
-  -DCMAKE_CXX_FLAGS="-D_GLIBCXX_USE_CXX11_ABI=0 -I$CONDA_PREFIX/include/eigen3" \
+  -DCMAKE_CXX_FLAGS="$CASADI_CXX_ABI_FLAG -I$CONDA_PREFIX/include/eigen3" \
   -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
   -Dcasadi_DIR="$casadi_cmake_dir" \
   -DCasadi_DIR="$casadi_cmake_dir" \
@@ -102,7 +104,7 @@ cmake \
   -DBUILD_TESTS=OFF \
   -DCMAKE_BUILD_TYPE=Release \
   -DCMAKE_INSTALL_PREFIX="$CONDA_PREFIX" \
-  -DCMAKE_CXX_FLAGS="-D_GLIBCXX_USE_CXX11_ABI=0 -I$CONDA_PREFIX/include/eigen3" \
+  -DCMAKE_CXX_FLAGS="$CASADI_CXX_ABI_FLAG -I$CONDA_PREFIX/include/eigen3" \
   -DCasadi_DIR="$casadi_cmake_dir" \
   -DINSTALL_DEPENDENCIES_PREFIX="$CONDA_PREFIX" \
   -DMATH_LIBRARY_BACKEND=Casadi \

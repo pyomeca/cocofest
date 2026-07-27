@@ -10,6 +10,14 @@ from __future__ import annotations
 from typing import Any
 
 NLP_SOLVER_NAMES = ("ipopt", "madnlp", "alpaqa")
+MADNLP_LINEAR_SOLVER_NAMES = (
+    "mumps",
+    "umfpack",
+    "lapack_cpu",
+    "cudss",
+    "lapack_gpu",
+    "cucholesky",
+)
 
 
 class SolverBackendUnavailable(RuntimeError):
@@ -69,10 +77,6 @@ def configure_nlp_solver(
     ipopt_options: dict[str, Any] | None = None,
     madnlp_c_compile: bool = False,
     madnlp_linear_solver: str | None = None,
-    madnlp_max_wall_time: float | None = None,
-    madnlp_nlp_scaling: bool | None = None,
-    madnlp_acceptable_tolerance: float | None = None,
-    madnlp_acceptable_iterations: int | None = None,
     alpaqa_alm_max_iterations: int | None = None,
     alpaqa_lbfgs_memory: int = 20,
     alpaqa_max_wall_time: float | None = None,
@@ -99,21 +103,13 @@ def configure_nlp_solver(
         raise ValueError("tolerance must be strictly positive.")
     if alpaqa_lbfgs_memory < 1:
         raise ValueError("alpaqa_lbfgs_memory must be strictly positive.")
-    if madnlp_max_wall_time is not None and madnlp_max_wall_time <= 0:
-        raise ValueError("madnlp_max_wall_time must be strictly positive.")
     if (
-        madnlp_acceptable_tolerance is not None
-        and madnlp_acceptable_tolerance <= 0
+        madnlp_linear_solver is not None
+        and madnlp_linear_solver not in MADNLP_LINEAR_SOLVER_NAMES
     ):
         raise ValueError(
-            "madnlp_acceptable_tolerance must be strictly positive."
-        )
-    if (
-        madnlp_acceptable_iterations is not None
-        and madnlp_acceptable_iterations < 1
-    ):
-        raise ValueError(
-            "madnlp_acceptable_iterations must be strictly positive."
+            "madnlp_linear_solver must be one of "
+            f"{', '.join(MADNLP_LINEAR_SOLVER_NAMES)}."
         )
     if alpaqa_initial_tolerance is not None and alpaqa_initial_tolerance <= 0:
         raise ValueError("alpaqa_initial_tolerance must be strictly positive.")
@@ -175,20 +171,16 @@ def configure_nlp_solver(
     solver.set_maximum_iterations(max_iterations)
 
     if solver_name == "madnlp":
-        solver.set_print_level("ERROR" if print_level == 0 else print_level)
+        # Bioptim's symbolic MadNLP levels are reversed relative to the pinned
+        # madnlp_c runtime (its "ERROR" becomes 6, which the runtime clamps to
+        # TRACE=5). Bypass that mapping so quiet benchmarks are actually quiet.
+        solver.set_option_unsafe(max(0, min(int(print_level), 5)), "print_level")
         # The pinned madnlp_c runtime rejects both ``dual_initialized`` and
         # ``mu_init``.  The reliable hot start is therefore the shifted,
         # projected primal trajectory supplied by Cocofest, without a
         # solver-specific barrier or multiplier initialization.
-        for name, value in (
-            ("linear_solver", madnlp_linear_solver),
-            ("max_wall_time", madnlp_max_wall_time),
-            ("nlp_scaling", madnlp_nlp_scaling),
-            ("acceptable_tol", madnlp_acceptable_tolerance),
-            ("acceptable_iter", madnlp_acceptable_iterations),
-        ):
-            if value is not None:
-                solver.set_option_unsafe(value, name)
+        if madnlp_linear_solver is not None:
+            solver.set_option_unsafe(madnlp_linear_solver, "linear_solver")
         solver.set_c_compile(madnlp_c_compile)
         return solver
 

@@ -529,6 +529,12 @@ def apply_ipopt_dual_warm_start(nmpc, solution, mode: str) -> dict:
         "reason": None,
     }
     if mode == "off":
+        interface = getattr(nmpc, "ocp_solver", None)
+        if interface is not None:
+            if hasattr(interface, "lam_g"):
+                interface.lam_g = None
+            if hasattr(interface, "lam_x"):
+                interface.lam_x = None
         summary["reason"] = "disabled"
         return summary
     if solution is None:
@@ -1713,43 +1719,18 @@ def build_argument_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--madnlp-linear-solver",
         default=None,
-        help=(
-            "Optional MadNLP linear-solver type, for example MumpsSolver, "
-            "UmfpackSolver, LDLSolver, or Ma57Solver. This uses MadNLP's own "
-            "runtime and is independent from --ipopt-hsl-library."
+        choices=(
+            "mumps",
+            "umfpack",
+            "lapack_cpu",
+            "cudss",
+            "lapack_gpu",
+            "cucholesky",
         ),
-    )
-    parser.add_argument(
-        "--madnlp-max-wall-time",
-        type=float,
-        default=None,
-        help="Optional MadNLP wall-time limit in seconds for each MHE window.",
-    )
-    madnlp_scaling_group = parser.add_mutually_exclusive_group()
-    madnlp_scaling_group.add_argument(
-        "--madnlp-nlp-scaling",
-        dest="madnlp_nlp_scaling",
-        action="store_true",
-        help="Enable MadNLP's internal nonlinear-problem scaling.",
-    )
-    madnlp_scaling_group.add_argument(
-        "--madnlp-no-nlp-scaling",
-        dest="madnlp_nlp_scaling",
-        action="store_false",
-        help="Disable MadNLP's internal nonlinear-problem scaling.",
-    )
-    parser.set_defaults(madnlp_nlp_scaling=None)
-    parser.add_argument(
-        "--madnlp-acceptable-tolerance",
-        type=float,
-        default=None,
-        help="Optional acceptable termination tolerance for MadNLP.",
-    )
-    parser.add_argument(
-        "--madnlp-acceptable-iterations",
-        type=int,
-        default=None,
-        help="Consecutive acceptable MadNLP iterations required for early termination.",
+        help=(
+            "MadNLP C-runtime linear solver. The default is mumps; GPU choices "
+            "require a compatible MadNLP runtime and runner."
+        ),
     )
     parser.add_argument(
         "--madnlp-c-compile",
@@ -3300,10 +3281,6 @@ def configure_cycle_nlp_solver(args: argparse.Namespace):
             tolerance=args.nlp_tolerance,
             madnlp_c_compile=args.madnlp_c_compile,
             madnlp_linear_solver=args.madnlp_linear_solver,
-            madnlp_max_wall_time=args.madnlp_max_wall_time,
-            madnlp_nlp_scaling=args.madnlp_nlp_scaling,
-            madnlp_acceptable_tolerance=args.madnlp_acceptable_tolerance,
-            madnlp_acceptable_iterations=args.madnlp_acceptable_iterations,
         )
     if args.solver == "alpaqa":
         return configure_nlp_solver(
@@ -10648,16 +10625,6 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
                 )
             if args.solver == "madnlp":
                 print(f"madnlp_linear_solver: {args.madnlp_linear_solver}")
-                print(f"madnlp_max_wall_time: {args.madnlp_max_wall_time}")
-                print(f"madnlp_nlp_scaling: {args.madnlp_nlp_scaling}")
-                print(
-                    "madnlp_acceptable_tolerance: "
-                    f"{args.madnlp_acceptable_tolerance}"
-                )
-                print(
-                    "madnlp_acceptable_iterations: "
-                    f"{args.madnlp_acceptable_iterations}"
-                )
             if args.solver == "alpaqa":
                 print(
                     "alpaqa_initial_tolerance: "
@@ -11161,9 +11128,10 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
             cache_first_successful_window(_nmpc, solution)
 
     nmpc.before_window_advance = snapshot_completed_window
+    consecutive_physical_failures = 0
 
     def update_functions(_nmpc, cycle_idx, _sol):
-        nonlocal transfer_failure_window
+        nonlocal transfer_failure_window, consecutive_physical_failures
         print(f"window {cycle_idx}")
         if args.solver in NLP_SOLVER_NAMES and _sol is not None:
             nlp_solver_stats.append(
@@ -11204,7 +11172,30 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
                     f"lam_x={dual_summary['lam_x_size']} "
                     f"reason={dual_summary['reason']}"
                 )
-        continue_solving = cycle_idx < requested_window_solves
+        if _sol is not None:
+            feasibility = getattr(
+                _sol, "_cocofest_feasibility_summary", None
+            )
+            if feasibility is not None:
+                if feasibility["passes_tolerance"]:
+                    consecutive_physical_failures = 0
+                else:
+                    consecutive_physical_failures += 1
+        continue_solving = (
+            cycle_idx < requested_window_solves
+            and consecutive_physical_failures < args.max_consecutive_failing
+        )
+        if (
+            not continue_solving
+            and cycle_idx < requested_window_solves
+            and consecutive_physical_failures >= args.max_consecutive_failing
+            and echo
+        ):
+            print(
+                "physical_feasibility_stop: "
+                f"window={cycle_idx} "
+                f"consecutive_failures={consecutive_physical_failures}"
+            )
         targets_updated = False
         if (
             continue_solving

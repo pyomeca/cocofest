@@ -49,28 +49,34 @@ The useful transfers are not identical for every backend:
 | Periodic IPOPT seed | native reference | optional/default in comparison | optional/default in comparison | default |
 | Constraint multiplier reuse | optional | experimental | supported | reset/rebuilt |
 | Bound multiplier reuse | supported | experimental | unsupported by plugin | backend-specific |
-| Internal scaling | IPOPT options | `--madnlp-nlp-scaling` | relies strongly on model/constraint scaling | QP scaling |
+| Internal scaling | IPOPT options | unavailable in pinned C runtime; use model scaling | relies strongly on model/constraint scaling | QP scaling |
 | Linear solver choice | MUMPS/MA57 | MadNLP runtime types | not applicable to PANOC | QP solver |
 | Native C evaluator | optional | experimental | unsupported by the CasADi plugin | generated code |
-| Time budget | IPOPT option | `--madnlp-max-wall-time` | ALM and inner PANOC budgets | backend timeout |
+| Time budget | IPOPT option | outer process/job timeout with pinned runtime | ALM and inner PANOC budgets | backend timeout |
 
 Relevant MadNLP screens include:
 
 ```bash
---madnlp-linear-solver MumpsSolver
---madnlp-linear-solver UmfpackSolver
---madnlp-linear-solver LDLSolver
---madnlp-nlp-scaling
---madnlp-acceptable-tolerance 1e-5
---madnlp-acceptable-iterations 2
---madnlp-max-wall-time 600
+--madnlp-linear-solver mumps
+--madnlp-linear-solver umfpack
+--madnlp-linear-solver lapack_cpu
 ```
 
-`Ma57Solver` is also accepted by MadNLP, but it uses MadNLPHSL's Julia runtime.
-It does not reuse `--ipopt-hsl-library`. On the tested macOS runtime it failed
-because its own `libhsl_subset.dylib` path was unresolved, even though IPOPT
-could load MA57 successfully. Do not select it on the calculator until a
-minimal MadNLP-MA57 solve passes there.
+The pinned `madnlp_c` runtime accepts `mumps`, `umfpack`, `lapack_cpu`, and
+three GPU backends; it does not accept the Julia type names
+`MumpsSolver`/`UmfpackSolver` or `Ma57Solver`. It also cannot reuse
+`--ipopt-hsl-library`. MA57 is therefore not available to MadNLP in this
+benchmark runtime.
+
+The pinned `madnlp_c` runtime rejects `mu_init`, `dual_initialized`,
+`max_wall_time`, `nlp_scaling`, and the `acceptable_*` options. Cocofest
+therefore does not expose or send them. Its MadNLP hot start is the shifted and
+projected primal state/control trajectory after the certified periodic IPOPT
+refinement; multiplier transfer remains off. The GitHub job timeout is the
+safety limit.
+The Bioptim branch's symbolic `ERROR` level maps to a numeric value that this
+runtime clamps to `TRACE`; Cocofest bypasses that mapping and sends numeric
+`print_level=0`, preventing verbose logging from contaminating timings.
 
 Relevant Alpaqa screens include:
 
@@ -264,8 +270,13 @@ This bypasses only the standard IPOPT seed solve. The target OCP and its
 constant torque are still rebuilt at the requested new load, then MadNLP
 optimizes the complete target NLP. The seed path is stored in benchmark JSON
 for provenance. The cache metadata must match the horizon, stimulation grid,
-torque application, and mechanical role. In particular, a resistance seed
-cannot be reused for an assisted target.
+torque application, and mechanical role. A metadata-bearing resistance seed
+is therefore rejected for an assisted target. The public Linux workflow uses
+a separate, explicit legacy-continuation path: it asserts that the old seed
+was created at signed torque `+0.22 N.m`, uses it only as a primal initial
+guess, then solves and certifies a new IPOPT seed on the assisted
+`-0.20 N.m` target before any compared solver starts. The legacy file itself
+is never presented as an assisted solution.
 
 ## Linux GitHub Actions endurance benchmark
 
@@ -295,7 +306,7 @@ of a larger Linux or self-hosted runner. For example:
 
 ```bash
 gh workflow run cycling_solver_benchmark_linux.yml \
-  --repo mickaelbegon/cocofest-pedalage \
+  --repo mickaelbegon/cocofest \
   --ref codex/acados-pr-refresh \
   -f runner_label=ubuntu-22.04 \
   -f cycles=30 \
@@ -308,8 +319,12 @@ The action pins the validated MadNLP and Alpaqa Bioptim integration commits.
 Because those integrations currently live on separate branches, the combined
 report records both SHAs and flags that provenance explicitly. Each job first
 asserts that IPOPT and its target plugin coexist in the same CasADi runtime.
-The Alpaqa job builds CasADi 3.7.2 with the pinned Alpaqa 1.0.0a16 source;
-the other two jobs use the validated MadNLP runtime archive.
+The Alpaqa job builds CasADi 3.7.2 with the pinned compatibility fork declared
+by that CasADi release (`jgillis/alpaqa` at
+`bf9f87d59640501ea72f94aa6e2d4e62b20c677b`). The upstream
+`kul-optec/alpaqa` 1.0.0a16 API is not interchangeable: its sparse
+Jacobian/Hessian callbacks have different signatures and fail compilation.
+The other two jobs use the validated MadNLP runtime archive.
 
 Each solver artifact contains its JSON and complete log. A final report job
 adds a side-by-side Markdown summary, `rho-timings.csv`, the raw stimulation
@@ -482,9 +497,10 @@ therefore:
 
 For MadNLP, transferring all multipliers was only about five percent faster in
 this preliminary screen. Because neither constraint nor bound multiplier
-blocks are structurally shifted, the corrected endurance configuration uses
-`off` with `mu_init=0.01`; multiplier modes remain explicit performance
-ablations.
+blocks are structurally shifted, the corrected endurance configuration keeps
+multiplier transfer `off`. The pinned runtime also rejects `mu_init`, so the
+only enabled MadNLP hot start is the shifted/projected primal trajectory;
+multiplier modes remain explicit performance ablations.
 
 Absolute late-run wall times were affected by concurrent macOS indexing,
 Defender, and desktop processes. The JSON stores every window separately and

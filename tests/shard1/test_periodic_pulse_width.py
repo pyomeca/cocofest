@@ -2278,6 +2278,20 @@ def test_optional_nlp_dual_warm_starts_preserve_shifted_primal():
         )
 
 
+def test_disabled_nlp_dual_warm_start_clears_stale_multipliers():
+    nmpc, solution = _ipopt_dual_warm_start_fixture()
+    nmpc.ocp_solver.lam_g = np.ones(3)
+    nmpc.ocp_solver.lam_x = np.ones(2)
+
+    summary = periodic_example.apply_nlp_dual_warm_start(
+        nmpc, solution, solver_name="madnlp", mode="off"
+    )
+
+    assert summary["reason"] == "disabled"
+    assert nmpc.ocp_solver.lam_g is None
+    assert nmpc.ocp_solver.lam_x is None
+
+
 def test_ipopt_dual_warm_start_cli_defaults_to_bound_multipliers():
     periodic_args = periodic_example.build_argument_parser().parse_args([])
     comparison_args = comparison_example.build_cli().parse_args([])
@@ -2738,9 +2752,7 @@ def test_optional_nlp_config_clones_ipopt_transcription_exactly():
         tolerance=1e-6,
         max_iterations=500,
         dual_warm_start_mode="bounds",
-        madnlp_linear_solver="LDLSolver",
-        madnlp_max_wall_time=5.0,
-        madnlp_nlp_scaling=True,
+        madnlp_linear_solver="umfpack",
         periodic_ipopt_hot_start=True,
     )
     alpaqa = comparison_example._nlp_solver_config(
@@ -2767,9 +2779,7 @@ def test_optional_nlp_config_clones_ipopt_transcription_exactly():
         assert candidate.objective_shape == "quadratic"
         assert candidate.nlp_periodic_ipopt_hot_start is True
 
-    assert madnlp.madnlp_linear_solver == "LDLSolver"
-    assert madnlp.madnlp_max_wall_time == 5.0
-    assert madnlp.madnlp_nlp_scaling is True
+    assert madnlp.madnlp_linear_solver == "umfpack"
     assert alpaqa.alpaqa_initial_tolerance == 1e-3
     assert alpaqa.alpaqa_penalty_update_factor == 5.0
     assert alpaqa.alpaqa_alm_max_iterations == 40
@@ -2803,14 +2813,7 @@ def test_optional_nlp_cli_exposes_cross_solver_hot_start_and_tuning():
             "madnlp",
             "--nlp-periodic-ipopt-hot-start",
             "--madnlp-linear-solver",
-            "UmfpackSolver",
-            "--madnlp-max-wall-time",
-            "12",
-            "--madnlp-nlp-scaling",
-            "--madnlp-acceptable-tolerance",
-            "1e-4",
-            "--madnlp-acceptable-iterations",
-            "3",
+            "umfpack",
         ]
     )
     comparison_args = comparison_example.build_cli().parse_args(
@@ -2831,11 +2834,7 @@ def test_optional_nlp_cli_exposes_cross_solver_hot_start_and_tuning():
     )
 
     assert periodic_args.nlp_periodic_ipopt_hot_start is True
-    assert periodic_args.madnlp_linear_solver == "UmfpackSolver"
-    assert periodic_args.madnlp_max_wall_time == 12
-    assert periodic_args.madnlp_nlp_scaling is True
-    assert periodic_args.madnlp_acceptable_tolerance == 1e-4
-    assert periodic_args.madnlp_acceptable_iterations == 3
+    assert periodic_args.madnlp_linear_solver == "umfpack"
     assert comparison_args.optional_nlp_periodic_ipopt_hot_start is True
     assert comparison_args.alpaqa_alm_max_iter == 40
     assert comparison_args.alpaqa_initial_tolerance == 1e-3

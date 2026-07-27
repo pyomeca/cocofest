@@ -156,12 +156,19 @@ jobs:
           - solver: ipopt
             bioptim_commit: 346eb1d445e6ba67010b96c6f16ba830185119e7
             integration_branch: codex/madnlp-integration-master
+            casadi_cxx_abi: 0
           - solver: madnlp
             bioptim_commit: 346eb1d445e6ba67010b96c6f16ba830185119e7
             integration_branch: codex/madnlp-integration-master
+            casadi_cxx_abi: 0
           - solver: alpaqa
             bioptim_commit: d84e7e43534360fc048e0be26a3bd69a2abc2d77
             integration_branch: codex/alpaqa-integration
+            casadi_cxx_abi: 1
+    env:
+      # The official CasADi wheel uses ABI 0. The source-built Alpaqa stack
+      # links Conda IPOPT (ABI 1), so CasADi, RBDL and biorbd must all use 1.
+      CASADI_CXX_ABI: ${{ matrix.casadi_cxx_abi }}
     defaults:
       run:
         shell: bash -el {0}
@@ -264,6 +271,26 @@ jobs:
               assert hasattr(bioptim.Solver, "MADNLP")
           if target == "alpaqa":
               assert hasattr(bioptim.Solver, "ALPAQA")
+
+          x = cas.MX.sym("x")
+          plugin_options = {"print_time": False}
+          if target == "ipopt":
+              plugin_options["ipopt"] = {"print_level": 0, "max_iter": 50}
+          elif target == "madnlp":
+              plugin_options["madnlp"] = {
+                  "print_level": 0,
+                  "max_iter": 50,
+                  "tol": 1e-8,
+              }
+          smoke = cas.nlpsol(
+              f"{target}_smoke",
+              target,
+              {"x": x, "f": (x - 1) ** 2, "g": x},
+              plugin_options,
+          )
+          smoke_result = smoke(x0=0, lbg=1, ubg=1)
+          assert abs(float(smoke_result["x"]) - 1.0) < 1e-6
+          print(f"{target} minimal solve: {smoke.stats()}")
           PY
           python -m pytest -q \
             tests/shard1/test_solver_backends.py \

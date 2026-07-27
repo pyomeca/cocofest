@@ -59,11 +59,7 @@ def test_configure_madnlp_uses_supported_primal_hot_start():
         "madnlp",
         max_iterations=321,
         tolerance=2e-6,
-        madnlp_linear_solver="UmfpackSolver",
-        madnlp_max_wall_time=12.5,
-        madnlp_nlp_scaling=True,
-        madnlp_acceptable_tolerance=1e-4,
-        madnlp_acceptable_iterations=3,
+        madnlp_linear_solver="umfpack",
         solver_namespace=namespace,
         check_availability=False,
     )
@@ -71,17 +67,14 @@ def test_configure_madnlp_uses_supported_primal_hot_start():
     assert ("set_convergence_tolerance", 2e-6) in solver.calls
     assert ("set_constraint_tolerance", 2e-6) in solver.calls
     assert ("set_maximum_iterations", 321) in solver.calls
-    assert ("set_print_level", "ERROR") in solver.calls
+    assert ("set_option_unsafe", 0, "print_level") in solver.calls
+    assert not any(call[0] == "set_print_level" for call in solver.calls)
     assert not any(
         call[0] == "set_option_unsafe" and call[-1] == "mu_init"
         for call in solver.calls
     )
     assert not any(call[0] == "set_warm_start_options" for call in solver.calls)
-    assert ("set_option_unsafe", "UmfpackSolver", "linear_solver") in solver.calls
-    assert ("set_option_unsafe", 12.5, "max_wall_time") in solver.calls
-    assert ("set_option_unsafe", True, "nlp_scaling") in solver.calls
-    assert ("set_option_unsafe", 1e-4, "acceptable_tol") in solver.calls
-    assert ("set_option_unsafe", 3, "acceptable_iter") in solver.calls
+    assert ("set_option_unsafe", "umfpack", "linear_solver") in solver.calls
     assert ("set_c_compile", False) in solver.calls
 
 
@@ -163,12 +156,8 @@ def test_configure_ipopt_retains_robust_cocofest_settings():
             "alpaqa_lbfgs_memory",
         ),
         (
-            {"max_iterations": 1, "madnlp_max_wall_time": 0},
-            "madnlp_max_wall_time",
-        ),
-        (
-            {"max_iterations": 1, "madnlp_acceptable_iterations": 0},
-            "madnlp_acceptable_iterations",
+            {"max_iterations": 1, "madnlp_linear_solver": "MumpsSolver"},
+            "madnlp_linear_solver",
         ),
         (
             {"max_iterations": 1, "alpaqa_penalty_update_factor": 1},

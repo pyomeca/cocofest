@@ -100,10 +100,6 @@ BENCHMARK_CONFIGURATION_FIELDS = (
     "madnlp_dual_warm_start_mode",
     "madnlp_c_compile",
     "madnlp_linear_solver",
-    "madnlp_max_wall_time",
-    "madnlp_nlp_scaling",
-    "madnlp_acceptable_tolerance",
-    "madnlp_acceptable_iterations",
     "max_madnlp_iterations",
     "alpaqa_dual_warm_start_mode",
     "max_alpaqa_iterations",
@@ -1317,10 +1313,6 @@ def _nlp_solver_config(
     alpaqa_initial_penalty: float | None = None,
     alpaqa_alm_max_iterations: int | None = None,
     madnlp_linear_solver: str | None = None,
-    madnlp_max_wall_time: float | None = None,
-    madnlp_nlp_scaling: bool | None = None,
-    madnlp_acceptable_tolerance: float | None = None,
-    madnlp_acceptable_iterations: int | None = None,
     alpaqa_initial_tolerance: float | None = None,
     alpaqa_penalty_update_factor: float | None = None,
     alpaqa_maximum_penalty: float | None = None,
@@ -1340,10 +1332,6 @@ def _nlp_solver_config(
     args.nlp_periodic_ipopt_hot_start = periodic_ipopt_hot_start
     if solver_name == "madnlp":
         args.madnlp_linear_solver = madnlp_linear_solver
-        args.madnlp_max_wall_time = madnlp_max_wall_time
-        args.madnlp_nlp_scaling = madnlp_nlp_scaling
-        args.madnlp_acceptable_tolerance = madnlp_acceptable_tolerance
-        args.madnlp_acceptable_iterations = madnlp_acceptable_iterations
     if solver_name == "alpaqa":
         args.alpaqa_lbfgs_memory = alpaqa_lbfgs_memory
         args.alpaqa_alm_max_iterations = alpaqa_alm_max_iterations
@@ -2153,10 +2141,6 @@ def main(
     madnlp_dual_warm_start_mode: str = "off",
     madnlp_c_compile: bool = False,
     madnlp_linear_solver: str | None = None,
-    madnlp_max_wall_time: float | None = None,
-    madnlp_nlp_scaling: bool | None = None,
-    madnlp_acceptable_tolerance: float | None = None,
-    madnlp_acceptable_iterations: int | None = None,
     alpaqa_max_iter: int = 2000,
     alpaqa_alm_max_iter: int | None = None,
     alpaqa_dual_warm_start_mode: str = "constraints",
@@ -2656,10 +2640,6 @@ def main(
         max_iterations=madnlp_max_iter,
         dual_warm_start_mode=madnlp_dual_warm_start_mode,
         madnlp_linear_solver=madnlp_linear_solver,
-        madnlp_max_wall_time=madnlp_max_wall_time,
-        madnlp_nlp_scaling=madnlp_nlp_scaling,
-        madnlp_acceptable_tolerance=madnlp_acceptable_tolerance,
-        madnlp_acceptable_iterations=madnlp_acceptable_iterations,
         periodic_ipopt_hot_start=optional_nlp_periodic_ipopt_hot_start,
     )
     ipopt_args.ipopt_c_compile = ipopt_c_compile
@@ -2912,30 +2892,18 @@ def build_cli() -> argparse.ArgumentParser:
     parser.add_argument(
         "--madnlp-linear-solver",
         default=None,
-        help=(
-            "MadNLP linear-solver type, e.g. MumpsSolver, UmfpackSolver, "
-            "LDLSolver, or Ma57Solver. MadNLPHSL must be configured separately "
-            "before Ma57Solver can work."
+        choices=(
+            "mumps",
+            "umfpack",
+            "lapack_cpu",
+            "cudss",
+            "lapack_gpu",
+            "cucholesky",
         ),
-    )
-    parser.add_argument("--madnlp-max-wall-time", type=float, default=None)
-    madnlp_scaling_group = parser.add_mutually_exclusive_group()
-    madnlp_scaling_group.add_argument(
-        "--madnlp-nlp-scaling",
-        dest="madnlp_nlp_scaling",
-        action="store_true",
-    )
-    madnlp_scaling_group.add_argument(
-        "--madnlp-no-nlp-scaling",
-        dest="madnlp_nlp_scaling",
-        action="store_false",
-    )
-    parser.set_defaults(madnlp_nlp_scaling=None)
-    parser.add_argument(
-        "--madnlp-acceptable-tolerance", type=float, default=None
-    )
-    parser.add_argument(
-        "--madnlp-acceptable-iterations", type=int, default=None
+        help=(
+            "MadNLP C-runtime linear solver. The default is mumps; GPU choices "
+            "require a compatible MadNLP runtime and runner."
+        ),
     )
     parser.add_argument(
         "--madnlp-c-compile",
@@ -3566,10 +3534,6 @@ if __name__ == "__main__":
         madnlp_dual_warm_start_mode=args.madnlp_dual_warm_start_mode,
         madnlp_c_compile=args.madnlp_c_compile,
         madnlp_linear_solver=args.madnlp_linear_solver,
-        madnlp_max_wall_time=args.madnlp_max_wall_time,
-        madnlp_nlp_scaling=args.madnlp_nlp_scaling,
-        madnlp_acceptable_tolerance=args.madnlp_acceptable_tolerance,
-        madnlp_acceptable_iterations=args.madnlp_acceptable_iterations,
         alpaqa_max_iter=args.alpaqa_max_iter,
         alpaqa_alm_max_iter=args.alpaqa_alm_max_iter,
         alpaqa_dual_warm_start_mode=args.alpaqa_dual_warm_start_mode,
