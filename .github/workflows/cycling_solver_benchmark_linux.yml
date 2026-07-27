@@ -289,9 +289,10 @@ jobs:
               --ipopt-dual-warm-start-mode bounds
             )
           elif [[ "$BENCHMARK_SOLVER" == "madnlp" ]]; then
+            # The pinned CasADi plugin rejects MadNLP's max_wall_time option.
+            # The job timeout remains the outer safety limit.
             solver_options+=(
               --madnlp-max-iter "$BENCHMARK_MAX_ITER"
-              --madnlp-max-wall-time 600
               --madnlp-mu-init 0.01
               --madnlp-dual-warm-start-mode off
               --optional-nlp-periodic-ipopt-hot-start
