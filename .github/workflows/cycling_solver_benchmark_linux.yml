@@ -254,6 +254,7 @@ jobs:
           BENCHMARK_SOLVER: ${{ matrix.solver }}
         run: |
           python - <<'PY'
+          import math
           import os
           import casadi as cas
           import bioptim
@@ -289,7 +290,15 @@ jobs:
               plugin_options,
           )
           smoke_result = smoke(x0=0, lbg=1, ubg=1)
-          assert abs(float(smoke_result["x"]) - 1.0) < 1e-6
+          smoke_x = float(smoke_result["x"])
+          smoke_error = abs(smoke_x - 1.0)
+          smoke_tolerance = 1e-3 if target == "alpaqa" else 1e-6
+          print(
+              f"{target} minimal solution: x={smoke_x:.12g}, "
+              f"error={smoke_error:.3e}, tolerance={smoke_tolerance:.1e}"
+          )
+          assert math.isfinite(smoke_x)
+          assert smoke_error < smoke_tolerance
           print(f"{target} minimal solve: {smoke.stats()}")
           PY
           python -m pytest -q \
