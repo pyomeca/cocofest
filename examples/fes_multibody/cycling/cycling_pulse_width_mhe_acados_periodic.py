@@ -5042,6 +5042,10 @@ def _solution_feasibility_summary(
 ) -> dict[str, float | bool | None]:
     """Record solver primal infeasibility and global trajectory finiteness."""
 
+    cached = getattr(solution, "_cocofest_feasibility_summary", None)
+    if cached is not None:
+        return dict(cached)
+
     states = solution.decision_states(to_merge=SolutionMerge.NODES)
     controls = solution.decision_controls(to_merge=SolutionMerge.NODES)
     trajectories_finite = all(
@@ -11149,8 +11153,21 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
                 f"({horizon_seed_cache_path.name})"
             )
 
-    if args.solver == "acados" and horizon_seed_cache_path is not None:
-        nmpc.before_window_advance = cache_first_successful_window
+    window_feasibility_tolerance = (
+        args.acados_tolerance if args.solver == "acados" else args.nlp_tolerance
+    )
+
+    def snapshot_completed_window(_nmpc, solution):
+        # Every stored RHO solution references the same mutable OCP. Snapshot
+        # feasibility while its lbx/ubx still describe this window; otherwise
+        # post-processing compares old decisions with the final window bounds.
+        solution._cocofest_feasibility_summary = _solution_feasibility_summary(
+            solution, window_feasibility_tolerance
+        )
+        if args.solver == "acados" and horizon_seed_cache_path is not None:
+            cache_first_successful_window(_nmpc, solution)
+
+    nmpc.before_window_advance = snapshot_completed_window
 
     def update_functions(_nmpc, cycle_idx, _sol):
         nonlocal transfer_failure_window

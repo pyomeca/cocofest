@@ -52,7 +52,7 @@ def test_solver_availability_checks_bioptim_factory_and_casadi_plugin():
     assert "Solver.ALPAQA" in reason
 
 
-def test_configure_madnlp_enables_validated_dual_warm_start():
+def test_configure_madnlp_uses_supported_primal_hot_start():
     namespace = _solver_namespace("MADNLP")
 
     solver = configure_nlp_solver(
@@ -73,7 +73,8 @@ def test_configure_madnlp_enables_validated_dual_warm_start():
     assert ("set_constraint_tolerance", 2e-6) in solver.calls
     assert ("set_maximum_iterations", 321) in solver.calls
     assert ("set_print_level", "ERROR") in solver.calls
-    assert ("set_warm_start_options", 1e-2) in solver.calls
+    assert ("set_option_unsafe", 1e-2, "mu_init") in solver.calls
+    assert not any(call[0] == "set_warm_start_options" for call in solver.calls)
     assert ("set_option_unsafe", "UmfpackSolver", "linear_solver") in solver.calls
     assert ("set_option_unsafe", 12.5, "max_wall_time") in solver.calls
     assert ("set_option_unsafe", True, "nlp_scaling") in solver.calls

@@ -135,7 +135,7 @@ jobs:
             benchmark-seed-result/common-continuation-warmup.npz
 
       - name: Upload the validated immutable common seed
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: cycling-assisted-common-seed-${{ github.run_id }}
           path: benchmark-seed-result/common-continuation-warmup.npz
@@ -201,7 +201,7 @@ jobs:
       - name: Cache the MadNLP runtime
         if: matrix.solver != 'alpaqa'
         id: madnlp-cache
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: .cache/madnlp
           key: madnlp-cpu-jl1.10.4-linux-${{ env.MADNLP_SHA256 }}
@@ -235,7 +235,7 @@ jobs:
           python -m pip install --no-deps -e .benchmark-deps/bioptim
 
       - name: Download the validated common continuation seed
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: cycling-assisted-common-seed-${{ github.run_id }}
           path: benchmark-seed
@@ -367,12 +367,27 @@ jobs:
 
       - name: Upload benchmark JSON and log
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: cycling-fatigue-linux-${{ matrix.solver }}-${{ github.run_id }}
           path: benchmark-results/
           if-no-files-found: warn
           retention-days: 30
+
+      - name: Require an attempted RHO without infrastructure errors
+        if: always()
+        env:
+          BENCHMARK_SOLVER: ${{ matrix.solver }}
+        run: |
+          result="benchmark-results/${BENCHMARK_SOLVER}.json"
+          if [[ ! -f "$result" ]]; then
+            echo "${BENCHMARK_SOLVER}: benchmark JSON is missing." >&2
+            exit 1
+          fi
+          jq -e '
+            .results[0] |
+            (.attempted_windows > 0 and .error == null)
+          ' "$result"
 
   report:
     name: Aggregate Kevin benchmark
@@ -388,7 +403,7 @@ jobs:
         uses: actions/checkout@v6
 
       - name: Download every available solver artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         continue-on-error: true
         with:
           pattern: cycling-fatigue-linux-*-${{ github.run_id }}
@@ -412,7 +427,7 @@ jobs:
 
       - name: Upload the combined Kevin report
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: cycling-fatigue-kevin-report-${{ github.run_id }}
           path: |

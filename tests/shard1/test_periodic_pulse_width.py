@@ -2523,6 +2523,46 @@ def test_feasibility_uses_constraint_and_decision_bounds():
     assert feasibility["passes_tolerance"] is False
 
 
+def test_feasibility_snapshot_is_not_recomputed_with_next_window_bounds():
+    class FakeSolution:
+        constraints = np.array([0.0])
+        inf_pr = np.array([0.0])
+        vector = np.array([0.5])
+        ocp = SimpleNamespace(
+            ocp_solver=SimpleNamespace(
+                limits={
+                    "lbg": np.array([0.0]),
+                    "ubg": np.array([0.0]),
+                    "lbx": np.array([0.0]),
+                    "ubx": np.array([1.0]),
+                }
+            )
+        )
+
+        @staticmethod
+        def decision_states(to_merge=None):
+            return {"q": np.zeros((3, 2))}
+
+        @staticmethod
+        def decision_controls(to_merge=None):
+            return {"u": np.zeros((1, 1))}
+
+    solution = FakeSolution()
+    snapshot = periodic_example._solution_feasibility_summary(
+        solution, tolerance=1e-6
+    )
+    solution._cocofest_feasibility_summary = snapshot
+    solution.ocp.ocp_solver.limits["lbx"][:] = 10.0
+    solution.ocp.ocp_solver.limits["ubx"][:] = 11.0
+
+    feasibility = periodic_example._solution_feasibility_summary(
+        solution, tolerance=1e-6
+    )
+
+    assert feasibility["decision_bound_violation"] == 0.0
+    assert feasibility["passes_tolerance"] is True
+
+
 def test_github_benchmark_report_compares_patterns_and_writes_csv(tmp_path):
     def entry(solver, pulse_width_us):
         return {
