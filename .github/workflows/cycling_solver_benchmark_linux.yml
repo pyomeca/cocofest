@@ -28,6 +28,11 @@ on:
         required: true
         default: "2000"
         type: string
+      warmup_max_iterations:
+        description: Maximum IPOPT iterations used only to build the shared seed
+        required: true
+        default: "10000"
+        type: string
 
 permissions:
   contents: read
@@ -113,7 +118,7 @@ jobs:
             --crank-assistance "${{ inputs.crank_assistance_nm }}" \
             --warmup-ipopt-linear-solver mumps \
             --ipopt-linear-solver mumps \
-            --ipopt-max-iter "${{ inputs.solver_max_iterations }}" \
+            --ipopt-max-iter "${{ inputs.warmup_max_iterations }}" \
             --ipopt-disable-historical-initial-guess \
             --state-scaling full \
             --first-node-wheel-q-slack 0 \
@@ -389,11 +394,13 @@ jobs:
 
       - name: Build the comparison report
         run: |
-          mkdir -p benchmark-results-all
+          mkdir -p benchmark-results-all benchmark-report
           mapfile -t result_files < <(find benchmark-results-all -name '*.json' -type f | sort)
           if [[ "${#result_files[@]}" -eq 0 ]]; then
-            echo "No solver JSON was produced." >> "$GITHUB_STEP_SUMMARY"
-            exit 0
+            message="No solver JSON was produced; inspect the prerequisite or matrix jobs."
+            echo "$message" >> "$GITHUB_STEP_SUMMARY"
+            echo "$message" > benchmark-report/NO_RESULTS.txt
+            exit 1
           fi
           python .github/scripts/summarize_cycling_benchmark.py \
             --output-dir benchmark-report \
