@@ -2302,6 +2302,20 @@ def test_ipopt_dual_warm_start_cli_defaults_to_bound_multipliers():
     assert periodic_args.alpaqa_dual_warm_start_mode == "constraints"
     assert comparison_args.madnlp_dual_warm_start_mode == "off"
     assert comparison_args.alpaqa_dual_warm_start_mode == "constraints"
+    assert periodic_args.primal_feasibility_threshold is None
+    assert comparison_args.primal_feasibility_threshold is None
+
+
+def test_common_primal_threshold_is_independent_of_nlp_solver_tolerance():
+    args = SimpleNamespace(
+        solver="madnlp",
+        nlp_tolerance=1e-8,
+        primal_feasibility_threshold=1e-5,
+    )
+
+    tolerance = periodic_example._window_feasibility_tolerance(args)
+
+    assert tolerance == 1e-6
 
 
 def test_nlp_solver_stats_snapshot_keeps_oracle_timing_without_iterations():
@@ -2656,6 +2670,34 @@ def test_github_benchmark_report_compares_patterns_and_writes_csv(tmp_path):
     assert "MADNLP" in markdown
     assert "native_status" in (tmp_path / "rho.csv").read_text()
     assert "crank_phase_rad" in (tmp_path / "patterns.csv").read_text()
+
+
+def test_github_benchmark_compares_physical_threshold_not_solver_tolerance():
+    entries = [
+        {
+            "configuration": {
+                "nlp_tolerance": 1e-6,
+                "primal_feasibility_threshold": 1e-5,
+            },
+            "result": {"solver": "ipopt"},
+        },
+        {
+            "configuration": {
+                "nlp_tolerance": 1e-8,
+                "primal_feasibility_threshold": 1e-5,
+            },
+            "result": {"solver": "madnlp"},
+        },
+    ]
+
+    assert benchmark_report.configuration_mismatches(entries) == []
+    entries[1]["configuration"]["primal_feasibility_threshold"] = 2e-5
+
+    mismatches = benchmark_report.configuration_mismatches(entries)
+
+    assert [item["field"] for item in mismatches] == [
+        "primal_feasibility_threshold"
+    ]
 
 
 def test_single_shot_requires_solver_and_feasibility_success():

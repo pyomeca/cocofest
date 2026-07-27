@@ -29,7 +29,7 @@ COMPARABILITY_FIELDS = (
     "n_threads",
     "constant_crank_torque",
     "crank_torque_role",
-    "nlp_tolerance",
+    "primal_feasibility_threshold",
 )
 DEFAULT_EXPECTED_SOLVERS = ("ipopt", "madnlp", "alpaqa")
 
@@ -351,15 +351,21 @@ def render_markdown(
             else "**Attention : branches d’intégration Bioptim différentes selon le backend.**"
         ),
         "",
-        "| Solveur | Convergence | Cycles validés | Mur-à-mur (s) | Préparation (s) | Mur/RHO médian (s) | Mur/RHO P90 (s) | Arrêt |",
-        "|---|---:|---:|---:|---:|---:|---:|---|",
+        "| Solveur | Tol. interne | Seuil physique | Convergence | Cycles validés | Mur-à-mur (s) | Préparation (s) | Mur/RHO médian (s) | Mur/RHO P90 (s) | Arrêt |",
+        "|---|---:|---:|---:|---:|---:|---:|---:|---:|---|",
     ]
     for entry in entries:
         row = entry["result"]
         requested = entry["configuration"].get("n_windows")
         lines.append(
-            "| {solver} | {success} | {validated}/{requested} | {e2e} | {prep} | {median} | {p90} | {stop} |".format(
+            "| {solver} | {solver_tolerance} | {physical_threshold} | {success} | {validated}/{requested} | {e2e} | {prep} | {median} | {p90} | {stop} |".format(
                 solver=row["solver"].upper(),
+                solver_tolerance=_fmt(
+                    entry["configuration"].get("nlp_tolerance")
+                ),
+                physical_threshold=_fmt(
+                    entry["configuration"].get("primal_feasibility_threshold")
+                ),
                 success="oui" if row.get("success") else "non",
                 validated=row.get("validated_cycles", 0),
                 requested=requested if requested is not None else "—",

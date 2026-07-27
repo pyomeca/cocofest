@@ -1711,6 +1711,17 @@ def build_argument_parser() -> argparse.ArgumentParser:
         help="Common convergence and constraint tolerance for IPOPT, MadNLP, and Alpaqa.",
     )
     parser.add_argument(
+        "--primal-feasibility-threshold",
+        type=float,
+        default=None,
+        help=(
+            "Optional common absolute primal-feasibility threshold used to "
+            "validate IPOPT, MadNLP, and Alpaqa windows independently of each "
+            "solver's internal tolerance. The legacy default is ten times "
+            "--nlp-tolerance."
+        ),
+    )
+    parser.add_argument(
         "--max-madnlp-iterations",
         type=int,
         default=2000,
@@ -5104,6 +5115,15 @@ def _solution_feasibility_summary(
         "feasibility_threshold": threshold,
         "passes_tolerance": bool(passes_tolerance),
     }
+
+
+def _window_feasibility_tolerance(args: argparse.Namespace) -> float | None:
+    """Map the public absolute threshold to the legacy 10*tolerance audit."""
+
+    if args.solver == "acados":
+        return args.acados_tolerance
+    threshold = getattr(args, "primal_feasibility_threshold", None)
+    return args.nlp_tolerance if threshold is None else float(threshold) / 10.0
 
 
 def _native_solver_status(nmpc) -> str | None:
@@ -9656,6 +9676,11 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
     if args.n_threads < 1:
         raise ValueError("--n-threads must be >= 1")
     if (
+        getattr(args, "primal_feasibility_threshold", None) is not None
+        and args.primal_feasibility_threshold <= 0
+    ):
+        raise ValueError("--primal-feasibility-threshold must be strictly positive.")
+    if (
         args.legacy_standard_warmup_seed_signed_torque is not None
         and args.standard_warmup_seed is None
     ):
@@ -11113,9 +11138,7 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
                 f"({horizon_seed_cache_path.name})"
             )
 
-    window_feasibility_tolerance = (
-        args.acados_tolerance if args.solver == "acados" else args.nlp_tolerance
-    )
+    window_feasibility_tolerance = _window_feasibility_tolerance(args)
 
     def snapshot_completed_window(_nmpc, solution):
         # Every stored RHO solution references the same mutable OCP. Snapshot
@@ -12087,9 +12110,7 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
                 print(f"acados_seed_cache: saved ({acados_seed_cache_path.name})")
         summary = build_single_shot_summary(
             sol,
-            feasibility_tolerance=(
-                args.acados_tolerance if args.solver == "acados" else args.nlp_tolerance
-            ),
+            feasibility_tolerance=window_feasibility_tolerance,
             cycle_count=args.cycles_per_window,
             cycle_progress_tolerance=(
                 max(
@@ -12174,9 +12195,7 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
             sol,
             requested_windows=args.n_windows,
             cycles_per_window=args.cycles_per_window,
-            feasibility_tolerance=(
-                args.acados_tolerance if args.solver == "acados" else args.nlp_tolerance
-            ),
+            feasibility_tolerance=window_feasibility_tolerance,
             cycle_progress_tolerance=(
                 max(
                     2.0 * args.acados_terminal_wheel_q_slack,
@@ -12197,9 +12216,7 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
         sol,
         requested_windows=args.n_windows,
         cycles_per_window=args.cycles_per_window,
-        feasibility_tolerance=(
-            args.acados_tolerance if args.solver == "acados" else args.nlp_tolerance
-        ),
+        feasibility_tolerance=window_feasibility_tolerance,
         cycle_progress_tolerance=(
             max(
                 2.0 * args.acados_terminal_wheel_q_slack,

@@ -263,7 +263,9 @@ jobs:
           PY
           python -m pytest -q \
             tests/shard1/test_solver_backends.py \
-            tests/test_solver_option_screen_summary.py
+            tests/test_solver_option_screen_summary.py \
+            tests/shard1/test_periodic_pulse_width.py::test_common_primal_threshold_is_independent_of_nlp_solver_tolerance \
+            tests/shard1/test_periodic_pulse_width.py::test_github_benchmark_compares_physical_threshold_not_solver_tolerance
 
       - name: Run the focused ${{ matrix.solver }} option screen
         env:
@@ -294,6 +296,7 @@ jobs:
               --n-threads "$BENCHMARK_THREADS" \
               --crank-assistance "$BENCHMARK_ASSISTANCE" \
               --nlp-tolerance "$tolerance" \
+              --primal-feasibility-threshold 1e-5 \
               --max-consecutive-failing 2 \
               --standard-warmup-seed benchmark-seed/common-continuation-warmup.npz \
               --legacy-standard-warmup-seed-signed-torque 0.22 \
@@ -527,7 +530,10 @@ jobs:
           python -m pytest -q \
             tests/shard1/test_solver_backends.py \
             tests/shard1/test_biorbd_backend_conversion.py \
-            tests/shard1/test_plot_backend.py
+            tests/shard1/test_plot_backend.py \
+            tests/test_solver_option_screen_summary.py \
+            tests/shard1/test_periodic_pulse_width.py::test_common_primal_threshold_is_independent_of_nlp_solver_tolerance \
+            tests/shard1/test_periodic_pulse_width.py::test_github_benchmark_compares_physical_threshold_not_solver_tolerance
 
       - name: Run the ${{ matrix.solver }} assisted benchmark
         env:
@@ -543,12 +549,14 @@ jobs:
         run: |
           mkdir -p benchmark-results
           solver_options=()
+          solver_tolerance=1e-6
           if [[ "$BENCHMARK_SOLVER" == "ipopt" ]]; then
             solver_options+=(
               --ipopt-max-iter "$BENCHMARK_MAX_ITER"
               --ipopt-dual-warm-start-mode bounds
             )
           elif [[ "$BENCHMARK_SOLVER" == "madnlp" ]]; then
+            solver_tolerance=1e-8
             # The pinned madnlp_c runtime rejects max_wall_time, mu_init and
             # dual_initialized. Cocofest still supplies the shifted/projected
             # primal trajectory; the job timeout is the outer safety limit.
@@ -562,6 +570,8 @@ jobs:
               --alpaqa-max-iter "$BENCHMARK_MAX_ITER"
               --alpaqa-alm-max-iter "$BENCHMARK_MAX_ITER"
               --alpaqa-max-wall-time 600
+              --alpaqa-panoc-max-wall-time 20
+              --alpaqa-initial-penalty 0
               # Do not reuse multipliers from a time-limited or otherwise
               # invalid RHO. The shifted/projected primal remains enabled.
               --alpaqa-dual-warm-start-mode off
@@ -579,7 +589,8 @@ jobs:
             --n-windows "$BENCHMARK_CYCLES" \
             --n-threads "$BENCHMARK_THREADS" \
             --crank-assistance "$BENCHMARK_ASSISTANCE" \
-            --nlp-tolerance 1e-6 \
+            --nlp-tolerance "$solver_tolerance" \
+            --primal-feasibility-threshold 1e-5 \
             --max-consecutive-failing 2 \
             --standard-warmup-seed benchmark-seed/common-continuation-warmup.npz \
             --legacy-standard-warmup-seed-signed-torque 0.22 \

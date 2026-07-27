@@ -74,6 +74,7 @@ BENCHMARK_CONFIGURATION_FIELDS = (
     "expected_external_crank_power_w",
     "max_consecutive_failing",
     "nlp_tolerance",
+    "primal_feasibility_threshold",
     "ipopt_linear_solver",
     "warmup_ipopt_linear_solver",
     "standard_warmup_seed",
@@ -2137,6 +2138,7 @@ def main(
     ipopt_ma57_small_pivot_flag: int | None = None,
     ipopt_dual_warm_start_mode: str = "bounds",
     nlp_tolerance: float = 1e-6,
+    primal_feasibility_threshold: float | None = None,
     madnlp_max_iter: int = 2000,
     madnlp_dual_warm_start_mode: str = "off",
     madnlp_c_compile: bool = False,
@@ -2491,6 +2493,7 @@ def main(
         periodic_ipopt_refinement_use_sx=periodic_ipopt_refinement_use_sx,
         warmup_state_comparison_limit=warmup_state_comparison_limit,
     )
+    ipopt_args.primal_feasibility_threshold = primal_feasibility_threshold
     ipopt_args.max_consecutive_failing = max_consecutive_failing
     acados_args.max_consecutive_failing = max_consecutive_failing
     ipopt_args.warmup_ipopt_linear_solver = warmup_ipopt_linear_solver
@@ -2888,6 +2891,15 @@ def build_cli() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument("--nlp-tolerance", type=float, default=1e-6)
+    parser.add_argument(
+        "--primal-feasibility-threshold",
+        type=float,
+        default=None,
+        help=(
+            "Common absolute primal-feasibility threshold used to validate "
+            "windows independently of solver-specific convergence tolerances."
+        ),
+    )
     parser.add_argument("--madnlp-max-iter", type=int, default=2000)
     parser.add_argument(
         "--madnlp-linear-solver",
@@ -3530,6 +3542,7 @@ if __name__ == "__main__":
         ipopt_ma57_small_pivot_flag=args.ipopt_ma57_small_pivot_flag,
         ipopt_dual_warm_start_mode=args.ipopt_dual_warm_start_mode,
         nlp_tolerance=args.nlp_tolerance,
+        primal_feasibility_threshold=args.primal_feasibility_threshold,
         madnlp_max_iter=args.madnlp_max_iter,
         madnlp_dual_warm_start_mode=args.madnlp_dual_warm_start_mode,
         madnlp_c_compile=args.madnlp_c_compile,
