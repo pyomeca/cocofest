@@ -15,6 +15,7 @@ from pathlib import Path
 import sys
 from tempfile import TemporaryDirectory
 from time import perf_counter
+import traceback
 
 import numpy as np
 
@@ -1621,7 +1622,11 @@ def _failed_solver_result(
 
 
 def _run_benchmark_case(
-    solver_name: str, args: argparse.Namespace, *, echo: bool = True
+    solver_name: str,
+    args: argparse.Namespace,
+    *,
+    echo: bool = True,
+    print_traceback: bool = False,
 ) -> dict:
     label = solver_name.upper()
     print(f"Running {label} configuration...")
@@ -1643,6 +1648,8 @@ def _run_benchmark_case(
         else:
             result = solve_case(args, echo=echo)
     except (AttributeError, ImportError, RuntimeError) as error:
+        if print_traceback:
+            traceback.print_exc()
         result = _failed_solver_result(args, error, perf_counter() - start)
         print(f"{label} unavailable or failed during setup: {result['error']}")
         return result
@@ -2695,7 +2702,10 @@ def main(
     results = {}
     for solver_name in solvers:
         results[solver_name] = _run_benchmark_case(
-            solver_name, solver_args[solver_name], echo=True
+            solver_name,
+            solver_args[solver_name],
+            echo=True,
+            print_traceback=print_traces,
         )
         print()
 

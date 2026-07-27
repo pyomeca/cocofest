@@ -21,6 +21,22 @@ def _biorbd_vector_to_numpy(value) -> np.ndarray:
     return np.asarray(converted, dtype=float).reshape(-1)
 
 
+def _biorbd_marker_residual(markers_model: np.ndarray, markers_real: np.ndarray) -> np.ndarray:
+    """Compute an IK marker residual for either biorbd numerical backend."""
+    markers = np.vstack([_biorbd_vector_to_numpy(marker) for marker in markers_model])
+    return markers.reshape(-1) - np.asarray(markers_real, dtype=float).T.reshape(-1)
+
+
+def _biorbd_marker_jacobian(jacobian_matrix: np.ndarray) -> np.ndarray:
+    """Stack biorbd marker Jacobians for SciPy's least-squares interface."""
+    return np.vstack(
+        [
+            _biorbd_vector_to_numpy(marker_jacobian).reshape(3, -1)
+            for marker_jacobian in jacobian_matrix
+        ]
+    )
+
+
 # This function gets the x, y, z circle coordinates based on the angle theta
 def get_circle_coord(
     theta: int | float,
@@ -137,6 +153,11 @@ def inverse_kinematics_cycling(
     target_marker = np.concatenate((target_marker_hand, target_marker_wheel_center), axis=1)
     time_step = cycling_number / n_shooting
     ik = biorbd.InverseKinematics(model, target_marker)
+    # biorbd 1.12's Python IK helper calls ``to_array`` internally even when
+    # built with CasADi, whose NodeSegment and Jacobian wrappers expose
+    # ``to_mx`` instead. Override only the two numerical callbacks.
+    ik._marker_diff = _biorbd_marker_residual
+    ik._marker_jacobian = _biorbd_marker_jacobian
     ik_q = ik.solve(method=ik_method)
     ik_qdot = np.array([np.gradient(ik_q[i], time_step) for i in range(ik_q.shape[0])])
     ik_qddot = np.array([np.gradient(ik_qdot[i], time_step) for i in range(ik_qdot.shape[0])])
