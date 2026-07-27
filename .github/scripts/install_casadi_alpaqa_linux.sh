@@ -51,6 +51,12 @@ cmake \
   -DBUILD_ALPAQA_GIT_REPO="$ALPAQA_REPOSITORY" \
   -DBUILD_ALPAQA_GIT_SHALLOW=OFF \
   -DBUILD_ALPAQA_VERSION="$ALPAQA_REVISION"
+# CasADi 3.7.2 exposes Alpaqa as an imported target. Ninja does not propagate
+# that target's ExternalProject dependency to the plugin reliably, so install
+# the pinned Alpaqa build before linking the complete CasADi tree.
+cmake --build "$build_root/casadi-build" \
+  --target alpaqa-external \
+  --parallel "$BUILD_JOBS"
 cmake --build "$build_root/casadi-build" --parallel "$BUILD_JOBS"
 cmake --install "$build_root/casadi-build"
 

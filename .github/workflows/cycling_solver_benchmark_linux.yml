@@ -335,6 +335,7 @@ jobs:
 
       - name: Add the result to the job summary
         if: always()
+        shell: bash
         env:
           BENCHMARK_SOLVER: ${{ matrix.solver }}
         run: |
@@ -376,6 +377,7 @@ jobs:
 
       - name: Require an attempted RHO without infrastructure errors
         if: always()
+        shell: bash
         env:
           BENCHMARK_SOLVER: ${{ matrix.solver }}
         run: |
