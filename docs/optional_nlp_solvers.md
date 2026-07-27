@@ -341,6 +341,56 @@ first failed or infeasible RHO. Status-zero count, independent bound
 violations, native status, and both failed attempts remain available for
 diagnosis.
 
+The final Linux run
+[`30287669771`](https://github.com/mickaelbegon/cocofest/actions/runs/30287669771)
+uses four available CPU cores and provides the first directly comparable
+measurement on the corrected one-cycle assisted formulation:
+
+| Solver | Validated / requested RHO | Attempted RHO | Preparation | Hot median | Hot P90 | End-to-end |
+|---|---:|---:|---:|---:|---:|---:|
+| IPOPT-MUMPS | 30 / 30 | 30 | 23.40 s | 6.130 s | 8.116 s | 233.53 s |
+| MadNLP | 3 / 30 | 11 | 53.69 s | 5.353 s | 5.472 s | 118.38 s |
+| Alpaqa | 0 / 30 | 2 | 52.96 s | — | — | 1254.47 s |
+
+All 30 IPOPT windows pass the independent `1e-5` feasibility screen. MadNLP
+returns a native success status for every attempted window, but its
+independently recomputed violation first reaches `1.2766e-5` at RHO 4. Its
+strictly comparable prefix therefore ends at RHO 3. RHO 10 and 11 then exceed
+the threshold consecutively, activating the requested two-chance stop. The
+MadNLP end-to-end total must not be compared with IPOPT's because MadNLP
+attempted only 11 windows.
+
+GitHub-hosted runner timing is noisy enough to reverse the raw ranking. Across
+three corrected runs, IPOPT's hot medians range from 3.83 to 6.13 seconds and
+MadNLP's from 5.32 to 5.82 seconds. The median of those three run medians is
+4.43 seconds for IPOPT and 5.35 seconds for MadNLP. They should therefore be
+treated as the same timing order of magnitude until paired repetitions are run
+on a controlled machine; the 30/30 versus 3/30 robustness distinction is much
+stronger than the timing distinction.
+
+The source-built CasADi used by Alpaqa now has `WITH_THREAD=ON`, and the
+workflow rejects a runtime whose compiler flags do not expose that feature.
+The Alpaqa evaluation counters report about 2080 seconds of aggregate CPU time
+per 600-second wall-time solve, confirming that roughly 3.5 of the four
+available cores are used. The first limited RHO performs about 69,000 `psi`
+evaluations and ends at `8.7335e-5` infeasibility; the second ends at
+`6.3190e-3`. Both are above the independent `1e-5` threshold and both return
+`SOLVER_RET_LIMITED`.
+
+Constraint multiplier reuse is disabled in this final Alpaqa run. The second
+RHO therefore reuses only the shifted/projected primal trajectory, not duals
+from the first limited solve. Its remaining degradation means that
+multithreading and removal of the invalid dual hot start are insufficient.
+Further work should screen ALM and PANOC budgets separately, constraint
+scaling and problem-size reductions before another endurance run. These
+results apply to CasADi 3.7.2's 2023 compatibility fork, not to current
+upstream Alpaqa.
+
+At RHO 30, IPOPT still has `min(A/A_scale)=0.98334`. This 30-cycle job is a
+solver-throughput and stimulation-pattern benchmark, not a fatigue-to-failure
+experiment. Hundreds of RHO, plausibly close to the requested 1000, remain
+necessary to identify the physiological failure point.
+
 MA57 is deliberately not part of the portable public-runner matrix because
 CoinHSL cannot be redistributed with a public action. IPOPT-MUMPS is therefore
 the Linux reference. A private runner can add MA57 once its licensed CoinHSL
