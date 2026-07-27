@@ -1033,6 +1033,15 @@ def build_argument_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--standard-warmup-seed-continuation",
+        action="store_true",
+        help=(
+            "Allow an explicitly documented seed built at another signed crank "
+            "torque to initialize the target NLP. The seed is only a primal "
+            "continuation point; target convergence and feasibility are still required."
+        ),
+    )
+    parser.add_argument(
         "--acados-horizon-continuation",
         action="store_true",
         help=(
@@ -1589,6 +1598,15 @@ def build_argument_parser() -> argparse.ArgumentParser:
         type=int,
         default=2000,
         help="Maximum number of IPOPT iterations per window.",
+    )
+    parser.add_argument(
+        "--standard-warmup-max-iterations",
+        type=int,
+        default=None,
+        help=(
+            "Maximum IPOPT iterations used only to build the standard warmup. "
+            "Defaults to --max-ipopt-iterations."
+        ),
     )
     parser.add_argument(
         "--ipopt-c-compile",
@@ -2485,6 +2503,8 @@ def _validate_standard_warmup_seed(
     solution: "_WarmupSolutionAdapter",
     args: argparse.Namespace,
     seed_path: Path,
+    *,
+    allow_torque_continuation: bool = False,
 ) -> None:
     """Reject a seed whose physical convention cannot initialize this target."""
 
@@ -2519,11 +2539,15 @@ def _validate_standard_warmup_seed(
 
     source_torque = metadata.get("signed_crank_torque_nm")
     target_torque = float(args.constant_crank_torque)
-    if (
-        source_torque is None
-        or not np.isfinite(float(source_torque))
-        or not np.isclose(float(source_torque), target_torque, rtol=0.0, atol=1e-12)
-    ):
+    if source_torque is None or not np.isfinite(float(source_torque)):
+        raise ValueError(
+            f"Warmup seed '{seed_path}' has no finite documented signed crank "
+            "torque and cannot be used for continuation."
+        )
+    torque_mismatch = not np.isclose(
+        float(source_torque), target_torque, rtol=0.0, atol=1e-12
+    )
+    if torque_mismatch and not allow_torque_continuation:
         raise ValueError(
             f"Warmup seed '{seed_path}' uses signed crank torque "
             f"{source_torque!r} N.m but the target uses {target_torque!r} N.m; "
@@ -2535,7 +2559,17 @@ def _validate_standard_warmup_seed(
         args.wheel_qdot_regularization_target,
     )["role"]
     source_role = metadata.get("crank_torque_role")
-    if source_role != target_role:
+    documented_source_role = crank_torque_diagnostics(
+        float(source_torque),
+        args.wheel_qdot_regularization_target,
+    )["role"]
+    if source_role != documented_source_role:
+        raise ValueError(
+            f"Warmup seed '{seed_path}' has inconsistent torque metadata: "
+            f"{source_torque!r} N.m implies {documented_source_role!r}, not "
+            f"{source_role!r}."
+        )
+    if source_role != target_role and not allow_torque_continuation:
         raise ValueError(
             f"Warmup seed '{seed_path}' uses a {source_role!r} crank torque but "
             f"the target is {target_role!r}. A resistance seed cannot initialize "
@@ -9495,7 +9529,21 @@ def run_standard_ipopt_warmup(
             print(
                 "warmup_seed_legacy_torque_assertion_nm: " f"{declared_legacy_torque}"
             )
-        _validate_standard_warmup_seed(warmup_seed, args, explicit_seed)
+        allow_torque_continuation = bool(
+            getattr(args, "standard_warmup_seed_continuation", False)
+        )
+        _validate_standard_warmup_seed(
+            warmup_seed,
+            args,
+            explicit_seed,
+            allow_torque_continuation=allow_torque_continuation,
+        )
+        if allow_torque_continuation:
+            print(
+                "warmup_seed_torque_continuation: "
+                f"source={warmup_seed.metadata.get('signed_crank_torque_nm')} "
+                f"target={args.constant_crank_torque}"
+            )
         return warmup_seed
 
     cache_path = _warmup_cache_path(
@@ -9533,7 +9581,11 @@ def run_standard_ipopt_warmup(
     warmup_nmpc.n_cycles_simultaneous = args.cycles_per_window
 
     warmup_solver = configure_ipopt_solver(
-        max_iterations=args.max_ipopt_iterations,
+        max_iterations=(
+            args.standard_warmup_max_iterations
+            if getattr(args, "standard_warmup_max_iterations", None) is not None
+            else args.max_ipopt_iterations
+        ),
         linear_solver=_warmup_ipopt_linear_solver(args),
     )
     warmup_sol = super(RecedingHorizonOptimization, warmup_nmpc).solve(
@@ -9637,6 +9689,16 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
             "--legacy-standard-warmup-seed-signed-torque requires "
             "--standard-warmup-seed."
         )
+    if args.standard_warmup_seed_continuation and args.standard_warmup_seed is None:
+        raise ValueError(
+            "--standard-warmup-seed-continuation requires "
+            "--standard-warmup-seed."
+        )
+    if (
+        args.standard_warmup_max_iterations is not None
+        and args.standard_warmup_max_iterations < 1
+    ):
+        raise ValueError("--standard-warmup-max-iterations must be >= 1.")
     if args.cycles_per_window < 1:
         raise ValueError("--cycles-per-window must be >= 1")
     if args.stimulations_per_cycle < 1:

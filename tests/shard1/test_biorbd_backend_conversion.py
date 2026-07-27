@@ -1,6 +1,9 @@
 import numpy as np
+import pytest
 from casadi import DM, MX
+from pathlib import Path
 
+import cocofest.dynamics.inverse_kinematics_and_dynamics as cycling_dynamics
 from cocofest.dynamics.inverse_kinematics_and_dynamics import (
     _biorbd_marker_jacobian,
     _biorbd_marker_residual,
@@ -67,3 +70,50 @@ def test_biorbd_casadi_marker_callbacks_are_numpy_compatible():
         jacobian,
         np.arange(1.0, 13.0).reshape(6, 2),
     )
+
+
+def test_real_biorbd_casadi_inverse_kinematics_and_jacobian(monkeypatch):
+    biorbd_casadi = pytest.importorskip("biorbd_casadi")
+    model_path = (
+        Path(__file__).resolve().parents[2]
+        / "examples"
+        / "msk_models"
+        / "Wu"
+        / "Modified_Wu_Shoulder_Model_Cycling_for_IK.bioMod"
+    )
+    model = biorbd_casadi.Model(str(model_path))
+    q = np.zeros(model.nbQ())
+    markers = np.array(model.markers(q), dtype=object)
+    reference = np.column_stack(
+        [_biorbd_vector_to_numpy(marker) for marker in markers]
+    )
+    analytical = _biorbd_marker_jacobian(
+        np.array(model.markersJacobian(q), dtype=object)
+    )
+    finite_difference = np.empty_like(analytical)
+    step = 1e-7
+    for index in range(model.nbQ()):
+        perturbed = q.copy()
+        perturbed[index] += step
+        residual = _biorbd_marker_residual(
+            np.array(model.markers(perturbed), dtype=object),
+            reference,
+        )
+        finite_difference[:, index] = residual / step
+    np.testing.assert_allclose(
+        analytical,
+        finite_difference,
+        rtol=1e-5,
+        atol=1e-7,
+    )
+
+    monkeypatch.setattr(cycling_dynamics, "biorbd", biorbd_casadi)
+    q_solution, qdot, qddot = cycling_dynamics.inverse_kinematics_cycling(
+        str(model_path),
+        n_shooting=3,
+        x_center=0.35,
+        y_center=0.0,
+        radius=0.1,
+    )
+    assert q_solution.shape == qdot.shape == qddot.shape == (model.nbQ(), 4)
+    assert np.all(np.isfinite(q_solution))

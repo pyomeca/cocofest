@@ -77,6 +77,7 @@ BENCHMARK_CONFIGURATION_FIELDS = (
     "ipopt_linear_solver",
     "warmup_ipopt_linear_solver",
     "standard_warmup_seed",
+    "standard_warmup_seed_continuation",
     "legacy_standard_warmup_seed_signed_torque",
     "ipopt_hsl_library",
     "ipopt_c_compile",
@@ -94,6 +95,7 @@ BENCHMARK_CONFIGURATION_FIELDS = (
     "ipopt_ma57_small_pivot_flag",
     "ipopt_dual_warm_start_mode",
     "max_ipopt_iterations",
+    "standard_warmup_max_iterations",
     "disable_historical_ipopt_initial_guess",
     "madnlp_dual_warm_start_mode",
     "madnlp_mu_init",
@@ -2126,9 +2128,11 @@ def main(
     acados_dir: str | None = None,
     codegen_tag: str | None = None,
     ipopt_max_iter: int = 2000,
+    standard_warmup_max_iter: int | None = None,
     ipopt_linear_solver: str = "ma57",
     warmup_ipopt_linear_solver: str | None = None,
     standard_warmup_seed: str | Path | None = None,
+    standard_warmup_seed_continuation: bool = False,
     legacy_standard_warmup_seed_signed_torque: float | None = None,
     ipopt_hsl_library: str | None = None,
     ipopt_c_compile: bool = False,
@@ -2510,6 +2514,14 @@ def main(
     ipopt_args.warmup_ipopt_linear_solver = warmup_ipopt_linear_solver
     ipopt_args.standard_warmup_seed = standard_warmup_seed
     acados_args.standard_warmup_seed = standard_warmup_seed
+    ipopt_args.standard_warmup_seed_continuation = (
+        standard_warmup_seed_continuation
+    )
+    acados_args.standard_warmup_seed_continuation = (
+        standard_warmup_seed_continuation
+    )
+    ipopt_args.standard_warmup_max_iterations = standard_warmup_max_iter
+    acados_args.standard_warmup_max_iterations = standard_warmup_max_iter
     ipopt_args.legacy_standard_warmup_seed_signed_torque = (
         legacy_standard_warmup_seed_signed_torque
     )
@@ -2798,6 +2810,15 @@ def build_cli() -> argparse.ArgumentParser:
     parser.add_argument("--acados-dir", default=os.environ.get("ACADOS_SOURCE_DIR"))
     parser.add_argument("--codegen-tag", default="fes_compare")
     parser.add_argument("--ipopt-max-iter", type=int, default=2000)
+    parser.add_argument(
+        "--standard-warmup-max-iter",
+        type=int,
+        default=None,
+        help=(
+            "Maximum IPOPT iterations used only to build a standard warmup; "
+            "--ipopt-max-iter remains the per-RHO budget."
+        ),
+    )
     parser.add_argument("--ipopt-linear-solver", default="ma57")
     parser.add_argument(
         "--warmup-ipopt-linear-solver",
@@ -2811,6 +2832,14 @@ def build_cli() -> argparse.ArgumentParser:
         help=(
             "Explicit warmup .npz used as the primal seed. Use this for a "
             "neighbouring 0.02 N.m torque-continuation step."
+        ),
+    )
+    parser.add_argument(
+        "--standard-warmup-seed-continuation",
+        action="store_true",
+        help=(
+            "Allow the documented seed torque to differ from the target torque. "
+            "The target NLP must still converge and pass the physical checks."
         ),
     )
     parser.add_argument(
@@ -3511,9 +3540,13 @@ if __name__ == "__main__":
         acados_dir=args.acados_dir,
         codegen_tag=args.codegen_tag,
         ipopt_max_iter=args.ipopt_max_iter,
+        standard_warmup_max_iter=args.standard_warmup_max_iter,
         ipopt_linear_solver=args.ipopt_linear_solver,
         warmup_ipopt_linear_solver=args.warmup_ipopt_linear_solver,
         standard_warmup_seed=args.standard_warmup_seed,
+        standard_warmup_seed_continuation=(
+            args.standard_warmup_seed_continuation
+        ),
         legacy_standard_warmup_seed_signed_torque=(
             args.legacy_standard_warmup_seed_signed_torque
         ),

@@ -491,6 +491,27 @@ def test_solver_clis_distinguish_assistance_magnitude_from_signed_torque():
     with np.testing.assert_raises(SystemExit):
         periodic_parser.parse_args(["--crank-assistance", "-0.2"])
 
+    periodic_budgets = periodic_parser.parse_args(
+        [
+            "--max-ipopt-iterations",
+            "2000",
+            "--standard-warmup-max-iterations",
+            "10000",
+        ]
+    )
+    comparison_budgets = comparison_parser.parse_args(
+        [
+            "--ipopt-max-iter",
+            "2000",
+            "--standard-warmup-max-iter",
+            "10000",
+        ]
+    )
+    assert periodic_budgets.max_ipopt_iterations == 2000
+    assert periodic_budgets.standard_warmup_max_iterations == 10000
+    assert comparison_budgets.ipopt_max_iter == 2000
+    assert comparison_budgets.standard_warmup_max_iter == 10000
+
 
 def test_standard_warmup_cache_metadata_rejects_a_resistance_seed(tmp_path):
     args = periodic_example.build_argument_parser().parse_args([])
@@ -535,6 +556,12 @@ def test_standard_warmup_cache_metadata_rejects_a_resistance_seed(tmp_path):
             args,
             resistance_path,
         )
+    periodic_example._validate_standard_warmup_seed(
+        resistance_seed,
+        args,
+        resistance_path,
+        allow_torque_continuation=True,
+    )
 
     wrong_magnitude_metadata = dict(metadata)
     wrong_magnitude_metadata["signed_crank_torque_nm"] = -0.21
@@ -2507,7 +2534,7 @@ def test_github_benchmark_report_compares_patterns_and_writes_csv(tmp_path):
                     )
                 }
             },
-            "configuration": {},
+            "configuration": {"n_windows": 30},
             "result": {
                 "solver": solver,
                 "success": True,
@@ -2568,12 +2595,17 @@ def test_github_benchmark_report_compares_patterns_and_writes_csv(tmp_path):
     comparisons = benchmark_report.stimulation_comparisons(entries)
     benchmark_report.write_rho_csv(tmp_path / "rho.csv", entries)
     benchmark_report.write_stimulation_csv(tmp_path / "patterns.csv", entries)
-    markdown = benchmark_report.render_markdown(entries, [])
+    markdown = benchmark_report.render_markdown(
+        entries, [], missing_solvers=("madnlp",)
+    )
 
     np.testing.assert_allclose(
         comparisons[0]["root_mean_square_error_us"], 1.0
     )
     assert "branches d’intégration Bioptim différentes" in markdown
+    assert "# Benchmark cyclage FES — 30 RHO" in markdown
+    assert "INCOMPLÈTE" in markdown
+    assert "MADNLP" in markdown
     assert "native_status" in (tmp_path / "rho.csv").read_text()
     assert "crank_phase_rad" in (tmp_path / "patterns.csv").read_text()
 

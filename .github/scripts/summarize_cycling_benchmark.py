@@ -31,6 +31,7 @@ COMPARABILITY_FIELDS = (
     "crank_torque_role",
     "nlp_tolerance",
 )
+DEFAULT_EXPECTED_SOLVERS = ("ipopt", "madnlp", "alpaqa")
 
 
 def _finite(value) -> float | None:
@@ -309,20 +310,41 @@ def write_stimulation_csv(path: Path, entries: list[dict]) -> None:
                         )
 
 
-def render_markdown(entries: list[dict], mismatches: list[dict]) -> str:
+def render_markdown(
+    entries: list[dict],
+    mismatches: list[dict],
+    missing_solvers: tuple[str, ...] = (),
+) -> str:
     bioptim_commits = {
         entry["runtime"].get("provenance", {}).get("BIOPTIM_BENCHMARK_COMMIT")
         for entry in entries
         if entry["runtime"].get("provenance", {}).get("BIOPTIM_BENCHMARK_COMMIT")
     }
+    requested_horizons = {
+        entry["configuration"].get("n_windows")
+        for entry in entries
+        if entry["configuration"].get("n_windows") is not None
+    }
+    horizon_label = (
+        f"{next(iter(requested_horizons))} RHO"
+        if len(requested_horizons) == 1
+        else "horizons mixtes"
+    )
+    if missing_solvers:
+        comparability = (
+            "Comparabilité des configurations : **INCOMPLÈTE** "
+            f"(solveurs manquants : {', '.join(name.upper() for name in missing_solvers)})"
+        )
+    elif mismatches:
+        comparability = (
+            f"Comparabilité des configurations : **ÉCHEC ({len(mismatches)} écarts)**"
+        )
+    else:
+        comparability = "Comparabilité des configurations : **OK**"
     lines = [
-        "# Benchmark cyclage FES — 30 RHO",
+        f"# Benchmark cyclage FES — {horizon_label}",
         "",
-        (
-            "Comparabilité des configurations : **OK**"
-            if not mismatches
-            else f"Comparabilité des configurations : **ÉCHEC ({len(mismatches)} écarts)**"
-        ),
+        comparability,
         (
             "Intégration Bioptim : **commit commun**"
             if len(bioptim_commits) <= 1
@@ -449,6 +471,11 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("json_files", nargs="+", type=Path)
     parser.add_argument("--output-dir", type=Path, required=True)
+    parser.add_argument(
+        "--expected-solvers",
+        default=",".join(DEFAULT_EXPECTED_SOLVERS),
+        help="Comma-separated solver set required for a complete report.",
+    )
     args = parser.parse_args()
 
     entries = load_benchmark_files(args.json_files)
@@ -457,6 +484,19 @@ def main() -> None:
     args.output_dir.mkdir(parents=True, exist_ok=True)
     mismatches = configuration_mismatches(entries)
     comparisons = stimulation_comparisons(entries)
+    expected_solvers = tuple(
+        dict.fromkeys(
+            solver.strip().lower()
+            for solver in args.expected_solvers.split(",")
+            if solver.strip()
+        )
+    )
+    present_solvers = {
+        entry["result"].get("solver", "").lower() for entry in entries
+    }
+    missing_solvers = tuple(
+        solver for solver in expected_solvers if solver not in present_solvers
+    )
     bioptim_commits = sorted(
         {
             entry["runtime"].get("provenance", {}).get("BIOPTIM_BENCHMARK_COMMIT")
@@ -468,7 +508,11 @@ def main() -> None:
     )
     combined = {
         "schema_version": 1,
-        "comparable_configuration": not mismatches,
+        "complete_solver_matrix": not missing_solvers,
+        "expected_solvers": expected_solvers,
+        "present_solvers": sorted(present_solvers),
+        "missing_solvers": missing_solvers,
+        "comparable_configuration": not mismatches and not missing_solvers,
         "configuration_mismatches": mismatches,
         "same_bioptim_commit": len(bioptim_commits) <= 1,
         "bioptim_commits": bioptim_commits,
@@ -482,9 +526,13 @@ def main() -> None:
     write_rho_csv(args.output_dir / "rho-timings.csv", entries)
     write_stimulation_csv(args.output_dir / "stimulation-patterns.csv", entries)
     (args.output_dir / "benchmark-comparison.md").write_text(
-        render_markdown(entries, mismatches),
+        render_markdown(entries, mismatches, missing_solvers),
         encoding="utf-8",
     )
+    if missing_solvers:
+        raise SystemExit(
+            "Incomplete solver matrix; missing: " + ", ".join(missing_solvers)
+        )
 
 
 if __name__ == "__main__":

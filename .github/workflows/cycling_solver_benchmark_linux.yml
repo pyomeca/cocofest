@@ -1,4 +1,4 @@
-name: Cycling fatigue solvers — assisted 30 RHO
+name: Cycling fatigue solvers — assisted benchmark
 
 on:
   workflow_dispatch:
@@ -28,10 +28,10 @@ on:
         required: true
         default: "2000"
         type: string
-      warmup_max_iterations:
-        description: Maximum IPOPT iterations used only to build the shared seed
+      seed_validation_max_iterations:
+        description: Maximum IPOPT iterations used to validate the shared continuation seed
         required: true
-        default: "10000"
+        default: "2000"
         type: string
 
 permissions:
@@ -61,7 +61,7 @@ env:
 
 jobs:
   prepare-seed:
-    name: Prepare the common assisted IPOPT seed
+    name: Validate the common continuation seed
     runs-on: ${{ inputs.runner_label }}
     timeout-minutes: 120
     defaults:
@@ -102,7 +102,7 @@ jobs:
           bash .github/scripts/install_biorbd_casadi_linux.sh
           python -m pip install --no-deps -e .benchmark-deps/bioptim
 
-      - name: Build and certify the common physical seed
+      - name: Validate the seed on the assisted target
         env:
           PYTHONPATH: ${{ github.workspace }}
         run: |
@@ -116,9 +116,12 @@ jobs:
             --n-windows 1 \
             --n-threads "$BENCHMARK_THREADS" \
             --crank-assistance "${{ inputs.crank_assistance_nm }}" \
+            --standard-warmup-seed .github/benchmark-seeds/legacy-resistive-0p22-warmup.npz \
+            --legacy-standard-warmup-seed-signed-torque 0.22 \
+            --standard-warmup-seed-continuation \
             --warmup-ipopt-linear-solver mumps \
             --ipopt-linear-solver mumps \
-            --ipopt-max-iter "${{ inputs.warmup_max_iterations }}" \
+            --ipopt-max-iter "${{ inputs.seed_validation_max_iterations }}" \
             --ipopt-disable-historical-initial-guess \
             --state-scaling full \
             --first-node-wheel-q-slack 0 \
@@ -126,18 +129,15 @@ jobs:
             --compact-rho-output \
             --print-traces \
             --output-json benchmark-seed-result/seed-check.json
-          seed_path="$(find examples/fes_multibody/cycling/result/cache -name 'warmup_*.npz' -print -quit)"
-          if [[ -z "$seed_path" ]]; then
-            echo "The standard assisted IPOPT seed was not created." >&2
-            exit 1
-          fi
-          cp "$seed_path" benchmark-seed-result/common-assisted-warmup.npz
+          jq -e '.results[0].success == true' benchmark-seed-result/seed-check.json
+          cp .github/benchmark-seeds/legacy-resistive-0p22-warmup.npz \
+            benchmark-seed-result/common-continuation-warmup.npz
 
-      - name: Upload the immutable common seed
+      - name: Upload the validated immutable common seed
         uses: actions/upload-artifact@v4
         with:
           name: cycling-assisted-common-seed-${{ github.run_id }}
-          path: benchmark-seed-result/common-assisted-warmup.npz
+          path: benchmark-seed-result/common-continuation-warmup.npz
           if-no-files-found: error
           retention-days: 30
 
@@ -233,7 +233,7 @@ jobs:
           bash .github/scripts/install_biorbd_casadi_linux.sh
           python -m pip install --no-deps -e .benchmark-deps/bioptim
 
-      - name: Download the common assisted IPOPT seed
+      - name: Download the validated common continuation seed
         uses: actions/download-artifact@v4
         with:
           name: cycling-assisted-common-seed-${{ github.run_id }}
@@ -285,7 +285,6 @@ jobs:
           if [[ "$BENCHMARK_SOLVER" == "ipopt" ]]; then
             solver_options+=(
               --ipopt-max-iter "$BENCHMARK_MAX_ITER"
-              --ipopt-linear-solver mumps
               --ipopt-dual-warm-start-mode bounds
             )
           elif [[ "$BENCHMARK_SOLVER" == "madnlp" ]]; then
@@ -318,8 +317,11 @@ jobs:
             --crank-assistance "$BENCHMARK_ASSISTANCE" \
             --nlp-tolerance 1e-6 \
             --max-consecutive-failing 2 \
-            --standard-warmup-seed benchmark-seed/common-assisted-warmup.npz \
+            --standard-warmup-seed benchmark-seed/common-continuation-warmup.npz \
+            --legacy-standard-warmup-seed-signed-torque 0.22 \
+            --standard-warmup-seed-continuation \
             --warmup-ipopt-linear-solver mumps \
+            --ipopt-linear-solver mumps \
             --ipopt-disable-historical-initial-guess \
             --state-scaling full \
             --first-node-wheel-q-slack 0 \
