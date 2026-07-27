@@ -342,7 +342,9 @@ jobs:
               --alpaqa-max-iter "$BENCHMARK_MAX_ITER"
               --alpaqa-alm-max-iter "$BENCHMARK_MAX_ITER"
               --alpaqa-max-wall-time 600
-              --alpaqa-dual-warm-start-mode constraints
+              # Do not reuse multipliers from a time-limited or otherwise
+              # invalid RHO. The shifted/projected primal remains enabled.
+              --alpaqa-dual-warm-start-mode off
               --optional-nlp-periodic-ipopt-hot-start
             )
           fi
