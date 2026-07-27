@@ -1,5 +1,6 @@
 import importlib.util
 import numpy as np
+import pytest
 from casadi import Function, SX
 from pathlib import Path
 from types import SimpleNamespace
@@ -2315,7 +2316,7 @@ def test_common_primal_threshold_is_independent_of_nlp_solver_tolerance():
 
     tolerance = periodic_example._window_feasibility_tolerance(args)
 
-    assert tolerance == 1e-6
+    assert tolerance == pytest.approx(1e-6)
 
 
 def test_nlp_solver_stats_snapshot_keeps_oracle_timing_without_iterations():
