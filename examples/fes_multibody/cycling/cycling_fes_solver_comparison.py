@@ -65,6 +65,7 @@ BENCHMARK_CONFIGURATION_FIELDS = (
     "pulse_width_active_margin",
     "acados_wheel_q_slack",
     "acados_terminal_wheel_q_slack",
+    "terminal_wheel_q_reference_mode",
     "cycles_per_window",
     "stimulations_per_cycle",
     "n_windows",
@@ -2070,6 +2071,7 @@ def write_benchmark_summary(output_path: str | Path, results: dict[str, dict]) -
                     "COCOFEST_BENCHMARK_COMMIT",
                     "BIOPTIM_BENCHMARK_COMMIT",
                     "BIOPTIM_INTEGRATION_BRANCH",
+                    "LIBMAD_BENCHMARK_COMMIT",
                     "GITHUB_RUN_ID",
                     "GITHUB_RUN_ATTEMPT",
                     "RUNNER_NAME",
@@ -3002,13 +3004,15 @@ def build_cli() -> argparse.ArgumentParser:
             "mumps",
             "umfpack",
             "lapack_cpu",
+            "pardiso_mkl",
             "cudss",
             "lapack_gpu",
             "cucholesky",
         ),
         help=(
-            "MadNLP C-runtime linear solver. The default is mumps; GPU choices "
-            "require a compatible MadNLP runtime and runner."
+            "MadNLP C-runtime linear solver. The default is mumps; pardiso_mkl "
+            "requires the x86-64 libMad MKL runtime, and GPU choices require a "
+            "compatible runtime and runner."
         ),
     )
     parser.add_argument(
@@ -3342,7 +3346,10 @@ def build_cli() -> argparse.ArgumentParser:
         dest="acados_terminal_wheel_q_slack",
         type=float,
         default=0.002,
-        help="Backend-independent terminal crank-angle slack in rad.",
+        help=(
+            "Backend-independent terminal crank-angle slack in rad around the "
+            "absolute initial-angle plus signed-cycle-count reference."
+        ),
     )
     parser.add_argument(
         "--state-scaling", choices=("none", "fes", "full"), default="full"

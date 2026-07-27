@@ -95,13 +95,18 @@ Relevant MadNLP screens include:
 --madnlp-linear-solver mumps
 --madnlp-linear-solver umfpack
 --madnlp-linear-solver lapack_cpu
+--madnlp-linear-solver pardiso_mkl
 ```
 
-The pinned `madnlp_c` runtime accepts `mumps`, `umfpack`, `lapack_cpu`, and
-three GPU backends; it does not accept the Julia type names
-`MumpsSolver`/`UmfpackSolver` or `Ma57Solver`. It also cannot reuse
-`--ipopt-hsl-library`. MA57 is therefore not available to MadNLP in this
-benchmark runtime.
+The portable `madnlp_c` runtime accepts `mumps`, `umfpack`, `lapack_cpu`, and
+three GPU backends. The public x86-64 Linux benchmark now builds libMad commit
+`5529f23a6bff33c566ad954da38d352f1f172356` directly from
+`mickaelbegon/libMad`'s `codex/pardiso-mkl` branch and maps
+`pardiso_mkl` to its native `PardisoMKLSolver` type. This runtime embeds
+`MadNLPPardiso` and Intel oneMKL without depending on HSL. It is unavailable
+on ARM, including Apple Silicon, because oneMKL does not provide that native
+backend there. CoinHSL remains loaded dynamically only by IPOPT through
+`--ipopt-hsl-library`.
 
 The pinned `madnlp_c` runtime rejects `mu_init`, `dual_initialized`,
 `max_wall_time`, `nlp_scaling`, and the `acceptable_*` options. Cocofest
@@ -367,7 +372,12 @@ gh workflow run cycling_solver_benchmark_linux.yml \
 The production action pins the combined Fatrop/MadNLP Bioptim integration
 commit, so IPOPT, Fatrop and MadNLP use the same Bioptim revision. Each job
 first asserts that IPOPT and its target plugin coexist in the same CasADi
-runtime. The
+runtime. The MadNLP job additionally pins and builds the libMad PARDISO/MKL
+runtime, exercises `PardisoMKLSolver` through libMad's C example, then repeats
+that check through CasADi before starting the OCP. The installed runtime is
+cached by the exact libMad and JuliaC commits. `MKL_NUM_THREADS` receives the
+runner's complete CPU allocation for this job, while the unrelated BLAS and
+OpenMP pools remain at one thread to prevent nested oversubscription. The
 archived Alpaqa screen still builds CasADi 3.7.2 with the pinned compatibility
 fork declared by that release (`jgillis/alpaqa` at
 `bf9f87d59640501ea72f94aa6e2d4e62b20c677b`); this path is no longer part of
@@ -780,13 +790,26 @@ work.
 The crank angle can be tightened independently of the solver with
 `--first-node-wheel-q-slack` and `--terminal-wheel-q-slack`. The production
 screen uses exact inter-window continuity and `0.002 rad` at internal and final
-cycle boundaries. A custom boundary constraint is imposed at every executed
-cycle seam and recentered after every RHO shift; the terminal center remains
-anchored to the new first node plus
-`n_cycles_simultaneous * signed(2*pi)`. At 30 cycles the maximum local
-turn-progress error was 0.002002 rad. Its same-sign accumulation reached
-0.0380 rad, so use zero boundary slack when an exact absolute final crank angle
-is required.
+cycle boundaries. The runs reported above used a terminal center reconstructed
+from the preceding window. At 30 cycles the maximum local turn-progress error
+was 0.002002 rad, but its same-sign accumulation reached 0.0380 rad.
+
+The current implementation instead anchors every internal and terminal center
+to the original unwrapped crank angle:
+
+```text
+q_target(k) = q_initial + k * signed(2*pi)
+```
+
+The executed terminal state still becomes the exact first-node state of the
+next RHO, but it no longer defines the next terminal target. Consequently,
+`0.002 rad` remains an absolute tolerance around the requested cycle count and
+cannot accumulate from one RHO to the next. The window diagnostic now reports
+both local turn errors and absolute cycle-count errors, and rejects a
+same-sign cumulative drift even when every individual turn is locally within
+tolerance. Periodic-refinement, continuation, horizon-seed, and generated-code
+cache signatures were advanced so a relative-reference seed cannot be
+silently reused.
 
 `physical_success` now checks progress against the problem's expected
 `-2*pi rad/cycle` direction. A finite but reversed or incomplete rotation is

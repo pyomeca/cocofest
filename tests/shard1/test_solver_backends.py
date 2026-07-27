@@ -78,6 +78,25 @@ def test_configure_madnlp_uses_supported_primal_hot_start():
     assert ("set_c_compile", False) in solver.calls
 
 
+def test_configure_madnlp_maps_pardiso_mkl_to_native_libmad_type():
+    namespace = _solver_namespace("MADNLP")
+
+    solver = configure_nlp_solver(
+        "madnlp",
+        max_iterations=321,
+        tolerance=2e-6,
+        madnlp_linear_solver="pardiso_mkl",
+        solver_namespace=namespace,
+        check_availability=False,
+    )
+
+    assert (
+        "set_option_unsafe",
+        "PardisoMKLSolver",
+        "linear_solver",
+    ) in solver.calls
+
+
 def test_configure_fatrop_uses_time_structured_native_options():
     namespace = _solver_namespace("FATROP")
 

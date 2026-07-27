@@ -73,6 +73,12 @@ class MyCyclicNMPC(FesNmpcMsk):
         self.bound_first_node_wheel_qdot = True
         self.advance_wheel_q_bounds = False
         self.anchor_terminal_wheel_to_first_node = False
+        self.anchor_wheel_q_to_absolute_reference = False
+        self.absolute_wheel_q_reference = float(
+            np.asarray(self.nlp[0].x_init["q"].init, dtype=float)[2, 0]
+        )
+        self.absolute_wheel_q_cycle_shift = None
+        self.absolute_wheel_q_cycle_index = 0
         self.wheel_q_path_margin = 2.0
         self.use_signed_wheel_shift = False
         self.continuous_state_initial_guess_mode = "continuous"
@@ -205,6 +211,16 @@ class MyCyclicNMPC(FesNmpcMsk):
         # --- Get states results --- #
         states = sol.decision_states(to_merge=SolutionMerge.NODES)
         states_keys = states.keys()
+        advance_cycles = int(getattr(self, "time_idx_to_cycle", 1))
+        if advance_cycles < 1:
+            raise ValueError(
+                "The absolute crank reference requires a positive window advance."
+            )
+        next_absolute_cycle_index = (
+            int(getattr(self, "absolute_wheel_q_cycle_index", 0))
+            + advance_cycles
+        )
+        absolute_wheel_reference_applied = False
         # --- Store previous state bounds for debugg purpose --- #
         if self.debugg_bounds:
             self.previous_bounds = {}
@@ -229,10 +245,41 @@ class MyCyclicNMPC(FesNmpcMsk):
                         self.nlp[0].x_bounds[key].max[i, 0] = center + slack
                         if key == "q" and self.advance_wheel_q_bounds:
                             cycle_shift = self._wheel_cycle_shift(states)
-                            MyCyclicNMPC._recenter_wheel_cycle_boundary_constraints(
-                                self, float(center), cycle_shift
-                            )
-                            if self.anchor_terminal_wheel_to_first_node:
+                            boundary_cycle_shift = cycle_shift
+                            boundary_reference = float(center)
+                            if getattr(
+                                self, "anchor_wheel_q_to_absolute_reference", False
+                            ):
+                                absolute_reference = float(
+                                    self.absolute_wheel_q_reference
+                                )
+                                absolute_cycle_shift = getattr(
+                                    self, "absolute_wheel_q_cycle_shift", None
+                                )
+                                if absolute_cycle_shift is None:
+                                    absolute_cycle_shift = cycle_shift
+                                absolute_cycle_shift = float(absolute_cycle_shift)
+                                boundary_cycle_shift = absolute_cycle_shift
+                                boundary_reference = (
+                                    absolute_reference
+                                    + next_absolute_cycle_index
+                                    * absolute_cycle_shift
+                                )
+                                simultaneous_cycles = (
+                                    n_cycles_simultaneous
+                                    if n_cycles_simultaneous is not None
+                                    else self.n_cycles_simultaneous
+                                )
+                                terminal_center = (
+                                    absolute_reference
+                                    + (
+                                        next_absolute_cycle_index
+                                        + simultaneous_cycles
+                                    )
+                                    * absolute_cycle_shift
+                                )
+                                absolute_wheel_reference_applied = True
+                            elif self.anchor_terminal_wheel_to_first_node:
                                 simultaneous_cycles = (
                                     n_cycles_simultaneous
                                     if n_cycles_simultaneous is not None
@@ -243,6 +290,9 @@ class MyCyclicNMPC(FesNmpcMsk):
                                 )
                             else:
                                 terminal_center = states[key][i][-1] + cycle_shift
+                            MyCyclicNMPC._recenter_wheel_cycle_boundary_constraints(
+                                self, boundary_reference, boundary_cycle_shift
+                            )
                             path_min = (
                                 min(center, terminal_center) - self.wheel_q_path_margin
                             )
@@ -257,6 +307,9 @@ class MyCyclicNMPC(FesNmpcMsk):
                             )
                             self.nlp[0].x_bounds[key].max[i, 2] = (
                                 terminal_center + terminal_slack
+                            )
+                            self._cocofest_terminal_wheel_q_center = float(
+                                terminal_center
                             )
                         elif key == "q" and not self.use_signed_wheel_shift:
                             self.nlp[0].x_bounds[key].min[
@@ -291,8 +344,12 @@ class MyCyclicNMPC(FesNmpcMsk):
                 f"path_q=[{q_path_bound_min:.6f}, {q_path_bound_max:.6f}] "
                 f"terminal_q=[{q_terminal_bound_min:.6f}, {q_terminal_bound_max:.6f}] "
                 f"bound_qdot=[{qdot_bound_min:.6f}, {qdot_bound_max:.6f}] "
-                f"cycle_shift={self._wheel_cycle_shift(states):.6f}"
+                f"cycle_shift={self._wheel_cycle_shift(states):.6f} "
+                f"absolute_cycle_index="
+                f"{next_absolute_cycle_index if absolute_wheel_reference_applied else 'off'}"
             )
+        if absolute_wheel_reference_applied:
+            self.absolute_wheel_q_cycle_index = next_absolute_cycle_index
         # --- Inform the past cycle stimulation time into the new one --- #
         self.update_stim()
         self._sync_acados_state_bounds()

@@ -19,7 +19,7 @@ on:
         default: "0.20"
         type: string
       terminal_wheel_q_slack:
-        description: Local cycle-boundary crank-angle slack in radians
+        description: Absolute cycle-count crank-angle slack in radians
         required: true
         default: "0.002"
         type: string
@@ -50,9 +50,9 @@ env:
   BIOPTIM_REPOSITORY: mickaelbegon/BiorbdOptim
   BIOPTIM_PRODUCTION_COMMIT: 3523f1745e315f07761159d7e06bd2d876026704
   BIOPTIM_ALPAQA_COMMIT: d84e7e43534360fc048e0be26a3bd69a2abc2d77
-  MADNLP_ARCHIVE: madnlp-jl1.10.4-ubuntu-20.04-x64.zip
-  MADNLP_SHA256: 333c42a1beb04fdba84410cc861927a74c3591c3b9cffd15323cbfeb44fbc8a0
-  MADNLP_URL: https://github.com/tmmsartor/madnlp_c/releases/download/nightly-cpu_only/madnlp-jl1.10.4-ubuntu-20.04-x64.zip
+  LIBMAD_REPOSITORY: mickaelbegon/libMad
+  LIBMAD_PARDISO_COMMIT: 5529f23a6bff33c566ad954da38d352f1f172356
+  JULIAC_COMMIT: 73be8587a80bbb65dab7acd71d406f72867a3571
   OMP_NUM_THREADS: "1"
   OPENBLAS_NUM_THREADS: "1"
   MKL_NUM_THREADS: "1"
@@ -180,6 +180,14 @@ jobs:
           ref: ${{ matrix.bioptim_commit }}
           path: .benchmark-deps/bioptim
 
+      - name: Checkout the pinned libMad PARDISO runtime
+        if: matrix.solver == 'madnlp'
+        uses: actions/checkout@v6
+        with:
+          repository: ${{ env.LIBMAD_REPOSITORY }}
+          ref: ${{ env.LIBMAD_PARDISO_COMMIT }}
+          path: .benchmark-deps/libMad
+
       - name: Set up the Linux benchmark environment
         uses: conda-incubator/setup-miniconda@v4
         with:
@@ -197,6 +205,9 @@ jobs:
           fi
           echo "BENCHMARK_THREADS=$available_cores" >> "$GITHUB_ENV"
           echo "CMAKE_BUILD_PARALLEL_LEVEL=$available_cores" >> "$GITHUB_ENV"
+          if [[ "${{ matrix.solver }}" == "madnlp" ]]; then
+            echo "MKL_NUM_THREADS=$available_cores" >> "$GITHUB_ENV"
+          fi
           lscpu
           grep '^Cpus_allowed_list' /proc/self/status || true
 
@@ -205,23 +216,30 @@ jobs:
         id: screen-madnlp-cache
         uses: actions/cache@v6
         with:
-          path: .cache/madnlp
-          key: madnlp-cpu-jl1.10.4-linux-${{ env.MADNLP_SHA256 }}
+          path: .cache/madnlp-pardiso
+          key: libmad-pardiso-linux-${{ env.LIBMAD_PARDISO_COMMIT }}-${{ env.JULIAC_COMMIT }}
 
-      - name: Install the MadNLP runtime
+      - name: Install Julia for the MadNLP PARDISO runtime
+        if: matrix.solver == 'madnlp' && steps.screen-madnlp-cache.outputs.cache-hit != 'true'
+        uses: julia-actions/install-juliaup@v2
+        with:
+          channel: "1.12"
+
+      - name: Build the MadNLP PARDISO runtime
         if: matrix.solver == 'madnlp' && steps.screen-madnlp-cache.outputs.cache-hit != 'true'
         run: |
-          mkdir -p .cache/madnlp
-          curl --fail --location --retry 3 "$MADNLP_URL" \
-            --output "/tmp/$MADNLP_ARCHIVE"
-          echo "$MADNLP_SHA256  /tmp/$MADNLP_ARCHIVE" | sha256sum --check
-          unzip -q "/tmp/$MADNLP_ARCHIVE" -d .cache/madnlp
+          bash .github/scripts/install_libmad_pardiso_linux.sh \
+            .benchmark-deps/libMad \
+            .cache/madnlp-pardiso \
+            "$JULIAC_COMMIT"
 
       - name: Configure the MadNLP runtime
         if: matrix.solver == 'madnlp'
         run: |
-          echo "LD_LIBRARY_PATH=$GITHUB_WORKSPACE/.cache/madnlp/foo/lib:${LD_LIBRARY_PATH:-}" \
+          test -f .cache/madnlp-pardiso/lib/libMad.so
+          echo "LD_LIBRARY_PATH=$GITHUB_WORKSPACE/.cache/madnlp-pardiso/lib:$GITHUB_WORKSPACE/.cache/madnlp-pardiso/share/julia/lib:${LD_LIBRARY_PATH:-}" \
             >> "$GITHUB_ENV"
+          echo "LIBMAD_BENCHMARK_COMMIT=$LIBMAD_PARDISO_COMMIT" >> "$GITHUB_ENV"
 
       - name: Install CasADi with IPOPT and MadNLP
         if: matrix.solver == 'madnlp'
@@ -356,6 +374,8 @@ jobs:
               "${madnlp_common[@]}" --madnlp-linear-solver mumps
             run_case madnlp-tol1e-7-umfpack 4 1e-7 \
               "${madnlp_common[@]}" --madnlp-linear-solver umfpack
+            run_case madnlp-tol1e-8-pardiso-mkl 4 1e-8 \
+              "${madnlp_common[@]}" --madnlp-linear-solver pardiso_mkl
           fi
 
       - name: Upload the option-screen JSON and logs
@@ -408,6 +428,14 @@ jobs:
           ref: ${{ matrix.bioptim_commit }}
           path: .benchmark-deps/bioptim
 
+      - name: Checkout the pinned libMad PARDISO runtime
+        if: matrix.solver == 'madnlp'
+        uses: actions/checkout@v6
+        with:
+          repository: ${{ env.LIBMAD_REPOSITORY }}
+          ref: ${{ env.LIBMAD_PARDISO_COMMIT }}
+          path: .benchmark-deps/libMad
+
       - name: Set up the Linux benchmark environment
         uses: conda-incubator/setup-miniconda@v4
         with:
@@ -427,6 +455,9 @@ jobs:
           fi
           echo "BENCHMARK_THREADS=$available_cores" >> "$GITHUB_ENV"
           echo "CMAKE_BUILD_PARALLEL_LEVEL=$available_cores" >> "$GITHUB_ENV"
+          if [[ "${{ matrix.solver }}" == "madnlp" ]]; then
+            echo "MKL_NUM_THREADS=$available_cores" >> "$GITHUB_ENV"
+          fi
           lscpu
           grep '^Cpus_allowed_list' /proc/self/status || true
 
@@ -435,23 +466,30 @@ jobs:
         id: madnlp-cache
         uses: actions/cache@v6
         with:
-          path: .cache/madnlp
-          key: madnlp-cpu-jl1.10.4-linux-${{ env.MADNLP_SHA256 }}
+          path: .cache/madnlp-pardiso
+          key: libmad-pardiso-linux-${{ env.LIBMAD_PARDISO_COMMIT }}-${{ env.JULIAC_COMMIT }}
 
-      - name: Install the MadNLP runtime
+      - name: Install Julia for the MadNLP PARDISO runtime
+        if: matrix.solver == 'madnlp' && steps.madnlp-cache.outputs.cache-hit != 'true'
+        uses: julia-actions/install-juliaup@v2
+        with:
+          channel: "1.12"
+
+      - name: Build the MadNLP PARDISO runtime
         if: matrix.solver == 'madnlp' && steps.madnlp-cache.outputs.cache-hit != 'true'
         run: |
-          mkdir -p .cache/madnlp
-          curl --fail --location --retry 3 "$MADNLP_URL" \
-            --output "/tmp/$MADNLP_ARCHIVE"
-          echo "$MADNLP_SHA256  /tmp/$MADNLP_ARCHIVE" | sha256sum --check
-          unzip -q "/tmp/$MADNLP_ARCHIVE" -d .cache/madnlp
+          bash .github/scripts/install_libmad_pardiso_linux.sh \
+            .benchmark-deps/libMad \
+            .cache/madnlp-pardiso \
+            "$JULIAC_COMMIT"
 
       - name: Configure the MadNLP runtime
         if: matrix.solver == 'madnlp'
         run: |
-          echo "LD_LIBRARY_PATH=$GITHUB_WORKSPACE/.cache/madnlp/foo/lib:${LD_LIBRARY_PATH:-}" \
+          test -f .cache/madnlp-pardiso/lib/libMad.so
+          echo "LD_LIBRARY_PATH=$GITHUB_WORKSPACE/.cache/madnlp-pardiso/lib:$GITHUB_WORKSPACE/.cache/madnlp-pardiso/share/julia/lib:${LD_LIBRARY_PATH:-}" \
             >> "$GITHUB_ENV"
+          echo "LIBMAD_BENCHMARK_COMMIT=$LIBMAD_PARDISO_COMMIT" >> "$GITHUB_ENV"
 
       - name: Install CasADi with IPOPT, Fatrop and MadNLP
         run: python -m pip install --no-deps "casadi==$CASADI_VERSION"
@@ -514,6 +552,7 @@ jobs:
                   "print_level": 0,
                   "max_iter": 50,
                   "tol": 1e-8,
+                  "linear_solver": "PardisoMKLSolver",
               }
           smoke = cas.nlpsol(
               f"{target}_smoke",
@@ -582,6 +621,7 @@ jobs:
             # primal trajectory; the job timeout is the outer safety limit.
             solver_options+=(
               --madnlp-max-iter "$BENCHMARK_MAX_ITER"
+              --madnlp-linear-solver pardiso_mkl
               --madnlp-dual-warm-start-mode off
               --optional-nlp-periodic-ipopt-hot-start
             )

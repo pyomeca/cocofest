@@ -1331,7 +1331,11 @@ def build_argument_parser() -> argparse.ArgumentParser:
         "--acados-terminal-wheel-q-slack",
         type=float,
         default=0.002,
-        help="Terminal crank-angle slack in rad; independent from the first-node transfer slack.",
+        help=(
+            "Terminal crank-angle slack in rad around the absolute initial-angle "
+            "plus signed-cycle-count reference; independent from the first-node "
+            "transfer slack."
+        ),
     )
     parser.add_argument(
         "--terminal-wheel-q-slack",
@@ -1339,8 +1343,9 @@ def build_argument_parser() -> argparse.ArgumentParser:
         default=None,
         help=(
             "Backend-independent terminal crank-angle slack in rad. When set, "
-            "it overrides --acados-terminal-wheel-q-slack for IPOPT, MadNLP, "
-            "Alpaqa, and ACADOS."
+            "it overrides --acados-terminal-wheel-q-slack for IPOPT, Fatrop, "
+            "MadNLP, Alpaqa, and ACADOS. The center is an absolute cycle-count "
+            "reference, so this tolerance cannot accumulate between RHO windows."
         ),
     )
     parser.add_argument(
@@ -1784,13 +1789,15 @@ def build_argument_parser() -> argparse.ArgumentParser:
             "mumps",
             "umfpack",
             "lapack_cpu",
+            "pardiso_mkl",
             "cudss",
             "lapack_gpu",
             "cucholesky",
         ),
         help=(
-            "MadNLP C-runtime linear solver. The default is mumps; GPU choices "
-            "require a compatible MadNLP runtime and runner."
+            "MadNLP C-runtime linear solver. The default is mumps; pardiso_mkl "
+            "requires the x86-64 libMad MKL runtime, and GPU choices require a "
+            "compatible runtime and runner."
         ),
     )
     parser.add_argument(
@@ -2741,7 +2748,7 @@ def _warmup_cache_path(
 def _periodic_ipopt_refinement_cache_path(
     args: argparse.Namespace,
     model_path: Path,
-    cache_version: int = 3,
+    cache_version: int = 4,
 ) -> Path:
     repository_root = Path(__file__).resolve().parents[3]
     payload = {
@@ -2790,6 +2797,8 @@ def _periodic_ipopt_refinement_cache_path(
         payload["wheel_cycle_boundary_slack"] = (
             args.acados_terminal_wheel_q_slack
         )
+    if cache_version >= 4:
+        payload["terminal_wheel_q_reference_mode"] = "absolute_initial"
     return _cache_root() / f"periodic_ipopt_{_short_hash(payload)}.npz"
 
 
@@ -2811,7 +2820,7 @@ def _acados_seed_cache_path(args: argparse.Namespace, model_path: Path) -> Path 
     )
     payload = {
         "kind": "acados_seed",
-        "cache_version": 2,
+        "cache_version": 3,
         "model_formulation": args.model_formulation,
         "cycles_per_window": args.cycles_per_window,
         "stimulations_per_cycle": args.stimulations_per_cycle,
@@ -2824,6 +2833,7 @@ def _acados_seed_cache_path(args: argparse.Namespace, model_path: Path) -> Path 
         "torque_application": args.torque_application,
         "state_scaling": args.state_scaling,
         "pulse_width_scaling": args.pulse_width_scaling,
+        "terminal_wheel_q_reference_mode": "absolute_initial",
         "integrator_type": args.acados_integrator_type,
         "sim_stages": args.acados_sim_stages,
         "sim_steps": args.acados_sim_steps,
@@ -2883,8 +2893,8 @@ def _continuation_cache_signature(args: argparse.Namespace) -> str:
     repository_root = Path(__file__).resolve().parents[3]
     payload = {
         "kind": "acados_one_cycle_continuation",
-        "cache_version": 2,
-        "nmpc_builder_version": 1,
+        "cache_version": 3,
+        "nmpc_builder_version": 2,
         "model_formulation": args.model_formulation,
         "objective": args.objective,
         "objective_shape": args.objective_shape,
@@ -2909,6 +2919,7 @@ def _continuation_cache_signature(args: argparse.Namespace) -> str:
             args.terminal_qdot_regularization_target_source
         ),
         "terminal_wheel_q_slack": args.acados_terminal_wheel_q_slack,
+        "terminal_wheel_q_reference_mode": "absolute_initial",
         "integrator_type": args.acados_integrator_type,
         "collocation_type": args.acados_collocation_type,
         "sim_stages": args.acados_sim_stages,
@@ -2969,8 +2980,8 @@ def _horizon_seed_cache_signature(args: argparse.Namespace) -> str:
     repository_root = Path(__file__).resolve().parents[3]
     payload = {
         "kind": "acados_horizon_seed",
-        "cache_version": 4,
-        "nmpc_builder_version": 1,
+        "cache_version": 5,
+        "nmpc_builder_version": 2,
         "model_formulation": args.model_formulation,
         "cycles_per_window": args.cycles_per_window,
         "stimulations_per_cycle": args.stimulations_per_cycle,
@@ -3002,6 +3013,7 @@ def _horizon_seed_cache_signature(args: argparse.Namespace) -> str:
         "fes_state_trust_radius": args.acados_fes_state_trust_radius,
         "wheel_q_slack": args.acados_wheel_q_slack,
         "terminal_wheel_q_slack": args.acados_terminal_wheel_q_slack,
+        "terminal_wheel_q_reference_mode": "absolute_initial",
         "wheel_qdot_slack": args.acados_wheel_qdot_slack,
         "wheel_q_path_margin": args.acados_wheel_q_path_margin,
         "project_qdot_from_q": args.acados_project_qdot_from_q,
@@ -3040,8 +3052,8 @@ def _codegen_signature(args: argparse.Namespace) -> str:
     payload = {
         # Increment when solve_case changes the generated OCP structure in a way that is
         # not represented by the arguments or the model sources below.
-        "problem_builder_version": 1,
-        "nmpc_builder_version": 1,
+        "problem_builder_version": 2,
+        "nmpc_builder_version": 2,
         "solver": args.solver,
         "model_formulation": args.model_formulation,
         "torque_application": args.torque_application,
@@ -3069,6 +3081,7 @@ def _codegen_signature(args: argparse.Namespace) -> str:
             args.terminal_qdot_regularization_target_source
         ),
         "acados_terminal_wheel_q_slack": args.acados_terminal_wheel_q_slack,
+        "terminal_wheel_q_reference_mode": "absolute_initial",
         "state_scaling": args.state_scaling,
         "pulse_width_scaling": args.pulse_width_scaling,
         "acados_pulse_width_trust_radius": args.acados_pulse_width_trust_radius,
@@ -5578,6 +5591,9 @@ def diagnose_wheel_trace(
         issues.append("wheel_angle_jump_out_of_bounds")
     cycle_progress_errors = np.array([], dtype=float)
     maximum_cycle_progress_error = None
+    absolute_cycle_errors = np.array([], dtype=float)
+    maximum_absolute_cycle_error = None
+    final_absolute_cycle_error = None
     interval_count = trace.size - 1
     if finite and interval_count > 0 and interval_count % requested_windows == 0:
         shooting_per_cycle = interval_count // requested_windows
@@ -5586,6 +5602,18 @@ def diagnose_wheel_trace(
         maximum_cycle_progress_error = float(np.max(np.abs(cycle_progress_errors)))
         if maximum_cycle_progress_error > cycle_progress_tolerance:
             issues.append("wheel_cycle_progress_out_of_bounds")
+        absolute_targets = (
+            cycle_boundaries[0]
+            + np.arange(cycle_boundaries.size, dtype=float)
+            * float(expected_cycle_shift)
+        )
+        absolute_cycle_errors = cycle_boundaries - absolute_targets
+        maximum_absolute_cycle_error = float(
+            np.max(np.abs(absolute_cycle_errors))
+        )
+        final_absolute_cycle_error = float(absolute_cycle_errors[-1])
+        if maximum_absolute_cycle_error > cycle_progress_tolerance:
+            issues.append("wheel_absolute_progress_out_of_bounds")
     elif finite:
         issues.append("wheel_cycle_grid_mismatch")
 
@@ -5601,6 +5629,9 @@ def diagnose_wheel_trace(
         "cycle_progress_tolerance": float(cycle_progress_tolerance),
         "cycle_progress_errors": cycle_progress_errors.tolist(),
         "maximum_cycle_progress_error": maximum_cycle_progress_error,
+        "absolute_cycle_errors": absolute_cycle_errors.tolist(),
+        "maximum_absolute_cycle_error": maximum_absolute_cycle_error,
+        "final_absolute_cycle_error": final_absolute_cycle_error,
     }
 
 
@@ -9047,6 +9078,10 @@ def _copy_periodic_runtime_settings(source_nmpc, target_nmpc) -> None:
         "bound_first_node_wheel_qdot",
         "advance_wheel_q_bounds",
         "anchor_terminal_wheel_to_first_node",
+        "anchor_wheel_q_to_absolute_reference",
+        "absolute_wheel_q_reference",
+        "absolute_wheel_q_cycle_shift",
+        "absolute_wheel_q_cycle_index",
         "wheel_q_path_margin",
         "use_signed_wheel_shift",
         "transfer_initial_guess_mode",
@@ -9796,6 +9831,7 @@ def get_one_cycle_acados_continuation_source(
 def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
     preparation_start = perf_counter()
     apply_assisted_hot_start_defaults(args)
+    args.terminal_wheel_q_reference_mode = "absolute_initial"
     objectives = parse_objectives(args.objective)
     torque_diagnostics = crank_torque_diagnostics(
         args.constant_crank_torque,
@@ -10391,7 +10427,13 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
         )
         nmpc.bound_first_node_wheel_qdot = False
         nmpc.advance_wheel_q_bounds = True
-        nmpc.anchor_terminal_wheel_to_first_node = True
+        nmpc.anchor_terminal_wheel_to_first_node = False
+        nmpc.anchor_wheel_q_to_absolute_reference = True
+        nmpc.absolute_wheel_q_reference = float(
+            np.asarray(nmpc.nlp[0].x_init["q"].init, dtype=float)[2, 0]
+        )
+        nmpc.absolute_wheel_q_cycle_shift = -2.0 * np.pi
+        nmpc.absolute_wheel_q_cycle_index = 0
         nmpc.wheel_q_path_margin = args.acados_wheel_q_path_margin
         nmpc.use_signed_wheel_shift = True
         nmpc.transfer_initial_guess_mode = "anchored"
@@ -10462,6 +10504,10 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
         print(
             "terminal_wheel_regularization_weight: "
             f"{args.terminal_wheel_regularization_weight}"
+        )
+        print(
+            "terminal_wheel_q_reference_mode: "
+            f"{args.terminal_wheel_q_reference_mode}"
         )
         print(f"state_scaling: {args.state_scaling}")
         print(f"pulse_width_scaling: {args.pulse_width_scaling}")

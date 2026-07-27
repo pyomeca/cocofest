@@ -1896,6 +1896,33 @@ def test_wheel_trace_diagnostic_accepts_configured_cycle_slack():
 
     assert diagnostics["is_physical"]
     assert diagnostics["maximum_cycle_progress_error"] < 0.01
+    assert diagnostics["maximum_absolute_cycle_error"] < 0.01
+    np.testing.assert_allclose(
+        diagnostics["final_absolute_cycle_error"],
+        -12.56 - (-4.0 * np.pi),
+    )
+
+
+def test_wheel_trace_diagnostic_rejects_accumulated_same_sign_drift():
+    per_cycle_error = 0.002
+    cycle_boundaries = np.arange(101, dtype=float) * (
+        -2.0 * np.pi + per_cycle_error
+    )
+
+    diagnostics = periodic_example.diagnose_wheel_trace(
+        cycle_boundaries,
+        requested_windows=100,
+        expected_cycle_shift=-2.0 * np.pi,
+        cycle_progress_tolerance=0.0021,
+    )
+
+    assert diagnostics["maximum_cycle_progress_error"] < 0.0021
+    np.testing.assert_allclose(
+        diagnostics["final_absolute_cycle_error"], 100 * per_cycle_error
+    )
+    assert diagnostics["maximum_absolute_cycle_error"] > 0.19
+    assert "wheel_absolute_progress_out_of_bounds" in diagnostics["issues"]
+    assert diagnostics["is_physical"] is False
 
 
 def test_a_capacity_metrics_use_model_scale_instead_of_initial_state():
@@ -1982,9 +2009,13 @@ def test_solver_clis_accept_explicit_thread_count():
     periodic_args = periodic_example.build_argument_parser().parse_args(
         ["--n-threads", "8"]
     )
+    pardiso_args = comparison_example.build_cli().parse_args(
+        ["--madnlp-linear-solver", "pardiso_mkl"]
+    )
     comparison_args = comparison_example.build_cli().parse_args(["--n-threads", "8"])
 
     assert periodic_args.n_threads == 8
+    assert pardiso_args.madnlp_linear_solver == "pardiso_mkl"
     assert comparison_args.n_threads == 8
 
 
@@ -4054,6 +4085,82 @@ def test_terminal_wheel_target_is_anchored_to_new_window_start():
     expected_terminal = -6.0 - 4.0 * np.pi
     np.testing.assert_allclose(q_bounds.min[2, 2], expected_terminal - 0.01)
     np.testing.assert_allclose(q_bounds.max[2, 2], expected_terminal + 0.01)
+
+
+def test_terminal_wheel_target_uses_absolute_cycle_reference_without_drift():
+    q_bounds = SimpleNamespace(
+        min=np.full((3, 3), -100.0),
+        max=np.full((3, 3), 100.0),
+    )
+    qdot_bounds = SimpleNamespace(
+        min=np.full((3, 3), -100.0),
+        max=np.full((3, 3), 100.0),
+    )
+    nmpc = SimpleNamespace(
+        before_window_advance=None,
+        nodes_per_cycle=1,
+        time_idx_to_cycle=1,
+        n_cycles_simultaneous=2,
+        debugg_bounds=False,
+        transfer_debug=False,
+        bound_first_node_all_states=True,
+        bound_first_node_wheel_qdot=False,
+        advance_wheel_q_bounds=True,
+        anchor_terminal_wheel_to_first_node=False,
+        anchor_wheel_q_to_absolute_reference=True,
+        absolute_wheel_q_reference=0.0,
+        absolute_wheel_q_cycle_shift=-2.0 * np.pi,
+        absolute_wheel_q_cycle_index=0,
+        wheel_q_path_margin=2.0,
+        use_signed_wheel_shift=True,
+        first_node_state_slack={"q": [0.0, 0.0, 0.0]},
+        terminal_state_slack={"q": [0.0, 0.0, 0.002]},
+        nlp=[SimpleNamespace(x_bounds={"q": q_bounds, "qdot": qdot_bounds})],
+        _wheel_cycle_shift=lambda states: -2.0 * np.pi,
+        _state_slack_for=lambda key, index: 0.0,
+        _terminal_state_slack_for=lambda key, index: (
+            0.002 if key == "q" and index == 2 else 0.0
+        ),
+        update_stim=lambda: None,
+        _sync_acados_state_bounds=lambda: None,
+    )
+
+    first_q = np.zeros((3, 3))
+    first_q[2] = [
+        0.0,
+        -2.0 * np.pi + 0.005,
+        -4.0 * np.pi + 0.010,
+    ]
+    qdot = np.zeros((3, 3))
+    qdot[2] = -2.0 * np.pi
+    first_solution = SimpleNamespace(
+        decision_states=lambda to_merge=None: {"q": first_q, "qdot": qdot}
+    )
+
+    MyCyclicNMPC.advance_window_bounds_states(
+        nmpc, first_solution, n_cycles_simultaneous=2
+    )
+
+    np.testing.assert_allclose(q_bounds.min[2, 2], -6.0 * np.pi - 0.002)
+    np.testing.assert_allclose(q_bounds.max[2, 2], -6.0 * np.pi + 0.002)
+
+    second_q = np.zeros((3, 3))
+    second_q[2] = [
+        -2.0 * np.pi + 0.005,
+        -4.0 * np.pi + 0.010,
+        -6.0 * np.pi + 0.015,
+    ]
+    second_solution = SimpleNamespace(
+        decision_states=lambda to_merge=None: {"q": second_q, "qdot": qdot}
+    )
+
+    MyCyclicNMPC.advance_window_bounds_states(
+        nmpc, second_solution, n_cycles_simultaneous=2
+    )
+
+    np.testing.assert_allclose(q_bounds.min[2, 2], -8.0 * np.pi - 0.002)
+    np.testing.assert_allclose(q_bounds.max[2, 2], -8.0 * np.pi + 0.002)
+    assert nmpc.absolute_wheel_q_cycle_index == 2
 
 
 def test_wheel_cycle_boundary_constraint_is_recentered_with_unwrapped_angle():

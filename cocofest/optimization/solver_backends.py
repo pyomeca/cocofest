@@ -14,10 +14,14 @@ MADNLP_LINEAR_SOLVER_NAMES = (
     "mumps",
     "umfpack",
     "lapack_cpu",
+    "pardiso_mkl",
     "cudss",
     "lapack_gpu",
     "cucholesky",
 )
+MADNLP_LINEAR_SOLVER_RUNTIME_NAMES = {
+    "pardiso_mkl": "PardisoMKLSolver",
+}
 
 
 class SolverBackendUnavailable(RuntimeError):
@@ -215,7 +219,10 @@ def configure_nlp_solver(
         # projected primal trajectory supplied by Cocofest, without a
         # solver-specific barrier or multiplier initialization.
         if madnlp_linear_solver is not None:
-            solver.set_option_unsafe(madnlp_linear_solver, "linear_solver")
+            runtime_linear_solver = MADNLP_LINEAR_SOLVER_RUNTIME_NAMES.get(
+                madnlp_linear_solver, madnlp_linear_solver
+            )
+            solver.set_option_unsafe(runtime_linear_solver, "linear_solver")
         solver.set_c_compile(madnlp_c_compile)
         return solver
 

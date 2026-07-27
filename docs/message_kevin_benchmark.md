@@ -120,10 +120,16 @@ Un autre point sensible apparaît seulement sur l’horizon long : la tolérance
 terminale de `0.002 rad` est respectée à chaque RHO, mais elle est presque
 toujours utilisée dans le même sens à partir d’environ 30 cycles. L’erreur
 angulaire accumulée d’IPOPT atteint `0.1587 rad` à 100 cycles, soit environ
-`9.1°`. Le solveur converge, mais cette dérive rend l’état terminal moins
-précis qu’on le souhaite pour une étude d’endurance. Le prochain essai
-scientifique devrait comparer `0`, `1e-4` et `0.002 rad`, sans modifier
-rétroactivement ce benchmark de performance.
+`9.1°`. Ce résultat décrit le run historique ci-dessus.
+
+Le code a depuis été corrigé : la cible terminale du cycle `k` vaut maintenant
+`q_initial + k*(-2π)`, au lieu d’être reconstruite depuis le RHO précédent.
+L’état exécuté conserve la continuité exacte au premier nœud, mais une erreur
+terminale ne peut plus déplacer la cible suivante. La tolérance `0.002 rad`
+est donc absolue et ne peut plus s’accumuler. Le diagnostic rejette également
+une dérive cumulée même si chaque tour respecte séparément la tolérance locale.
+Les caches de warm start dépendants de cette contrainte ont été versionnés pour
+éviter de réutiliser silencieusement une ancienne référence relative.
 
 Pour relancer exactement le benchmark :
 
@@ -153,3 +159,14 @@ avec la compatibilité actuelle sans scaling ; son intérêt principal est une
 seconde méthode structurée indépendante pour valider les solutions.
 **Alpaqa reste laissé de côté**, car aucun réglage testé n’a fourni une
 continuation MHE convergente.
+
+Pour le prochain run Linux, MadNLP utilise désormais PARDISO/MKL au lieu de
+MUMPS. Le workflow construit directement le commit libMad
+`5529f23a6bff33c566ad954da38d352f1f172356` de la branche
+`codex/pardiso-mkl`, vérifie `PardisoMKLSolver` via l’interface C puis via
+CasADi, et lui attribue tous les cœurs du runner avec `MKL_NUM_THREADS`. Cette
+voie est limitée à Linux x86-64 et n’est pas disponible nativement sur les Mac
+Apple Silicon. Elle n’a pas encore de résultat sur l’OCP complet : le prochain
+benchmark doit donc être interprété comme la première comparaison
+MadNLP-PARDISO face à IPOPT-MUMPS et Fatrop, avec la nouvelle contrainte
+angulaire absolue.
