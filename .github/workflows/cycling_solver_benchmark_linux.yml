@@ -9,7 +9,7 @@ on:
         default: ubuntu-22.04
         type: string
       cycles:
-        description: Maximum number of one-cycle RHO windows
+        description: Maximum one-cycle RHO windows, or "screen" for the option matrix
         required: true
         default: "30"
         type: string
@@ -35,6 +35,7 @@ on:
         type: string
 
 permissions:
+  actions: read
   contents: read
 
 concurrency:
@@ -143,8 +144,227 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
+  screen-options:
+    name: Option screen — ${{ matrix.solver }}
+    if: inputs.cycles == 'screen'
+    needs: prepare-seed
+    runs-on: ${{ inputs.runner_label }}
+    timeout-minutes: 180
+    strategy:
+      fail-fast: false
+      max-parallel: 2
+      matrix:
+        include:
+          - solver: madnlp
+            bioptim_commit: 346eb1d445e6ba67010b96c6f16ba830185119e7
+            integration_branch: codex/madnlp-integration-master
+            casadi_cxx_abi: 0
+          - solver: alpaqa
+            bioptim_commit: d84e7e43534360fc048e0be26a3bd69a2abc2d77
+            integration_branch: codex/alpaqa-integration
+            casadi_cxx_abi: 1
+    env:
+      CASADI_CXX_ABI: ${{ matrix.casadi_cxx_abi }}
+    defaults:
+      run:
+        shell: bash -el {0}
+
+    steps:
+      - name: Checkout Cocofest
+        uses: actions/checkout@v6
+
+      - name: Checkout the pinned Bioptim solver integration
+        uses: actions/checkout@v6
+        with:
+          repository: ${{ env.BIOPTIM_REPOSITORY }}
+          ref: ${{ matrix.bioptim_commit }}
+          path: .benchmark-deps/bioptim
+
+      - name: Set up the Linux benchmark environment
+        uses: conda-incubator/setup-miniconda@v4
+        with:
+          miniforge-version: latest
+          activate-environment: cocofest-cycling-benchmark
+          environment-file: .github/cycling-benchmark-linux-environment.yml
+          conda-remove-defaults: true
+
+      - name: Detect the CPU allocation
+        run: |
+          available_cores="$(env -u OMP_NUM_THREADS -u OMP_THREAD_LIMIT nproc)"
+          if [[ "$available_cores" -lt 1 ]]; then
+            echo "No CPU was reported by nproc." >&2
+            exit 1
+          fi
+          echo "BENCHMARK_THREADS=$available_cores" >> "$GITHUB_ENV"
+          echo "CMAKE_BUILD_PARALLEL_LEVEL=$available_cores" >> "$GITHUB_ENV"
+          lscpu
+          grep '^Cpus_allowed_list' /proc/self/status || true
+
+      - name: Cache the MadNLP runtime
+        if: matrix.solver == 'madnlp'
+        id: screen-madnlp-cache
+        uses: actions/cache@v6
+        with:
+          path: .cache/madnlp
+          key: madnlp-cpu-jl1.10.4-linux-${{ env.MADNLP_SHA256 }}
+
+      - name: Install the MadNLP runtime
+        if: matrix.solver == 'madnlp' && steps.screen-madnlp-cache.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p .cache/madnlp
+          curl --fail --location --retry 3 "$MADNLP_URL" \
+            --output "/tmp/$MADNLP_ARCHIVE"
+          echo "$MADNLP_SHA256  /tmp/$MADNLP_ARCHIVE" | sha256sum --check
+          unzip -q "/tmp/$MADNLP_ARCHIVE" -d .cache/madnlp
+
+      - name: Configure the MadNLP runtime
+        if: matrix.solver == 'madnlp'
+        run: |
+          echo "LD_LIBRARY_PATH=$GITHUB_WORKSPACE/.cache/madnlp/foo/lib:${LD_LIBRARY_PATH:-}" \
+            >> "$GITHUB_ENV"
+
+      - name: Install CasADi with IPOPT and MadNLP
+        if: matrix.solver == 'madnlp'
+        run: python -m pip install --no-deps "casadi==$CASADI_VERSION"
+
+      - name: Build CasADi with IPOPT and Alpaqa
+        if: matrix.solver == 'alpaqa'
+        run: bash .github/scripts/install_casadi_alpaqa_linux.sh
+
+      - name: Install biorbd and Bioptim
+        run: |
+          bash .github/scripts/install_biorbd_casadi_linux.sh
+          python -m pip install --no-deps -e .benchmark-deps/bioptim
+
+      - name: Download the validated common continuation seed
+        uses: actions/download-artifact@v8
+        with:
+          name: cycling-assisted-common-seed-${{ github.run_id }}
+          path: benchmark-seed
+
+      - name: Verify the option-screen environment
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+          BENCHMARK_SOLVER: ${{ matrix.solver }}
+        run: |
+          python - <<'PY'
+          import os
+          import casadi as cas
+          import bioptim
+
+          solver = os.environ["BENCHMARK_SOLVER"]
+          print(f"CasADi {cas.__version__}")
+          print(f"Bioptim {bioptim.__version__}")
+          print(f"CasADi compiler flags: {cas.CasadiMeta.compiler_flags()}")
+          assert "-DCASADI_WITH_THREAD" in cas.CasadiMeta.compiler_flags()
+          assert cas.has_nlpsol("ipopt")
+          assert cas.has_nlpsol(solver)
+          assert hasattr(bioptim.Solver, solver.upper())
+          PY
+          python -m pytest -q \
+            tests/shard1/test_solver_backends.py \
+            tests/test_solver_option_screen_summary.py
+
+      - name: Run the focused ${{ matrix.solver }} option screen
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+          BENCHMARK_ASSISTANCE: ${{ inputs.crank_assistance_nm }}
+          BENCHMARK_Q_SLACK: ${{ inputs.terminal_wheel_q_slack }}
+          BENCHMARK_SOLVER: ${{ matrix.solver }}
+          COCOFEST_BENCHMARK_COMMIT: ${{ github.sha }}
+          BIOPTIM_BENCHMARK_COMMIT: ${{ matrix.bioptim_commit }}
+          BIOPTIM_INTEGRATION_BRANCH: ${{ matrix.integration_branch }}
+        run: |
+          mkdir -p benchmark-option-screen
+
+          run_case() {
+            local variant="$1"
+            local windows="$2"
+            local tolerance="$3"
+            shift 3
+            echo "::group::${variant}"
+            set -o pipefail
+            python examples/fes_multibody/cycling/cycling_fes_solver_comparison.py \
+              --solvers "$BENCHMARK_SOLVER" \
+              --objective fatigue \
+              --ipopt-profile periodic_collocation \
+              --cycles-per-window 1 \
+              --stimulations-per-cycle 30 \
+              --n-windows "$windows" \
+              --n-threads "$BENCHMARK_THREADS" \
+              --crank-assistance "$BENCHMARK_ASSISTANCE" \
+              --nlp-tolerance "$tolerance" \
+              --max-consecutive-failing 2 \
+              --standard-warmup-seed benchmark-seed/common-continuation-warmup.npz \
+              --legacy-standard-warmup-seed-signed-torque 0.22 \
+              --standard-warmup-seed-continuation \
+              --warmup-ipopt-linear-solver mumps \
+              --ipopt-linear-solver mumps \
+              --ipopt-disable-historical-initial-guess \
+              --state-scaling full \
+              --first-node-wheel-q-slack 0 \
+              --terminal-wheel-q-slack "$BENCHMARK_Q_SLACK" \
+              --compact-rho-output \
+              --print-traces \
+              --output-json "$GITHUB_WORKSPACE/benchmark-option-screen/${variant}.json" \
+              "$@" \
+              2>&1 | tee "benchmark-option-screen/${variant}.log"
+            jq -e '.results[0] | (.attempted_windows > 0 and .error == null)' \
+              "benchmark-option-screen/${variant}.json"
+            echo "::endgroup::"
+          }
+
+          if [[ "$BENCHMARK_SOLVER" == "alpaqa" ]]; then
+            alpaqa_common=(
+              --alpaqa-max-iter 2000
+              --alpaqa-alm-max-iter 100
+              --alpaqa-max-wall-time 60
+              --alpaqa-dual-warm-start-mode off
+              --optional-nlp-periodic-ipopt-hot-start
+            )
+            run_case alpaqa-panoc60-default 1 1e-6 \
+              "${alpaqa_common[@]}" --alpaqa-panoc-max-wall-time 60
+            run_case alpaqa-panoc20-default 1 1e-6 \
+              "${alpaqa_common[@]}" --alpaqa-panoc-max-wall-time 20
+            run_case alpaqa-panoc5-default 1 1e-6 \
+              "${alpaqa_common[@]}" --alpaqa-panoc-max-wall-time 5
+            run_case alpaqa-panoc20-auto-penalty 1 1e-6 \
+              "${alpaqa_common[@]}" --alpaqa-panoc-max-wall-time 20 \
+              --alpaqa-initial-penalty 0
+            run_case alpaqa-panoc20-penalty0p01 1 1e-6 \
+              "${alpaqa_common[@]}" --alpaqa-panoc-max-wall-time 20 \
+              --alpaqa-initial-penalty 0.01
+            run_case alpaqa-panoc20-penalty0p01-factor2 1 1e-6 \
+              "${alpaqa_common[@]}" --alpaqa-panoc-max-wall-time 20 \
+              --alpaqa-initial-penalty 0.01 \
+              --alpaqa-penalty-update-factor 2
+          else
+            madnlp_common=(
+              --madnlp-max-iter 2000
+              --madnlp-dual-warm-start-mode off
+              --optional-nlp-periodic-ipopt-hot-start
+            )
+            run_case madnlp-tol1e-6-default 4 1e-6 "${madnlp_common[@]}"
+            run_case madnlp-tol1e-7-default 4 1e-7 "${madnlp_common[@]}"
+            run_case madnlp-tol1e-8-default 4 1e-8 "${madnlp_common[@]}"
+            run_case madnlp-tol1e-7-mumps 4 1e-7 \
+              "${madnlp_common[@]}" --madnlp-linear-solver mumps
+            run_case madnlp-tol1e-7-umfpack 4 1e-7 \
+              "${madnlp_common[@]}" --madnlp-linear-solver umfpack
+          fi
+
+      - name: Upload the option-screen JSON and logs
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: cycling-option-screen-${{ matrix.solver }}-${{ github.run_id }}
+          path: benchmark-option-screen/
+          if-no-files-found: warn
+          retention-days: 30
+
   benchmark:
     name: ${{ matrix.solver }} — ${{ inputs.cycles }} RHO
+    if: inputs.cycles != 'screen'
     needs: prepare-seed
     runs-on: ${{ inputs.runner_label }}
     timeout-minutes: 350
@@ -434,9 +654,60 @@ jobs:
             (.attempted_windows > 0 and .error == null)
           ' "$result"
 
+  screen-report:
+    name: Aggregate solver option screen
+    if: ${{ always() && inputs.cycles == 'screen' }}
+    needs: screen-options
+    runs-on: ubuntu-22.04
+    permissions:
+      actions: read
+      contents: read
+
+    steps:
+      - name: Checkout Cocofest
+        uses: actions/checkout@v6
+
+      - name: Download every available option-screen artifact
+        uses: actions/download-artifact@v8
+        continue-on-error: true
+        with:
+          pattern: cycling-option-screen-*-${{ github.run_id }}
+          path: benchmark-option-screen-all
+          merge-multiple: true
+
+      - name: Build the option comparison
+        run: |
+          mkdir -p benchmark-option-screen-all benchmark-option-report
+          mapfile -t result_files < <(
+            find benchmark-option-screen-all -name '*.json' -type f | sort
+          )
+          if [[ "${#result_files[@]}" -eq 0 ]]; then
+            message="No option-screen JSON was produced; inspect the solver jobs."
+            echo "$message" >> "$GITHUB_STEP_SUMMARY"
+            echo "$message" > benchmark-option-report/NO_RESULTS.txt
+            exit 1
+          fi
+          python .github/scripts/summarize_solver_option_screen.py \
+            --output-dir benchmark-option-report \
+            --common-feasibility-threshold 1e-5 \
+            "${result_files[@]}"
+          cat benchmark-option-report/solver-option-screen.md \
+            >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload the combined option report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: cycling-option-screen-report-${{ github.run_id }}
+          path: |
+            benchmark-option-report/
+            benchmark-option-screen-all/
+          if-no-files-found: warn
+          retention-days: 30
+
   report:
     name: Aggregate Kevin benchmark
-    if: always()
+    if: ${{ always() && inputs.cycles != 'screen' }}
     needs: benchmark
     runs-on: ubuntu-22.04
     permissions:
