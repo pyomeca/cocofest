@@ -339,7 +339,7 @@ time-major/no-state-scaling Fatrop compatibility mode as a configuration
 difference instead of silently calling the three numerical NLPs identical.
 
 A preliminary IPOPT job builds one content-addressed, physically certified
-assisted seed. Both benchmark jobs download exactly that immutable artifact.
+assisted seed. All three benchmark jobs download exactly that immutable artifact.
 MadNLP additionally runs the periodic IPOPT hot start, and its cost remains
 visible in `initial_guess_preparation_time_s`; the warm RHO wall times are
 therefore reported separately from end-to-end time.
@@ -484,6 +484,55 @@ slack (for example `0` and `1e-4 rad`) before extending toward 1000 cycles.
 The cycle-100 stimulation pattern is reported only for IPOPT; the MadNLP
 pattern is deliberately suppressed because it follows the break in the strict
 prefix.
+
+The three-solver extension
+[`30309452077`](https://github.com/mickaelbegon/cocofest/actions/runs/30309452077)
+repeats 100 RHO with Fatrop included and the common Fatrop-capable Bioptim
+revision:
+
+| Solver | Certified windows | Strict prefix | Preparation | Attempted-RHO sum | Hot median | Hot P90 | End-to-end |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| IPOPT-MUMPS | 100 / 100 | 100 / 100 | 23.82 s | 830.20 s | 8.311 s | 11.190 s | 878.90 s |
+| Fatrop | 100 / 100 | 100 / 100 | 42.96 s | 1148.17 s | 11.979 s | 14.016 s | 1209.02 s |
+| MadNLP-MUMPS | 100 / 100 | 100 / 100 | 54.90 s | 799.46 s | 6.252 s | 9.278 s | 877.35 s |
+
+All three strict prefixes reach 100 and pass the independent physical audit.
+Their maximum effective infeasibilities are respectively `9.64e-7`,
+`9.55e-7`, and `1.00e-6`, below the common `1e-5` threshold. Fatrop's
+independently reconstructed decision-bound violation is exactly zero after
+compensating for its native relative bound relaxation.
+
+Fatrop is 44 percent slower than IPOPT in hot median and 38 percent slower
+end-to-end in this run. Its effort also grows with the continued horizon:
+RHO 1--10 average 77.4 iterations and have a 7.60-second median, whereas
+RHO 91--100 average 121.7 iterations and have a 13.33-second median. This is
+not a pure backend-only timing comparison. Fatrop's automatic gap-structure
+detection currently requires time-major ordering and unscaled state
+variables; full state scaling changes the collocation gap form and is rejected
+as a structure mismatch. IPOPT and MadNLP retain full state scaling, and the
+combined report exposes that mismatch explicitly.
+
+Fatrop remains very close to IPOPT physiologically and numerically. Their
+cycle-10 biceps/triceps pulse-width RMSE values are `0.10/0.49 us`, and their
+cycle-30 values are `1.84/5.21 us`; the corresponding correlations remain
+near one. Their minimum final capacity ratios are also close:
+`0.92453` for Fatrop and `0.92495` for IPOPT.
+
+MadNLP is fastest in the normal hot path, but a 969-iteration, 99.61-second
+RHO 99 outlier makes its end-to-end time essentially tied with IPOPT. The fact
+that it converges on all 100 windows in this repetition, after failing RHO 86
+in the preceding run, reinforces the tail-latency and repeatability concern.
+MadNLP also reaches a distinct lower-fatigue local solution:
+`min(A/A_scale)=0.94777`, an executed fatigue objective about 34 percent below
+IPOPT, and cycle-30 biceps/triceps pulse-width RMSE values of
+`100/140 us` with near-zero correlations. With no control regularization,
+forces, velocities, kinematics, and physiological plausibility must be checked
+before interpreting this basin as superior.
+
+No solver reaches physiological fatigue failure over 100 cycles: the lowest
+remaining capacity is still about 92.5 percent. This run compares
+continuation robustness, tail latency, and stimulation basins; it does not
+identify the fatigue-to-failure cycle.
 
 The source-built CasADi used by Alpaqa has `WITH_THREAD=ON`, and the workflow
 rejects a runtime whose compiler flags do not expose that feature. Its two
@@ -809,17 +858,28 @@ muscle moment arm or the instantaneous sign at the stimulation node.
 
 ## Interpretation
 
-MadNLP remains relevant but is not yet robust enough to replace IPOPT. On the
-direct Cocofest formulation it certifies 99 of 100 assisted RHO when its
-internal tolerance is tightened to `1e-8`, but one isolated 2000-iteration
-failure breaks the strict executable prefix at 85. Its normal hot path is
-faster, while its tail latency and additional IPOPT refinement make it slower
-end-to-end in the 100-RHO run. The related Bioptim Linux benchmark also
-reports 17.397 s hot for a 50-interval exact-Hessian muscle-fatigue problem
-versus 23.002 s for IPOPT, with 57 versus 67 iterations. These are useful
-indications for long collocation sequences, although paired repetitions and
-repeated paired runs and a recovery strategy are necessary before claiming a
-stable speedup.
+IPOPT-MUMPS remains the recommended reference. It certifies every assisted
+RHO in both 100-cycle runs, is substantially faster than Fatrop in the current
+compatibility mode, and has less severe tail variability than MadNLP.
+
+MadNLP remains relevant but is not yet robust enough to replace IPOPT. Its
+normal hot path is the fastest of the three, but the two 100-RHO repetitions
+contain respectively a 2000-iteration failure and a converged 969-iteration
+outlier. Extra IPOPT refinement and tail latency erase the median advantage
+end-to-end. The related Bioptim Linux benchmark also reports 17.397 s hot for
+a 50-interval exact-Hessian muscle-fatigue problem versus 23.002 s for IPOPT,
+with 57 versus 67 iterations. These are useful indications for long
+collocation sequences, although paired repetitions and a recovery strategy
+are necessary before claiming a stable speedup.
+
+Fatrop is now a functional independent structured solver for this benchmark:
+it certifies all 100 RHO, respects the physical bounds, and converges to
+IPOPT-like stimulation patterns. It does not provide a speed advantage yet.
+The present time-major, unscaled-state compatibility mode is about 38 percent
+slower end-to-end than IPOPT. A fair performance reevaluation requires either
+preserving Fatrop's explicit gap structure under state scaling or adding
+normalized gap constraints upstream; until then, the observed penalty cannot
+be attributed to Fatrop alone.
 
 Alpaqa is not usable for the present collocation MHE. Automatic penalty
 selection can produce a
@@ -837,6 +897,8 @@ Recommended use:
 - use MadNLP-MUMPS at `1e-8` as an experimental alternative for large,
   Hessian-heavy fatigue horizons, reporting preparation, hot execution,
   outliers and strict-prefix length separately;
+- use Fatrop as an independent structured feasibility and local-minimum check,
+  while reporting its time-major ordering and absence of state scaling;
 - leave Alpaqa out of production and endurance matrices. Retain only the
   explicit diagnostic path until a dedicated multiple-shooting or less
   redundant formulation demonstrates reliable multi-window convergence.
