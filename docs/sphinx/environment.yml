@@ -9,3 +9,6 @@ dependencies:
   - myst-parser
   - furo
   - sphinxcontrib-mermaid
+  - numpy
+  - scipy
+  - matplotlib
