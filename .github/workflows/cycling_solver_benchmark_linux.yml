@@ -4,9 +4,9 @@ on:
   workflow_dispatch:
     inputs:
       runner_label:
-        description: GitHub-hosted image or label of a larger Linux runner
+        description: Linux runner (Ubuntu 24.04 or GCC/libgcc >= 13 required for MadNLP)
         required: true
-        default: ubuntu-22.04
+        default: ubuntu-24.04
         type: string
       cycles:
         description: Maximum one-cycle RHO windows, or "screen" for the option matrix
@@ -217,7 +217,7 @@ jobs:
         uses: actions/cache@v6
         with:
           path: .cache/madnlp-pardiso
-          key: libmad-pardiso-linux-${{ env.LIBMAD_PARDISO_COMMIT }}-${{ env.JULIAC_COMMIT }}
+          key: libmad-pardiso-${{ inputs.runner_label }}-${{ runner.arch }}-${{ env.LIBMAD_PARDISO_COMMIT }}-${{ env.JULIAC_COMMIT }}
 
       - name: Install Julia for the MadNLP PARDISO runtime
         if: matrix.solver == 'madnlp' && steps.screen-madnlp-cache.outputs.cache-hit != 'true'
@@ -467,7 +467,7 @@ jobs:
         uses: actions/cache@v6
         with:
           path: .cache/madnlp-pardiso
-          key: libmad-pardiso-linux-${{ env.LIBMAD_PARDISO_COMMIT }}-${{ env.JULIAC_COMMIT }}
+          key: libmad-pardiso-${{ inputs.runner_label }}-${{ runner.arch }}-${{ env.LIBMAD_PARDISO_COMMIT }}-${{ env.JULIAC_COMMIT }}
 
       - name: Install Julia for the MadNLP PARDISO runtime
         if: matrix.solver == 'madnlp' && steps.madnlp-cache.outputs.cache-hit != 'true'
@@ -717,7 +717,7 @@ jobs:
     name: Aggregate solver option screen
     if: ${{ always() && inputs.cycles == 'screen' }}
     needs: screen-options
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     permissions:
       actions: read
       contents: read
@@ -768,7 +768,7 @@ jobs:
     name: Aggregate Kevin benchmark
     if: ${{ always() && inputs.cycles != 'screen' }}
     needs: benchmark
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     permissions:
       actions: read
       contents: read

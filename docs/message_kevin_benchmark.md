@@ -137,7 +137,7 @@ Pour relancer exactement le benchmark :
 gh workflow run cycling_solver_benchmark_linux.yml \
   --repo mickaelbegon/cocofest \
   --ref codex/acados-pr-refresh \
-  -f runner_label=ubuntu-22.04 \
+  -f runner_label=ubuntu-24.04 \
   -f cycles=100 \
   -f crank_assistance_nm=0.20 \
   -f terminal_wheel_q_slack=0.002 \

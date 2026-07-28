@@ -362,7 +362,7 @@ of a larger Linux or self-hosted runner. For example:
 gh workflow run cycling_solver_benchmark_linux.yml \
   --repo mickaelbegon/cocofest \
   --ref codex/acados-pr-refresh \
-  -f runner_label=ubuntu-22.04 \
+  -f runner_label=ubuntu-24.04 \
   -f cycles=100 \
   -f crank_assistance_nm=0.20 \
   -f terminal_wheel_q_slack=0.002 \
@@ -375,7 +375,10 @@ first asserts that IPOPT and its target plugin coexist in the same CasADi
 runtime. The MadNLP job additionally pins and builds the libMad PARDISO/MKL
 runtime, exercises `PardisoMKLSolver` through libMad's C example, then repeats
 that check through CasADi before starting the OCP. The installed runtime is
-cached by the exact libMad and JuliaC commits. `MKL_NUM_THREADS` receives the
+cached by the runner image, architecture, and exact libMad and JuliaC commits.
+Julia 1.12's compiled runtime requires GCC/libgcc 13 or newer; the workflow
+therefore defaults to Ubuntu 24.04 and rejects an older toolchain before the
+roughly 20-minute JuliaC build. `MKL_NUM_THREADS` receives the
 runner's complete CPU allocation for this job, while the unrelated BLAS and
 OpenMP pools remain at one thread to prevent nested oversubscription. The
 archived Alpaqa screen still builds CasADi 3.7.2 with the pinned compatibility
