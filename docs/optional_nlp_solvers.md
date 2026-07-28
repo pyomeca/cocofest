@@ -553,6 +553,60 @@ remaining capacity is still about 92.5 percent. This run compares
 continuation robustness, tail latency, and stimulation basins; it does not
 identify the fatigue-to-failure cycle.
 
+### Absolute-angle 100-RHO benchmark with MadNLP-PARDISO
+
+Run
+[`30363688991`](https://github.com/mickaelbegon/cocofest/actions/runs/30363688991)
+uses the fixed absolute crank target, a common assisted seed, the production
+Bioptim commit, and the libMad PARDISO/MKL runtime. The seed, all three
+100-RHO jobs, and the aggregate report succeed:
+
+| Solver | Certified windows | Strict prefix | Preparation | Attempted-RHO sum | Hot median | Hot P90 | End-to-end |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| IPOPT-MUMPS | 100 / 100 | 100 / 100 | 23.76 s | 730.71 s | 7.110 s | 9.434 s | 778.99 s |
+| Fatrop | 100 / 100 | 100 / 100 | 56.86 s | 1230.43 s | 11.719 s | 17.607 s | 1312.02 s |
+| MadNLP-PARDISO | 100 / 100 | 100 / 100 | 51.60 s | 1060.00 s | 8.679 s | 10.827 s | 1135.93 s |
+
+The maximum independently reconstructed primal infeasibilities are
+`9.71e-7`, `9.43e-7`, and `1.00e-6`, respectively. All are below the common
+`1e-5` acceptance threshold. The corresponding maximum absolute crank-angle
+errors are `0.002005`, `0.002000`, and `0.002006 rad`. The audit reference is
+the fixed problem origin shifted by the one warmup cycle consumed before the
+exported RHO trace. The scaled decision-bound tolerance is converted back to
+physical radians; this accepts solver-level numerical error without allowing
+the terminal band to drift between cycles.
+
+IPOPT is fastest in this run. Fatrop is 65 percent slower in hot median and
+68 percent slower end-to-end. MadNLP-PARDISO is 22 percent slower in hot
+median and 46 percent slower end-to-end. MadNLP's tail contains three
+important events: RHO 75 takes 1177 iterations and 141.22 seconds, RHO 82
+takes 533 iterations and 63.55 seconds, and RHO 60 takes 209 iterations and
+24.61 seconds. Every event still converges and passes the physical audit.
+
+The immediately preceding PARDISO run produced nearly identical timings and
+the same outliers, so the tail behavior is reproducible. The older MUMPS run
+was faster, but it still used the relative terminal-angle formulation that
+could drift and reached a different fatigue trajectory. It is therefore not a
+controlled linear-solver comparison. The current evidence shows no PARDISO
+speed advantage for this OCP, but a paired MUMPS/PARDISO experiment on the
+same absolute formulation and repeated runners is required before attributing
+the difference to the factorization backend.
+
+At cycle 10, all three stimulation patterns remain in the same basin. By
+cycle 30, Fatrop and MadNLP have moved together to a second muscle-sharing
+solution: their biceps/triceps means are approximately `134/174 us`, versus
+`159/136 us` for IPOPT. Against IPOPT, the phase-aligned biceps and triceps
+RMSE values are about `108 us` and `144--145 us`; Fatrop and MadNLP differ
+from each other by only `0.49 us` and `1.05 us`. The deltoid patterns remain
+almost unchanged. The executed fatigue objectives are `2177.52` for IPOPT,
+`1751.06` for Fatrop, and `1696.11` for MadNLP. With no control
+regularization, this lower scalar objective identifies a distinct local
+minimum, not automatically a more plausible physiological strategy.
+
+Remaining minimum capacity is still between 93.7 and 94.2 percent. The
+absolute-angle run therefore remains a solver throughput and continuation
+benchmark rather than a fatigue-to-failure experiment.
+
 The source-built CasADi used by Alpaqa has `WITH_THREAD=ON`, and the workflow
 rejects a runtime whose compiler flags do not expose that feature. Its two
 600-second windows report roughly 2100 seconds of aggregate CPU time each,
@@ -891,24 +945,29 @@ muscle moment arm or the instantaneous sign at the stimulation node.
 ## Interpretation
 
 IPOPT-MUMPS remains the recommended reference. It certifies every assisted
-RHO in both 100-cycle runs, is substantially faster than Fatrop in the current
-compatibility mode, and has less severe tail variability than MadNLP.
+RHO in all 100-cycle runs, is substantially faster than Fatrop in the current
+compatibility mode, and is both faster and less exposed to tail latency than
+MadNLP-PARDISO on the absolute-angle problem.
 
-MadNLP remains relevant but is not yet robust enough to replace IPOPT. Its
-normal hot path is the fastest of the three, but the two 100-RHO repetitions
-contain respectively a 2000-iteration failure and a converged 969-iteration
-outlier. Extra IPOPT refinement and tail latency erase the median advantage
-end-to-end. The related Bioptim Linux benchmark also reports 17.397 s hot for
-a 50-interval exact-Hessian muscle-fatigue problem versus 23.002 s for IPOPT,
-with 57 versus 67 iterations. These are useful indications for long
-collocation sequences, although paired repetitions and a recovery strategy
-are necessary before claiming a stable speedup.
+MadNLP remains relevant but is not ready to replace IPOPT. The MUMPS runs
+showed a fast normal path but also a 2000-iteration failure and a converged
+969-iteration outlier. The absolute-angle PARDISO runs certify every RHO, but
+their normal path is slower than IPOPT and reproducibly contains
+1177-iteration/141-second and 533-iteration/64-second outliers. The older
+MUMPS timings and current PARDISO timings are not paired because the angular
+formulation changed. A same-code, same-seed, repeated MUMPS/PARDISO screen is
+required before concluding that the linear solver itself causes the
+difference. The related Bioptim Linux benchmark still indicates that MadNLP
+can be useful for long exact-Hessian collocation problems, but that indication
+does not override the current OCP evidence.
 
 Fatrop is now a functional independent structured solver for this benchmark:
-it certifies all 100 RHO, respects the physical bounds, and converges to
-IPOPT-like stimulation patterns. It does not provide a speed advantage yet.
-The present time-major, unscaled-state compatibility mode is about 38 percent
-slower end-to-end than IPOPT. A fair performance reevaluation requires either
+it certifies all 100 RHO and respects the physical bounds. It does not provide
+a speed advantage yet. The present time-major, unscaled-state compatibility
+mode is 38 to 68 percent slower end-to-end than IPOPT across the available
+100-RHO runs. On the relative-angle run it followed IPOPT closely; on the
+absolute-angle run it instead follows MadNLP's lower-fatigue
+biceps/triceps-sharing basin. A fair performance reevaluation requires either
 preserving Fatrop's explicit gap structure under state scaling or adding
 normalized gap constraints upstream; until then, the observed penalty cannot
 be attributed to Fatrop alone.
@@ -926,9 +985,11 @@ interior-point solvers.
 Recommended use:
 
 - keep IPOPT as the reference solver;
-- use MadNLP-MUMPS at `1e-8` as an experimental alternative for large,
-  Hessian-heavy fatigue horizons, reporting preparation, hot execution,
-  outliers and strict-prefix length separately;
+- use MadNLP at `1e-8` as an experimental alternative and independent
+  local-minimum check, reporting its linear solver, preparation, hot
+  execution, outliers and strict-prefix length separately;
+- do not prefer PARDISO over MUMPS for this OCP without a paired
+  absolute-angle comparison;
 - use Fatrop as an independent structured feasibility and local-minimum check,
   while reporting its time-major ordering and absence of state scaling;
 - leave Alpaqa out of production and endurance matrices. Retain only the
