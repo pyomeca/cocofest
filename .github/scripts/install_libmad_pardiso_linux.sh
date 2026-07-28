@@ -5,21 +5,8 @@ source_dir="${1:?libMad source directory is required}"
 install_dir="${2:?libMad install directory is required}"
 juliac_commit="${3:?JuliaC commit is required}"
 
-if [[ "$(uname -m)" != "x86_64" ]]; then
-  echo "PardisoMKLSolver requires an x86-64 Linux runner." >&2
-  exit 1
-fi
-
-# Julia 1.12's generated sysimage references libgcc symbols introduced in
-# GCC 13. Fail before the expensive JuliaC build instead of at the final link.
-cc_version="$(cc -dumpfullversion -dumpversion 2>/dev/null || true)"
-cc_major="${cc_version%%.*}"
-if [[ ! "$cc_major" =~ ^[0-9]+$ ]] || (( cc_major < 13 )); then
-  echo "MadNLP/PARDISO requires GCC and libgcc >= 13; cc reports '${cc_version:-unknown}'." >&2
-  echo "Use ubuntu-24.04 (the workflow default) or an equivalent x86-64 runner." >&2
-  exit 1
-fi
-echo "Building libMad with cc $cc_version"
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+bash "$script_dir/check_libmad_pardiso_host_linux.sh"
 
 source_dir="$(cd "$source_dir" && pwd)"
 mkdir -p "$install_dir"

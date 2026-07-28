@@ -98,8 +98,8 @@ Relevant MadNLP screens include:
 --madnlp-linear-solver pardiso_mkl
 ```
 
-The portable `madnlp_c` runtime accepts `mumps`, `umfpack`, `lapack_cpu`, and
-three GPU backends. The public x86-64 Linux benchmark now builds libMad commit
+The MadNLP C runtimes accept `mumps`, `umfpack`, `lapack_cpu`, and three GPU
+backends. The public x86-64 Linux benchmark now builds libMad commit
 `5529f23a6bff33c566ad954da38d352f1f172356` directly from
 `mickaelbegon/libMad`'s `codex/pardiso-mkl` branch and maps
 `pardiso_mkl` to its native `PardisoMKLSolver` type. This runtime embeds
@@ -108,7 +108,7 @@ on ARM, including Apple Silicon, because oneMKL does not provide that native
 backend there. CoinHSL remains loaded dynamically only by IPOPT through
 `--ipopt-hsl-library`.
 
-The pinned `madnlp_c` runtime rejects `mu_init`, `dual_initialized`,
+The pinned libMad runtime rejects `mu_init`, `dual_initialized`,
 `max_wall_time`, `nlp_scaling`, and the `acceptable_*` options. Cocofest
 therefore does not expose or send them. Its MadNLP hot start is the shifted and
 projected primal state/control trajectory after the certified periodic IPOPT
@@ -374,11 +374,16 @@ commit, so IPOPT, Fatrop and MadNLP use the same Bioptim revision. Each job
 first asserts that IPOPT and its target plugin coexist in the same CasADi
 runtime. The MadNLP job additionally pins and builds the libMad PARDISO/MKL
 runtime, exercises `PardisoMKLSolver` through libMad's C example, then repeats
-that check through CasADi before starting the OCP. The installed runtime is
-cached by the runner image, architecture, and exact libMad and JuliaC commits.
-Julia 1.12's compiled runtime requires GCC/libgcc 13 or newer; the workflow
-therefore defaults to Ubuntu 24.04 and rejects an older toolchain before the
-roughly 20-minute JuliaC build. `MKL_NUM_THREADS` receives the
+that check through CasADi before starting the OCP. The official CasADi 3.7.2
+wheel still targets the obsolete `libmadnlp_c.so` ABI, so the MadNLP job builds
+the pinned post-release CasADi 3.7.2 source revision that targets
+`libMad.so`; a symbolic link between these libraries would not be ABI-safe.
+The installed runtime is cached by the runner image, architecture, exact Julia
+version, and exact libMad and JuliaC commits. Julia 1.12's compiled runtime
+requires the `GCC_13.0.0` symbol in `libgcc`;
+the workflow therefore defaults to Ubuntu 24.04 and checks the resolved
+library before the roughly 20-minute JuliaC build, including on cache hits.
+`MKL_NUM_THREADS` receives the
 runner's complete CPU allocation for this job, while the unrelated BLAS and
 OpenMP pools remain at one thread to prevent nested oversubscription. The
 archived Alpaqa screen still builds CasADi 3.7.2 with the pinned compatibility

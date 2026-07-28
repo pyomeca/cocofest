@@ -45,6 +45,8 @@ concurrency:
 env:
   CASADI_VERSION: "3.7.2"
   CASADI_COMMIT: f959d3175a444d763e4eda4aece48f4c5f4a6f90
+  # Same 3.7.2 version, with the post-release libMad ABI integration.
+  CASADI_MADNLP_COMMIT: 973b086f4dcda9f49cd9c1948432ae4b7ee54886
   # CasADi 3.7.2's sparse Alpaqa interface targets this compatibility fork.
   ALPAQA_COMMIT: bf9f87d59640501ea72f94aa6e2d4e62b20c677b
   BIOPTIM_REPOSITORY: mickaelbegon/BiorbdOptim
@@ -53,6 +55,7 @@ env:
   LIBMAD_REPOSITORY: mickaelbegon/libMad
   LIBMAD_PARDISO_COMMIT: 5529f23a6bff33c566ad954da38d352f1f172356
   JULIAC_COMMIT: 73be8587a80bbb65dab7acd71d406f72867a3571
+  JULIA_VERSION: "1.12.6"
   OMP_NUM_THREADS: "1"
   OPENBLAS_NUM_THREADS: "1"
   MKL_NUM_THREADS: "1"
@@ -158,7 +161,7 @@ jobs:
           - solver: madnlp
             bioptim_commit: 346eb1d445e6ba67010b96c6f16ba830185119e7
             integration_branch: codex/madnlp-integration-master
-            casadi_cxx_abi: 0
+            casadi_cxx_abi: 1
           - solver: alpaqa
             bioptim_commit: d84e7e43534360fc048e0be26a3bd69a2abc2d77
             integration_branch: codex/alpaqa-integration
@@ -217,13 +220,17 @@ jobs:
         uses: actions/cache@v6
         with:
           path: .cache/madnlp-pardiso
-          key: libmad-pardiso-${{ inputs.runner_label }}-${{ runner.arch }}-${{ env.LIBMAD_PARDISO_COMMIT }}-${{ env.JULIAC_COMMIT }}
+          key: libmad-pardiso-${{ inputs.runner_label }}-${{ runner.arch }}-julia-${{ env.JULIA_VERSION }}-${{ env.LIBMAD_PARDISO_COMMIT }}-${{ env.JULIAC_COMMIT }}
+
+      - name: Verify the MadNLP host runtime
+        if: matrix.solver == 'madnlp'
+        run: bash .github/scripts/check_libmad_pardiso_host_linux.sh
 
       - name: Install Julia for the MadNLP PARDISO runtime
         if: matrix.solver == 'madnlp' && steps.screen-madnlp-cache.outputs.cache-hit != 'true'
-        uses: julia-actions/install-juliaup@v2
+        uses: julia-actions/install-juliaup@05d98a2ef433ca0723a8221e38c4723ea92b0c5f # v3.1.4
         with:
-          channel: "1.12"
+          channel: ${{ env.JULIA_VERSION }}
 
       - name: Build the MadNLP PARDISO runtime
         if: matrix.solver == 'madnlp' && steps.screen-madnlp-cache.outputs.cache-hit != 'true'
@@ -241,9 +248,9 @@ jobs:
             >> "$GITHUB_ENV"
           echo "LIBMAD_BENCHMARK_COMMIT=$LIBMAD_PARDISO_COMMIT" >> "$GITHUB_ENV"
 
-      - name: Install CasADi with IPOPT and MadNLP
+      - name: Build CasADi with the libMad ABI
         if: matrix.solver == 'madnlp'
-        run: python -m pip install --no-deps "casadi==$CASADI_VERSION"
+        run: bash .github/scripts/install_casadi_madnlp_linux.sh .cache/madnlp-pardiso
 
       - name: Build CasADi with IPOPT and Alpaqa
         if: matrix.solver == 'alpaqa'
@@ -409,9 +416,10 @@ jobs:
           - solver: madnlp
             bioptim_commit: 3523f1745e315f07761159d7e06bd2d876026704
             integration_branch: codex/fatrop-cocofest-benchmark
-            casadi_cxx_abi: 0
+            casadi_cxx_abi: 1
     env:
-      # All production backends use the official CasADi wheel (C++ ABI 0).
+      # IPOPT/Fatrop use the wheel ABI; source-built CasADi/libMad follows
+      # Conda's modern libstdc++ ABI.
       CASADI_CXX_ABI: ${{ matrix.casadi_cxx_abi }}
     defaults:
       run:
@@ -467,13 +475,17 @@ jobs:
         uses: actions/cache@v6
         with:
           path: .cache/madnlp-pardiso
-          key: libmad-pardiso-${{ inputs.runner_label }}-${{ runner.arch }}-${{ env.LIBMAD_PARDISO_COMMIT }}-${{ env.JULIAC_COMMIT }}
+          key: libmad-pardiso-${{ inputs.runner_label }}-${{ runner.arch }}-julia-${{ env.JULIA_VERSION }}-${{ env.LIBMAD_PARDISO_COMMIT }}-${{ env.JULIAC_COMMIT }}
+
+      - name: Verify the MadNLP host runtime
+        if: matrix.solver == 'madnlp'
+        run: bash .github/scripts/check_libmad_pardiso_host_linux.sh
 
       - name: Install Julia for the MadNLP PARDISO runtime
         if: matrix.solver == 'madnlp' && steps.madnlp-cache.outputs.cache-hit != 'true'
-        uses: julia-actions/install-juliaup@v2
+        uses: julia-actions/install-juliaup@05d98a2ef433ca0723a8221e38c4723ea92b0c5f # v3.1.4
         with:
-          channel: "1.12"
+          channel: ${{ env.JULIA_VERSION }}
 
       - name: Build the MadNLP PARDISO runtime
         if: matrix.solver == 'madnlp' && steps.madnlp-cache.outputs.cache-hit != 'true'
@@ -491,8 +503,13 @@ jobs:
             >> "$GITHUB_ENV"
           echo "LIBMAD_BENCHMARK_COMMIT=$LIBMAD_PARDISO_COMMIT" >> "$GITHUB_ENV"
 
-      - name: Install CasADi with IPOPT, Fatrop and MadNLP
+      - name: Install official CasADi with IPOPT and Fatrop
+        if: matrix.solver != 'madnlp'
         run: python -m pip install --no-deps "casadi==$CASADI_VERSION"
+
+      - name: Build CasADi with the libMad ABI
+        if: matrix.solver == 'madnlp'
+        run: bash .github/scripts/install_casadi_madnlp_linux.sh .cache/madnlp-pardiso
 
       - name: Install biorbd and Bioptim
         run: |
@@ -616,7 +633,7 @@ jobs:
             )
           elif [[ "$BENCHMARK_SOLVER" == "madnlp" ]]; then
             solver_tolerance=1e-8
-            # The pinned madnlp_c runtime rejects max_wall_time, mu_init and
+            # The pinned libMad runtime rejects max_wall_time, mu_init and
             # dual_initialized. Cocofest still supplies the shifted/projected
             # primal trajectory; the job timeout is the outer safety limit.
             solver_options+=(

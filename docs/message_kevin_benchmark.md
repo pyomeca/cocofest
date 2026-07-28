@@ -164,9 +164,13 @@ Pour le prochain run Linux, MadNLP utilise désormais PARDISO/MKL au lieu de
 MUMPS. Le workflow construit directement le commit libMad
 `5529f23a6bff33c566ad954da38d352f1f172356` de la branche
 `codex/pardiso-mkl`, vérifie `PardisoMKLSolver` via l’interface C puis via
-CasADi, et lui attribue tous les cœurs du runner avec `MKL_NUM_THREADS`. Cette
-voie est limitée à Linux x86-64 et n’est pas disponible nativement sur les Mac
-Apple Silicon. Elle n’a pas encore de résultat sur l’OCP complet : le prochain
-benchmark doit donc être interprété comme la première comparaison
-MadNLP-PARDISO face à IPOPT-MUMPS et Fatrop, avec la nouvelle contrainte
-angulaire absolue.
+CasADi, et lui attribue tous les cœurs du runner avec `MKL_NUM_THREADS`.
+Attention : le premier essai Linux a révélé que le wheel officiel CasADi 3.7.2
+charge encore l’ancienne ABI `libmadnlp_c.so`, incompatible avec la nouvelle
+ABI `libMad.so`. Le workflow construit donc maintenant la révision CasADi
+3.7.2 post-release épinglée qui intègre cette nouvelle ABI ; un simple lien
+symbolique aurait été incorrect. Cette voie est limitée à Linux x86-64 et
+n’est pas disponible nativement sur les Mac Apple Silicon. Elle n’a pas encore
+de résultat sur l’OCP complet : le prochain benchmark doit donc être
+interprété comme la première comparaison MadNLP-PARDISO face à IPOPT-MUMPS et
+Fatrop, avec la nouvelle contrainte angulaire absolue.
