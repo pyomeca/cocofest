@@ -2029,6 +2029,29 @@ def test_wheel_q_state_scaling_reads_crank_coordinate():
     )
 
 
+def test_wheel_trace_absolute_reference_accounts_for_consumed_warmup():
+    nmpc = SimpleNamespace(
+        anchor_wheel_q_to_absolute_reference=True,
+        absolute_wheel_q_reference=0.95,
+        absolute_wheel_q_cycle_shift=-2.0 * np.pi,
+        absolute_wheel_q_cycle_index=1,
+    )
+
+    trace_reference, origin_reference, cycle_index = (
+        periodic_example._wheel_trace_absolute_reference(nmpc)
+    )
+
+    assert trace_reference == pytest.approx(0.95 - 2.0 * np.pi)
+    assert origin_reference == pytest.approx(0.95)
+    assert cycle_index == 1
+
+
+def test_wheel_trace_absolute_reference_is_optional_without_absolute_anchor():
+    assert periodic_example._wheel_trace_absolute_reference(
+        SimpleNamespace(absolute_wheel_q_reference=0.95)
+    ) == (None, None, 0)
+
+
 def test_a_capacity_metrics_use_model_scale_instead_of_initial_state():
     result = _benchmark_result([0, 0])
     result["state_traces"]["A_Biceps"] = np.linspace(90.0, 80.0, 7)[np.newaxis, :]

@@ -5326,6 +5326,30 @@ def _wheel_q_state_scaling(nmpc) -> float:
     return wheel_q_scaling
 
 
+def _wheel_trace_absolute_reference(nmpc) -> tuple[float | None, float | None, int]:
+    """Return the fixed reference at the first cycle exported by the RHO."""
+
+    if not getattr(nmpc, "anchor_wheel_q_to_absolute_reference", False):
+        return None, None, 0
+    origin_reference = getattr(nmpc, "absolute_wheel_q_reference", None)
+    if origin_reference is None:
+        return None, None, 0
+    origin_reference = float(origin_reference)
+    cycle_index = int(getattr(nmpc, "absolute_wheel_q_cycle_index", 0))
+    cycle_shift = getattr(nmpc, "absolute_wheel_q_cycle_shift", None)
+    if cycle_shift is None:
+        if cycle_index:
+            raise RuntimeError(
+                "An absolute crank cycle index requires an absolute cycle shift."
+            )
+        cycle_shift = 0.0
+    cycle_shift = float(cycle_shift)
+    if not np.isfinite(origin_reference) or not np.isfinite(cycle_shift):
+        raise RuntimeError("The absolute crank reference must be finite.")
+    trace_reference = origin_reference + cycle_index * cycle_shift
+    return trace_reference, origin_reference, cycle_index
+
+
 def _native_solver_status(nmpc) -> str | None:
     """Extract the native status retained by the optional Bioptim interfaces."""
 
@@ -11437,9 +11461,11 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
         wheel_cycle_progress_tolerance,
         wheel_absolute_cycle_tolerance,
     ) = _wheel_cycle_diagnostic_tolerances(args, wheel_q_scaling)
-    absolute_wheel_q_reference = getattr(
-        nmpc, "absolute_wheel_q_reference", None
-    )
+    (
+        absolute_wheel_q_reference,
+        absolute_wheel_q_origin_reference,
+        absolute_wheel_q_start_cycle_index,
+    ) = _wheel_trace_absolute_reference(nmpc)
 
     def snapshot_completed_window(_nmpc, solution):
         # Every stored RHO solution references the same mutable OCP. Snapshot
@@ -12435,6 +12461,12 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
         summary["warmup_cycles_consumed"] = args.warmup_cycles_consumed
         summary["fatigue_capacity_scales"] = fatigue_capacity_scales
         summary["wheel_q_scaling"] = wheel_q_scaling
+        summary[
+            "absolute_wheel_q_origin_reference"
+        ] = absolute_wheel_q_origin_reference
+        summary[
+            "absolute_wheel_q_start_cycle_index"
+        ] = absolute_wheel_q_start_cycle_index
         summary["native_solver_status"] = _native_solver_status(nmpc)
         if control_homotopy_summaries:
             summary["control_homotopy_summaries"] = control_homotopy_summaries
@@ -12578,6 +12610,12 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
     summary["warmup_cycles_consumed"] = args.warmup_cycles_consumed
     summary["fatigue_capacity_scales"] = fatigue_capacity_scales
     summary["wheel_q_scaling"] = wheel_q_scaling
+    summary["absolute_wheel_q_origin_reference"] = (
+        absolute_wheel_q_origin_reference
+    )
+    summary["absolute_wheel_q_start_cycle_index"] = (
+        absolute_wheel_q_start_cycle_index
+    )
     summary["native_solver_status"] = _native_solver_status(nmpc)
     return summary
 
