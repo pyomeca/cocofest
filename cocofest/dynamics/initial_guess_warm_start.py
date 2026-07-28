@@ -1,15 +1,19 @@
+"""
+This class is meant to determine the initial states and control guesses of an optimization problem.
+"""
+
 import numpy as np
 
 import biorbd
 
 from bioptim import (
     Axis,
-    BiorbdModel,
     BoundsList,
-    DynamicsFcn,
-    DynamicsList,
+    DynamicsOptions,
+    DynamicsOptionsList,
     InitialGuessList,
     InterpolationType,
+    MusclesBiorbdModel,
     Node,
     ObjectiveFcn,
     ObjectiveList,
@@ -120,7 +124,7 @@ def prepare_muscle_driven_ocp(
     """
 
     # Adding the models to the same phase
-    bio_model = BiorbdModel(
+    bio_model = MusclesBiorbdModel(
         biorbd_model_path,
     )
 
@@ -148,11 +152,13 @@ def prepare_muscle_driven_ocp(
     )
 
     # Dynamics
-    dynamics = DynamicsList()
+    dynamics = DynamicsOptionsList()
     dynamics.add(
-        DynamicsFcn.MUSCLE_DRIVEN,
-        expand_dynamics=True,
-        phase_dynamics=PhaseDynamics.SHARED_DURING_THE_PHASE,
+        DynamicsOptions(
+            expand_dynamics=True,
+            phase_dynamics=PhaseDynamics.SHARED_DURING_THE_PHASE,
+            ode_solver=OdeSolver.RK4(),
+        )
     )
 
     # Path constraint
@@ -178,16 +184,15 @@ def prepare_muscle_driven_ocp(
 
     return (
         OptimalControlProgram(
-            bio_model,
-            dynamics,
-            n_shooting,
-            final_time,
+            bio_model=[bio_model],
+            dynamics=dynamics,
+            n_shooting=n_shooting,
+            phase_time=final_time,
             x_bounds=x_bounds,
             u_bounds=u_bounds,
             x_init=x_init,
             u_init=u_init,
             objective_functions=objective_functions,
-            ode_solver=OdeSolver.RK4(),
             n_threads=n_threads,
         ),
         q_guess,

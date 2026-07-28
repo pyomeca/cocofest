@@ -1,3 +1,10 @@
+"""
+Ding2003 model: frequency as the control input.
+
+Ding, J., Wexler, A. S., & Binder-Macleod, S. A. (2003). Mathematical models for fatigue minimization
+during functional electrical stimulation. Journal of Electromyography and Kinesiology, 13(6), 575-588.
+"""
+
 from typing import Callable, List
 from math import gcd
 from fractions import Fraction
@@ -80,36 +87,46 @@ class DingModelFrequency(FesModel, StateDynamics):
     # --- Configure variables --- #
     @property
     def state_configuration_functions(self) -> List[States | Callable]:
+        """The state configuration functions used to declare Cn and F to bioptim."""
         return [StateConfigure().configure_all_muscle_states]
 
     @property
     def control_configuration_functions(self) -> List[States | Callable]:
+        """The control configuration functions used to declare the model's controls to bioptim (none)."""
         return []
 
     @property
     def algebraic_configuration_functions(self) -> List[States | Callable]:
+        """The algebraic state configuration functions used to declare the model's algebraic states to bioptim (none)."""
         return []
 
     @property
     def extra_configuration_functions(self) -> List[States | Callable]:
+        """Extra configuration functions used to declare additional variables to bioptim (none)."""
         return []
 
     # --- Set model parameters --- #
     def set_a_rest(self, model, a_rest: MX | float):
+        """Set the rest value of the force-scaling parameter A."""
         # models is required for bioptim compatibility
         self.a_rest = a_rest
 
     def set_km_rest(self, model, km_rest: MX | float):
+        """Set the rest value of the cross-bridges sensitivity parameter Km."""
         self.km_rest = km_rest
 
     def set_tau1_rest(self, model, tau1_rest: MX | float):
+        """Set the rest value of the force decline time constant Tau1."""
         self.tau1_rest = tau1_rest
 
     def set_tau2(self, model, tau2: MX | float):
+        """Set the time constant of force decline due to cross-bridges Tau2."""
         self.tau2 = tau2
 
     def standard_rest_values(self) -> np.array:
         """
+        The model's states at rest.
+
         Returns
         -------
         The rested values of the states Cn, F
@@ -118,6 +135,13 @@ class DingModelFrequency(FesModel, StateDynamics):
 
     # ---- Absolutely needed methods ---- #
     def serialize(self) -> tuple[Callable, dict]:
+        """
+        Serialize the model's parameters for later saving/reloading.
+
+        Returns
+        -------
+        A tuple of the model's class and a dict of its parameters, used to save/reload the model
+        """
         # This is where you can serialize your models
         # This is useful if you want to save your models and load it later
         return (
@@ -134,27 +158,33 @@ class DingModelFrequency(FesModel, StateDynamics):
     # ---- Needed for the example ---- #
     @property
     def name_dofs(self) -> list[str]:
+        """The states' names (Cn, F), suffixed with the muscle name if any."""
         muscle_name = "_" + self.muscle_name if self.muscle_name is not None else ""
         return ["Cn" + muscle_name, "F" + muscle_name]
 
     @property
     def nb_state(self) -> int:
+        """The number of states of the model (Cn, F)."""
         return 2
 
     @property
     def model_name(self) -> None | str:
+        """The model's name."""
         return self._model_name
 
     @property
     def muscle_name(self) -> None | str:
+        """The muscle's name."""
         return self._muscle_name
 
     @property
     def with_fatigue(self):
+        """If the model includes fatigue dynamics (False for this model)."""
         return self._with_fatigue
 
     @property
     def identifiable_parameters(self):
+        """The model's parameters that can be identified from experimental data."""
         return {
             "a_rest": self.a_rest,
             "tau1_rest": self.tau1_rest,
@@ -164,19 +194,49 @@ class DingModelFrequency(FesModel, StateDynamics):
 
     @property
     def km_name(self) -> str:
+        """The name of the cross-bridges sensitivity state Km, suffixed with the muscle name if any."""
         muscle_name = "_" + self.muscle_name if self.muscle_name else ""
         return "Km" + muscle_name
 
     @property
     def cn_sum_name(self):
+        """The name of the calcium-troponin complex summation state, suffixed with the muscle name if any."""
         muscle_name = "_" + self.muscle_name if self.muscle_name else ""
         return "Cn_sum" + muscle_name
 
     def get_r0(self, km: MX | float) -> MX | float:
+        """
+        Compute the R0 term from the cross-bridges sensitivity Km.
+
+        Parameters
+        ----------
+        km: MX | float
+            The current cross-bridges sensitivity to Cn
+
+        Returns
+        -------
+        MX | float
+            The R0 term (magnitude of enhancement in Cn from the following stimuli)
+        """
         return km + self.r0_km_relationship
 
     @staticmethod
     def get_lambda_i(nb_stim: int, pulse_intensity: MX | float) -> list[MX | float]:
+        """
+        The force-pulse amplitude relationship for each stimulation (this frequency-driven model has none).
+
+        Parameters
+        ----------
+        nb_stim: int
+            The number of stimulations
+        pulse_intensity: MX | float
+            Unused for this model (frequency-driven, no pulse intensity control)
+
+        Returns
+        -------
+        list[MX | float]
+            The force-pulse amplitude relationship for each stimulation (always 1, unused for this model)
+        """
         return [1 for _ in range(nb_stim)]
 
     # ---- Model's dynamics ---- #
@@ -222,6 +282,8 @@ class DingModelFrequency(FesModel, StateDynamics):
 
     def exp_time_fun(self, t: MX, t_stim_i: MX) -> MX | float:
         """
+        Compute the exponential decay term of the calcium-troponin complex since a given stimulation.
+
         Parameters
         ----------
         t: MX
@@ -237,6 +299,8 @@ class DingModelFrequency(FesModel, StateDynamics):
 
     def ri_fun(self, r0: MX | float, time_between_stim: MX) -> MX | float:
         """
+        Compute the magnitude of enhancement in the calcium-troponin complex from the following stimuli.
+
         Parameters
         ----------
         r0: MX | float
@@ -252,6 +316,8 @@ class DingModelFrequency(FesModel, StateDynamics):
 
     def cn_sum_fun(self, r0: MX | float, t: MX, t_stim_prev: list[MX], lambda_i: list[MX]) -> MX | float:
         """
+        Compute the calcium-troponin complex summation over the previous stimulations.
+
         Parameters
         ----------
         r0: MX | float
@@ -278,6 +344,8 @@ class DingModelFrequency(FesModel, StateDynamics):
 
     def cn_dot_fun(self, cn: MX, cn_sum: MX) -> MX | float:
         """
+        Compute the derivative of the calcium-troponin complex.
+
         Parameters
         ----------
         cn: MX
@@ -293,6 +361,25 @@ class DingModelFrequency(FesModel, StateDynamics):
         return (1 / self.tauc) * cn_sum - (cn / self.tauc)  # Equation n°1
 
     def calculate_cn_dot(self, cn, t, t_stim_prev, pulse_intensity=1):
+        """
+        Compute the calcium-troponin complex summation, then its derivative, for the current node.
+
+        Parameters
+        ----------
+        cn: MX
+            The previous step value of the calcium-troponin complex (unitless)
+        t: MX
+            The current time at which the dynamics is evaluated (s)
+        t_stim_prev: MX
+            The time list of the previous stimulations (s)
+        pulse_intensity: MX | float
+            Unused for this model (frequency-driven, no pulse intensity control)
+
+        Returns
+        -------
+        MX | float
+            The value of the derivative of the calcium-troponin complex (unitless)
+        """
         cn_sum = self.cn_sum_fun(
             self.get_r0(self.km_rest), t, t_stim_prev, self.get_lambda_i(t_stim_prev.shape[0], pulse_intensity)
         )
@@ -307,6 +394,8 @@ class DingModelFrequency(FesModel, StateDynamics):
         km: MX | float,
     ) -> MX | float:
         """
+        Compute the derivative of the force.
+
         Parameters
         ----------
         cn: MX
@@ -382,11 +471,29 @@ class DingModelFrequency(FesModel, StateDynamics):
         )
 
     def _get_additional_previous_stim_time(self):
+        """Pad previous_stim with far-past dummy stimulation times so the truncated sum always has enough terms."""
         while len(self.previous_stim["time"]) < self.sum_stim_truncation:
             self.previous_stim["time"].insert(0, -10000000)
         return self.previous_stim
 
     def get_numerical_data_time_series(self, n_shooting, final_time, all_stim_time=None):
+        """
+        Build the numerical time series data used by the dynamics.
+
+        Parameters
+        ----------
+        n_shooting: int
+            The number of shooting points
+        final_time: float
+            The ocp final time
+        all_stim_time: list
+            All the stimulation times, used for problem reconstruction in MHE
+
+        Returns
+        -------
+        tuple
+            The numerical time series of truncated previous stimulation times per node, and the matching node indices
+        """
         truncation = self.sum_stim_truncation
         # --- Set the previous stim time for the numerical data time series (mandatory to avoid nan values) --- #
         self.previous_stim = self._get_additional_previous_stim_time()

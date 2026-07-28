@@ -8,6 +8,7 @@ import matplotlib.cm
 
 
 def _get_cmap_compat(name=None, lut=None):
+    """Backport of the removed matplotlib.cm.get_cmap, used to patch it back in for bioptim."""
     import matplotlib
 
     cmap = matplotlib.colormaps[name] if name is not None else matplotlib.colormaps["viridis"]

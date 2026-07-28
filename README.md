@@ -15,7 +15,8 @@ Supports predictive musculoskeletal simulation driven by FES, moving time horizo
 [![Last commit](https://img.shields.io/github/last-commit/pyomeca/cocofest.svg?style=for-the-badge)]()<br/>
 [![Coverage](https://img.shields.io/codecov/c/github/pyomeca/cocofest?style=for-the-badge&logo=codecov&branch=main&token=GPBRI2U4CO)](https://codecov.io/gh/pyomeca/cocofest)
 [![Maintainability](https://img.shields.io/badge/Maintainability-B-green?style=for-the-badge&logo=codeclimate)](https://qlty.sh/gh/pyomeca/projects/cocofest)
-[![Tests](https://img.shields.io/github/actions/workflow/status/pyomeca/cocofest/run_tests.yml?branch=main&style=for-the-badge&label=Tests&logo=githubactions)](https://github.com/pyomeca/cocofest/actions/workflows/run_tests.yml)<br/>
+[![Tests](https://img.shields.io/github/actions/workflow/status/pyomeca/cocofest/run_tests.yml?branch=main&style=for-the-badge&label=Tests&logo=githubactions)](https://github.com/pyomeca/cocofest/actions/workflows/run_tests.yml)
+[![Docs](https://img.shields.io/readthedocs/cocofest?style=for-the-badge&label=Docs&logo=readthedocs)](https://cocofest.readthedocs.io)<br/>
 [![Discord](https://img.shields.io/discord/1340640457327247460.svg?label=chat&logo=discord&color=7289DA&style=for-the-badge)](https://discord.gg/s3g2ATpvDs)
 [![Licence](https://img.shields.io/github/license/pyomeca/cocofest.svg?style=for-the-badge)](https://opensource.org/licenses/MIT)
 

@@ -1,3 +1,7 @@
+"""
+This class is meant to determine the inverse kinematics of a cycling task.
+"""
+
 import math
 import numpy as np
 from scipy.interpolate import interp1d

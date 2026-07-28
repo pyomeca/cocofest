@@ -1,3 +1,10 @@
+"""
+Veltink1992 model: muscle activation dynamics driven by stimulation intensity.
+
+Veltink, P. H., Chizeck, H. J., Crago, P. E., & El-Bialy, A. (1992). Nonlinear joint angle control
+for artificially stimulated muscle. IEEE Transactions on Biomedical Engineering, 39(4), 368-380.
+"""
+
 from typing import Callable, List
 from casadi import MX, vertcat
 import numpy as np
@@ -44,48 +51,59 @@ class VeltinkModelPulseIntensity(StateDynamics):
 
     @property
     def name(self):
+        """The model's name."""
         return self._name
 
     # --- Configure variables --- #
     @property
     def state_configuration_functions(self) -> List[States | Callable]:
+        """The state configuration functions used to declare the muscle activation state to bioptim."""
         return [StateConfigure().configure_all_muscle_states]
 
     @property
     def control_configuration_functions(self) -> List[States | Callable]:
+        """The control configuration functions used to declare the stimulation intensity control to bioptim."""
         return [StateConfigure().configure_intensity]
 
     @property
     def algebraic_configuration_functions(self) -> List[States | Callable]:
+        """The algebraic state configuration functions used to declare the model's algebraic states to bioptim (none)."""
         return []
 
     @property
     def extra_configuration_functions(self) -> List[States | Callable]:
+        """Extra configuration functions used to declare additional variables to bioptim (none)."""
         return []
 
     @property
     def name_dofs(self, with_muscle_name: bool = False) -> list[str]:
+        """The state's name (a), suffixed with the muscle name if any."""
         muscle_name = "_" + self.muscle_name if self.muscle_name is not None else ""
         return ["a" + muscle_name]  # Only muscle activation state
 
     @property
     def nb_state(self) -> int:
+        """The number of states of the model (a)."""
         return 1
 
     @property
     def model_name(self) -> None | str:
+        """The model's name."""
         return self._model_name
 
     @property
     def muscle_name(self) -> None | str:
+        """The muscle's name."""
         return self._muscle_name
 
     @property
     def with_fatigue(self):
+        """If the model includes fatigue dynamics (False for this model)."""
         return self._with_fatigue
 
     @property
     def identifiable_parameters(self):
+        """The model's parameters that can be identified from experimental data."""
         return {
             "Ta": self.Ta,
             "I_threshold": self.I_threshold,
@@ -94,6 +112,8 @@ class VeltinkModelPulseIntensity(StateDynamics):
 
     def standard_rest_values(self) -> np.array:
         """
+        The model's state at rest.
+
         Returns
         -------
         The rested value of muscle activation
@@ -101,6 +121,13 @@ class VeltinkModelPulseIntensity(StateDynamics):
         return np.array([[0]])
 
     def serialize(self) -> tuple[Callable, dict]:
+        """
+        Serialize the model's parameters for later saving/reloading.
+
+        Returns
+        -------
+        A tuple of the model's class and a dict of its parameters, used to save/reload the model
+        """
         return (
             VeltinkModelPulseIntensity,
             {

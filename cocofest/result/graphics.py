@@ -1,3 +1,8 @@
+"""
+Plots the results of an FES optimal control problem, forward simulation, musculoskeletal simulation, or
+model identification.
+"""
+
 from bioptim import Solution, SolutionMerge, InterpolationType
 import matplotlib.pyplot as plt
 import numpy as np
@@ -6,6 +11,12 @@ from ..models.dynamical_model import FesMskModel
 
 
 class FES_plot:
+    """
+    Plots the results of an FES optimal control problem, forward simulation, musculoskeletal simulation, or
+    model identification (states, controls, stimulation pattern, and identified parameters) from a bioptim
+    Solution or a dict of extracted data.
+    """
+
     def __init__(self, data: Solution | dict):
         self.data = data
 
@@ -48,6 +59,22 @@ class FES_plot:
         tracked_data=None,
         default_model=None,
     ):
+        """
+        Dispatch to the right plotting method (ocp, msk, id or ivp) based on the data's type and content.
+
+        Parameters
+        ----------
+        title: str
+            The figure's title
+        show_stim: bool
+            If the stimulation times should be shown
+        show_bounds: bool
+            If the state bounds should be shown
+        tracked_data
+            The tracked data to plot alongside the identification result (id_plot only)
+        default_model
+            The default (non-identified) model to compare identified parameters against (id_plot only)
+        """
         if isinstance(self.data, Solution):
             if isinstance(self.data.ocp.nlp[0].model, FesMskModel):
                 self.msk_plot(title, show_stim, show_bounds)
@@ -64,6 +91,19 @@ class FES_plot:
             raise ValueError("Data must be a Solution or a dictionary")
 
     def get_data(self, solution: Solution):
+        """
+        Extract the joint kinematics, torque and muscle forces from a musculoskeletal solution.
+
+        Parameters
+        ----------
+        solution: Solution
+            The bioptim Solution to extract data from
+
+        Returns
+        -------
+        tuple
+            The Q, Qdot, tau, muscle forces and time of the solution
+        """
         states = solution.stepwise_states(to_merge=SolutionMerge.NODES)
         controls = solution.stepwise_controls(to_merge=SolutionMerge.NODES)
         time = solution.stepwise_time(to_merge=SolutionMerge.NODES).T[0]
@@ -76,6 +116,19 @@ class FES_plot:
         return q, qdot, tau, force, time
 
     def get_msk_bounds(self, solution: Solution):
+        """
+        Extract the Q, Qdot, tau and muscle force bounds from a musculoskeletal solution.
+
+        Parameters
+        ----------
+        solution: Solution
+            The bioptim Solution to extract state/control bounds from
+
+        Returns
+        -------
+        dict
+            The Q, Qdot, tau and muscle force bounds
+        """
         q_bounds = [solution.ocp.nlp[0].x_bounds["q"].min[0], solution.ocp.nlp[0].x_bounds["q"].max[0]]
         qdot_bounds = [solution.ocp.nlp[0].x_bounds["qdot"].min[0], solution.ocp.nlp[0].x_bounds["qdot"].max[0]]
         tau_bounds = (
@@ -93,6 +146,19 @@ class FES_plot:
         return bounds
 
     def get_bounds(self, solution: Solution):
+        """
+        Extract the state bounds of a single-muscle solution, for the currently used interpolation type.
+
+        Parameters
+        ----------
+        solution: Solution
+            The bioptim Solution to extract state bounds from
+
+        Returns
+        -------
+        tuple
+            The Cn, F (and A, Tau1, Km if the model has fatigue) state bounds, and their matching time vector
+        """
         if solution.ocp.nlp[0].x_bounds.type == InterpolationType.CONSTANT_WITH_FIRST_AND_LAST_DIFFERENT:
             solution_bounds = solution.ocp.nlp[0].x_bounds
             cn_bounds = [list(solution_bounds["Cn"].min[0]), list(solution_bounds["Cn"].max[0])]
@@ -127,6 +193,7 @@ class FES_plot:
         return bounds, bound_time
 
     def axes_settings(self, axes_list):
+        """Style a list of stacked twin y-axes: colored, offset left spines and hidden frame otherwise."""
         for i in range(len(axes_list)):
             offset = -0.2 * i if len(axes_list) > 1 else -0.05
             axes_list[i].spines["left"].set_position(("axes", offset))
@@ -136,6 +203,20 @@ class FES_plot:
             axes_list[i].spines["left"].set_visible(True)
 
     def build_several_y_axis(self, axis, time, values, labels: list = None):
+        """
+        Plot several time series on one axis, each with its own color-coded y-axis.
+
+        Parameters
+        ----------
+        axis
+            The matplotlib axis to plot on
+        time
+            The time vector
+        values
+            The values to plot, one row per series
+        labels: list
+            The label of each series
+        """
         n = values.shape[0]
         cmap = plt.colormaps["tab20"].resampled(n)
         colors = [cmap(i) for i in range(n)]
@@ -159,6 +240,26 @@ class FES_plot:
     def build_several_y_axis_FES(
         self, axis, time, values, labels: list = None, stim_time=None, stim_values=None, axes_title=None
     ):
+        """
+        Plot muscle forces on one axis and the stimulation pattern (pulse width/intensity) on a twin axis.
+
+        Parameters
+        ----------
+        axis
+            The matplotlib axis to plot on
+        time
+            The time vector
+        values
+            The muscle force values to plot, one row per muscle
+        labels: list
+            The label of each muscle
+        stim_time
+            The stimulation times
+        stim_values
+            The per-muscle stimulation control values (pulse width/intensity), keyed by parameter name
+        axes_title
+            The titles of the force axis and the stimulation axis
+        """
         n = len(labels)
         cmap = plt.colormaps["tab20b"].resampled(n)
         colors = [cmap(i) for i in range(n)]
@@ -212,6 +313,18 @@ class FES_plot:
         return twin_ax, line
 
     def ocp_plot(self, title: str = None, show_stim: bool = True, show_bounds: bool = True):
+        """
+        Plot the force and (optionally) fatigue model states of a single-muscle optimal control problem solution.
+
+        Parameters
+        ----------
+        title: str
+            The figure's title
+        show_stim: bool
+            If the stimulation times should be shown
+        show_bounds: bool
+            If the state bounds should be shown
+        """
         solution = self.data
         states = solution.stepwise_states(to_merge=SolutionMerge.NODES)
         time = solution.stepwise_time(to_merge=SolutionMerge.NODES).T[0]
@@ -377,6 +490,18 @@ class FES_plot:
         plt.show()
 
     def msk_plot(self, title: str = None, show_stim: bool = True, show_bounds: bool = True):
+        """
+        Plot the joint angles, joint velocities, torques and muscle forces of a musculoskeletal solution.
+
+        Parameters
+        ----------
+        title: str
+            The figure's title
+        show_stim: bool
+            If the stimulation times should be shown
+        show_bounds: bool
+            If the state bounds should be shown
+        """
         solution = self.data
         self.force_keys = [key for key in solution.stepwise_states().keys() if key.startswith("F_")]
         q, qdot, tau, force, time = self.get_data(solution)
@@ -471,6 +596,22 @@ class FES_plot:
     def id_plot(
         self, title: str = None, show_stim: bool = True, show_bounds: bool = True, tracked_data=None, default_model=None
     ):
+        """
+        Plot the identified force curve against the tracked data, annotated with the identified parameter values.
+
+        Parameters
+        ----------
+        title: str
+            The figure's title
+        show_stim: bool
+            Unused for this plot
+        show_bounds: bool
+            Unused for this plot
+        tracked_data
+            The tracked (simulated or experimental) [time, force] data to plot alongside the identification result
+        default_model
+            The default (non-identified) model to compare identified parameters against
+        """
         solution = self.data
         identified_params = self.extract_identified_parameters(solution)
 

@@ -1,8 +1,18 @@
+"""
+Utilities to load, align and average experimental or simulated force/stimulation data ahead of a model
+identification optimal control problem.
+"""
+
 import pickle
 import numpy as np
 
 
 class DataExtraction:
+    """
+    Utility methods to load, align and average experimental or simulated force/stimulation data ahead of a
+    model identification optimal control problem.
+    """
+
     @staticmethod
     def flatten(nested_list):
         """Flatten a list of lists."""

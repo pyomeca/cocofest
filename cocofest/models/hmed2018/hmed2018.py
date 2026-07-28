@@ -1,3 +1,11 @@
+"""
+Hmed2018 model: frequency and pulse intensity as control inputs.
+
+Hmed, A. B., Bakir, T., Garnier, Y. M., Sakly, A., Lepers, R., & Binczak, S. (2018). An approach to a
+muscle force model with force-pulse amplitude relationship of human quadriceps muscles.
+Computers in Biology and Medicine, 101, 218-228.
+"""
+
 from typing import Callable, List
 
 from casadi import MX, vertcat, tanh
@@ -60,10 +68,12 @@ class DingModelPulseIntensityFrequency(DingModelFrequency):
 
     @property
     def control_configuration_functions(self) -> List[States | Callable]:
+        """The control configuration functions used to declare the model's controls (pulse intensity) to bioptim."""
         return [StateConfigure().configure_pulse_intensity]
 
     @property
     def identifiable_parameters(self):
+        """The model's parameters that can be identified from experimental data."""
         return {
             "a_rest": self.a_rest,
             "tau1_rest": self.tau1_rest,
@@ -77,27 +87,54 @@ class DingModelPulseIntensityFrequency(DingModelFrequency):
 
     @property
     def pulse_intensity_name(self):
+        """The name of the pulse intensity control, suffixed with the muscle name if any."""
         muscle_name = "_" + self.muscle_name if self.muscle_name is not None else ""
         return "pulse_intensity" + muscle_name
 
     def set_ar(self, model, ar: MX | float):
+        """Set the axis-coordinate translation parameter Ar."""
         # models is required for bioptim compatibility
         self.ar = ar
 
     def set_bs(self, model, bs: MX | float):
+        """Set the fiber muscle recruitment constant Bs."""
         self.bs = bs
 
     def set_Is(self, model, Is: MX | float):
+        """Set the muscle saturation intensity Is."""
         self.Is = Is
 
     def set_cr(self, model, cr: MX | float):
+        """Set the axis-coordinate translation parameter Cr."""
         self.cr = cr
 
     def get_lambda_i(self, nb_stim: int, pulse_intensity: MX | float) -> list[MX | float]:
+        """
+        Compute the force-pulse amplitude relationship for each stimulation.
+
+        Parameters
+        ----------
+        nb_stim: int
+            The number of stimulations
+        pulse_intensity: MX | float
+            The pulse intensity of each stimulation (mA)
+
+        Returns
+        -------
+        list[MX | float]
+            The force-pulse amplitude relationship for each stimulation
+        """
         return [self.lambda_i_calculation(pulse_intensity[i]) for i in range(nb_stim)]
 
     # ---- Absolutely needed methods ---- #
     def serialize(self) -> tuple[Callable, dict]:
+        """
+        Serialize the model's parameters for later saving/reloading.
+
+        Returns
+        -------
+        A tuple of the model's class and a dict of its parameters, used to save/reload the model
+        """
         # This is where you can serialize your models
         # This is useful if you want to save your models and load it later
         return (
@@ -158,6 +195,8 @@ class DingModelPulseIntensityFrequency(DingModelFrequency):
 
     def lambda_i_calculation(self, pulse_intensity: MX):
         """
+        Compute the force-pulse amplitude relationship (lambda) from the pulse intensity.
+
         Parameters
         ----------
         pulse_intensity: MX
@@ -174,6 +213,8 @@ class DingModelPulseIntensityFrequency(DingModelFrequency):
         pulse_intensity: MX, ar: MX | float, bs: MX | float, Is: MX | float, cr: MX | float
     ):
         """
+        Compute the force-pulse amplitude relationship (lambda), with ar/bs/Is/cr as free identification parameters.
+
         Parameters
         ----------
         pulse_intensity: MX
@@ -208,6 +249,8 @@ class DingModelPulseIntensityFrequency(DingModelFrequency):
 
     def min_pulse_intensity(self):
         """
+        Compute the minimum pulse intensity threshold for which lambda_i stays positive.
+
         Returns
         -------
         The minimum pulse intensity threshold of the model
@@ -216,6 +259,7 @@ class DingModelPulseIntensityFrequency(DingModelFrequency):
         return (np.arctanh(-self.cr) / self.bs) + self.Is
 
     def _get_additional_previous_stim_time(self):
+        """Pad previous_stim with far-past dummy stimulation times/intensities so the truncated sum always has enough terms."""
         while len(self.previous_stim["time"]) < self.sum_stim_truncation:
             self.previous_stim["time"].insert(0, -10000000)
             self.previous_stim["pulse_intensity"].insert(0, 50)

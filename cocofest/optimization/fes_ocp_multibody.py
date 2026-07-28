@@ -1,3 +1,7 @@
+"""
+Builds the optimal control problem for a musculoskeletal model driven by one or more FES muscle models.
+"""
+
 import numpy as np
 
 from bioptim import (
@@ -14,15 +18,35 @@ from ..models.ding2007.ding2007 import DingModelPulseWidthFrequency
 from ..models.dynamical_model import FesMskModel
 from ..models.hmed2018.hmed2018 import DingModelPulseIntensityFrequency
 from ..optimization.fes_ocp import OcpFes
-from ..custom_constraints import CustomConstraint
+from .penalties.custom_constraints import CustomConstraint
 
 
 class OcpFesMsk(OcpFes):
+    """
+    Builds the optimal control problem for a musculoskeletal model driven by one or more FES muscle models
+    (see FesMskModel).
+    """
+
     def __init__(self):
         super().__init__()
 
     @staticmethod
     def get_numerical_time_series_for_external_forces(n_shooting, external_force_dict):
+        """
+        Build the numerical time series data carrying the external (resistive) torque.
+
+        Parameters
+        ----------
+        n_shooting: int
+            The number of shooting points
+        external_force_dict: dict
+            The external (resistive) torque and the segment it applies to
+
+        Returns
+        -------
+        tuple
+            The numerical time series to pass to the dynamics, and the built external force set
+        """
         external_force_set = ExternalForceSetTimeSeries(nb_frames=n_shooting)
         external_force_array = np.array(external_force_dict["torque"])
         reshape_values_array = np.tile(external_force_array[:, np.newaxis], (1, n_shooting))
@@ -42,6 +66,23 @@ class OcpFesMsk(OcpFes):
         max_pulse_intensity: int,
         use_sx: bool = True,
     ):
+        """
+        Declare the pulse intensity as an optimization parameter for every muscle model that uses one.
+
+        Parameters
+        ----------
+        model: FesMskModel
+            The musculoskeletal model used in the ocp
+        max_pulse_intensity: int
+            The maximum pulse intensity allowed
+        use_sx: bool
+            If the ocp should use SX instead of MX variables
+
+        Returns
+        -------
+        tuple
+            The ocp's parameters, parameters bounds and parameters initial guess
+        """
         parameters = ParameterList(use_sx=use_sx)
         parameters_bounds = BoundsList()
         parameters_init = InitialGuessList()
@@ -71,6 +112,25 @@ class OcpFesMsk(OcpFes):
 
     @staticmethod
     def set_constraints(models, n_shooting, stim_idx_at_node_list, custom_constraint=None):
+        """
+        Declare the pulse intensity sliding window constraint for every muscle model that uses one, plus any custom constraint.
+
+        Parameters
+        ----------
+        models: FesMskModel
+            The musculoskeletal model used in the ocp
+        n_shooting: int
+            The number of shooting points
+        stim_idx_at_node_list: list
+            The list of stimulation indices considered at each node
+        custom_constraint: list
+            Additional user-defined constraints, per muscle
+
+        Returns
+        -------
+        ConstraintList
+            The ocp's constraints (pulse intensity sliding window and any custom constraint)
+        """
         constraints = ConstraintList()
         for model in models.muscles_dynamics_model:
             if isinstance(model, DingModelPulseIntensityFrequency):
@@ -93,6 +153,19 @@ class OcpFesMsk(OcpFes):
 
     @staticmethod
     def set_x_bounds_fes(bio_models):
+        """
+        Build the state bounds and initial guess from each muscle model's rest values.
+
+        Parameters
+        ----------
+        bio_models: FesMskModel
+            The musculoskeletal model used in the ocp
+
+        Returns
+        -------
+        tuple
+            The state bounds and initial guess for every muscle model's states
+        """
         # ---- STATE BOUNDS REPRESENTATION ---- #
         #
         #                    |‾‾‾‾‾‾‾‾‾‾x_max_middle‾‾‾‾‾‾‾‾‾‾‾‾x_max_end‾
@@ -146,6 +219,25 @@ class OcpFesMsk(OcpFes):
 
     @staticmethod
     def set_x_bounds_msk(x_bounds, x_init, bio_models, msk_info):
+        """
+        Add the musculoskeletal model's Q/Qdot bounds (start/end joint angle constraints) to the ocp's state bounds.
+
+        Parameters
+        ----------
+        x_bounds: BoundsList
+            The ocp's state bounds so far (typically from set_x_bounds_fes)
+        x_init: InitialGuessList
+            The ocp's state initial guess so far
+        bio_models: FesMskModel
+            The musculoskeletal model used in the ocp
+        msk_info: dict
+            The bound_type ("start", "end" or "start_end") and bound_data (joint angles, in degrees)
+
+        Returns
+        -------
+        tuple
+            The updated state bounds and initial guess
+        """
         if msk_info["bound_type"] == "start_end":
             start_bounds = []
             end_bounds = []
@@ -189,12 +281,40 @@ class OcpFesMsk(OcpFes):
 
     @staticmethod
     def set_x_bounds(bio_models, msk_info):
+        """
+        Build the full state bounds and initial guess, combining the FES states and the musculoskeletal states.
+
+        Parameters
+        ----------
+        bio_models: FesMskModel
+            The musculoskeletal model used in the ocp
+        msk_info: dict
+            The bound_type ("start", "end" or "start_end") and bound_data (joint angles, in degrees)
+
+        Returns
+        -------
+        tuple
+            The ocp's state bounds and initial guess
+        """
         x_bounds, x_init = OcpFesMsk.set_x_bounds_fes(bio_models)
         x_bounds, x_init = OcpFesMsk.set_x_bounds_msk(x_bounds, x_init, bio_models, msk_info)
         return x_bounds, x_init
 
     @staticmethod
     def set_u_bounds_fes(bio_models):
+        """
+        Build the control bounds and initial guess (pulse width or pulse intensity) for every muscle model.
+
+        Parameters
+        ----------
+        bio_models: FesMskModel
+            The musculoskeletal model used in the ocp
+
+        Returns
+        -------
+        tuple
+            The control bounds and initial guess for every muscle model's controls
+        """
         u_bounds = BoundsList()  # Controls bounds
         u_init = InitialGuessList()  # Controls initial guess
         models = bio_models.muscles_dynamics_model
@@ -221,6 +341,27 @@ class OcpFesMsk(OcpFes):
 
     @staticmethod
     def set_u_bounds_msk(u_bounds, u_init, bio_models, with_residual_torque, max_bound=None):
+        """
+        Add the residual joint torque control bounds (if any) to the ocp's control bounds.
+
+        Parameters
+        ----------
+        u_bounds: BoundsList
+            The ocp's control bounds so far (typically from set_u_bounds_fes)
+        u_init: InitialGuessList
+            The ocp's control initial guess so far
+        bio_models: FesMskModel
+            The musculoskeletal model used in the ocp
+        with_residual_torque: bool
+            If a residual joint torque control should be added
+        max_bound: int | float
+            The maximum control value allowed (pulse width or pulse intensity)
+
+        Returns
+        -------
+        tuple
+            The updated control bounds and initial guess
+        """
         if with_residual_torque:  # TODO : ADD SEVERAL INDIVIDUAL FIXED RESIDUAL TORQUE FOR EACH JOINT
             nb_tau = bio_models.nb_tau
             tau_min, tau_max, tau_init = [-200] * nb_tau, [200] * nb_tau, [0] * nb_tau
@@ -253,12 +394,46 @@ class OcpFesMsk(OcpFes):
 
     @staticmethod
     def set_u_bounds(bio_models, with_residual_torque, max_bound=None):
+        """
+        Build the full control bounds and initial guess, combining the FES controls and the residual torque.
+
+        Parameters
+        ----------
+        bio_models: FesMskModel
+            The musculoskeletal model used in the ocp
+        with_residual_torque: bool
+            If a residual joint torque control should be added
+        max_bound: int | float
+            The maximum control value allowed (pulse width or pulse intensity)
+
+        Returns
+        -------
+        tuple
+            The ocp's control bounds and initial guess
+        """
         u_bounds, u_init = OcpFesMsk.set_u_bounds_fes(bio_models)
         u_bounds, u_init = OcpFesMsk.set_u_bounds_msk(u_bounds, u_init, bio_models, with_residual_torque, max_bound)
         return u_bounds, u_init
 
     @staticmethod
     def update_model(model, parameters, external_force_set):
+        """
+        Rebuild the musculoskeletal model, attaching the ocp's parameters and external forces.
+
+        Parameters
+        ----------
+        model: FesMskModel
+            The musculoskeletal model to rebuild
+        parameters: ParameterList
+            The ocp's parameters to attach to the rebuilt model
+        external_force_set: ExternalForceSetTimeSeries
+            The external force set to attach to the rebuilt model
+
+        Returns
+        -------
+        FesMskModel
+            A new instance of the model, rebuilt with the given parameters and external forces
+        """
         # rebuilding model for the OCP
         return FesMskModel(
             name=model.name,

@@ -1,3 +1,7 @@
+"""
+Moving horizon estimation (MHE) for a musculoskeletal model (FesMskModel) driven by FES.
+"""
+
 import numpy as np
 from copy import deepcopy
 from casadi import SX
@@ -19,10 +23,29 @@ from ..models.dynamical_model import FesMskModel
 
 
 class FesMheMsk(FesMhe):
+    """
+    Musculoskeletal counterpart of FesMhe: moving horizon estimation for a FesMskModel driven by FES.
+    """
+
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
 
     def build_new_model(self, model, previous_stim_time):
+        """
+        Build a new model instance carrying the given stimulation history forward.
+
+        Parameters
+        ----------
+        model: FesMskModel
+            The model whose configuration should be reused
+        previous_stim_time: dict
+            The stimulation history to carry forward into the new model
+
+        Returns
+        -------
+        FesMskModel
+            A new model instance carrying the given stimulation history
+        """
         new_model = FesMskModel(
             name=model.name,
             biorbd_path=model.biorbd_path,
@@ -38,6 +61,7 @@ class FesMheMsk(FesMhe):
         return new_model
 
     def update_stim(self):
+        """Rebuild the current phase's musculoskeletal model with the stimulation history from the previous window."""
         if isinstance(self.nlp[0].model, FesMskModel):
             muscle_model = self.nlp[0].model.muscles_dynamics_model[0]
             truncation_term = muscle_model.sum_stim_truncation
@@ -56,6 +80,25 @@ class FesMheMsk(FesMhe):
             self.all_models.append(new_model)
 
     def _initialize_solution(self, dt: float, states: list, controls: list, parameters: list):
+        """
+        Build a bioptim Solution spanning the full combined MHE horizon from the per-window results.
+
+        Parameters
+        ----------
+        dt: float
+            The time step of the full combined horizon
+        states: list
+            The state values collected from every solved window
+        controls: list
+            The control values collected from every solved window
+        parameters: list
+            The parameter values collected from every solved window
+
+        Returns
+        -------
+        Solution
+            A bioptim Solution spanning the full combined MHE horizon
+        """
         combine_model = False if isinstance(self.nlp[0].model, BiorbdModel) else True
         combined_model = self.create_model_from_list(self.all_models) if combine_model else self.nlp[0].model
         x_init = InitialGuessList()
@@ -171,6 +214,19 @@ class FesMheMsk(FesMhe):
         return Solution.from_initial_guess(solution_ocp, [np.array([dt]), x_init, u_init_for_solution, p_init, a_init])
 
     def create_model_from_list(self, models: list):
+        """
+        Combine the per-window models into a single model spanning the full MHE horizon.
+
+        Parameters
+        ----------
+        models: list
+            The per-window models solved so far
+
+        Returns
+        -------
+        FesMskModel
+            A single model whose stim_time spans every window's stimulation, offset in time
+        """
         if isinstance(models[0], BiorbdModel):
             return models[0]
 
@@ -196,6 +252,14 @@ class FesMheMsk(FesMhe):
         return combined_model
 
     def get_stim_time_from_all_models(self):
+        """
+        Reconstruct the continuous stimulation timeline across every solved window.
+
+        Returns
+        -------
+        list
+            The stimulation times of every solved window, offset so they are continuous across the full horizon
+        """
         stim_time = []
         offset = 0.0
         for model in self.all_models:
@@ -217,6 +281,32 @@ class FesMheMsk(FesMhe):
         cyclic_options: dict = None,
         max_consecutive_failing: int = 3,
     ):
+        """
+        Solve the moving horizon estimation problem and stitch the resulting stimulation timeline back together.
+
+        Parameters
+        ----------
+        update_functions
+            The bioptim callback deciding when to stop sliding the window
+        solver: Solver.IPOPT
+            The solver used to solve each window
+        total_cycles: int
+            The total number of stimulation cycles to solve
+        external_force: dict
+            The external (resistive) torque and the segment it applies to
+        cycle_solutions: MultiCyclicCycleSolutions
+            Which per-cycle solutions to keep
+        get_all_iterations: bool
+            If every solver iteration's solution should be kept
+        cyclic_options: dict
+            Additional options forwarded to the cyclic NMPC solve
+        max_consecutive_failing: int
+            The maximum number of consecutive failing windows before aborting
+
+        Returns
+        -------
+        The MHE solution
+        """
 
         sol = self.solve(
             update_functions,

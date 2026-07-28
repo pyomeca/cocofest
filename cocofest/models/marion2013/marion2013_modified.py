@@ -1,3 +1,11 @@
+"""
+Marion2013 model with pulse width as the control input instead of frequency.
+
+Marion, M. S., Wexler, A. S., & Hull, M. L. (2013). Predicting non-isometric fatigue induced by
+electrical stimulation pulse trains as a function of pulse duration. Journal of NeuroEngineering
+and Rehabilitation, 10, 1-16.
+"""
+
 from typing import Callable
 from casadi import MX, vertcat, exp, cos, pi
 import numpy as np
@@ -13,7 +21,7 @@ class Marion2013ModelPulseWidthFrequency(Marion2009ModelPulseWidthFrequency):
     """
     Implementation of the Marion 2013 force-motion model for electrical stimulation
 
-    Warning: This model was not validated from Marion's experiment as the pulse with is added.
+    Warning: This model was not validated from Marion's experiment as the pulse width is added.
     This model should be used with caution.
 
     Marion, M. S., Wexler, A. S., & Hull, M. L. (2013).
@@ -69,6 +77,7 @@ class Marion2013ModelPulseWidthFrequency(Marion2009ModelPulseWidthFrequency):
 
     @property
     def name_dofs(self, with_muscle_name: bool = False) -> list[str]:
+        """The states' names (Cn, F, theta, dtheta_dt), suffixed with the muscle name if any."""
         muscle_name = "_" + self.muscle_name if self.muscle_name is not None else ""
         return [
             "Cn" + muscle_name,
@@ -79,10 +88,12 @@ class Marion2013ModelPulseWidthFrequency(Marion2009ModelPulseWidthFrequency):
 
     @property
     def nb_state(self) -> int:
+        """The number of states of the model (Cn, F, theta, dtheta_dt)."""
         return 4
 
     @property
     def identifiable_parameters(self):
+        """The model's parameters that can be identified from experimental data."""
         return {
             "a": self.a_rest,
             "a_theta": self.a_theta,
@@ -95,6 +106,8 @@ class Marion2013ModelPulseWidthFrequency(Marion2009ModelPulseWidthFrequency):
 
     def standard_rest_values(self) -> np.array:
         """
+        The model's states at rest.
+
         Returns
         -------
         The rested values of CN, F, theta, dtheta_dt
@@ -102,6 +115,13 @@ class Marion2013ModelPulseWidthFrequency(Marion2009ModelPulseWidthFrequency):
         return np.array([[0], [0], [90], [0]])
 
     def serialize(self) -> tuple[Callable, dict]:
+        """
+        Serialize the model's parameters for later saving/reloading.
+
+        Returns
+        -------
+        A tuple of the model's class and a dict of its parameters, used to save/reload the model
+        """
         return (
             Marion2013ModelPulseWidthFrequency,
             {
@@ -126,6 +146,25 @@ class Marion2013ModelPulseWidthFrequency(Marion2009ModelPulseWidthFrequency):
         return self.V1 * theta * exp(-self.V2 * theta) * dtheta_dt
 
     def calculate_acceleration(self, theta: MX, lambda_angle: MX, f: MX, Fload: MX) -> MX:
+        """
+        Calculate the angular acceleration d2theta_dt2 of the joint driven by the muscle force.
+
+        Parameters
+        ----------
+        theta: MX
+            Current joint angle (deg)
+        lambda_angle: MX
+            Resting angle adjustment (deg)
+        f: MX
+            The current force value (N)
+        Fload: MX
+            The external load applied to the joint (N)
+
+        Returns
+        -------
+        MX
+            The angular acceleration of the joint (deg/s^2)
+        """
         return self.L_I * ((Fload + self.FM) * cos(pi / 180 * (theta + lambda_angle)) - f)
 
     def system_dynamics(

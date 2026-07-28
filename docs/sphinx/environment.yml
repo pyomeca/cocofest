@@ -1,0 +1,6 @@
+name: cocofest-docs
+channels:
+- conda-forge
+dependencies:
+- python=3.11
+- bioptim=3.4.0

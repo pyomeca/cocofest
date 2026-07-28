@@ -1,5 +1,6 @@
 """
-The muscle force length, velocity and passive force coefficients calculation from:
+Muscle force-length, force-velocity and passive force Hill-type coefficients.
+
 De Groote, F., Kinney, A. L., Rao, A. V., & Fregly, B. J. (2016).
 Evaluation of direct collocation optimal control problem formulations for solving the muscle redundancy problem.
 Annals of biomedical engineering, 44, 2922-2936.

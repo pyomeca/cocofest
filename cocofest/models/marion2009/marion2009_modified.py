@@ -1,3 +1,10 @@
+"""
+Marion2009 model with pulse width as the control input instead of frequency.
+
+Marion, M. S., Wexler, A. S., Hull, M. L., & Binder-Macleod, S. A. (2009). Predicting the effect of
+muscle length on fatigue during electrical stimulation. Muscle & Nerve, 40(4), 573-581.
+"""
+
 from typing import Callable
 
 from casadi import MX, vertcat
@@ -11,7 +18,7 @@ class Marion2009ModelPulseWidthFrequency(DingModelPulseWidthFrequency):
 
     This implements the Marion 2009 model which adds angle dependency to the force-fatigue relationship.
 
-    Warning: This model was not validated from Marion's experiment as the pulse with is added.
+    Warning: This model was not validated from Marion's experiment as the pulse width is added.
     This model should be used with caution.
 
     Marion, M. S., Wexler, A. S., Hull, M. L., & Binder‐Macleod, S. A. (2009).
@@ -65,6 +72,7 @@ class Marion2009ModelPulseWidthFrequency(DingModelPulseWidthFrequency):
 
     @property
     def identifiable_parameters(self):
+        """The model's parameters that can be identified from experimental data."""
         params = super().identifiable_parameters
         params.update(
             {
@@ -76,6 +84,13 @@ class Marion2009ModelPulseWidthFrequency(DingModelPulseWidthFrequency):
         return params
 
     def serialize(self) -> tuple[Callable, dict]:
+        """
+        Serialize the model's parameters for later saving/reloading.
+
+        Returns
+        -------
+        A tuple of the model's class and a dict of its parameters, used to save/reload the model
+        """
         base_params = super().serialize()[1]
         base_params.update(
             {

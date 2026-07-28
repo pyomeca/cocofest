@@ -1,16 +1,22 @@
 """
-This custom objective class regroups all the custom objectives that are used in the optimization problem.
+This class regroups objective that are not available through Bioptim and can be used in the optimization problem.
+By adding definitions to this class, you can create your own custom objective.
 """
 
 from casadi import MX, vertcat
 from bioptim import PenaltyController
-from .models.fes_model import FesModel
-from .models.ding2007.ding2007 import DingModelPulseWidthFrequency
-from .models.dynamical_model import FesMskModel
-from .models.hmed2018.hmed2018 import DingModelPulseIntensityFrequency
+from ...models.fes_model import FesModel
+from ...models.ding2007.ding2007 import DingModelPulseWidthFrequency
+from ...models.dynamical_model import FesMskModel
+from ...models.hmed2018.hmed2018 import DingModelPulseIntensityFrequency
 
 
 class CustomObjective:
+    """
+    Custom objective functions not available in bioptim, usable as extra cost terms in an optimal control
+    program.
+    """
+
     @staticmethod
     def minimize_overall_muscle_fatigue(controller: PenaltyController) -> MX:
         """

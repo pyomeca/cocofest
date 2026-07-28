@@ -1,15 +1,25 @@
+"""
+Exports a bioptim Solution's time, states, controls and parameters to a pickle file for later reuse.
+"""
+
 import pickle
 import numpy as np
 from bioptim import SolutionMerge
 
 
 class SolutionToPickle:
+    """
+    Exports a bioptim Solution's time, states, controls and parameters to a pickle file for later reuse (e.g.
+    plotting or identification).
+    """
+
     def __init__(self, solution, file_name, path):
         self.sol = solution
         self.file_name = file_name
         self.path = path
 
     def pickle(self):
+        """Export the solution's time, states, controls, parameters and bio model path to self.path/self.file_name."""
         bounds_key = self.sol.ocp.parameter_bounds.keys()
         bounds = {}
         for key in bounds_key:
@@ -41,6 +51,19 @@ class SolutionToPickle:
         return print(f"Solution values has been exported in pickle format in {self.path + self.file_name}")
 
     def remove_duplicates(self, time):
+        """
+        Remove duplicated timestamps at phase transitions from the decision time and states.
+
+        Parameters
+        ----------
+        time: np.ndarray
+            The decision time vector, possibly containing duplicated timestamps at phase transitions
+
+        Returns
+        -------
+        tuple
+            The deduplicated time vector and the matching states
+        """
         states = self.sol.decision_states(to_merge=[SolutionMerge.PHASES, SolutionMerge.NODES])
         vals, idx_start, count = np.unique(time, return_counts=True, return_index=True)
         time = time[idx_start]

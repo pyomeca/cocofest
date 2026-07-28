@@ -38,6 +38,12 @@ dev = [
     "codecov",
     "packaging",
 ]
+docs = [
+    "sphinx",
+    "myst-parser",
+    "furo",
+    "sphinxcontrib-mermaid",
+]
 
 [project.urls]
 Homepage = "https://github.com/pyomeca/cocofest"

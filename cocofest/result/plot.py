@@ -1,3 +1,7 @@
+"""
+Plots the muscle stimulation angle and related quantities of a cycling motion.
+"""
+
 import numpy as np
 import matplotlib
 
@@ -12,6 +16,11 @@ import pickle
 
 
 class PlotCyclingResult:
+    """
+    Plots the muscle stimulation angle and related quantities of a cycling motion from a bioptim Solution or a
+    pickled result file.
+    """
+
     def __init__(self, solution: Solution | str):
         self.sol = solution
 
@@ -84,7 +93,7 @@ class PlotCyclingResult:
         plt.show()
 
     def plot_rehastim(self):
-
+        """Plot a fixed reference stimulation pattern matching the RehaStim device's 4-muscle electrode layout."""
         triceps_brachii = {
             "theta": np.radians(100),
             "radii": 1 / 5,
@@ -151,6 +160,19 @@ class PlotCyclingResult:
         plt.show()
 
     def extract_data_from_sol(self, solution: Solution):
+        """
+        Extract the per-muscle stimulation angle and opacity from a bioptim Solution.
+
+        Parameters
+        ----------
+        solution: Solution
+            The bioptim Solution to extract the per-muscle stimulation angle/opacity data from
+
+        Returns
+        -------
+        dict
+            Per-muscle polar bar-plot data (theta, radii, width, bottom, opacity, label)
+        """
         data = {}
         n_phase = solution.ocp.n_phases
         width = 2 * np.pi / n_phase
@@ -208,6 +230,19 @@ class PlotCyclingResult:
         return data
 
     def extract_data_from_pickle(self, solution: str):
+        """
+        Extract the per-muscle stimulation angle and opacity from a pickled solution.
+
+        Parameters
+        ----------
+        solution: str
+            The path to a pickled Solution (as exported by SolutionToPickle)
+
+        Returns
+        -------
+        dict
+            Per-muscle polar bar-plot data (theta, radii, width, bottom, opacity, label)
+        """
         with open(solution, "rb") as f:
             pickle_data = pickle.load(f)
         data = {}
@@ -274,6 +309,19 @@ class PlotCyclingResult:
 
     @staticmethod
     def add_empty_muscle(data):
+        """
+        Pad the polar bar-plot data with an invisible "empty" entry.
+
+        Parameters
+        ----------
+        data: dict
+            The per-muscle polar bar-plot data
+
+        Returns
+        -------
+        dict
+            The same data with an added invisible "empty" entry used to pad the polar plot
+        """
         empty = {
             "theta": 1,
             "radii": 1 / len(data),
@@ -287,6 +335,14 @@ class PlotCyclingResult:
 
     @staticmethod
     def rehamove_data():
+        """
+        The fixed reference stimulation pattern matching the RehaStim device's 4-muscle electrode layout.
+
+        Returns
+        -------
+        dict
+            The fixed reference stimulation pattern matching the RehaStim device's 4-muscle electrode layout
+        """
         triceps_brachii = {
             "theta": np.radians(100),
             "radii": 1 / 5,

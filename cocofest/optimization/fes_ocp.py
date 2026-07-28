@@ -1,3 +1,7 @@
+"""
+Builds the optimal control problem used to optimize a single-muscle FES model.
+"""
+
 import numpy as np
 
 from bioptim import (
@@ -15,10 +19,10 @@ from bioptim import (
     VariableScaling,
 )
 
-from ..fourier_approx import FourierSeries
+from ..misc.fourier_approx import FourierSeries
 from cocofest.models.ding2007.ding2007 import DingModelPulseWidthFrequency
 from cocofest.models.hmed2018.hmed2018 import DingModelPulseIntensityFrequency
-from ..custom_constraints import CustomConstraint
+from .penalties.custom_constraints import CustomConstraint
 
 
 class OcpFes:
@@ -33,6 +37,23 @@ class OcpFes:
         max_pulse_intensity,
         use_sx,
     ):
+        """
+        Declare the pulse intensity as an optimization parameter, if the model uses one.
+
+        Parameters
+        ----------
+        model: FesModel
+            The FES model used in the ocp
+        max_pulse_intensity: int | float
+            The maximum pulse intensity allowed
+        use_sx: bool
+            The nature of the casadi variables. MX are used if False.
+
+        Returns
+        -------
+        tuple
+            All the parameters to optimize of the program, their bounds and their initial guess
+        """
         parameters = ParameterList(use_sx=use_sx)
         parameters_bounds = BoundsList()
         parameters_init = InitialGuessList()
@@ -58,6 +79,23 @@ class OcpFes:
 
     @staticmethod
     def set_constraints(model, n_shooting, stim_idx_at_node_list):
+        """
+        Declare the pulse intensity sliding window constraint, if the model uses pulse intensity.
+
+        Parameters
+        ----------
+        model: FesModel
+            The FES model used in the ocp
+        n_shooting: int
+            The number of shooting points of the phase
+        stim_idx_at_node_list: list
+            The list of stimulation indices considered at each node
+
+        Returns
+        -------
+        ConstraintList
+            All the constraints of the program
+        """
         constraints = ConstraintList()
         if isinstance(model, DingModelPulseIntensityFrequency):
             for i in range(n_shooting):
@@ -73,6 +111,21 @@ class OcpFes:
 
     @staticmethod
     def declare_dynamics_options(numerical_time_series, ode_solver):
+        """
+        Build the ocp's dynamics options, sharing dynamics between nodes and expanding them for speed.
+
+        Parameters
+        ----------
+        numerical_time_series: dict
+            The numerical timeseries at each node. ex: the experimental external forces data should go here.
+        ode_solver: OdeSolver
+            The integrator to use to integrate this dynamics.
+
+        Returns
+        -------
+        DynamicsOptionsList
+            The dynamics of the phase
+        """
         dynamics_options = DynamicsOptionsList()
         dynamics_options.add(
             DynamicsOptions(
@@ -87,6 +140,19 @@ class OcpFes:
 
     @staticmethod
     def set_x_bounds(model):
+        """
+        Build the state bounds from the model's rest values, widening them to the model's physiological range.
+
+        Parameters
+        ----------
+        model: FesModel
+            The FES model used in the ocp
+
+        Returns
+        -------
+        BoundsList
+            The bounds for the states
+        """
         # ---- STATE BOUNDS REPRESENTATION ---- #
         #
         #                    |‾‾‾‾‾‾‾‾‾‾x_max_middle‾‾‾‾‾‾‾‾‾‾‾‾x_max_end‾
@@ -132,6 +198,19 @@ class OcpFes:
 
     @staticmethod
     def set_x_init(model):
+        """
+        Build the state initial guess from the model's rest values.
+
+        Parameters
+        ----------
+        model: FesModel
+            The FES model used in the ocp
+
+        Returns
+        -------
+        InitialGuessList
+            The initial guesses for the states
+        """
         variable_bound_list = model.name_dofs
         x_init = InitialGuessList()
         for j in range(len(variable_bound_list)):
@@ -141,6 +220,21 @@ class OcpFes:
 
     @staticmethod
     def set_u_bounds(model, max_bound: int | float):
+        """
+        Build the control bounds (pulse width or pulse intensity, depending on the model).
+
+        Parameters
+        ----------
+        model: FesModel
+            The FES model used in the ocp
+        max_bound: int | float
+            The maximum control value allowed (pulse width or pulse intensity)
+
+        Returns
+        -------
+        BoundsList
+            The bounds for the controls
+        """
         u_bounds = BoundsList()  # Controls bounds
 
         if isinstance(model, DingModelPulseWidthFrequency):
@@ -167,6 +261,19 @@ class OcpFes:
 
     @staticmethod
     def set_u_init(model):
+        """
+        Build the control initial guess (pulse width or pulse intensity, depending on the model).
+
+        Parameters
+        ----------
+        model: FesModel
+            The FES model used in the ocp
+
+        Returns
+        -------
+        InitialGuessList
+            The initial guesses for the controls
+        """
         u_init = InitialGuessList()  # Controls initial guess
 
         if isinstance(model, DingModelPulseWidthFrequency):
@@ -180,6 +287,21 @@ class OcpFes:
     # TODO: Remove this method
     @staticmethod
     def _set_objective(n_shooting, objective):
+        """
+        Build the objective functions of the program from a custom, force-tracking and/or end-node-tracking entry.
+
+        Parameters
+        ----------
+        n_shooting: int
+            The number of shooting points of the phase
+        objective: dict
+            The ocp objective, including custom, force_tracking and end_node_tracking entries
+
+        Returns
+        -------
+        ObjectiveList
+            All the objective function of the program
+        """
         # Creates the objective for our problem
         objective_functions = ObjectiveList()
         if objective["custom"]:
@@ -220,6 +342,22 @@ class OcpFes:
 
     @staticmethod
     def check_and_adjust_dimensions_for_objective_fun(force_to_track, n_shooting, final_time):
+        """
+        Fit a tracked force curve with a Fourier series, then resample it at every shooting node.
+
+        Parameters
+        ----------
+        force_to_track: list
+            A [time, force] pair of equal-length lists to track
+        n_shooting: int
+            The number of shooting points
+        final_time: float
+            The ocp final time
+
+        Returns
+        -------
+        The tracked force resampled at each shooting node
+        """
         if len(force_to_track[0]) != len(force_to_track[1]):
             raise ValueError("force_tracking time and force argument must be same length")
         if len(force_to_track) != 2:
@@ -237,6 +375,16 @@ class OcpFes:
 
     @staticmethod
     def update_model_param(model, parameters):
+        """
+        Apply every identified/optimized bioptim parameter back onto the model via its setter function.
+
+        Parameters
+        ----------
+        model: FesModel
+            The FES model to update
+        parameters: ParameterList
+            All the parameters to optimize of the program
+        """
         for param_key in parameters:
             if parameters[param_key].function:
                 param_scaling = parameters[param_key].scaling.scaling
