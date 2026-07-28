@@ -1,3 +1,12 @@
+"""
+Veltink1992 model combined with the Riener1998 fatigue prediction.
+
+Veltink, P. H., Chizeck, H. J., Crago, P. E., & El-Bialy, A. (1992). Nonlinear joint angle control
+for artificially stimulated muscle. IEEE Transactions on Biomedical Engineering, 39(4), 368-380.
+Combined with the fatigue prediction from Riener, R., & Veltink, P. H. (1998). A model of muscle
+fatigue during electrical stimulation. IEEE Transactions on Biomedical Engineering, 45(1), 105-113.
+"""
+
 from typing import Callable
 from casadi import MX, vertcat
 import numpy as np
@@ -50,6 +59,7 @@ class VeltinkRienerModelPulseIntensityWithFatigue(VeltinkModelPulseIntensity):
 
     @property
     def name_dofs(self, with_muscle_name: bool = False) -> list[str]:
+        """The states' names (a, mu), suffixed with the muscle name if any."""
         muscle_name = "_" + self.muscle_name if self.muscle_name is not None else ""
         return [
             "a" + muscle_name,  # Muscle activation
@@ -58,10 +68,12 @@ class VeltinkRienerModelPulseIntensityWithFatigue(VeltinkModelPulseIntensity):
 
     @property
     def nb_state(self) -> int:
+        """The number of states of the model (a, mu)."""
         return 2
 
     @property
     def identifiable_parameters(self):
+        """The model's parameters that can be identified from experimental data."""
         params = super().identifiable_parameters
         params.update(
             {
@@ -74,6 +86,8 @@ class VeltinkRienerModelPulseIntensityWithFatigue(VeltinkModelPulseIntensity):
 
     def standard_rest_values(self) -> np.array:
         """
+        The model's states at rest.
+
         Returns
         -------
         The rested values of muscle activation and fatigue state
@@ -81,6 +95,13 @@ class VeltinkRienerModelPulseIntensityWithFatigue(VeltinkModelPulseIntensity):
         return np.array([[0], [1]])  # a = 0, mu = 1 (no fatigue)
 
     def serialize(self) -> tuple[Callable, dict]:
+        """
+        Serialize the model's parameters for later saving/reloading.
+
+        Returns
+        -------
+        A tuple of the model's class and a dict of its parameters, used to save/reload the model
+        """
         base_dict = super().serialize()[1]
         base_dict.update(
             {

@@ -1,3 +1,7 @@
+"""
+Registers the bioptim states/controls used by Cocofest's FES and musculoskeletal models.
+"""
+
 from bioptim import (
     ConfigureVariables,
     NonLinearProgram,
@@ -6,6 +10,11 @@ from bioptim import (
 
 
 class StateConfigure:
+    """
+    Registers the bioptim states/controls (Cn, F, A, Tau1, Km, pulse width/intensity, angle, ...) used by
+    Cocofest's FES and musculoskeletal models.
+    """
+
     def __init__(self):
         self.state_dictionary = {
             "Cn": self.configure_ca_troponin_complex,  # Ding model
@@ -479,6 +488,16 @@ class StateConfigure:
 
     @staticmethod
     def configure_all_muscle_states(ocp, nlp):
+        """
+        Configure every state of a single-muscle FES model (nlp.model) to bioptim.
+
+        Parameters
+        ----------
+        ocp: OptimalControlProgram
+            A reference to the ocp
+        nlp: NonLinearProgram
+            A reference to the phase
+        """
         for state_key in nlp.model.name_dofs:
             if state_key in StateConfigure().state_dictionary.keys():
                 StateConfigure().state_dictionary[state_key](
@@ -491,6 +510,16 @@ class StateConfigure:
 
     @staticmethod
     def configure_all_muscle_msk_states(ocp, nlp):
+        """
+        Configure every state of every muscle model in a musculoskeletal model (nlp.model) to bioptim.
+
+        Parameters
+        ----------
+        ocp: OptimalControlProgram
+            A reference to the ocp
+        nlp: NonLinearProgram
+            A reference to the phase
+        """
         for muscle_dynamics_model in nlp.model.muscles_dynamics_model:
             for state_key in muscle_dynamics_model.name_dofs:
                 separator = "_"
@@ -505,6 +534,18 @@ class StateConfigure:
                     )
 
     def configure_all_fes_model_states(self, ocp, nlp, fes_model):
+        """
+        Configure every state of the given FES model to bioptim.
+
+        Parameters
+        ----------
+        ocp: OptimalControlProgram
+            A reference to the ocp
+        nlp: NonLinearProgram
+            A reference to the phase
+        fes_model
+            The FES model whose states should be configured
+        """
         for state_key in fes_model.name_dofs:
             if state_key in self.state_dictionary.keys():
                 self.state_dictionary[state_key](

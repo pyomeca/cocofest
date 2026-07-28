@@ -1,3 +1,7 @@
+"""
+Musculoskeletal model driven by one or more FES muscle models.
+"""
+
 from typing import Callable, List
 import numpy as np
 
@@ -30,6 +34,12 @@ from .hill_coefficients import (
 
 
 class FesMskModel(BiorbdModel, StateDynamics):
+    """
+    A custom bioptim/biorbd model that couples one or more FES muscle models to a musculoskeletal model, so a
+    movement can be driven directly by functional electrical stimulation instead of joint torques or generic
+    muscle activations.
+    """
+
     def __init__(
         self,
         name: str = None,
@@ -104,22 +114,27 @@ class FesMskModel(BiorbdModel, StateDynamics):
 
     @property
     def state_configuration_functions(self) -> List[States | Callable]:
+        """The state configuration functions used to declare each muscle's states plus Q and Qdot to bioptim."""
         return [StateConfigure().configure_all_muscle_msk_states, States.Q, States.QDOT]
 
     @property
     def control_configuration_functions(self) -> list:
+        """The control configuration functions used to declare each muscle model's controls to bioptim."""
         return [FesMskModel.declare_model_control]
 
     @property
     def algebraic_configuration_functions(self) -> list:
+        """The algebraic state configuration functions used to declare the model's algebraic states to bioptim (none)."""
         return []
 
     @property
     def extra_configuration_functions(self) -> list:
+        """Extra configuration functions used to declare additional variables to bioptim (none)."""
         return []
 
     @property
     def contact_types(self) -> List[ContactType]:
+        """The rigid contact types active on the model, based on with_contact."""
         return [ContactType.RIGID_EXPLICIT] if self.with_contact else []
 
     def get_rigid_contact_forces(
@@ -132,6 +147,30 @@ class FesMskModel(BiorbdModel, StateDynamics):
         numerical_timeseries,
         nlp,
     ):
+        """
+        Compute the rigid contact forces at the model's contact points.
+
+        Parameters
+        ----------
+        time
+            The system's current node time
+        states
+            The state of the system
+        controls
+            The controls of the system
+        parameters
+            The parameters of the system
+        algebraic_states
+            The algebraic states of the system
+        numerical_timeseries
+            The numerical timeseries of the system
+        nlp: NonLinearProgram
+            A reference to the phase
+
+        Returns
+        -------
+        The rigid contact forces at the model's contact points
+        """
         q = DynamicsFunctions.get(nlp.states["q"], states)
         qdot = DynamicsFunctions.get(nlp.states["qdot"], states)
         tau = DynamicsFunctions.get(nlp.controls["tau"], controls) if "tau" in nlp.controls.keys() else MX()
@@ -143,6 +182,13 @@ class FesMskModel(BiorbdModel, StateDynamics):
 
     # ---- Absolutely needed methods ---- #
     def serialize(self) -> tuple[Callable, dict]:
+        """
+        Serialize the model's parameters for later saving/reloading.
+
+        Returns
+        -------
+        A tuple of the model's class and a dict of its parameters, used to save/reload the model
+        """
         return (
             FesMskModel,
             {
@@ -162,10 +208,24 @@ class FesMskModel(BiorbdModel, StateDynamics):
 
     # ---- Needed for the example ---- #
     def muscle_name_dof(self, index: int = 0) -> list[str]:
+        """
+        The states' names of a given muscle model, suffixed with its muscle name.
+
+        Parameters
+        ----------
+        index: int
+            The index of the muscle model in muscles_dynamics_model
+
+        Returns
+        -------
+        list[str]
+            The states' names of the muscle at the given index, suffixed with its muscle name
+        """
         return self.muscles_dynamics_model[index].name_dof(with_muscle_name=True)
 
     @property
     def nb_state(self) -> int:
+        """The total number of states (every muscle model's states plus the biorbd model's Q)."""
         nb_state = 0
         for muscle_model in self.muscles_dynamics_model:
             nb_state += muscle_model.nb_state
@@ -174,6 +234,7 @@ class FesMskModel(BiorbdModel, StateDynamics):
 
     @property
     def name(self) -> None | str:
+        """The model's name."""
         return self._name
 
     def dynamics(
@@ -259,6 +320,35 @@ class FesMskModel(BiorbdModel, StateDynamics):
         q: MX | SX = None,
         qdot: MX | SX = None,
     ):
+        """
+        Compute the joint torque produced by every muscle model and their combined states derivative.
+
+        Parameters
+        ----------
+        time: MX | SX
+            The time of the system
+        states: MX | SX
+            The state of the system
+        controls: MX | SX
+            The controls of the system
+        parameters: MX | SX
+            The parameters of the system
+        algebraic_states: MX | SX
+            The algebraic states of the system
+        numerical_data_timeseries: MX | SX
+            The numerical timeseries of the system
+        nlp: NonLinearProgram
+            A reference to the phase
+        q: MX | SX
+            The generalized coordinates
+        qdot: MX | SX
+            The generalized velocities
+
+        Returns
+        -------
+        tuple
+            The joint torque produced by the muscles, and the concatenated muscle states derivative
+        """
         dxdt_muscle_list = vertcat()
         muscle_forces = vertcat()
         muscle_idx_list = []
@@ -494,6 +584,7 @@ class FesMskModel(BiorbdModel, StateDynamics):
         activate_force_length_relationship,
         activate_force_velocity_relationship,
     ):
+        """Validate the muscles_model list and the force-length/force-velocity relationship flags, raising on invalid input."""
         if not isinstance(muscles_model, list):
             for muscle_model in muscles_model:
                 if not isinstance(muscle_model, FesModel):

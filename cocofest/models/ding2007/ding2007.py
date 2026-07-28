@@ -1,3 +1,10 @@
+"""
+Ding2007 model: frequency and pulse width as control inputs.
+
+Ding, J., Chou, L. W., Kesar, T. M., et al. (2007). Mathematical model that predicts the
+force-intensity and force-frequency relationships after spinal cord injuries. Muscle & Nerve, 36(2), 214-222.
+"""
+
 from typing import Callable, List
 
 from casadi import MX, vertcat, exp
@@ -63,10 +70,12 @@ class DingModelPulseWidthFrequency(DingModelFrequency):
 
     @property
     def control_configuration_functions(self) -> List[States | Callable]:
+        """The control configuration functions used to declare the model's controls (pulse width) to bioptim."""
         return [StateConfigure().configure_last_pulse_width]
 
     @property
     def identifiable_parameters(self):
+        """The model's parameters that can be identified from experimental data."""
         return {
             "a_scale": self.a_scale,
             "tau1_rest": self.tau1_rest,
@@ -77,16 +86,26 @@ class DingModelPulseWidthFrequency(DingModelFrequency):
         }
 
     def set_a_scale(self, model, a_scale: MX | float):
+        """Set the maximal force-scaling parameter A_scale."""
         # models is required for bioptim compatibility
         self.a_scale = a_scale
 
     def set_pd0(self, model, pd0: MX | float):
+        """Set the minimal pulse width required to produce force Pd0."""
         self.pd0 = pd0
 
     def set_pdt(self, model, pdt: MX | float):
+        """Set the pulse width/force-scaling relationship time constant Pdt."""
         self.pdt = pdt
 
     def serialize(self) -> tuple[Callable, dict]:
+        """
+        Serialize the model's parameters for later saving/reloading.
+
+        Returns
+        -------
+        A tuple of the model's class and a dict of its parameters, used to save/reload the model
+        """
         # This is where you can serialize your models
         # This is useful if you want to save your models and load it later
         return (
@@ -153,6 +172,8 @@ class DingModelPulseWidthFrequency(DingModelFrequency):
         pulse_width: MX,
     ) -> MX:
         """
+        Compute the pulse-width-scaled force-scaling factor A.
+
         Parameters
         ----------
         a_scale: float | MX
@@ -173,6 +194,8 @@ class DingModelPulseWidthFrequency(DingModelFrequency):
         pdt: float | MX,
     ) -> MX:
         """
+        Compute the pulse-width-scaled force-scaling factor A, with pd0/pdt as free identification parameters.
+
         Parameters
         ----------
         a_scale: float | MX

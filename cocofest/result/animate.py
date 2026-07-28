@@ -1,3 +1,7 @@
+"""
+Reloads a pickled Solution and replays it as a 3D animation using pyorerun.
+"""
+
 import pyorerun as prr
 import biorbd
 import pickle
@@ -5,6 +9,10 @@ import numpy as np
 
 
 class PickleAnimate:
+    """
+    Reloads a pickled Solution and replays it as a 3D animation using pyorerun.
+    """
+
     def __init__(self, path: str):
         self.path = path
         self.data = None
@@ -14,6 +22,7 @@ class PickleAnimate:
         self.frames = None
 
     def load(self):
+        """Load the pickled solution from self.path and prepare the Q trajectory for animation."""
         with open(self.path, "rb") as f:
             self.data = pickle.load(f)
 
@@ -30,6 +39,14 @@ class PickleAnimate:
         self.frames = self.state_q.shape[1]
 
     def animate(self, model: biorbd.Model = None):
+        """
+        Load the pickled solution and replay it as a single 3D animation with pyorerun.
+
+        Parameters
+        ----------
+        model: biorbd.Model
+            The biorbd model to animate, if not already loaded from the pickle file
+        """
         self.model = model
         self.load()
 
@@ -44,6 +61,16 @@ class PickleAnimate:
         viz.rerun("msk_model")
 
     def multiple_animations(self, additional_path: list[str], model: biorbd.Model = None):
+        """
+        Load the pickled solution plus additional pickled solutions and replay them side by side with pyorerun.
+
+        Parameters
+        ----------
+        additional_path: list[str]
+            Paths to additional pickled solutions to animate alongside the main one
+        model: biorbd.Model
+            The biorbd model to animate, if not already loaded from the pickle file
+        """
         self.model = model
         self.load()
         nb_seconds = self.time[-1]

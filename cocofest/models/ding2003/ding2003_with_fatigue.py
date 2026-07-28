@@ -1,3 +1,10 @@
+"""
+Ding2003 model with fatigue: frequency as the control input.
+
+Ding, J., Wexler, A. S., & Binder-Macleod, S. A. (2003). Mathematical models for fatigue minimization
+during functional electrical stimulation. Journal of Electromyography and Kinesiology, 13(6), 575-588.
+"""
+
 from typing import Callable
 
 from casadi import MX, vertcat
@@ -53,19 +60,25 @@ class DingModelFrequencyWithFatigue(DingModelFrequency):
         self.alpha_km = ALPHA_KM_DEFAULT
 
     def set_alpha_a(self, model, alpha_a: MX | float):
+        """Set the fatigue rate of the force-scaling parameter A."""
         self.alpha_a = alpha_a
 
     def set_alpha_km(self, model, alpha_km: MX | float):
+        """Set the fatigue rate of the cross-bridges sensitivity parameter Km."""
         self.alpha_km = alpha_km
 
     def set_alpha_tau1(self, model, alpha_tau1: MX | float):
+        """Set the fatigue rate of the force decline time constant Tau1."""
         self.alpha_tau1 = alpha_tau1
 
     def set_tau_fat(self, model, tau_fat: MX | float):
+        """Set the time constant of the fatigue recovery Tau_fat."""
         self.tau_fat = tau_fat
 
     def standard_rest_values(self) -> np.array:
         """
+        The model's states at rest.
+
         Returns
         -------
         The rested values of the states Cn, F, A, Tau1, Km
@@ -74,6 +87,13 @@ class DingModelFrequencyWithFatigue(DingModelFrequency):
 
     # ---- Absolutely needed methods ---- #
     def serialize(self) -> tuple[Callable, dict]:
+        """
+        Serialize the model's parameters for later saving/reloading.
+
+        Returns
+        -------
+        A tuple of the model's class and a dict of its parameters, used to save/reload the model
+        """
         # This is where you can serialize your models
         # This is useful if you want to save your models and load it later
         return (
@@ -94,6 +114,7 @@ class DingModelFrequencyWithFatigue(DingModelFrequency):
     # ---- Needed for the example ---- #
     @property
     def name_dofs(self) -> list[str]:
+        """The states' names (Cn, F, A, Tau1, Km), suffixed with the muscle name if any."""
         muscle_name = "_" + self.muscle_name if self.muscle_name is not None else ""
         return [
             "Cn" + muscle_name,
@@ -105,18 +126,22 @@ class DingModelFrequencyWithFatigue(DingModelFrequency):
 
     @property
     def nb_state(self) -> int:
+        """The number of states of the model (Cn, F, A, Tau1, Km)."""
         return 5
 
     @property
     def model_name(self) -> None | str:
+        """The model's name."""
         return self._model_name
 
     @property
     def muscle_name(self) -> None | str:
+        """The muscle's name."""
         return self._muscle_name
 
     @property
     def identifiable_parameters(self):
+        """The model's parameters that can be identified from experimental data."""
         return {
             "a_rest": self.a_rest,
             "tau1_rest": self.tau1_rest,
@@ -177,6 +202,8 @@ class DingModelFrequencyWithFatigue(DingModelFrequency):
 
     def a_dot_fun(self, a: MX, f: MX) -> MX | float:
         """
+        Compute the derivative of the force-scaling factor A.
+
         Parameters
         ----------
         a: MX
@@ -192,6 +219,8 @@ class DingModelFrequencyWithFatigue(DingModelFrequency):
 
     def tau1_dot_fun(self, tau1: MX, f: MX) -> MX | float:
         """
+        Compute the derivative of the force decline time constant Tau1.
+
         Parameters
         ----------
         tau1: MX
@@ -207,6 +236,8 @@ class DingModelFrequencyWithFatigue(DingModelFrequency):
 
     def km_dot_fun(self, km: MX, f: MX) -> MX | float:
         """
+        Compute the derivative of the cross-bridges sensitivity Km.
+
         Parameters
         ----------
         km: MX

@@ -1,3 +1,11 @@
+"""
+Hmed2018 model with fatigue: frequency and pulse intensity as control inputs.
+
+Hmed, A. B., Bakir, T., Garnier, Y. M., Sakly, A., Lepers, R., & Binczak, S. (2018). An approach to a
+muscle force model with force-pulse amplitude relationship of human quadriceps muscles.
+Computers in Biology and Medicine, 101, 218-228.
+"""
+
 from typing import Callable
 
 from casadi import MX, vertcat
@@ -54,6 +62,7 @@ class DingModelPulseIntensityFrequencyWithFatigue(DingModelPulseIntensityFrequen
     # ---- Absolutely needed methods ---- #
     @property
     def name_dofs(self) -> list[str]:
+        """The states' names (Cn, F, A, Tau1, Km), suffixed with the muscle name if any."""
         muscle_name = "_" + self.muscle_name if self.muscle_name is not None else ""
         return [
             "Cn" + muscle_name,
@@ -65,10 +74,12 @@ class DingModelPulseIntensityFrequencyWithFatigue(DingModelPulseIntensityFrequen
 
     @property
     def nb_state(self) -> int:
+        """The number of states of the model (Cn, F, A, Tau1, Km)."""
         return 5
 
     @property
     def identifiable_parameters(self):
+        """The model's parameters that can be identified from experimental data."""
         return {
             "a_rest": self.a_rest,
             "tau1_rest": self.tau1_rest,
@@ -86,6 +97,8 @@ class DingModelPulseIntensityFrequencyWithFatigue(DingModelPulseIntensityFrequen
 
     def standard_rest_values(self) -> np.array:
         """
+        The model's states at rest.
+
         Returns
         -------
         The rested values of the states Cn, F, A, Tau1, Km
@@ -93,6 +106,13 @@ class DingModelPulseIntensityFrequencyWithFatigue(DingModelPulseIntensityFrequen
         return np.array([[0], [0], [self.a_rest], [self.tau1_rest], [self.km_rest]])
 
     def serialize(self) -> tuple[Callable, dict]:
+        """
+        Serialize the model's parameters for later saving/reloading.
+
+        Returns
+        -------
+        A tuple of the model's class and a dict of its parameters, used to save/reload the model
+        """
         # This is where you can serialize your models
         # This is useful if you want to save your models and load it later
         return (
@@ -125,15 +145,15 @@ class DingModelPulseIntensityFrequencyWithFatigue(DingModelPulseIntensityFrequen
         The system dynamics is the function that describes the models.
 
         Parameters
-         ----------
+        ----------
         time: MX
-             The system's current node time
+            The system's current node time
         states: MX
-             The state of the system CN, F, A, Tau1, Km
+            The state of the system CN, F, A, Tau1, Km
         controls: MX
-             The controls of the system, pulse_intensity
+            The controls of the system, pulse_intensity
         numerical_timeseries: MX
-             The numerical timeseries of the system
+            The numerical timeseries of the system
 
         Returns
         -------
@@ -163,6 +183,8 @@ class DingModelPulseIntensityFrequencyWithFatigue(DingModelPulseIntensityFrequen
 
     def a_dot_fun(self, a: MX, f: MX) -> MX | float:
         """
+        Compute the derivative of the force-scaling factor A.
+
         Parameters
         ----------
         a: MX
@@ -178,6 +200,8 @@ class DingModelPulseIntensityFrequencyWithFatigue(DingModelPulseIntensityFrequen
 
     def tau1_dot_fun(self, tau1: MX, f: MX) -> MX | float:
         """
+        Compute the derivative of the force decline time constant Tau1.
+
         Parameters
         ----------
         tau1: MX
@@ -193,6 +217,8 @@ class DingModelPulseIntensityFrequencyWithFatigue(DingModelPulseIntensityFrequen
 
     def km_dot_fun(self, km: MX, f: MX) -> MX | float:
         """
+        Compute the derivative of the cross-bridges sensitivity Km.
+
         Parameters
         ----------
         km: MX

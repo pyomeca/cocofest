@@ -1,3 +1,7 @@
+"""
+Factory to instantiate any FES model from a short string key instead of importing the class directly.
+"""
+
 from cocofest.models.ding2003.ding2003 import DingModelFrequency
 from cocofest.models.ding2003.ding2003_with_fatigue import DingModelFrequencyWithFatigue
 from cocofest.models.ding2007.ding2007 import DingModelPulseWidthFrequency
@@ -17,8 +21,28 @@ from cocofest.models.veltink1992.veltink1992_and_riener1998 import VeltinkRiener
 
 
 class ModelMaker:
+    """
+    Factory that instantiates any of Cocofest's FES models from a short string key (e.g.
+    "ding2007_with_fatigue") instead of importing the class directly.
+    """
+
     @staticmethod
     def create_model(model_type, **kwargs):
+        """
+        Instantiate the FES model matching the given string key.
+
+        Parameters
+        ----------
+        model_type: str
+            The model's string key (e.g. "ding2007_with_fatigue")
+        **kwargs
+            Keyword arguments forwarded to the model's constructor
+
+        Returns
+        -------
+        FesModel
+            An instance of the requested FES model
+        """
         model_dict = {
             "ding2003": DingModelFrequency,
             "ding2003_with_fatigue": DingModelFrequencyWithFatigue,

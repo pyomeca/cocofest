@@ -1,3 +1,7 @@
+"""
+Moving horizon estimation (MHE) for a single-muscle FES model.
+"""
+
 import numpy as np
 
 from casadi import SX
@@ -16,6 +20,11 @@ from cocofest.models.ding2007.ding2007_with_fatigue import DingModelPulseWidthFr
 
 
 class FesMhe(MultiCyclicNonlinearModelPredictiveControl):
+    """
+    Moving horizon estimation (MHE) for a single-muscle FES model: solves a sliding sequence of stimulation
+    cycles, carrying the stimulation history and fatigue state forward from one window to the next.
+    """
+
     def __init__(self, **kwargs):
         super(FesMhe, self).__init__(**kwargs)
         self.all_models = []
@@ -26,26 +35,45 @@ class FesMhe(MultiCyclicNonlinearModelPredictiveControl):
         self.use_sx = kwargs["use_sx"]
 
     def advance_window_bounds_states(self, sol, n_cycles_simultaneous=None, **extra):
+        """Slide the state bounds window forward, then rebuild the model with the updated stimulation history."""
         super(FesMhe, self).advance_window_bounds_states(sol)
         self.update_stim()
         return True
 
     def advance_window_initial_guess_states(self, sol, n_cycles_simultaneous=None):
+        """Slide the state initial guess window forward."""
         super(FesMhe, self).advance_window_initial_guess_states(sol)
         return True
 
     def advance_window_bounds_controls(self, sol, n_cycles_simultaneous=None, **extra):
+        """Slide the control bounds window forward."""
         bound_have_changed = super(FesMhe, self).advance_window_bounds_controls(sol)
         return bound_have_changed
 
     @staticmethod
     def build_new_model(model, previous_stim):
+        """
+        Build a new model instance carrying the given stimulation history forward.
+
+        Parameters
+        ----------
+        model: FesModel
+            The model whose stim_time and sum_stim_truncation should be reused
+        previous_stim: dict
+            The stimulation history to carry forward into the new model
+
+        Returns
+        -------
+        DingModelPulseWidthFrequencyWithFatigue
+            A new model instance carrying the given stimulation history
+        """
         new_model = DingModelPulseWidthFrequencyWithFatigue(
             previous_stim=previous_stim, stim_time=model.stim_time, sum_stim_truncation=model.sum_stim_truncation
         )
         return new_model
 
     def update_stim(self):
+        """Rebuild the current phase's model with the stimulation history from the previous window."""
         truncation_term = self.nlp[0].model.sum_stim_truncation
         solution_stimulation_time = self.nlp[0].model.stim_time[-truncation_term:]
         previous_stim_time = [x - self.phase_time[0] for x in solution_stimulation_time]
@@ -61,6 +89,25 @@ class FesMhe(MultiCyclicNonlinearModelPredictiveControl):
         self.all_models.append(new_model)
 
     def _initialize_solution(self, dt: float, states: list, controls: list, parameters: list):
+        """
+        Build a bioptim Solution spanning the full combined MHE horizon from the per-window results.
+
+        Parameters
+        ----------
+        dt: float
+            The time step of the full combined horizon
+        states: list
+            The state values collected from every solved window
+        controls: list
+            The control values collected from every solved window
+        parameters: list
+            The parameter values collected from every solved window
+
+        Returns
+        -------
+        Solution
+            A bioptim Solution spanning the full combined MHE horizon
+        """
         combined_model = self.create_model_from_list(self.all_models)
         x_init = InitialGuessList()
         for key in self.nlp[0].states.keys():
@@ -106,6 +153,19 @@ class FesMhe(MultiCyclicNonlinearModelPredictiveControl):
         return Solution.from_initial_guess(solution_ocp, [np.array([dt]), x_init, u_init, p_init, a_init])
 
     def create_model_from_list(self, models: list):
+        """
+        Combine the per-window models into a single model spanning the full MHE horizon.
+
+        Parameters
+        ----------
+        models: list
+            The per-window models solved so far
+
+        Returns
+        -------
+        DingModelPulseWidthFrequencyWithFatigue
+            A single model whose stim_time spans every window's stimulation, offset in time
+        """
         stimulation_per_cycle = int(len(self.nlp[0].model.stim_time) / self.n_cycles)
         stim_time = []
         for i in range(len(models)):
@@ -127,6 +187,30 @@ class FesMhe(MultiCyclicNonlinearModelPredictiveControl):
         cyclic_options: dict = None,
         max_consecutive_failing: int = 3,
     ):
+        """
+        Solve the moving horizon estimation problem and stitch the resulting stimulation timeline back together.
+
+        Parameters
+        ----------
+        update_functions
+            The bioptim callback deciding when to stop sliding the window
+        solver: Solver.IPOPT
+            The solver used to solve each window
+        total_cycles: int
+            The total number of stimulation cycles to solve
+        cycle_solutions: MultiCyclicCycleSolutions
+            Which per-cycle solutions to keep
+        get_all_iterations: bool
+            If every solver iteration's solution should be kept
+        cyclic_options: dict
+            Additional options forwarded to the cyclic NMPC solve
+        max_consecutive_failing: int
+            The maximum number of consecutive failing windows before aborting
+
+        Returns
+        -------
+        The MHE solution
+        """
 
         sol = self.solve(
             update_functions,

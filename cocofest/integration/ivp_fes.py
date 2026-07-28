@@ -1,3 +1,7 @@
+"""
+Code used to determine the Initial Value Problem.
+"""
+
 import numpy as np
 from bioptim import (
     ControlType,
@@ -25,13 +29,6 @@ class IvpFes:
     """
     The main class to define an ivp. This class prepares the ivp and gives all
     the needed parameters to integrate a functional electrical stimulation problem.
-
-    Methods
-    -------
-    from_frequency_and_final_time(self, frequency: int | float, final_time: float, round_down: bool)
-        Calculates the number of stim (phases) for the ocp from frequency and final time
-    from_frequency_and_n_stim(self, frequency: int | float, n_stim: int)
-        Calculates the final ocp time from frequency and stimulation number
     """
 
     def __init__(
@@ -110,6 +107,8 @@ class IvpFes:
 
     def _fill_fes_dict(self, fes_parameters: dict):
         """
+        Fill fes_parameters with default values for any key the user did not provide.
+
         Parameters
         ----------
         fes_parameters : dict
@@ -139,6 +138,7 @@ class IvpFes:
 
     def _fill_ivp_dict(self, ivp_parameters: dict):
         """
+        Fill ivp_parameters with default values for any key the user did not provide.
 
         Parameters
         ----------
@@ -166,6 +166,7 @@ class IvpFes:
         self.ivp_parameters = ivp_parameters
 
     def dictionaries_check(self):
+        """Validate fes_parameters and ivp_parameters, raising if a value has the wrong type or is out of bounds."""
         if not isinstance(self.fes_parameters, dict):
             raise ValueError("fes_parameters must be a dictionary")
 
@@ -251,6 +252,7 @@ class IvpFes:
             raise ValueError("n_thread must be a int type")
 
     def _pulse_mode_settings(self):
+        """Adjust stim_time, n_stim and n_shooting according to the pulse_mode (single, doublet, triplet)."""
         if self.pulse_mode == "single":
             pass
         elif self.pulse_mode == "doublet":
@@ -299,6 +301,14 @@ class IvpFes:
         )
 
     def _build_solution_from_initial_guess(self):
+        """
+        Build a bioptim Solution directly from the initial guess, without solving an ocp.
+
+        Returns
+        -------
+        Solution
+            A bioptim Solution built directly from the initial guess, without solving an ocp
+        """
         return Solution.from_initial_guess(self.fake_ocp, [self.dt, self.x_init, self.u_init, self.p_init, self.s_init])
 
     def integrate(
@@ -309,6 +319,26 @@ class IvpFes:
         return_time=True,
         duplicated_times=False,
     ):
+        """
+        Integrate the model's dynamics forward in time from the initial guess.
+
+        Parameters
+        ----------
+        shooting_type: Shooting
+            The shooting type to use for the integration
+        integrator: SolutionIntegrator
+            The integrator to use
+        to_merge: list
+            The SolutionMerge options to apply to the result
+        return_time: bool
+            If the time vector should be returned alongside the states
+        duplicated_times: bool
+            If the shooting node times should be duplicated at phase transitions
+
+        Returns
+        -------
+        The integrated states (and time, if return_time is True)
+        """
         to_merge = [SolutionMerge.NODES, SolutionMerge.PHASES] if to_merge is None else to_merge
         return self.initial_guess_solution.integrate(
             shooting_type=shooting_type,

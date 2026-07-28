@@ -1,3 +1,10 @@
+"""
+Marion2009 model with pulse width as the control input instead of frequency, with fatigue.
+
+Marion, M. S., Wexler, A. S., Hull, M. L., & Binder-Macleod, S. A. (2009). Predicting the effect of
+muscle length on fatigue during electrical stimulation. Muscle & Nerve, 40(4), 573-581.
+"""
+
 from typing import Callable
 
 import numpy as np
@@ -13,7 +20,7 @@ class Marion2009ModelPulseWidthFrequencyWithFatigue(Marion2009ModelPulseWidthFre
     It combines the angle-dependent force-fatigue relationship from Marion 2009 with
     explicit fatigue states tracking (A, Tau1, Km) as done in Ding's models.
 
-    Warning: This model was not validated from Marion's experiment as the pulse with is added.
+    Warning: This model was not validated from Marion's experiment as the pulse width is added.
     This model should be used with caution.
 
     Marion, M. S., Wexler, A. S., Hull, M. L., & Binder‐Macleod, S. A. (2009).
@@ -55,6 +62,7 @@ class Marion2009ModelPulseWidthFrequencyWithFatigue(Marion2009ModelPulseWidthFre
 
     @property
     def name_dofs(self, with_muscle_name: bool = False) -> list[str]:
+        """The states' names (Cn, F, A, Tau1, Km), suffixed with the muscle name if any."""
         muscle_name = "_" + self.muscle_name if self.muscle_name is not None else ""
         return [
             "Cn" + muscle_name,
@@ -66,10 +74,12 @@ class Marion2009ModelPulseWidthFrequencyWithFatigue(Marion2009ModelPulseWidthFre
 
     @property
     def nb_state(self) -> int:
+        """The number of states of the model (Cn, F, A, Tau1, Km)."""
         return 5
 
     @property
     def identifiable_parameters(self):
+        """The model's parameters that can be identified from experimental data."""
         params = super().identifiable_parameters
         params.update(
             {
@@ -83,6 +93,8 @@ class Marion2009ModelPulseWidthFrequencyWithFatigue(Marion2009ModelPulseWidthFre
 
     def standard_rest_values(self) -> np.array:
         """
+        The model's states at rest.
+
         Returns
         -------
         The rested values of Cn, F, A, Tau1, Km
@@ -90,6 +102,13 @@ class Marion2009ModelPulseWidthFrequencyWithFatigue(Marion2009ModelPulseWidthFre
         return np.array([[0], [0], [self.a_scale], [self.tau1_rest], [self.km_rest]])
 
     def serialize(self) -> tuple[Callable, dict]:
+        """
+        Serialize the model's parameters for later saving/reloading.
+
+        Returns
+        -------
+        A tuple of the model's class and a dict of its parameters, used to save/reload the model
+        """
         base_params = super().serialize()[1]
         base_params.update(
             {
@@ -162,6 +181,8 @@ class Marion2009ModelPulseWidthFrequencyWithFatigue(Marion2009ModelPulseWidthFre
 
     def a_dot_fun(self, a: MX, f: MX) -> MX | float:
         """
+        Compute the derivative of the force-scaling factor A.
+
         Parameters
         ----------
         a: MX
@@ -177,6 +198,8 @@ class Marion2009ModelPulseWidthFrequencyWithFatigue(Marion2009ModelPulseWidthFre
 
     def tau1_dot_fun(self, tau1: MX, f: MX) -> MX | float:
         """
+        Compute the derivative of the force decline time constant Tau1.
+
         Parameters
         ----------
         tau1: MX
@@ -192,6 +215,8 @@ class Marion2009ModelPulseWidthFrequencyWithFatigue(Marion2009ModelPulseWidthFre
 
     def km_dot_fun(self, km: MX, f: MX) -> MX | float:
         """
+        Compute the derivative of the cross-bridges sensitivity Km.
+
         Parameters
         ----------
         km: MX

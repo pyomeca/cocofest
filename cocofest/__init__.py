@@ -1,7 +1,11 @@
+"""
+Cocofest: an open-source Python package for Functional Electrical Stimulation (FES) optimization in optimal control.
+"""
+
 from . import _matplotlib_compat  # Temporary fix
 from .misc.__version__ import __version__
-from .custom_objectives import CustomObjective
-from .custom_constraints import CustomConstraint
+from .optimization.penalties.custom_objectives import CustomObjective
+from .optimization.penalties.custom_constraints import CustomConstraint
 from .models.fes_model import FesModel
 from cocofest.models.ding2003.ding2003 import DingModelFrequency
 from cocofest.models.ding2003.ding2003_with_fatigue import DingModelFrequencyWithFatigue
@@ -28,7 +32,7 @@ from .optimization.fes_mhe import FesMhe
 from .optimization.fes_mhe_multibody import FesMheMsk
 from .integration.ivp_fes import IvpFes
 from .identification.identification_method import DataExtraction
-from .fourier_approx import FourierSeries
+from .misc.fourier_approx import FourierSeries
 from .dynamics.inverse_kinematics_and_dynamics import (
     get_circle_coord,
     inverse_kinematics_cycling,

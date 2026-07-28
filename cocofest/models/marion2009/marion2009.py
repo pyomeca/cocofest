@@ -1,3 +1,10 @@
+"""
+Marion2009 model: frequency as the control input.
+
+Marion, M. S., Wexler, A. S., Hull, M. L., & Binder-Macleod, S. A. (2009). Predicting the effect of
+muscle length on fatigue during electrical stimulation. Muscle & Nerve, 40(4), 573-581.
+"""
+
 from typing import Callable
 
 from casadi import MX, vertcat
@@ -59,6 +66,7 @@ class Marion2009ModelFrequency(DingModelFrequency):
 
     @property
     def identifiable_parameters(self):
+        """The model's parameters that can be identified from experimental data."""
         params = super().identifiable_parameters
         params.update(
             {
@@ -70,6 +78,13 @@ class Marion2009ModelFrequency(DingModelFrequency):
         return params
 
     def serialize(self) -> tuple[Callable, dict]:
+        """
+        Serialize the model's parameters for later saving/reloading.
+
+        Returns
+        -------
+        A tuple of the model's class and a dict of its parameters, used to save/reload the model
+        """
         base_params = super().serialize()[1]
         base_params.update(
             {

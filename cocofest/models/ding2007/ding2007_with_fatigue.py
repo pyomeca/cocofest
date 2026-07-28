@@ -1,3 +1,10 @@
+"""
+Ding2007 model with fatigue: frequency and pulse width as control inputs.
+
+Ding, J., Chou, L. W., Kesar, T. M., et al. (2007). Mathematical model that predicts the
+force-intensity and force-frequency relationships after spinal cord injuries. Muscle & Nerve, 36(2), 214-222.
+"""
+
 from typing import Callable
 
 from casadi import MX, vertcat
@@ -53,6 +60,7 @@ class DingModelPulseWidthFrequencyWithFatigue(DingModelPulseWidthFrequency):
     # ---- Absolutely needed methods ---- #
     @property
     def name_dofs(self) -> list[str]:
+        """The states' names (Cn, F, A, Tau1, Km), suffixed with the muscle name if any."""
         muscle_name = "_" + self.muscle_name if self.muscle_name is not None else ""
         return [
             "Cn" + muscle_name,
@@ -64,10 +72,12 @@ class DingModelPulseWidthFrequencyWithFatigue(DingModelPulseWidthFrequency):
 
     @property
     def nb_state(self) -> int:
+        """The number of states of the model (Cn, F, A, Tau1, Km)."""
         return 5
 
     @property
     def identifiable_parameters(self):
+        """The model's parameters that can be identified from experimental data."""
         return {
             "a_scale": self.a_scale,
             "tau1_rest": self.tau1_rest,
@@ -83,6 +93,8 @@ class DingModelPulseWidthFrequencyWithFatigue(DingModelPulseWidthFrequency):
 
     def standard_rest_values(self) -> np.array:
         """
+        The model's states at rest.
+
         Returns
         -------
         The rested values of Cn, F, A, Tau1, Km
@@ -90,6 +102,13 @@ class DingModelPulseWidthFrequencyWithFatigue(DingModelPulseWidthFrequency):
         return np.array([[0], [0], [self.a_scale], [self.tau1_rest], [self.km_rest]])
 
     def serialize(self) -> tuple[Callable, dict]:
+        """
+        Serialize the model's parameters for later saving/reloading.
+
+        Returns
+        -------
+        A tuple of the model's class and a dict of its parameters, used to save/reload the model
+        """
         # This is where you can serialize your models
         # This is useful if you want to save your models and load it later
 
@@ -167,6 +186,8 @@ class DingModelPulseWidthFrequencyWithFatigue(DingModelPulseWidthFrequency):
 
     def a_dot_fun(self, a: MX, f: MX) -> MX | float:
         """
+        Compute the derivative of the force-scaling factor A.
+
         Parameters
         ----------
         a: MX
@@ -182,6 +203,8 @@ class DingModelPulseWidthFrequencyWithFatigue(DingModelPulseWidthFrequency):
 
     def tau1_dot_fun(self, tau1: MX, f: MX) -> MX | float:
         """
+        Compute the derivative of the force decline time constant Tau1.
+
         Parameters
         ----------
         tau1: MX
@@ -197,6 +220,8 @@ class DingModelPulseWidthFrequencyWithFatigue(DingModelPulseWidthFrequency):
 
     def km_dot_fun(self, km: MX, f: MX) -> MX | float:
         """
+        Compute the derivative of the cross-bridges sensitivity Km.
+
         Parameters
         ----------
         km: MX

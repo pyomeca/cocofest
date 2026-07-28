@@ -1,3 +1,7 @@
+"""
+Builds the optimal control problem used to identify FES model parameters by fitting a tracked force curve.
+"""
+
 import numpy as np
 
 from bioptim import (
@@ -16,6 +20,10 @@ from ..optimization.fes_ocp import OcpFes
 
 
 class OcpFesId(OcpFes):
+    """
+    Builds the optimal control problem used to identify FES model parameters by fitting a tracked force curve.
+    """
+
     def __init__(self):
         super(OcpFesId, self).__init__()
 
@@ -24,6 +32,21 @@ class OcpFesId(OcpFes):
         model: FesModel = None,
         force_tracking=None,
     ):
+        """
+        Build the state bounds and initial guess, tracking the experimental/simulated force in the state initial guess.
+
+        Parameters
+        ----------
+        model: FesModel
+            The FES model whose parameters are being identified
+        force_tracking
+            The tracked force values used as the state initial guess for F
+
+        Returns
+        -------
+        tuple
+            The ocp's state bounds and initial guess
+        """
         # ---- STATE BOUNDS REPRESENTATION ---- #
         #
         #                    |‾‾‾‾‾‾‾‾‾‾x_max_middle‾‾‾‾‾‾‾‾‾‾‾‾x_max_end‾
@@ -90,6 +113,23 @@ class OcpFesId(OcpFes):
         parameter_setting,
         use_sx,
     ):
+        """
+        Declare the model parameters to identify as optimization parameters.
+
+        Parameters
+        ----------
+        parameter_to_identify: list
+            The names of the model parameters to identify
+        parameter_setting: dict
+            Per-parameter initial guess, bounds, scaling and setter function (see set_default_values)
+        use_sx: bool
+            If the ocp should use SX instead of MX variables
+
+        Returns
+        -------
+        tuple
+            The ocp's parameters, parameters bounds and parameters initial guess
+        """
         parameters = ParameterList(use_sx=use_sx)
         parameters_bounds = BoundsList()
         parameters_init = InitialGuessList()
@@ -119,6 +159,25 @@ class OcpFesId(OcpFes):
 
     @staticmethod
     def set_u_bounds(model, control_value: list, stim_idx_at_node_list: list, n_shooting: int):
+        """
+        Build the control bounds, fixed to the tracked control values so the OCP only identifies model parameters.
+
+        Parameters
+        ----------
+        model: FesModel
+            The FES model whose parameters are being identified
+        control_value: list
+            The tracked control values (pulse width or pulse intensity) to fix as bounds
+        stim_idx_at_node_list: list
+            The list of stimulation indices considered at each node
+        n_shooting: int
+            The number of shooting points
+
+        Returns
+        -------
+        tuple
+            The ocp's control bounds and initial guess, fixed to the tracked control values
+        """
         u_bounds = BoundsList()  # Controls bounds
         u_init = InitialGuessList()  # Controls initial guess
         if isinstance(model, DingModelPulseWidthFrequency):

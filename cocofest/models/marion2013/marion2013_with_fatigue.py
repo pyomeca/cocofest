@@ -1,3 +1,11 @@
+"""
+Marion2013 model with fatigue: frequency as the control input.
+
+Marion, M. S., Wexler, A. S., & Hull, M. L. (2013). Predicting non-isometric fatigue induced by
+electrical stimulation pulse trains as a function of pulse duration. Journal of NeuroEngineering
+and Rehabilitation, 10, 1-16.
+"""
+
 from typing import Callable
 from casadi import MX, vertcat
 import numpy as np
@@ -56,6 +64,7 @@ class Marion2013ModelFrequencyWithFatigue(Marion2013ModelFrequency):
 
     @property
     def name_dofs(self, with_muscle_name: bool = False) -> list[str]:
+        """The states' names (Cn, F, theta, dtheta_dt, A, Tau1, Km), suffixed with the muscle name if any."""
         muscle_name = "_" + self.muscle_name if self.muscle_name is not None else ""
         return [
             "Cn" + muscle_name,
@@ -69,10 +78,12 @@ class Marion2013ModelFrequencyWithFatigue(Marion2013ModelFrequency):
 
     @property
     def nb_state(self) -> int:
+        """The number of states of the model (Cn, F, theta, dtheta_dt, A, Tau1, Km)."""
         return 7
 
     @property
     def identifiable_parameters(self):
+        """The model's parameters that can be identified from experimental data."""
         params = super().identifiable_parameters
         params.update(
             {
@@ -86,6 +97,8 @@ class Marion2013ModelFrequencyWithFatigue(Marion2013ModelFrequency):
 
     def standard_rest_values(self) -> np.array:
         """
+        The model's states at rest.
+
         Returns
         -------
         The rested values of all states including fatigue parameters
@@ -95,6 +108,13 @@ class Marion2013ModelFrequencyWithFatigue(Marion2013ModelFrequency):
         return np.vstack((base_values, fatigue_values))
 
     def serialize(self) -> tuple[Callable, dict]:
+        """
+        Serialize the model's parameters for later saving/reloading.
+
+        Returns
+        -------
+        A tuple of the model's class and a dict of its parameters, used to save/reload the model
+        """
         base_dict = super().serialize()[1]
         base_dict.update(
             {
@@ -108,6 +128,8 @@ class Marion2013ModelFrequencyWithFatigue(Marion2013ModelFrequency):
 
     def a_dot_fun(self, a: MX, f: MX, velocity: MX) -> MX | float:
         """
+        Compute the derivative of the force-scaling factor A, including the angular velocity term.
+
         Parameters
         ----------
         a: MX
@@ -125,6 +147,8 @@ class Marion2013ModelFrequencyWithFatigue(Marion2013ModelFrequency):
 
     def tau1_dot_fun(self, tau1: MX, f: MX, velocity: MX) -> MX | float:
         """
+        Compute the derivative of the force decline time constant Tau1, including the angular velocity term.
+
         Parameters
         ----------
         tau1: MX
@@ -142,6 +166,8 @@ class Marion2013ModelFrequencyWithFatigue(Marion2013ModelFrequency):
 
     def km_dot_fun(self, km: MX, f: MX, velocity: MX) -> MX | float:
         """
+        Compute the derivative of the cross-bridges sensitivity Km, including the angular velocity term.
+
         Parameters
         ----------
         km: MX
