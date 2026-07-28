@@ -3,3 +3,9 @@ channels:
 - conda-forge
 dependencies:
 - python=3.11
+- pip
+- pip:
+  - sphinx
+  - myst-parser
+  - furo
+  - sphinxcontrib-mermaid
