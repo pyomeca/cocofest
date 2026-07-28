@@ -2,6 +2,8 @@
 Abstract interface every FES model must implement to be usable within bioptim.
 """
 
+from __future__ import annotations
+
 from abc import ABC, abstractmethod
 
 from casadi import MX

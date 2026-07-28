@@ -5,6 +5,8 @@ Marion, M. S., Wexler, A. S., Hull, M. L., & Binder-Macleod, S. A. (2009). Predi
 muscle length on fatigue during electrical stimulation. Muscle & Nerve, 40(4), 573-581.
 """
 
+from __future__ import annotations
+
 from typing import Callable
 
 import numpy as np

@@ -2,6 +2,8 @@
 Moving horizon estimation (MHE) for a musculoskeletal model (FesMskModel) driven by FES.
 """
 
+from __future__ import annotations
+
 import numpy as np
 from copy import deepcopy
 from casadi import SX

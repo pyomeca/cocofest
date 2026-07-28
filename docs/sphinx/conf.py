@@ -1,9 +1,16 @@
+import importlib.util
 import pathlib
 import sys
 
-sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent.parent))
+repo_root = pathlib.Path(__file__).resolve().parent.parent.parent
+sys.path.insert(0, str(repo_root))
 
-from cocofest.misc.__version__ import __version__ as release
+_version_spec = importlib.util.spec_from_file_location(
+    "cocofest_version", repo_root / "cocofest" / "misc" / "__version__.py"
+)
+_version_module = importlib.util.module_from_spec(_version_spec)
+_version_spec.loader.exec_module(_version_module)
+release = _version_module.__version__
 
 project = "Cocofest"
 author = "Kev1Co"
@@ -27,9 +34,7 @@ source_suffix = {
     ".md": "markdown",
 }
 
-# cocofest.result.animate is not needed to build the docs and depends on
-# pyorerun, which is not installed in the docs environment.
-autodoc_mock_imports = ["pyorerun"]
+autodoc_mock_imports = ["bioptim", "biorbd", "casadi", "pyorerun"]
 
 autosummary_generate = True
 autodoc_default_options = {"undoc-members": True}

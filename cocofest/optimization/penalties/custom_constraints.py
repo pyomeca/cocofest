@@ -3,6 +3,8 @@ This class regroups constraints that are not available through Bioptim and can b
 By adding definitions to this class, you can create your own custom constraints.
 """
 
+from __future__ import annotations
+
 from casadi import MX, SX, vertcat
 from bioptim import PenaltyController
 

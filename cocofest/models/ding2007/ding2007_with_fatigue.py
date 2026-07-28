@@ -5,6 +5,8 @@ Ding, J., Chou, L. W., Kesar, T. M., et al. (2007). Mathematical model that pred
 force-intensity and force-frequency relationships after spinal cord injuries. Muscle & Nerve, 36(2), 214-222.
 """
 
+from __future__ import annotations
+
 from typing import Callable
 
 from casadi import MX, vertcat

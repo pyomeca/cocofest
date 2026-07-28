@@ -5,6 +5,8 @@ Veltink, P. H., Chizeck, H. J., Crago, P. E., & El-Bialy, A. (1992). Nonlinear j
 for artificially stimulated muscle. IEEE Transactions on Biomedical Engineering, 39(4), 368-380.
 """
 
+from __future__ import annotations
+
 from typing import Callable, List
 from casadi import MX, vertcat
 import numpy as np

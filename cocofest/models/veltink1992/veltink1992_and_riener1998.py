@@ -7,6 +7,8 @@ Combined with the fatigue prediction from Riener, R., & Veltink, P. H. (1998). A
 fatigue during electrical stimulation. IEEE Transactions on Biomedical Engineering, 45(1), 105-113.
 """
 
+from __future__ import annotations
+
 from typing import Callable
 from casadi import MX, vertcat
 import numpy as np

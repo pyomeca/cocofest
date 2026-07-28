@@ -6,6 +6,8 @@ Evaluation of direct collocation optimal control problem formulations for solvin
 Annals of biomedical engineering, 44, 2922-2936.
 """
 
+from __future__ import annotations
+
 from casadi import exp, log, sqrt
 
 

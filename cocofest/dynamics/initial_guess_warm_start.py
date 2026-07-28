@@ -2,6 +2,8 @@
 This class is meant to determine the initial states and control guesses of an optimization problem.
 """
 
+from __future__ import annotations
+
 import numpy as np
 
 import biorbd

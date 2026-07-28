@@ -6,6 +6,8 @@ muscle force model with force-pulse amplitude relationship of human quadriceps m
 Computers in Biology and Medicine, 101, 218-228.
 """
 
+from __future__ import annotations
+
 from typing import Callable
 
 from casadi import MX, vertcat

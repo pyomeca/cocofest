@@ -2,6 +2,8 @@
 Plots the muscle stimulation angle and related quantities of a cycling motion.
 """
 
+from __future__ import annotations
+
 import numpy as np
 import matplotlib
 

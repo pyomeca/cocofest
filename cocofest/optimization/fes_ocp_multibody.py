@@ -2,6 +2,8 @@
 Builds the optimal control problem for a musculoskeletal model driven by one or more FES muscle models.
 """
 
+from __future__ import annotations
+
 import numpy as np
 
 from bioptim import (

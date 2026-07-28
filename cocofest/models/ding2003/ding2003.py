@@ -5,6 +5,8 @@ Ding, J., Wexler, A. S., & Binder-Macleod, S. A. (2003). Mathematical models for
 during functional electrical stimulation. Journal of Electromyography and Kinesiology, 13(6), 575-588.
 """
 
+from __future__ import annotations
+
 from typing import Callable, List
 from math import gcd
 from fractions import Fraction

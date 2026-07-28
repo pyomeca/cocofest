@@ -2,6 +2,8 @@
 This class enables the creation of a Fourier serie, to track a position, a force position with the optimization problem.
 """
 
+from __future__ import annotations
+
 from casadi import cos, sin
 import matplotlib.pyplot as plt
 import numpy as np
