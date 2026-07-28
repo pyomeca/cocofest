@@ -22,6 +22,10 @@ MADNLP_LINEAR_SOLVER_NAMES = (
 MADNLP_LINEAR_SOLVER_RUNTIME_NAMES = {
     "pardiso_mkl": "PardisoMKLSolver",
 }
+# MadNLP 0.9.2 defines LogLevels as TRACE=1 through ERROR=6.  The libMad
+# interface transports that enum as an integer and rejects IPOPT's conventional
+# quiet value 0.
+MADNLP_QUIET_PRINT_LEVEL = 6
 
 
 class SolverBackendUnavailable(RuntimeError):
@@ -210,10 +214,15 @@ def configure_nlp_solver(
         return solver
 
     if solver_name == "madnlp":
-        # Bioptim's symbolic MadNLP levels are reversed relative to the pinned
-        # madnlp_c runtime (its "ERROR" becomes 6, which the runtime clamps to
-        # TRACE=5). Bypass that mapping so quiet benchmarks are actually quiet.
-        solver.set_option_unsafe(max(0, min(int(print_level), 5)), "print_level")
+        # Bypass Bioptim's generic print-level mapping. The pinned libMad
+        # runtime embeds MadNLP 0.9.2, whose LogLevels enum accepts only 1..6
+        # and uses ERROR=6 as the quiet benchmark setting.
+        madnlp_print_level = (
+            MADNLP_QUIET_PRINT_LEVEL
+            if int(print_level) == 0
+            else max(1, min(int(print_level), MADNLP_QUIET_PRINT_LEVEL))
+        )
+        solver.set_option_unsafe(madnlp_print_level, "print_level")
         # The pinned madnlp_c runtime rejects both ``dual_initialized`` and
         # ``mu_init``.  The reliable hot start is therefore the shifted,
         # projected primal trajectory supplied by Cocofest, without a

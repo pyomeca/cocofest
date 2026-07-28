@@ -114,9 +114,10 @@ therefore does not expose or send them. Its MadNLP hot start is the shifted and
 projected primal state/control trajectory after the certified periodic IPOPT
 refinement; multiplier transfer remains off. The GitHub job timeout is the
 safety limit.
-The Bioptim branch's symbolic `ERROR` level maps to a numeric value that this
-runtime clamps to `TRACE`; Cocofest bypasses that mapping and sends numeric
-`print_level=0`, preventing verbose logging from contaminating timings.
+The current libMad runtime embeds MadNLP 0.9.2, whose `LogLevels` enum ranges
+from `TRACE=1` to `ERROR=6` and rejects the usual IPOPT quiet value `0`.
+Cocofest therefore bypasses Bioptim's generic mapping and sends numeric
+`print_level=6`, preventing verbose logging from contaminating timings.
 
 Relevant Alpaqa screens include:
 

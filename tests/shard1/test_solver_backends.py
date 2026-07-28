@@ -3,6 +3,7 @@ from types import SimpleNamespace
 import pytest
 
 from cocofest.optimization.solver_backends import (
+    MADNLP_QUIET_PRINT_LEVEL,
     SolverBackendUnavailable,
     configure_nlp_solver,
     nlp_solver_availability,
@@ -67,7 +68,12 @@ def test_configure_madnlp_uses_supported_primal_hot_start():
     assert ("set_convergence_tolerance", 2e-6) in solver.calls
     assert ("set_constraint_tolerance", 2e-6) in solver.calls
     assert ("set_maximum_iterations", 321) in solver.calls
-    assert ("set_option_unsafe", 0, "print_level") in solver.calls
+    assert MADNLP_QUIET_PRINT_LEVEL == 6
+    assert (
+        "set_option_unsafe",
+        MADNLP_QUIET_PRINT_LEVEL,
+        "print_level",
+    ) in solver.calls
     assert not any(call[0] == "set_print_level" for call in solver.calls)
     assert not any(
         call[0] == "set_option_unsafe" and call[-1] == "mu_init"
@@ -76,6 +82,24 @@ def test_configure_madnlp_uses_supported_primal_hot_start():
     assert not any(call[0] == "set_warm_start_options" for call in solver.calls)
     assert ("set_option_unsafe", "umfpack", "linear_solver") in solver.calls
     assert ("set_c_compile", False) in solver.calls
+
+
+@pytest.mark.parametrize(
+    ("requested_level", "runtime_level"),
+    [(0, 6), (-1, 1), (1, 1), (5, 5), (6, 6), (9, 6)],
+)
+def test_configure_madnlp_maps_print_level_to_runtime_enum(
+    requested_level, runtime_level
+):
+    solver = configure_nlp_solver(
+        "madnlp",
+        max_iterations=10,
+        print_level=requested_level,
+        solver_namespace=_solver_namespace("MADNLP"),
+        check_availability=False,
+    )
+
+    assert ("set_option_unsafe", runtime_level, "print_level") in solver.calls
 
 
 def test_configure_madnlp_maps_pardiso_mkl_to_native_libmad_type():
