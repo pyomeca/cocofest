@@ -29,6 +29,7 @@ from bioptim import (
     SolutionMerge,
     Solver,
 )
+
 try:
     from bioptim import OrderingStrategy
 except ImportError:  # Bioptim releases before the Fatrop time-major interface
@@ -193,16 +194,10 @@ def apply_acados_wheel_cycle_boundary_bounds(interface) -> list[dict[str, float 
     generated problem dimensions.
     """
 
-    slack = getattr(
-        interface.ocp, "_cocofest_wheel_cycle_boundary_slack", None
-    )
+    slack = getattr(interface.ocp, "_cocofest_wheel_cycle_boundary_slack", None)
     cycle_len = getattr(interface.ocp, "_cocofest_cycle_len", None)
-    cycle_count = getattr(
-        interface.ocp, "_cocofest_cycles_per_window", 1
-    )
-    cycle_shift = getattr(
-        interface.ocp, "_cocofest_wheel_cycle_shift", None
-    )
+    cycle_count = getattr(interface.ocp, "_cocofest_cycles_per_window", 1)
+    cycle_shift = getattr(interface.ocp, "_cocofest_wheel_cycle_shift", None)
     if (
         slack is None
         or cycle_len is None
@@ -253,15 +248,10 @@ def apply_acados_wheel_cycle_boundary_bounds(interface) -> list[dict[str, float 
         raise RuntimeError(
             "The ACADOS path-bound dimension does not match the bound vectors."
         )
-    idxbx = getattr(
-        getattr(interface.acados_ocp, "constraints", None), "idxbx", None
-    )
+    idxbx = getattr(getattr(interface.acados_ocp, "constraints", None), "idxbx", None)
     if idxbx is not None:
         idxbx = np.asarray(idxbx, dtype=int).reshape(-1)
-        if (
-            idxbx.size != path_lower.size
-            or idxbx[acados_q_index] != acados_q_index
-        ):
+        if idxbx.size != path_lower.size or idxbx[acados_q_index] != acados_q_index:
             raise RuntimeError(
                 "The ACADOS path-bound index map is incompatible with the "
                 "crank-position bound."
@@ -683,11 +673,23 @@ def crank_torque_diagnostics(
 
 
 def apply_assisted_hot_start_defaults(args: argparse.Namespace) -> None:
-    """Enable the measured ACADOS continuation without affecting NLP backends."""
+    """Enable the robust ACADOS reference preparation without affecting NLPs."""
 
     assisted_hot_start = bool(
         getattr(args, "acados_assisted_hot_start", True) and args.solver == "acados"
     )
+    common_target_seed = bool(getattr(args, "common_initial_solution", None))
+    if assisted_hot_start and common_target_seed:
+        # The common IPOPT solution is physically relevant but its collocation
+        # interior does not directly satisfy the ACADOS shooting map. Rebuild
+        # the five-state periodic Ding trajectory, then reduce the remaining
+        # complete-dynamics defects before the first full-SQP solve. The same
+        # complete-dynamics rollout is used after each shifted RHO window.
+        if args.periodic_fes_warmup_projection_strategy == "sequential":
+            args.periodic_fes_warmup_projection_strategy = "rollout"
+        args.full_dynamics_phase_one = True
+        args.acados_transfer_full_dynamics_rollout = True
+        args.acados_bind_first_node_fes_states = True
     if assisted_hot_start and args.acados_control_homotopy_radii is None:
         args.acados_control_homotopy_radii = DEFAULT_ASSISTED_CONTROL_HOMOTOPY_RADII
     if args.acados_control_homotopy_keep_final_radius is None:
@@ -864,6 +866,14 @@ def build_argument_parser() -> argparse.ArgumentParser:
         help=(
             "Optional .npz reduced-mechanics profile. When omitted in reduced "
             "mode, a profile is generated once under result/cache."
+        ),
+    )
+    parser.add_argument(
+        "--experimental-reduced-acados",
+        action="store_true",
+        help=(
+            "Allow the uncertified theta/omega formulation with ACADOS for "
+            "one-cycle SQP convergence experiments."
         ),
     )
     parser.add_argument(
@@ -1087,6 +1097,25 @@ def build_argument_parser() -> argparse.ArgumentParser:
             "Allow an explicitly documented seed built at another signed crank "
             "torque to initialize the target NLP. The seed is only a primal "
             "continuation point; target convergence and feasibility are still required."
+        ),
+    )
+    parser.add_argument(
+        "--common-initial-solution",
+        type=Path,
+        default=None,
+        help=(
+            "Periodic target-solution .npz applied after the standard bridge. "
+            "This lets every NLP backend start from the exact same converged "
+            "primal trajectory."
+        ),
+    )
+    parser.add_argument(
+        "--common-initial-solution-output",
+        type=Path,
+        default=None,
+        help=(
+            "Save the first converged and independently feasible target window "
+            "as a reusable solver-neutral initial solution."
         ),
     )
     parser.add_argument(
@@ -2672,9 +2701,7 @@ def _validate_standard_warmup_seed(
         if np.asarray(values).ndim != 2
         or np.asarray(values).shape[1] != expected_control_nodes
     }
-    pulse_width_keys = [
-        key for key in controls if key.startswith("last_pulse_width_")
-    ]
+    pulse_width_keys = [key for key in controls if key.startswith("last_pulse_width_")]
     if (
         invalid_trajectories
         or invalid_control_nodes
@@ -2748,9 +2775,7 @@ def _attach_declared_legacy_warmup_metadata(
                     f"cannot be truncated from {source_control_nodes} controls."
                 )
             state_nodes_per_control = source_intervals // source_control_nodes
-            target_state_nodes = (
-                expected_control_nodes * state_nodes_per_control + 1
-            )
+            target_state_nodes = expected_control_nodes * state_nodes_per_control + 1
             solution._states[key] = values[:, :target_state_nodes]
 
     metadata = _standard_warmup_metadata(args)
@@ -2828,17 +2853,12 @@ def _periodic_ipopt_refinement_cache_path(
                 repository_root / "cocofest" / "dynamics" / "reduced_cycling.py"
             ),
             _source_stamp(
-                repository_root
-                / "cocofest"
-                / "models"
-                / "reduced_cycling_model.py"
+                repository_root / "cocofest" / "models" / "reduced_cycling_model.py"
             ),
         ],
     }
     if cache_version >= 3:
-        payload["wheel_cycle_boundary_slack"] = (
-            args.acados_terminal_wheel_q_slack
-        )
+        payload["wheel_cycle_boundary_slack"] = args.acados_terminal_wheel_q_slack
     if cache_version >= 4:
         payload["terminal_wheel_q_reference_mode"] = "absolute_initial"
     if cache_version >= 5 and args.mechanical_formulation == "reduced":
@@ -2941,6 +2961,58 @@ def _load_warmup_cache(cache_path: Path) -> "_WarmupSolutionAdapter":
             else None
         )
     return _WarmupSolutionAdapter(states, controls, metadata=metadata)
+
+
+def _common_initial_solution_metadata(args: argparse.Namespace) -> dict:
+    """Describe the physical OCP represented by a shared target seed."""
+
+    return {
+        "schema": "cocofest-common-periodic-initial-solution-v1",
+        "model_formulation": args.model_formulation,
+        "mechanical_formulation": args.mechanical_formulation,
+        "cycles_per_window": int(args.cycles_per_window),
+        "stimulations_per_cycle": int(args.stimulations_per_cycle),
+        "constant_crank_torque": float(args.constant_crank_torque),
+        "torque_application": args.torque_application,
+        "ode_solver": args.ode_solver,
+        "nlp_ordering_strategy": getattr(args, "nlp_ordering_strategy", None),
+        "producer_solver": args.solver,
+    }
+
+
+def _validate_common_initial_solution_metadata(
+    seed: "_WarmupSolutionAdapter",
+    args: argparse.Namespace,
+    seed_path: Path,
+) -> None:
+    """Reject silent horizon or physical-problem mismatches in shared seeds."""
+
+    metadata = getattr(seed, "metadata", None)
+    if not metadata:
+        raise ValueError(
+            f"Common initial solution '{seed_path}' has no metadata. Rebuild it "
+            "with --common-initial-solution-output."
+        )
+    expected = _common_initial_solution_metadata(args)
+    for field in (
+        "schema",
+        "model_formulation",
+        "mechanical_formulation",
+        "cycles_per_window",
+        "stimulations_per_cycle",
+        "torque_application",
+    ):
+        if metadata.get(field) != expected[field]:
+            raise ValueError(
+                f"Common initial solution '{seed_path}' has {field}="
+                f"{metadata.get(field)!r}, expected {expected[field]!r}."
+            )
+    seed_torque = float(metadata.get("constant_crank_torque", np.nan))
+    if not np.isclose(seed_torque, expected["constant_crank_torque"], atol=1e-12):
+        raise ValueError(
+            f"Common initial solution '{seed_path}' uses signed crank torque "
+            f"{seed_torque}, expected {expected['constant_crank_torque']}."
+        )
 
 
 def _continuation_cache_signature(args: argparse.Namespace) -> str:
@@ -3469,8 +3541,7 @@ def _wheel_trace_from_exported_cycles(
         return wheel_trace(merged_solution)
 
     cycle_traces = [
-        wheel_trace(cycle_solution)
-        for cycle_solution in exported_cycle_solutions
+        wheel_trace(cycle_solution) for cycle_solution in exported_cycle_solutions
     ]
     return np.concatenate(
         [trace[:-1] for trace in cycle_traces[:-1]] + [cycle_traces[-1]]
@@ -4335,9 +4406,7 @@ def resolve_cycle_boundary_homotopy_slacks(
     slacks = [first]
     for requested_slack in requested_slacks:
         requested_slack = float(requested_slack)
-        if requested_slack >= slacks[-1] or np.isclose(
-            requested_slack, slacks[-1]
-        ):
+        if requested_slack >= slacks[-1] or np.isclose(requested_slack, slacks[-1]):
             continue
         while slacks[-1] - requested_slack > maximum_step:
             slacks.append(slacks[-1] - maximum_step)
@@ -4346,9 +4415,7 @@ def resolve_cycle_boundary_homotopy_slacks(
     return tuple(slacks)
 
 
-def project_wheel_cycle_boundaries_to_slack(
-    periodic_nmpc, slack: float
-) -> dict:
+def project_wheel_cycle_boundaries_to_slack(periodic_nmpc, slack: float) -> dict:
     """Project only internal crank seam nodes into the current homotopy band."""
 
     q = periodic_nmpc.nlp[0].x_init["q"].init
@@ -4381,9 +4448,7 @@ def run_acados_cycle_boundary_continuation(
 ) -> dict:
     """Tighten ACADOS stage-wise crank bounds at internal cycle seams."""
 
-    resolved_slacks = resolve_cycle_boundary_homotopy_slacks(
-        periodic_nmpc, slacks
-    )
+    resolved_slacks = resolve_cycle_boundary_homotopy_slacks(periodic_nmpc, slacks)
     stage_solver = deepcopy(solver)
     stage_solver.set_convergence_tolerance(convergence_tolerance)
     if stage_iterations is not None:
@@ -4427,15 +4492,11 @@ def run_acados_cycle_boundary_continuation(
                 control_radius = float(initial_control_radius) * (
                     float(control_radius_growth) ** stage_index
                 )
-                apply_pulse_width_control_trust_region(
-                    periodic_nmpc, control_radius
-                )
+                apply_pulse_width_control_trust_region(periodic_nmpc, control_radius)
             stage_accepted = False
             for attempt in range(max_restarts + 1):
                 if stage_iterations is not None:
-                    set_acados_runtime_max_iterations(
-                        periodic_nmpc, stage_iterations
-                    )
+                    set_acados_runtime_max_iterations(periodic_nmpc, stage_iterations)
                 solution = solve_stage()
                 diagnostics = snapshot_acados_diagnostics(solution)
                 accepted = _status_is_success(
@@ -4486,12 +4547,8 @@ def run_acados_cycle_boundary_continuation(
                     apply_solution_directly_to_periodic_nmpc_initial_guess(
                         periodic_nmpc, solution
                     )
-                    accepted_states = snapshot_container(
-                        periodic_nmpc.nlp[0].x_init
-                    )
-                    accepted_controls = snapshot_container(
-                        periodic_nmpc.nlp[0].u_init
-                    )
+                    accepted_states = snapshot_container(periodic_nmpc.nlp[0].x_init)
+                    accepted_controls = snapshot_container(periodic_nmpc.nlp[0].u_init)
                     accepted_slack = float(slack)
                     periodic_nmpc._cocofest_dual_warm_start_mode = "preserve"
                     stage_accepted = True
@@ -5163,9 +5220,9 @@ def _maximum_bound_violation_details(
 def _maximum_bound_violation(values, lower_bounds, upper_bounds) -> float | None:
     """Return a backend-independent maximum bound violation when dimensions match."""
 
-    return _maximum_bound_violation_details(
-        values, lower_bounds, upper_bounds
-    )["violation"]
+    return _maximum_bound_violation_details(values, lower_bounds, upper_bounds)[
+        "violation"
+    ]
 
 
 def _decision_vector_block(solution, index: int | None) -> str | None:
@@ -5281,9 +5338,7 @@ def _solution_feasibility_summary(
         )
         if value is not None
     ]
-    constraint_infeasibility = (
-        max(constraint_metrics) if constraint_metrics else None
-    )
+    constraint_infeasibility = max(constraint_metrics) if constraint_metrics else None
     primal_metrics = [
         value
         for value in (
@@ -5353,9 +5408,7 @@ def _wheel_cycle_diagnostic_tolerances(
         if args.solver == "acados" and args.acados_tolerance is not None
         else args.nlp_tolerance
     )
-    scaled_feasibility_threshold = getattr(
-        args, "primal_feasibility_threshold", None
-    )
+    scaled_feasibility_threshold = getattr(args, "primal_feasibility_threshold", None)
     if args.solver == "acados" or scaled_feasibility_threshold is None:
         scaled_feasibility_threshold = 10.0 * solver_tolerance
     # The independent feasibility audit operates on the scaled decision
@@ -5658,10 +5711,7 @@ def build_single_shot_summary(
         if "theta" in states
         else np.asarray(states["q"])[2, :]
     )
-    state_traces = {
-        key: np.asarray(values)
-        for key, values in states.items()
-    }
+    state_traces = {key: np.asarray(values) for key, values in states.items()}
     control_traces = {
         key: np.asarray(values)
         for key, values in sol.decision_controls(to_merge=SolutionMerge.NODES).items()
@@ -5768,9 +5818,7 @@ def diagnose_wheel_trace(
             cycle_boundaries.size, dtype=float
         ) * float(expected_cycle_shift)
         absolute_cycle_errors = cycle_boundaries - absolute_targets
-        maximum_absolute_cycle_error = float(
-            np.max(np.abs(absolute_cycle_errors))
-        )
+        maximum_absolute_cycle_error = float(np.max(np.abs(absolute_cycle_errors)))
         final_absolute_cycle_error = float(absolute_cycle_errors[-1])
         if maximum_absolute_cycle_error > absolute_cycle_tolerance:
             issues.append("wheel_absolute_progress_out_of_bounds")
@@ -5840,6 +5888,24 @@ def _ding_state_keys(muscle_name: str) -> tuple[str, str, str, str, str, str]:
         f"A_{muscle_name}",
         f"Tau1_{muscle_name}",
         f"Km_{muscle_name}",
+    )
+
+
+def _available_ding_state_keys(muscle_name: str, available_keys) -> tuple[str, ...]:
+    """Return the six-state periodic or five-state periodic-node Ding layout."""
+
+    six_state_keys = _ding_state_keys(muscle_name)
+    if all(key in available_keys for key in six_state_keys):
+        return six_state_keys
+    five_state_keys = (
+        f"Cn_{muscle_name}",
+        f"F_{muscle_name}",
+        f"A_{muscle_name}",
+        f"Tau1_{muscle_name}",
+        f"Km_{muscle_name}",
+    )
+    return (
+        five_state_keys if all(key in available_keys for key in five_state_keys) else ()
     )
 
 
@@ -5956,9 +6022,11 @@ def _periodic_fes_rollout_defects(
     defects = {}
     for muscle_model in periodic_nmpc.nlp[0].model.muscles_dynamics_model:
         muscle_name = muscle_model.muscle_name
-        state_keys = _ding_state_keys(muscle_name)
+        state_keys = _available_ding_state_keys(
+            muscle_name, periodic_nmpc.nlp[0].x_init.keys()
+        )
         control_key = f"last_pulse_width_{muscle_name}"
-        if any(key not in periodic_nmpc.nlp[0].x_init.keys() for key in state_keys):
+        if not state_keys:
             continue
         if control_key not in periodic_nmpc.nlp[0].u_init.keys():
             continue
@@ -5994,13 +6062,18 @@ def _periodic_fes_rollout_defect_details(
 
     for muscle_model in periodic_nmpc.nlp[0].model.muscles_dynamics_model:
         muscle_name = muscle_model.muscle_name
-        state_keys = _ding_state_keys(muscle_name)
+        state_keys = _available_ding_state_keys(
+            muscle_name, periodic_nmpc.nlp[0].x_init.keys()
+        )
         control_key = f"last_pulse_width_{muscle_name}"
-        if any(key not in periodic_nmpc.nlp[0].x_init.keys() for key in state_keys):
+        if not state_keys:
             continue
         if control_key not in periodic_nmpc.nlp[0].u_init.keys():
             continue
 
+        muscle_state_labels = tuple(
+            key[: -len(f"_{muscle_name}")] for key in state_keys
+        )
         states = np.vstack(
             [periodic_nmpc.nlp[0].x_init[key].init[0, :] for key in state_keys]
         )
@@ -6018,7 +6091,7 @@ def _periodic_fes_rollout_defect_details(
             defects = np.abs(states[:, node + 1] - expected)
             muscle_max = max(muscle_max, float(np.max(defects)))
             for label, absolute_defect, scale in zip(
-                state_labels, defects, state_scales, strict=True
+                muscle_state_labels, defects, state_scales, strict=True
             ):
                 absolute_by_state[label] = max(
                     absolute_by_state[label], float(absolute_defect)
@@ -7878,10 +7951,17 @@ def project_transferred_initial_guess_to_bounds(periodic_nmpc) -> dict:
     )
 
 
-def _projection_state_keys(muscle_name: str, projection_mode: str) -> tuple[str, ...]:
-    state_keys = _ding_state_keys(muscle_name)
+def _projection_state_keys(
+    muscle_name: str, projection_mode: str, available_keys=None
+) -> tuple[str, ...]:
+    state_keys = (
+        _ding_state_keys(muscle_name)
+        if available_keys is None
+        else _available_ding_state_keys(muscle_name, available_keys)
+    )
     if projection_mode == "calcium":
-        return state_keys[:2]
+        # The periodic-node model has Cn but no explicit Cn_sum state.
+        return state_keys[:2] if len(state_keys) == 6 else state_keys[:1]
     if projection_mode in (
         "all",
         "all_except_force",
@@ -7896,9 +7976,11 @@ def _projection_state_keys(muscle_name: str, projection_mode: str) -> tuple[str,
 
 
 def _projection_write_state_keys(
-    muscle_name: str, projection_mode: str
+    muscle_name: str, projection_mode: str, available_keys=None
 ) -> tuple[str, ...]:
-    state_keys = _projection_state_keys(muscle_name, projection_mode)
+    state_keys = _projection_state_keys(
+        muscle_name, projection_mode, available_keys=available_keys
+    )
     if projection_mode == "all_except_force":
         force_key = f"F_{muscle_name}"
         return tuple(key for key in state_keys if key != force_key)
@@ -8298,9 +8380,17 @@ def project_periodic_fes_initial_guess(
 
     for muscle_model in periodic_nmpc.nlp[0].model.muscles_dynamics_model:
         muscle_name = muscle_model.muscle_name
-        state_keys = _projection_state_keys(muscle_name, projection_mode)
+        available_keys = periodic_nmpc.nlp[0].x_init.keys()
+        state_keys = _projection_state_keys(
+            muscle_name, projection_mode, available_keys=available_keys
+        )
+        if projection_mode == "calcium" and len(state_keys) == 1:
+            raise ValueError(
+                "The five-state periodic-node Ding model has no explicit Cn_sum "
+                "state; use --periodic-fes-warmup-projection-mode all."
+            )
         control_key = f"last_pulse_width_{muscle_name}"
-        if any(key not in periodic_nmpc.nlp[0].x_init.keys() for key in state_keys):
+        if not state_keys:
             continue
         if control_key not in periodic_nmpc.nlp[0].u_init.keys():
             continue
@@ -8366,7 +8456,9 @@ def project_periodic_fes_initial_guess(
             projection_weight * projected_states
             + (1.0 - projection_weight) * original_states
         )
-        write_state_keys = _projection_write_state_keys(muscle_name, projection_mode)
+        write_state_keys = _projection_write_state_keys(
+            muscle_name, projection_mode, available_keys=available_keys
+        )
         for state_idx, key in enumerate(state_keys):
             if key not in write_state_keys:
                 continue
@@ -8511,9 +8603,7 @@ def _adapt_warmup_solution_to_periodic_nodes(
         and "q" in resampled_states
         and "qdot" in resampled_states
     ):
-        reduced_dynamics = getattr(
-            periodic_nmpc.nlp[0].model, "reduced_dynamics", None
-        )
+        reduced_dynamics = getattr(periodic_nmpc.nlp[0].model, "reduced_dynamics", None)
         if reduced_dynamics is None:
             raise RuntimeError(
                 "The reduced warm-start target does not expose reduced_dynamics."
@@ -9457,14 +9547,10 @@ def run_periodic_ipopt_refinement(
             else {}
         )
         iteration_stats = (
-            solver_stats.get("iterations", {})
-            if isinstance(solver_stats, dict)
-            else {}
+            solver_stats.get("iterations", {}) if isinstance(solver_stats, dict) else {}
         )
         native_inf_pr = (
-            iteration_stats.get("inf_pr")
-            if isinstance(iteration_stats, dict)
-            else None
+            iteration_stats.get("inf_pr") if isinstance(iteration_stats, dict) else None
         )
         if native_inf_pr is not None:
             native_inf_pr = np.asarray(native_inf_pr, dtype=float).reshape(-1)
@@ -9474,9 +9560,7 @@ def run_periodic_ipopt_refinement(
     feasibility = _solution_feasibility_summary(
         refinement_sol, provisional_feasibility_tolerance
     )
-    acceptance = periodic_refinement_acceptance(
-        refinement_sol.status, feasibility
-    )
+    acceptance = periodic_refinement_acceptance(refinement_sol.status, feasibility)
     success = acceptance["success"]
     feasibility_certified = acceptance["certified"]
     provisional = acceptance["provisional"]
@@ -9573,7 +9657,11 @@ def apply_terminal_qdot_regularization_target(periodic_nmpc, target) -> bool:
         if not penalty:
             continue
         key = getattr(penalty, "extra_parameters", {}).get("key")
-        if key not in ("qdot", "omega") or not penalty.node or penalty.node[0] != Node.END:
+        if (
+            key not in ("qdot", "omega")
+            or not penalty.node
+            or penalty.node[0] != Node.END
+        ):
             continue
         penalty.target = target
         return True
@@ -9742,9 +9830,7 @@ def set_terminal_wheel_q_bound_slack(periodic_nmpc, slack: float) -> None:
     bounds = periodic_nmpc.nlp[0].x_bounds[position_key]
     center = getattr(periodic_nmpc, "_cocofest_terminal_wheel_q_center", None)
     if center is None:
-        q_init = np.asarray(
-            periodic_nmpc.nlp[0].x_init[position_key].init, dtype=float
-        )
+        q_init = np.asarray(periodic_nmpc.nlp[0].x_init[position_key].init, dtype=float)
         center = float(q_init[position_index, -1])
         periodic_nmpc._cocofest_terminal_wheel_q_center = center
     bounds.min[position_index, 2] = center - slack
@@ -9758,9 +9844,7 @@ def recenter_terminal_wheel_q_bound_slack(periodic_nmpc, slack: float) -> dict:
     position_key = getattr(periodic_nmpc, "position_state_key", "q")
     position_index = getattr(periodic_nmpc, "wheel_state_index", 2)
     bounds = periodic_nmpc.nlp[0].x_bounds[position_key]
-    center = 0.5 * float(
-        bounds.min[position_index, 2] + bounds.max[position_index, 2]
-    )
+    center = 0.5 * float(bounds.min[position_index, 2] + bounds.max[position_index, 2])
     periodic_nmpc._cocofest_terminal_wheel_q_center = center
     set_terminal_wheel_q_bound_slack(periodic_nmpc, slack)
     return {
@@ -10149,9 +10233,19 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
         )
     if args.standard_warmup_seed_continuation and args.standard_warmup_seed is None:
         raise ValueError(
-            "--standard-warmup-seed-continuation requires "
-            "--standard-warmup-seed."
+            "--standard-warmup-seed-continuation requires " "--standard-warmup-seed."
         )
+    if (
+        args.common_initial_solution is not None
+        and args.common_initial_solution_output is not None
+    ):
+        input_path = Path(args.common_initial_solution).expanduser().resolve()
+        output_path = Path(args.common_initial_solution_output).expanduser().resolve()
+        if input_path == output_path:
+            raise ValueError(
+                "--common-initial-solution and "
+                "--common-initial-solution-output must not be the same file."
+            )
     if (
         args.standard_warmup_max_iterations is not None
         and args.standard_warmup_max_iterations < 1
@@ -10411,9 +10505,7 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
         args.acados_cycle_boundary_homotopy_slacks is not None
         and args.solver != "acados"
     ):
-        raise ValueError(
-            "Cycle-boundary continuation is only available with ACADOS."
-        )
+        raise ValueError("Cycle-boundary continuation is only available with ACADOS.")
     if (
         args.acados_cycle_boundary_homotopy_slacks is not None
         and args.cycles_per_window < 2
@@ -10454,10 +10546,11 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
         and args.nlp_periodic_ipopt_hot_start
         and not args.disable_periodic_ipopt_refinement
     )
-    if (
-        args.nlp_periodic_ipopt_hot_start
-        and args.solver not in {"fatrop", "madnlp", "alpaqa"}
-    ):
+    if args.nlp_periodic_ipopt_hot_start and args.solver not in {
+        "fatrop",
+        "madnlp",
+        "alpaqa",
+    }:
         raise ValueError(
             "--nlp-periodic-ipopt-hot-start is only available with Fatrop, MadNLP or Alpaqa."
         )
@@ -10487,10 +10580,7 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
             "to ACADOS. Fatrop, MadNLP and Alpaqa use the certified seed only for the "
             "first window, then warm-start from their own shifted solution."
         )
-    if (
-        cycle_boundary_homotopy_enabled
-        and args.periodic_ipopt_refinement_each_window
-    ):
+    if cycle_boundary_homotopy_enabled and args.periodic_ipopt_refinement_each_window:
         raise ValueError(
             "--periodic-ipopt-refinement-each-window cannot be combined with "
             "--acados-cycle-boundary-homotopy-slacks. Use the one-cycle "
@@ -10532,22 +10622,18 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
                 stacklevel=2,
             )
             args.compact_rho_output = True
-        if args.solver == "acados":
+        if args.solver == "acados" and not args.experimental_reduced_acados:
             raise ValueError(
                 "The reduced theta/omega OCP must first be certified with "
-                "IPOPT and MadNLP before enabling ACADOS RTI."
+                "IPOPT and MadNLP before enabling ACADOS. Pass "
+                "--experimental-reduced-acados only for diagnostic SQP runs."
             )
         if args.torque_application != "constant":
-            raise ValueError(
-                "Reduced mechanics require --torque-application constant."
-            )
+            raise ValueError("Reduced mechanics require --torque-application constant.")
         reduced_profile_path = (
             args.reduced_cycling_profile
             if args.reduced_cycling_profile is not None
-            else example_dir
-            / "result"
-            / "cache"
-            / "reduced_cycling_fourier12.npz"
+            else example_dir / "result" / "cache" / "reduced_cycling_fourier12.npz"
         )
         if reduced_profile_path.exists():
             try:
@@ -10626,12 +10712,8 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
         )
     ordering_strategy = (
         OrderingStrategy.TIME_MAJOR
-        if args.solver == "fatrop"
-        else (
-            OrderingStrategy.VARIABLE_MAJOR
-            if OrderingStrategy is not None
-            else None
-        )
+        if args.solver in NLP_SOLVER_NAMES and OrderingStrategy is not None
+        else (OrderingStrategy.VARIABLE_MAJOR if OrderingStrategy is not None else None)
     )
     mhe_info = {
         "cycle_duration": cycle_duration,
@@ -10647,7 +10729,7 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
         mhe_info["ordering_strategy"] = ordering_strategy
     args.nlp_ordering_strategy = (
         "time_major"
-        if args.solver == "fatrop"
+        if args.solver in NLP_SOLVER_NAMES and ordering_strategy is not None
         else ("variable_major" if ordering_strategy is not None else "bioptim_default")
     )
     cycling_info = {
@@ -10726,9 +10808,9 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
             warmup_conditions_for_active_set["control_regularization_weight"] = 0.0
             warmup_conditions_for_active_set["control_regularization_target"] = None
         if args.terminal_qdot_regularization_target_source == "first_node":
-            warmup_conditions_for_active_set[
-                "terminal_qdot_regularization_weight"
-            ] = 0.0
+            warmup_conditions_for_active_set["terminal_qdot_regularization_weight"] = (
+                0.0
+            )
         standard_warmup_cache_hit = (
             bool(getattr(args, "standard_warmup_seed", None))
             or _warmup_cache_path(
@@ -10742,9 +10824,9 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
             warmup_conditions_for_active_set,
             model_path,
         )
-        nmpc_simulation_conditions[
-            "pulse_width_active_reference"
-        ] = prefetched_standard_warmup.decision_controls(to_merge=SolutionMerge.NODES)
+        nmpc_simulation_conditions["pulse_width_active_reference"] = (
+            prefetched_standard_warmup.decision_controls(to_merge=SolutionMerge.NODES)
+        )
 
     nmpc = prepare_nmpc(model, mhe_info, cycling_info, nmpc_simulation_conditions)
     nmpc.n_cycles_simultaneous = args.cycles_per_window
@@ -10799,9 +10881,9 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
         nmpc.anchor_terminal_wheel_to_first_node = False
         nmpc.anchor_wheel_q_to_absolute_reference = True
         nmpc.absolute_wheel_q_reference = float(
-            np.asarray(
-                nmpc.nlp[0].x_init[position_key].init, dtype=float
-            )[wheel_index, 0]
+            np.asarray(nmpc.nlp[0].x_init[position_key].init, dtype=float)[
+                wheel_index, 0
+            ]
         )
         nmpc.absolute_wheel_q_cycle_shift = -2.0 * np.pi
         nmpc.absolute_wheel_q_cycle_index = 0
@@ -10815,9 +10897,7 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
         nmpc._cocofest_dual_warm_start_mode = args.acados_dual_warm_start_mode
         nmpc._cocofest_dual_shift_stages = args.stimulations_per_cycle
         nmpc._cocofest_wheel_cycle_boundary_slack = (
-            args.acados_terminal_wheel_q_slack
-            if args.solver == "acados"
-            else None
+            args.acados_terminal_wheel_q_slack if args.solver == "acados" else None
         )
         nmpc._cocofest_cycle_len = args.stimulations_per_cycle
         nmpc._cocofest_cycles_per_window = args.cycles_per_window
@@ -11236,8 +11316,7 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
                 )
             if args.solver == "fatrop":
                 print(
-                    "fatrop_structure_detection: "
-                    f"{args.fatrop_structure_detection}"
+                    "fatrop_structure_detection: " f"{args.fatrop_structure_detection}"
                 )
                 print(
                     "fatrop_bound_tightening_factor: "
@@ -11246,26 +11325,16 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
             if args.solver == "madnlp":
                 print(f"madnlp_linear_solver: {args.madnlp_linear_solver}")
             if args.solver == "alpaqa":
-                print(
-                    "alpaqa_initial_tolerance: "
-                    f"{args.alpaqa_initial_tolerance}"
-                )
+                print("alpaqa_initial_tolerance: " f"{args.alpaqa_initial_tolerance}")
                 print(
                     "alpaqa_penalty_update_factor: "
                     f"{args.alpaqa_penalty_update_factor}"
                 )
+                print("alpaqa_maximum_penalty: " f"{args.alpaqa_maximum_penalty}")
                 print(
-                    "alpaqa_maximum_penalty: "
-                    f"{args.alpaqa_maximum_penalty}"
+                    "alpaqa_panoc_max_wall_time: " f"{args.alpaqa_panoc_max_wall_time}"
                 )
-                print(
-                    "alpaqa_panoc_max_wall_time: "
-                    f"{args.alpaqa_panoc_max_wall_time}"
-                )
-                print(
-                    "alpaqa_max_no_progress: "
-                    f"{args.alpaqa_max_no_progress}"
-                )
+                print("alpaqa_max_no_progress: " f"{args.alpaqa_max_no_progress}")
             print(
                 "historical_initial_guess: "
                 f"{historical_init_guess_path if historical_init_guess_path else 'None'}"
@@ -11354,6 +11423,48 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
                 args.warmup_state_comparison_limit,
             )
 
+    if args.common_initial_solution is not None:
+        common_seed_path = _resolve_standard_warmup_seed(args.common_initial_solution)
+        common_seed = _load_warmup_cache(common_seed_path)
+        _validate_common_initial_solution_metadata(common_seed, args, common_seed_path)
+        apply_solution_directly_to_periodic_nmpc_initial_guess(nmpc, common_seed)
+        if echo:
+            print(f"common_initial_solution: applied ({common_seed_path})")
+        if args.solver == "acados" and not args.disable_periodic_fes_warmup_projection:
+            common_projection = project_periodic_fes_initial_guess(
+                nmpc,
+                projection_weight=args.periodic_fes_warmup_projection_weight,
+                projection_mode=args.periodic_fes_warmup_projection_mode,
+                projection_strategy=args.periodic_fes_warmup_projection_strategy,
+                projection_substeps=args.periodic_fes_warmup_projection_substeps,
+                projection_proximity_weight=(
+                    args.periodic_fes_warmup_projection_proximity_weight
+                ),
+                projection_defect_weight=(
+                    args.periodic_fes_warmup_projection_defect_weight
+                ),
+                projection_trust_radius=(
+                    args.periodic_fes_warmup_projection_trust_radius
+                ),
+                projection_max_iterations=(
+                    args.periodic_fes_warmup_projection_max_iterations
+                ),
+                force_projection_weight=(
+                    args.periodic_fes_warmup_force_projection_weight
+                ),
+                force_qdot_defect_limit=(
+                    args.periodic_fes_warmup_force_qdot_defect_limit
+                ),
+                force_adaptive_steps=args.periodic_fes_warmup_force_adaptive_steps,
+            )
+            if echo:
+                print(
+                    "common_initial_solution_fes_projection: "
+                    f"projected_muscles={common_projection['projected_muscles']} "
+                    f"max_defect_before={common_projection['max_defect_before']:.6g} "
+                    f"max_defect_after={common_projection['max_defect_after']:.6g}"
+                )
+
     if echo and args.pulse_width_active_set != "none":
         for summary in pulse_width_active_set_summary(nmpc):
             print(
@@ -11416,10 +11527,7 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
 
     refinement_nmpc = None
     periodic_refinement_accepted = False
-    if (
-        periodic_cn_sum_approximation
-        and target_periodic_ipopt_refinement_enabled
-    ):
+    if periodic_cn_sum_approximation and target_periodic_ipopt_refinement_enabled:
         if echo:
             print("running_periodic_ipopt_refinement: True")
             if args.acados_diagnostics:
@@ -11486,9 +11594,7 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
                 and not refinement_cache_path.exists()
                 and legacy_refinement_seed_path.exists()
             ):
-                legacy_refinement_seed = _load_warmup_cache(
-                    legacy_refinement_seed_path
-                )
+                legacy_refinement_seed = _load_warmup_cache(legacy_refinement_seed_path)
                 apply_solution_directly_to_periodic_nmpc_initial_guess(
                     refinement_nmpc, legacy_refinement_seed
                 )
@@ -11506,13 +11612,10 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
                 cache_path=refinement_cache_path,
                 echo=echo,
             )
-            if (
-                refinement_candidate is not None
-                and getattr(
-                    refinement_candidate,
-                    "_cocofest_refinement_accepted",
-                    False,
-                )
+            if refinement_candidate is not None and getattr(
+                refinement_candidate,
+                "_cocofest_refinement_accepted",
+                False,
             ):
                 periodic_ipopt_reference_solution = refinement_candidate
                 periodic_refinement_accepted = True
@@ -11549,14 +11652,10 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
         elif echo:
             print("acados_cycle_boundary_seed: current")
 
-        cycle_boundary_homotopy_schedule = (
-            resolve_cycle_boundary_homotopy_slacks(
-                nmpc, args.acados_cycle_boundary_homotopy_slacks
-            )
+        cycle_boundary_homotopy_schedule = resolve_cycle_boundary_homotopy_slacks(
+            nmpc, args.acados_cycle_boundary_homotopy_slacks
         )
-        nmpc._cocofest_wheel_cycle_boundary_slack = (
-            cycle_boundary_homotopy_schedule[0]
-        )
+        nmpc._cocofest_wheel_cycle_boundary_slack = cycle_boundary_homotopy_schedule[0]
         if echo:
             seam_errors = wheel_cycle_boundary_initial_guess_errors(nmpc)
             print(
@@ -11589,9 +11688,7 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
 
     if args.terminal_qdot_regularization_weight:
         velocity_key = "omega" if "omega" in nmpc.nlp[0].x_init else "qdot"
-        qdot_guess = np.asarray(
-            nmpc.nlp[0].x_init[velocity_key].init, dtype=float
-        )
+        qdot_guess = np.asarray(nmpc.nlp[0].x_init[velocity_key].init, dtype=float)
         terminal_qdot = (
             qdot_guess[:, 0]
             if args.terminal_qdot_regularization_target_source == "first_node"
@@ -11709,6 +11806,38 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
     requested_window_solves = receding_horizon_window_count(
         args.n_windows, args.cycles_per_window
     )
+    common_initial_solution_output = (
+        Path(args.common_initial_solution_output).expanduser().resolve()
+        if args.common_initial_solution_output is not None
+        else None
+    )
+
+    def save_common_initial_solution(solution) -> bool:
+        if (
+            common_initial_solution_output is None
+            or common_initial_solution_output.exists()
+        ):
+            return False
+        feasibility = _solution_feasibility_summary(
+            solution, _window_feasibility_tolerance(args)
+        )
+        if not (
+            _status_is_success(solution.status)
+            and feasibility.get("passes_tolerance", False)
+        ):
+            return False
+        common_initial_solution_output.parent.mkdir(parents=True, exist_ok=True)
+        _save_warmup_cache(
+            common_initial_solution_output,
+            solution,
+            metadata=_common_initial_solution_metadata(args),
+        )
+        if echo:
+            print(
+                "common_initial_solution_output: saved "
+                f"({common_initial_solution_output})"
+            )
+        return True
 
     def cache_first_successful_window(_nmpc, solution):
         diagnostics = snapshot_acados_diagnostics(solution)
@@ -11755,6 +11884,7 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
         solution._cocofest_feasibility_summary = _solution_feasibility_summary(
             solution, window_feasibility_tolerance
         )
+        save_common_initial_solution(solution)
         if args.solver == "acados" and horizon_seed_cache_path is not None:
             cache_first_successful_window(_nmpc, solution)
 
@@ -11808,9 +11938,7 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
                     f"reason={dual_summary['reason']}"
                 )
         if _sol is not None:
-            feasibility = getattr(
-                _sol, "_cocofest_feasibility_summary", None
-            )
+            feasibility = getattr(_sol, "_cocofest_feasibility_summary", None)
             if feasibility is not None:
                 if feasibility["passes_tolerance"]:
                     consecutive_physical_failures = 0
@@ -11867,14 +11995,10 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
             ):
                 if args.terminal_qdot_regularization_target_source == "previous":
                     previous_states = _sol.decision_states(to_merge=SolutionMerge.NODES)
-                    velocity_key = (
-                        "omega" if "omega" in previous_states else "qdot"
-                    )
+                    velocity_key = "omega" if "omega" in previous_states else "qdot"
                     terminal_qdot_target = previous_states[velocity_key][:, -1]
                 else:
-                    velocity_key = (
-                        "omega" if "omega" in _nmpc.nlp[0].x_init else "qdot"
-                    )
+                    velocity_key = "omega" if "omega" in _nmpc.nlp[0].x_init else "qdot"
                     terminal_qdot_target = np.asarray(
                         _nmpc.nlp[0].x_init[velocity_key].init, dtype=float
                     )[:, 0]
@@ -12510,10 +12634,7 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
         solver = configure_cycle_nlp_solver(args)
 
     control_homotopy_completed_for_seed = False
-    if (
-        args.solver == "acados"
-        and cycle_boundary_homotopy_schedule is not None
-    ):
+    if args.solver == "acados" and cycle_boundary_homotopy_schedule is not None:
         seam_initial_control_radius = None
         if args.acados_control_homotopy_radii is not None:
             control_homotopy_summaries = run_acados_control_homotopy(
@@ -12546,17 +12667,15 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
                 if summary["accepted"] and summary["radius"] is not None
             ][-1]
             control_homotopy_completed_for_seed = True
-        cycle_boundary_homotopy_summary = (
-            run_acados_cycle_boundary_continuation(
-                nmpc,
-                solver,
-                slacks=cycle_boundary_homotopy_schedule,
-                convergence_tolerance=args.acados_control_homotopy_tolerance,
-                stage_iterations=args.acados_control_homotopy_stage_iterations,
-                max_restarts=args.acados_control_homotopy_max_restarts,
-                initial_control_radius=seam_initial_control_radius,
-                echo=echo,
-            )
+        cycle_boundary_homotopy_summary = run_acados_cycle_boundary_continuation(
+            nmpc,
+            solver,
+            slacks=cycle_boundary_homotopy_schedule,
+            convergence_tolerance=args.acados_control_homotopy_tolerance,
+            stage_iterations=args.acados_control_homotopy_stage_iterations,
+            max_restarts=args.acados_control_homotopy_max_restarts,
+            initial_control_radius=seam_initial_control_radius,
+            echo=echo,
         )
         set_acados_runtime_max_iterations(nmpc, args.max_acados_iterations)
         solver.set_only_first_options_has_changed(False)
@@ -12593,8 +12712,7 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
             nmpc._cocofest_retained_control_homotopy_radius = retained_radius
             if echo:
                 print(
-                    "acados_control_homotopy_retained_radius: "
-                    f"{retained_radius:.9g}"
+                    "acados_control_homotopy_retained_radius: " f"{retained_radius:.9g}"
                 )
 
     if (
@@ -12726,6 +12844,7 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
             _save_warmup_cache(acados_seed_cache_path, sol)
             if echo:
                 print(f"acados_seed_cache: saved ({acados_seed_cache_path.name})")
+        save_common_initial_solution(sol)
         summary = build_single_shot_summary(
             sol,
             feasibility_tolerance=window_feasibility_tolerance,
@@ -12755,19 +12874,15 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
         summary["warmup_cycles_consumed"] = args.warmup_cycles_consumed
         summary["fatigue_capacity_scales"] = fatigue_capacity_scales
         summary["wheel_q_scaling"] = wheel_q_scaling
-        summary[
-            "absolute_wheel_q_origin_reference"
-        ] = absolute_wheel_q_origin_reference
-        summary[
-            "absolute_wheel_q_start_cycle_index"
-        ] = absolute_wheel_q_start_cycle_index
+        summary["absolute_wheel_q_origin_reference"] = absolute_wheel_q_origin_reference
+        summary["absolute_wheel_q_start_cycle_index"] = (
+            absolute_wheel_q_start_cycle_index
+        )
         summary["native_solver_status"] = _native_solver_status(nmpc)
         if control_homotopy_summaries:
             summary["control_homotopy_summaries"] = control_homotopy_summaries
         if cycle_boundary_homotopy_summary is not None:
-            summary[
-                "cycle_boundary_homotopy_summary"
-            ] = cycle_boundary_homotopy_summary
+            summary["cycle_boundary_homotopy_summary"] = cycle_boundary_homotopy_summary
         if terminal_wheel_bound_summaries:
             summary["terminal_wheel_bound_summaries"] = terminal_wheel_bound_summaries
         return summary
@@ -12808,10 +12923,18 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
         summary["native_solver_status"] = _native_solver_status(nmpc)
         summary["pulse_width_active_set_summary"] = pulse_width_active_set_summary(nmpc)
         if cycle_boundary_homotopy_summary is not None:
-            summary[
-                "cycle_boundary_homotopy_summary"
-            ] = cycle_boundary_homotopy_summary
+            summary["cycle_boundary_homotopy_summary"] = cycle_boundary_homotopy_summary
         return summary
+    if (
+        common_initial_solution_output is not None
+        and not common_initial_solution_output.exists()
+        and sol
+    ):
+        # Bioptim normally calls ``before_window_advance`` for every completed
+        # RHO, including the last one. Keep this fallback for versions that do
+        # not call it when only one window is requested by the seed-preparation
+        # CI job.
+        save_common_initial_solution(sol[0])
     if echo:
         summarize_windows(
             sol,
@@ -12846,39 +12969,37 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
     if transfer_rollout_summaries:
         summary["transfer_rollout_summaries"] = transfer_rollout_summaries
     if transfer_control_scaling_summaries:
-        summary[
-            "transfer_control_scaling_summaries"
-        ] = transfer_control_scaling_summaries
+        summary["transfer_control_scaling_summaries"] = (
+            transfer_control_scaling_summaries
+        )
     if transfer_qdot_projection_summaries:
-        summary[
-            "transfer_qdot_projection_summaries"
-        ] = transfer_qdot_projection_summaries
+        summary["transfer_qdot_projection_summaries"] = (
+            transfer_qdot_projection_summaries
+        )
     if transfer_mechanical_restoration_summaries:
-        summary[
-            "transfer_mechanical_restoration_summaries"
-        ] = transfer_mechanical_restoration_summaries
+        summary["transfer_mechanical_restoration_summaries"] = (
+            transfer_mechanical_restoration_summaries
+        )
     if transfer_ding_force_compensation_summaries:
-        summary[
-            "transfer_ding_force_compensation_summaries"
-        ] = transfer_ding_force_compensation_summaries
+        summary["transfer_ding_force_compensation_summaries"] = (
+            transfer_ding_force_compensation_summaries
+        )
     if transfer_bound_homotopy_summaries:
         summary["transfer_bound_homotopy_summaries"] = transfer_bound_homotopy_summaries
     if transfer_sqp_restart_summaries:
         summary["transfer_sqp_restart_summaries"] = transfer_sqp_restart_summaries
     if transfer_bound_projection_summaries:
-        summary[
-            "transfer_bound_projection_summaries"
-        ] = transfer_bound_projection_summaries
+        summary["transfer_bound_projection_summaries"] = (
+            transfer_bound_projection_summaries
+        )
     if inter_window_refinement_summaries:
         summary["inter_window_refinement_summaries"] = inter_window_refinement_summaries
     if cycle_boundary_homotopy_summary is not None:
-        summary["cycle_boundary_homotopy_summary"] = (
-            cycle_boundary_homotopy_summary
-        )
+        summary["cycle_boundary_homotopy_summary"] = cycle_boundary_homotopy_summary
     if inter_window_control_homotopy_summaries:
-        summary[
-            "inter_window_control_homotopy_summaries"
-        ] = inter_window_control_homotopy_summaries
+        summary["inter_window_control_homotopy_summaries"] = (
+            inter_window_control_homotopy_summaries
+        )
     if control_homotopy_summaries:
         summary["control_homotopy_summaries"] = control_homotopy_summaries
     if proximal_control_summaries:
@@ -12886,15 +13007,15 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
     if terminal_wheel_bound_summaries:
         summary["terminal_wheel_bound_summaries"] = terminal_wheel_bound_summaries
     if inter_window_proximal_control_summaries:
-        summary[
-            "inter_window_proximal_control_summaries"
-        ] = inter_window_proximal_control_summaries
+        summary["inter_window_proximal_control_summaries"] = (
+            inter_window_proximal_control_summaries
+        )
     if transfer_failure_window is not None:
         summary["transfer_failure_window"] = transfer_failure_window
     if inter_window_terminal_wheel_bound_summaries:
-        summary[
-            "inter_window_terminal_wheel_bound_summaries"
-        ] = inter_window_terminal_wheel_bound_summaries
+        summary["inter_window_terminal_wheel_bound_summaries"] = (
+            inter_window_terminal_wheel_bound_summaries
+        )
     if initial_guess_state_traces is not None:
         summary["initial_guess_state_traces"] = initial_guess_state_traces
         summary["initial_guess_control_traces"] = initial_guess_control_traces
@@ -12910,12 +13031,8 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
     summary["warmup_cycles_consumed"] = args.warmup_cycles_consumed
     summary["fatigue_capacity_scales"] = fatigue_capacity_scales
     summary["wheel_q_scaling"] = wheel_q_scaling
-    summary["absolute_wheel_q_origin_reference"] = (
-        absolute_wheel_q_origin_reference
-    )
-    summary["absolute_wheel_q_start_cycle_index"] = (
-        absolute_wheel_q_start_cycle_index
-    )
+    summary["absolute_wheel_q_origin_reference"] = absolute_wheel_q_origin_reference
+    summary["absolute_wheel_q_start_cycle_index"] = absolute_wheel_q_start_cycle_index
     summary["native_solver_status"] = _native_solver_status(nmpc)
     return summary
 

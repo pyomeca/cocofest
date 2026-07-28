@@ -14,6 +14,11 @@ on:
         required: true
         default: "30"
         type: string
+      cycles_per_window:
+        description: Simultaneous cycles per OCP (1 for backend benchmark; 2 for memory/robustness study)
+        required: true
+        default: "1"
+        type: string
       crank_assistance_nm:
         description: Driving crank assistance magnitude in N.m
         required: true
@@ -111,43 +116,59 @@ jobs:
       - name: Validate the seed on the assisted target
         env:
           PYTHONPATH: ${{ github.workspace }}
+          BENCHMARK_CYCLES_PER_WINDOW: ${{ inputs.cycles_per_window }}
         run: |
           mkdir -p benchmark-seed-result
-          python examples/fes_multibody/cycling/cycling_fes_solver_comparison.py \
-            --solvers ipopt \
-            --objective fatigue \
-            --ipopt-profile periodic_collocation \
-            --cycles-per-window 2 \
-            --stimulations-per-cycle 30 \
-            --n-windows 2 \
-            --n-threads "$BENCHMARK_THREADS" \
-            --crank-assistance "${{ inputs.crank_assistance_nm }}" \
-            --standard-warmup-seed .github/benchmark-seeds/legacy-resistive-0p22-warmup.npz \
-            --legacy-standard-warmup-seed-signed-torque 0.22 \
-            --standard-warmup-seed-continuation \
-            --warmup-ipopt-linear-solver mumps \
-            --ipopt-linear-solver mumps \
-            --ipopt-max-iter "${{ inputs.seed_validation_max_iterations }}" \
-            --ipopt-disable-historical-initial-guess \
-            --state-scaling full \
-            --first-node-wheel-q-slack 0 \
-            --terminal-wheel-q-slack "${{ inputs.terminal_wheel_q_slack }}" \
-            --compact-rho-output \
-            --print-traces \
-            --output-json "$GITHUB_WORKSPACE/benchmark-seed-result/seed-check.json"
-          jq -e '
-            .results[0] |
-            (.success == true and .attempted_windows == 1)
-          ' \
-            "$GITHUB_WORKSPACE/benchmark-seed-result/seed-check.json"
-          cp .github/benchmark-seeds/legacy-resistive-0p22-warmup.npz \
-            benchmark-seed-result/common-continuation-warmup.npz
+          if [[ "$BENCHMARK_CYCLES_PER_WINDOW" != "1" && "$BENCHMARK_CYCLES_PER_WINDOW" != "2" ]]; then
+            echo "cycles_per_window must be 1 or 2." >&2
+            exit 1
+          fi
+
+          prepare_case() {
+            local mechanics="$1"
+            local mechanics_options=()
+            if [[ "$mechanics" == "reduced" ]]; then
+              mechanics_options+=(--mechanical-formulation reduced)
+            fi
+            python examples/fes_multibody/cycling/cycling_fes_solver_comparison.py \
+              --solvers ipopt \
+              --objective fatigue \
+              --ipopt-profile periodic_collocation \
+              --cycles-per-window "$BENCHMARK_CYCLES_PER_WINDOW" \
+              --stimulations-per-cycle 30 \
+              --n-windows "$BENCHMARK_CYCLES_PER_WINDOW" \
+              --n-threads "$BENCHMARK_THREADS" \
+              --crank-assistance "${{ inputs.crank_assistance_nm }}" \
+              --standard-warmup-seed .github/benchmark-seeds/legacy-resistive-0p22-warmup.npz \
+              --legacy-standard-warmup-seed-signed-torque 0.22 \
+              --standard-warmup-seed-continuation \
+              --warmup-ipopt-linear-solver mumps \
+              --ipopt-linear-solver mumps \
+              --ipopt-max-iter "${{ inputs.seed_validation_max_iterations }}" \
+              --ipopt-disable-historical-initial-guess \
+              --state-scaling full \
+              --first-node-wheel-q-slack 0 \
+              --terminal-wheel-q-slack "${{ inputs.terminal_wheel_q_slack }}" \
+              --compact-rho-output \
+              --print-traces \
+              --common-initial-solution-output "$GITHUB_WORKSPACE/benchmark-seed-result/common-${mechanics}.npz" \
+              --output-json "$GITHUB_WORKSPACE/benchmark-seed-result/seed-check-${mechanics}.json" \
+              "${mechanics_options[@]}"
+            jq -e '
+              .results[0] |
+              (.success == true and .attempted_windows == 1)
+            ' "$GITHUB_WORKSPACE/benchmark-seed-result/seed-check-${mechanics}.json"
+            test -s "$GITHUB_WORKSPACE/benchmark-seed-result/common-${mechanics}.npz"
+          }
+
+          prepare_case full
+          prepare_case reduced
 
       - name: Upload the validated immutable common seed
         uses: actions/upload-artifact@v7
         with:
           name: cycling-assisted-common-seed-${{ github.run_id }}
-          path: benchmark-seed-result/common-continuation-warmup.npz
+          path: benchmark-seed-result/common-*.npz
           if-no-files-found: error
           retention-days: 30
 
@@ -163,10 +184,12 @@ jobs:
       matrix:
         include:
           - solver: madnlp
+            backend: pardiso_mkl
             bioptim_commit: 346eb1d445e6ba67010b96c6f16ba830185119e7
             integration_branch: codex/madnlp-integration-master
             casadi_cxx_abi: 1
           - solver: alpaqa
+            backend: panoc
             bioptim_commit: d84e7e43534360fc048e0be26a3bd69a2abc2d77
             integration_branch: codex/alpaqa-integration
             casadi_cxx_abi: 1
@@ -212,7 +235,7 @@ jobs:
           fi
           echo "BENCHMARK_THREADS=$available_cores" >> "$GITHUB_ENV"
           echo "CMAKE_BUILD_PARALLEL_LEVEL=$available_cores" >> "$GITHUB_ENV"
-          if [[ "${{ matrix.solver }}" == "madnlp" ]]; then
+          if [[ "${{ matrix.solver }}" == "madnlp" && "${{ matrix.backend }}" == "pardiso_mkl" ]]; then
             echo "MKL_NUM_THREADS=$available_cores" >> "$GITHUB_ENV"
           fi
           lscpu
@@ -282,6 +305,7 @@ jobs:
         env:
           PYTHONPATH: ${{ github.workspace }}
           BENCHMARK_SOLVER: ${{ matrix.solver }}
+          BENCHMARK_BACKEND: ${{ matrix.backend }}
         run: |
           python - <<'PY'
           import os
@@ -303,7 +327,11 @@ jobs:
             tests/test_solver_option_screen_summary.py \
             tests/shard1/test_periodic_pulse_width.py::test_stimulation_snapshots_use_one_based_cycles_and_real_crank_phase \
             tests/shard1/test_periodic_pulse_width.py::test_common_primal_threshold_is_independent_of_nlp_solver_tolerance \
-            tests/shard1/test_periodic_pulse_width.py::test_github_benchmark_compares_physical_threshold_not_solver_tolerance
+            tests/shard1/test_periodic_pulse_width.py::test_github_benchmark_compares_physical_threshold_not_solver_tolerance \
+            tests/shard1/test_periodic_pulse_width.py::test_common_initial_solution_metadata_rejects_an_incompatible_horizon \
+            tests/shard1/test_periodic_pulse_width.py::test_common_initial_solution_metadata_allows_a_transcription_change \
+            tests/shard1/test_periodic_pulse_width.py::test_periodic_node_projection_uses_all_five_ding_states \
+            tests/shard1/test_periodic_pulse_width.py::test_common_target_seed_enables_the_robust_acados_reference_preparation
 
       - name: Run the focused ${{ matrix.solver }} option screen
         env:
@@ -336,11 +364,10 @@ jobs:
               --nlp-tolerance "$tolerance" \
               --primal-feasibility-threshold 1e-5 \
               --max-consecutive-failing 2 \
-              --standard-warmup-seed benchmark-seed/common-continuation-warmup.npz \
-              --legacy-standard-warmup-seed-signed-torque 0.22 \
-              --standard-warmup-seed-continuation \
+              --common-initial-solution benchmark-seed/common-full.npz \
               --warmup-ipopt-linear-solver mumps \
               --ipopt-linear-solver mumps \
+              --ipopt-disable-standard-warmup \
               --ipopt-disable-historical-initial-guess \
               --state-scaling full \
               --first-node-wheel-q-slack 0 \
@@ -361,7 +388,6 @@ jobs:
               --alpaqa-alm-max-iter 100
               --alpaqa-max-wall-time 60
               --alpaqa-dual-warm-start-mode off
-              --optional-nlp-periodic-ipopt-hot-start
             )
             run_case alpaqa-panoc60-default 1 1e-6 \
               "${alpaqa_common[@]}" --alpaqa-panoc-max-wall-time 60
@@ -383,7 +409,6 @@ jobs:
             madnlp_common=(
               --madnlp-max-iter 2000
               --madnlp-dual-warm-start-mode off
-              --optional-nlp-periodic-ipopt-hot-start
             )
             run_case madnlp-tol1e-6-default 4 1e-6 "${madnlp_common[@]}"
             run_case madnlp-tol1e-7-default 4 1e-7 "${madnlp_common[@]}"
@@ -406,7 +431,7 @@ jobs:
           retention-days: 30
 
   benchmark:
-    name: ${{ matrix.solver }} / ${{ matrix.mechanics }} — ${{ matrix.benchmark_rhos }} RHO
+    name: ${{ matrix.case_slug }} / ${{ matrix.mechanics }} — ${{ matrix.benchmark_rhos }} RHO
     if: inputs.cycles != 'screen'
     needs: prepare-seed
     runs-on: ${{ inputs.runner_label }}
@@ -417,37 +442,65 @@ jobs:
       matrix:
         include:
           - solver: ipopt
+            backend: mumps
+            case_slug: ipopt
             mechanics: full
             benchmark_rhos: ${{ inputs.cycles }}
-            cycles_per_window: 2
+            cycles_per_window: ${{ inputs.cycles_per_window }}
             bioptim_commit: 3523f1745e315f07761159d7e06bd2d876026704
             integration_branch: codex/fatrop-cocofest-benchmark
             casadi_cxx_abi: 0
           - solver: fatrop
+            backend: structured
+            case_slug: fatrop
             mechanics: full
             benchmark_rhos: ${{ inputs.cycles }}
-            cycles_per_window: 2
+            cycles_per_window: ${{ inputs.cycles_per_window }}
             bioptim_commit: 3523f1745e315f07761159d7e06bd2d876026704
             integration_branch: codex/fatrop-cocofest-benchmark
             casadi_cxx_abi: 0
           - solver: madnlp
+            backend: pardiso_mkl
+            case_slug: madnlp-pardiso
             mechanics: full
             benchmark_rhos: ${{ inputs.cycles }}
-            cycles_per_window: 2
+            cycles_per_window: ${{ inputs.cycles_per_window }}
             bioptim_commit: 3523f1745e315f07761159d7e06bd2d876026704
             integration_branch: codex/fatrop-cocofest-benchmark
             casadi_cxx_abi: 1
           - solver: ipopt
+            backend: mumps
+            case_slug: ipopt
             mechanics: reduced
             benchmark_rhos: ${{ inputs.cycles }}
-            cycles_per_window: 2
+            cycles_per_window: ${{ inputs.cycles_per_window }}
             bioptim_commit: 3523f1745e315f07761159d7e06bd2d876026704
             integration_branch: codex/fatrop-cocofest-benchmark
             casadi_cxx_abi: 0
           - solver: madnlp
+            backend: pardiso_mkl
+            case_slug: madnlp-pardiso
             mechanics: reduced
             benchmark_rhos: ${{ inputs.cycles }}
-            cycles_per_window: 2
+            cycles_per_window: ${{ inputs.cycles_per_window }}
+            bioptim_commit: 3523f1745e315f07761159d7e06bd2d876026704
+            integration_branch: codex/fatrop-cocofest-benchmark
+            casadi_cxx_abi: 1
+          - solver: madnlp
+            backend: mumps
+            case_slug: madnlp-mumps
+            mechanics: full
+            benchmark_rhos: ${{ inputs.cycles }}
+            cycles_per_window: ${{ inputs.cycles_per_window }}
+            bioptim_commit: 3523f1745e315f07761159d7e06bd2d876026704
+            integration_branch: codex/fatrop-cocofest-benchmark
+            casadi_cxx_abi: 1
+          - solver: madnlp
+            backend: mumps
+            case_slug: madnlp-mumps
+            mechanics: reduced
+            benchmark_rhos: ${{ inputs.cycles }}
+            cycles_per_window: ${{ inputs.cycles_per_window }}
             bioptim_commit: 3523f1745e315f07761159d7e06bd2d876026704
             integration_branch: codex/fatrop-cocofest-benchmark
             casadi_cxx_abi: 1
@@ -497,7 +550,7 @@ jobs:
           fi
           echo "BENCHMARK_THREADS=$available_cores" >> "$GITHUB_ENV"
           echo "CMAKE_BUILD_PARALLEL_LEVEL=$available_cores" >> "$GITHUB_ENV"
-          if [[ "${{ matrix.solver }}" == "madnlp" ]]; then
+          if [[ "${{ matrix.solver }}" == "madnlp" && "${{ matrix.backend }}" == "pardiso_mkl" ]]; then
             echo "MKL_NUM_THREADS=$available_cores" >> "$GITHUB_ENV"
           fi
           lscpu
@@ -567,6 +620,7 @@ jobs:
         env:
           PYTHONPATH: ${{ github.workspace }}
           BENCHMARK_SOLVER: ${{ matrix.solver }}
+          BENCHMARK_BACKEND: ${{ matrix.backend }}
         run: |
           python - <<'PY'
           import math
@@ -578,6 +632,7 @@ jobs:
           import biorbd_casadi as biorbd
 
           target = os.environ["BENCHMARK_SOLVER"]
+          backend = os.environ["BENCHMARK_BACKEND"]
           print(f"CasADi {cas.__version__}")
           print(f"Bioptim {bioptim.__version__}")
           print(f"biorbd {biorbd.__version__}")
@@ -617,7 +672,7 @@ jobs:
                   "madnlp",
                   max_iterations=50,
                   tolerance=1e-8,
-                  madnlp_linear_solver="pardiso_mkl",
+                  madnlp_linear_solver=backend,
               )
               plugin_options = configured.as_dict(
                   SimpleNamespace(options_common=plugin_options)
@@ -625,9 +680,11 @@ jobs:
               assert plugin_options["madnlp"]["print_level"] == (
                   MADNLP_QUIET_PRINT_LEVEL
               )
-              assert plugin_options["madnlp"]["linear_solver"] == (
-                  "PardisoMKLSolver"
-              )
+              expected_linear_solver = {
+                  "pardiso_mkl": "PardisoMKLSolver",
+                  "mumps": "MumpsSolver",
+              }[backend]
+              assert plugin_options["madnlp"]["linear_solver"] == expected_linear_solver
           smoke = cas.nlpsol(
               f"{target}_smoke",
               target,
@@ -667,6 +724,8 @@ jobs:
           BENCHMARK_Q_SLACK: ${{ inputs.terminal_wheel_q_slack }}
           BENCHMARK_MAX_ITER: ${{ inputs.solver_max_iterations }}
           BENCHMARK_SOLVER: ${{ matrix.solver }}
+          BENCHMARK_BACKEND: ${{ matrix.backend }}
+          BENCHMARK_CASE_SLUG: ${{ matrix.case_slug }}
           COCOFEST_BENCHMARK_COMMIT: ${{ github.sha }}
           BIOPTIM_BENCHMARK_COMMIT: ${{ matrix.bioptim_commit }}
           BIOPTIM_INTEGRATION_BRANCH: ${{ matrix.integration_branch }}
@@ -685,16 +744,19 @@ jobs:
               --ipopt-dual-warm-start-mode bounds
             )
           elif [[ "$BENCHMARK_SOLVER" == "fatrop" ]]; then
-            # Fatrop exploits the time-major OCP structure. Cocofest transfers
-            # the shifted/projected primal trajectory but not dual blocks.
+            # Fatrop exploits a direct-shooting, time-major OCP. RK4 avoids
+            # exposing collocation variables as an unstructured control block,
+            # which made the two-cycle CasADi structure detector assert.
             # CasADi 3.7.2 bounds Fatrop's native max_iter option to 1000.
             solver_options+=(
+              --ipopt-ode-solver rk4
+              --ipopt-rk-steps 5
+              --ipopt-use-sx
               --fatrop-max-iter 1000
               --fatrop-structure-detection auto
               --fatrop-bound-tightening-factor 1e-8
               --fatrop-state-scaling none
               --fatrop-dual-warm-start-mode off
-              --optional-nlp-periodic-ipopt-hot-start
             )
           elif [[ "$BENCHMARK_SOLVER" == "madnlp" ]]; then
             solver_tolerance=1e-8
@@ -703,9 +765,8 @@ jobs:
             # primal trajectory; the job timeout is the outer safety limit.
             solver_options+=(
               --madnlp-max-iter "$BENCHMARK_MAX_ITER"
-              --madnlp-linear-solver pardiso_mkl
+              --madnlp-linear-solver "$BENCHMARK_BACKEND"
               --madnlp-dual-warm-start-mode off
-              --optional-nlp-periodic-ipopt-hot-start
             )
           fi
           if [[ "$BENCHMARK_MECHANICS" == "reduced" ]]; then
@@ -713,9 +774,9 @@ jobs:
               --mechanical-formulation reduced
             )
           fi
-          # Both mechanics use the same validated two-cycle seed. The reduced
-          # adapter projects q/qdot onto theta/omega, and every loaded PW is
-          # explicitly clipped to [pd0, 600 us] with a visible warning.
+          # Each mechanical formulation uses one immutable target solution,
+          # produced once by IPOPT and then reused bit-for-bit by every backend.
+          # Solver-specific periodic IPOPT refinements are deliberately disabled.
 
           set -o pipefail
           python examples/fes_multibody/cycling/cycling_fes_solver_comparison.py \
@@ -730,35 +791,46 @@ jobs:
             --nlp-tolerance "$solver_tolerance" \
             --primal-feasibility-threshold 1e-5 \
             --max-consecutive-failing 2 \
-            --standard-warmup-seed benchmark-seed/common-continuation-warmup.npz \
-            --legacy-standard-warmup-seed-signed-torque 0.22 \
-            --standard-warmup-seed-continuation \
+            --common-initial-solution "benchmark-seed/common-${BENCHMARK_MECHANICS}.npz" \
             --warmup-ipopt-linear-solver mumps \
             --ipopt-linear-solver mumps \
+            --ipopt-disable-standard-warmup \
             --ipopt-disable-historical-initial-guess \
             --state-scaling full \
             --first-node-wheel-q-slack 0 \
             --terminal-wheel-q-slack "$BENCHMARK_Q_SLACK" \
             --compact-rho-output \
             --print-traces \
-            --output-json "$GITHUB_WORKSPACE/benchmark-results/${BENCHMARK_SOLVER}-${BENCHMARK_MECHANICS}.json" \
+            --output-json "$GITHUB_WORKSPACE/benchmark-results/${BENCHMARK_CASE_SLUG}-${BENCHMARK_MECHANICS}.json" \
             "${solver_options[@]}" \
-            2>&1 | tee "benchmark-results/${BENCHMARK_SOLVER}-${BENCHMARK_MECHANICS}.log"
+            2>&1 | tee "benchmark-results/${BENCHMARK_CASE_SLUG}-${BENCHMARK_MECHANICS}.log"
+          result="$GITHUB_WORKSPACE/benchmark-results/${BENCHMARK_CASE_SLUG}-${BENCHMARK_MECHANICS}.json"
+          jq -e --arg solver "$BENCHMARK_SOLVER" '
+            .configurations[$solver].nlp_ordering_strategy == "time_major"
+          ' "$result"
+          if [[ "$BENCHMARK_SOLVER" == "fatrop" ]]; then
+            jq -e '.configurations.fatrop.ode_solver == "rk4"' "$result"
+          elif [[ "$BENCHMARK_SOLVER" == "madnlp" ]]; then
+            jq -e --arg backend "$BENCHMARK_BACKEND" '
+              .configurations.madnlp.madnlp_linear_solver == $backend
+            ' "$result"
+          fi
 
       - name: Add the result to the job summary
         if: always()
         shell: bash
         env:
           BENCHMARK_SOLVER: ${{ matrix.solver }}
+          BENCHMARK_CASE_SLUG: ${{ matrix.case_slug }}
           BENCHMARK_MECHANICS: ${{ matrix.mechanics }}
         run: |
-          result="benchmark-results/${BENCHMARK_SOLVER}-${BENCHMARK_MECHANICS}.json"
+          result="benchmark-results/${BENCHMARK_CASE_SLUG}-${BENCHMARK_MECHANICS}.json"
           if [[ ! -f "$result" ]]; then
             echo "### ${BENCHMARK_SOLVER}: no JSON result" >> "$GITHUB_STEP_SUMMARY"
             exit 0
           fi
           {
-            echo "### ${BENCHMARK_SOLVER} / ${BENCHMARK_MECHANICS}"
+            echo "### ${BENCHMARK_CASE_SLUG} / ${BENCHMARK_MECHANICS}"
             echo
             echo "| Field | Value |"
             echo "|---|---:|"
@@ -783,7 +855,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: cycling-fatigue-linux-${{ matrix.solver }}-${{ matrix.mechanics }}-${{ github.run_id }}
+          name: cycling-fatigue-linux-${{ matrix.case_slug }}-${{ matrix.mechanics }}-${{ github.run_id }}
           path: benchmark-results/
           if-no-files-found: warn
           retention-days: 30
@@ -793,9 +865,10 @@ jobs:
         shell: bash
         env:
           BENCHMARK_SOLVER: ${{ matrix.solver }}
+          BENCHMARK_CASE_SLUG: ${{ matrix.case_slug }}
           BENCHMARK_MECHANICS: ${{ matrix.mechanics }}
         run: |
-          result="benchmark-results/${BENCHMARK_SOLVER}-${BENCHMARK_MECHANICS}.json"
+          result="benchmark-results/${BENCHMARK_CASE_SLUG}-${BENCHMARK_MECHANICS}.json"
           if [[ ! -f "$result" ]]; then
             echo "${BENCHMARK_SOLVER}: benchmark JSON is missing." >&2
             exit 1
@@ -889,7 +962,7 @@ jobs:
           fi
           python .github/scripts/summarize_cycling_benchmark.py \
             --output-dir benchmark-report \
-            --expected-cases ipopt/full,fatrop/full,madnlp/full,ipopt/reduced,madnlp/reduced \
+            --expected-cases ipopt/full,fatrop/full,madnlp-pardiso/full,madnlp-mumps/full,ipopt/reduced,madnlp-pardiso/reduced,madnlp-mumps/reduced \
             "${result_files[@]}"
           cat benchmark-report/benchmark-comparison.md >> "$GITHUB_STEP_SUMMARY"
 

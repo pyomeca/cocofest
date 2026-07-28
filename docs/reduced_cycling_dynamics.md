@@ -133,17 +133,20 @@ theta/omega part is rejected while its Ding states and bounded PW are retained.
 Pulse-width seeds are independently validated and clipped to
 `[pd0, 600 microseconds]`, with a warning reporting every correction.
 
-The reduced formulation is intentionally rejected for ACADOS for now. It must
-first pass the 30-RHO IPOPT and MadNLP comparisons.
+The reduced formulation is intentionally guarded for ACADOS. It is available
+only with `--experimental-reduced-acados` while the one-cycle IPOPT-derived
+seed, five-state Ding projection and dynamics rollout are validated. ACADOS
+keeps its native stage-wise ordering; the generic time-major NLP ordering must
+not be imposed on it.
 
 ## Thirty-RHO comparison
 
-Both formulations use a two-cycle OCP window. Asking for 31 covered cycles
-therefore produces exactly 30 receding-horizon solves:
-`31 - 2 + 1 = 30 RHO`. Both cases use the validated two-cycle seed stored by
-the workflow from `.github/benchmark-seeds/legacy-resistive-0p22-warmup.npz`;
-the reduced adapter projects its mechanical part from `q/qdot` to
-`theta/omega`.
+The backend benchmark uses one cycle per OCP and 30 requested windows, hence
+exactly 30 RHO. A two-cycle horizon is retained as a separate robustness study
+for delayed muscle-state memory, not as the default timing case. For each
+mechanical formulation, the workflow uses the historical file only to let
+IPOPT construct and certify a new solution on the assisted target. Every
+compared solver then starts from that same target primal solution.
 
 Run the full reference:
 
@@ -152,13 +155,12 @@ python examples/fes_multibody/cycling/cycling_fes_solver_comparison.py \
   --solvers ipopt,madnlp \
   --mechanical-formulation full \
   --ipopt-profile periodic_collocation \
-  --cycles-per-window 2 \
-  --n-windows 31 \
+  --cycles-per-window 1 \
+  --n-windows 30 \
   --stimulations-per-cycle 30 \
   --objective fatigue \
-  --standard-warmup-seed .github/benchmark-seeds/legacy-resistive-0p22-warmup.npz \
-  --legacy-standard-warmup-seed-signed-torque 0.22 \
-  --standard-warmup-seed-continuation \
+  --common-initial-solution result/common-full.npz \
+  --ipopt-disable-standard-warmup \
   --ipopt-disable-historical-initial-guess \
   --compact-rho-output \
   --output-json result/full-mechanics-30-rho.json
@@ -171,26 +173,30 @@ python examples/fes_multibody/cycling/cycling_fes_solver_comparison.py \
   --solvers ipopt,madnlp \
   --mechanical-formulation reduced \
   --ipopt-profile periodic_collocation \
-  --cycles-per-window 2 \
-  --n-windows 31 \
+  --cycles-per-window 1 \
+  --n-windows 30 \
   --stimulations-per-cycle 30 \
   --objective fatigue \
-  --standard-warmup-seed .github/benchmark-seeds/legacy-resistive-0p22-warmup.npz \
-  --legacy-standard-warmup-seed-signed-torque 0.22 \
-  --standard-warmup-seed-continuation \
+  --common-initial-solution result/common-reduced.npz \
+  --ipopt-disable-standard-warmup \
   --ipopt-disable-historical-initial-guess \
   --compact-rho-output \
   --output-json result/reduced-mechanics-30-rho.json
 ```
 
-The Linux GitHub Actions benchmark runs IPOPT, Fatrop and MadNLP on the full
-mechanics and IPOPT/MadNLP on the reduced mechanics. Its default input is 30
-RHO. The aggregate report separates solver/formulation pairs and compares the
-pulse patterns at cycles 10 and 30, including a full-versus-reduced comparison
-for each supported solver.
+The Linux GitHub Actions benchmark runs IPOPT, Fatrop-RK4,
+MadNLP-PARDISO and MadNLP-MUMPS on the full mechanics, and IPOPT plus both
+MadNLP linear solvers on the reduced mechanics. Its default input is 30 RHO.
+All sparse NLP cases use time-major ordering. The aggregate report separates
+solver/formulation/backend pairs and compares pulse patterns at cycles 10 and
+30, including a full-versus-reduced comparison for each supported solver.
 
-ACADOS RTI remains the next stage, after comparing convergence, per-RHO timing,
-fatigue, crank progress and pulse patterns.
+ACADOS remains the next stage. Its convergence path starts from the common
+one-cycle reduced solution, maps variables by name, projects the five Ding
+states per muscle, performs a consistent rollout with the actual dynamics, and
+keeps the absolute terminal angle. Full SQP with zeroed duals is the reference;
+RTI and faster integrator/QP variants are tested only after repeated full-SQP
+convergence.
 
 The reduced formulation is experimental until muscle force, fatigue,
 stimulation patterns and terminal progress have been compared over the same

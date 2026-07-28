@@ -26,14 +26,21 @@ python examples/fes_multibody/cycling/cycling_fes_solver_comparison.py \
 
 ## Cross-solver hot-start and tuning
 
-All optional NLP solvers use the same physical transcription, terminal crank
-bound, standard warmup, and shifted primal MHE trajectory as IPOPT. The
-comparison runner additionally seeds their first window, by default, with the
-cached periodic IPOPT solution. Fatrop requires a time-major variable order and
-currently runs without state scaling; IPOPT and MadNLP retain variable-major
-ordering and full state scaling. These are numerical reparameterizations of
-the same physical OCP, but the report deliberately marks the configurations as
-not strictly identical because scaling can affect conditioning and timing.
+All sparse NLP solvers use a time-major decision-variable order, the same
+absolute terminal crank bound, and the same shifted primal MHE trajectory.
+The Linux workflow first solves one assisted target OCP with IPOPT for each
+mechanical formulation and stores the converged primal trajectory as a
+metadata-bearing common solution. IPOPT, MadNLP-PARDISO, MadNLP-MUMPS and
+Fatrop then load that exact target trajectory; the historical resistive file is
+only a bridge used to construct it. ACADOS keeps its native stage-wise
+`(x_k, u_k)` layout instead of receiving a generic NLP ordering.
+
+Fatrop runs the target problem with RK4 direct shooting (five integration
+steps), time-major ordering and no state scaling. IPOPT and both MadNLP
+backends use Radau collocation and full state scaling. The physical target and
+starting trajectory are common, but the report deliberately marks the
+transcription and scaling differences because they affect conditioning and
+timing.
 
 The periodic seed is committed only when IPOPT exposes a measured primal
 infeasibility below the acceptance threshold. Disable it with
@@ -54,8 +61,8 @@ The useful transfers are not identical for every backend:
 | Mechanism | IPOPT | Fatrop | MadNLP | Alpaqa | ACADOS |
 |---|---|---|---|---|---|
 | Shifted primal trajectory | yes | yes | yes | yes | yes |
-| Periodic IPOPT seed | native reference | default | default | default | default |
-| Variable order | variable-major | time-major | variable-major | variable-major | backend-specific |
+| Common assisted IPOPT solution | producer/consumer | consumer | consumer | diagnostic consumer | consumer before projection/rollout |
+| Variable order | time-major | time-major | time-major | time-major | native stage-wise |
 | State scaling | full | none, pending interface support | full | full | full |
 | Constraint multiplier reuse | optional | off pending shifted-block validation | experimental | supported | reset/rebuilt |
 | Bound multiplier reuse | supported | off pending shifted-block validation | experimental | unsupported by plugin | backend-specific |
@@ -66,12 +73,16 @@ The useful transfers are not identical for every backend:
 ### Fatrop-specific safeguards
 
 Fatrop is exposed by the official CasADi 3.7.2 wheel. It exploits the OCP
-structure only when Bioptim uses `OrderingStrategy.TIME_MAJOR`. With full state
-scaling, automatic structure detection rejects the collocation gaps because
-the coefficient of the next state is no longer the identity. The benchmark
-therefore uses `--fatrop-state-scaling none`. This keeps the physical
-equations, bounds and objective unchanged, but means that its timings are not a
-pure backend-only comparison with the fully scaled IPOPT/MadNLP NLP.
+structure only when Bioptim uses `OrderingStrategy.TIME_MAJOR`. A previous
+100-RHO CI validated 100/100 one-cycle collocation windows in that layout. The
+later two-cycle collocation profile failed before its first RHO because the
+automatic detector classified collocation variables as controls. The
+production benchmark therefore returns to one-cycle windows and uses RK4
+direct shooting with five integration steps. It also keeps
+`--fatrop-state-scaling none`, because scaled gap equations do not retain the
+identity next-state coefficient required by automatic structure detection.
+This preserves the physical model but is not a pure backend-only timing
+comparison with the collocation IPOPT/MadNLP NLP.
 
 CasADi/Fatrop also applies an effective relative relaxation of approximately
 `1e-8` to decision bounds. This matters for the unscaled fatigue capacities,
@@ -252,10 +263,10 @@ print("Alpaqa:", hasattr(Solver, "ALPAQA") and ca.has_nlpsol("alpaqa"))
 ## NLP formulation and warm-start policy
 
 Fatrop, MadNLP and Alpaqa clone the complete physical IPOPT-side NLP selected
-by `--ipopt-profile`. MadNLP and Alpaqa preserve its numerical scaling and
-variable ordering. Fatrop uses the compatibility reparameterization described
-above, so it remains physically comparable but not a backend-only numerical
-ablation:
+by `--ipopt-profile`. All sparse NLP backends now request time-major ordering.
+MadNLP and Alpaqa preserve IPOPT's full state scaling; Fatrop uses the RK4,
+unscaled compatibility reparameterization described above, so it remains
+physically comparable but not a backend-only numerical ablation:
 
 - `historical` uses the standard formulation, segment-level external torque,
   and `COLLOCATION(3, radau)`;
@@ -329,26 +340,32 @@ is never presented as an assisted solution.
 
 The manually triggered
 [`cycling_solver_benchmark_linux.yml`](../.github/workflows/cycling_solver_benchmark_linux.yml)
-now runs IPOPT-MUMPS, Fatrop and MadNLP in parallel on separate Linux runners.
+now runs IPOPT-MUMPS, Fatrop-RK4, MadNLP-PARDISO and MadNLP-MUMPS in parallel
+on separate Linux runners. IPOPT and both MadNLP backends are evaluated on the
+full and reduced mechanical formulations; Fatrop currently covers the full
+formulation.
 Alpaqa was removed from the endurance matrix after the option screen and the
 30-RHO confirmation: it validated no RHO, consumed two 600-second limits, and
 its second shifted window reached `4.57e-2` infeasibility. Its integration,
 historical results and explicit `cycles=screen` diagnostic remain documented
 for reproducibility, but no further endurance compute is allocated to it.
 
-The production experiment compares IPOPT-MUMPS, Fatrop and MadNLP over
-one-cycle RHO windows and stops after two consecutive failed windows. It uses
+The production experiment uses one-cycle RHO windows by default and stops
+after two consecutive failed windows. A two-cycle input remains available as
+a separate memory/robustness study: it can expose benefits from the delayed
+Ding states and reduce terminal-boundary myopia, but doubles the horizon,
+creates an internal seam and has already broken Fatrop's collocation structure
+detection. It is therefore not the backend timing reference. The benchmark uses
 the assisted physical case (`-0.20 N.m` signed crank torque), 30 stimulations
-per cycle, the fatigue-only objective, periodic Radau collocation, and a
-`0.002 rad` terminal crank-angle slack. The combined report exposes the
-time-major/no-state-scaling Fatrop compatibility mode as a configuration
-difference instead of silently calling the three numerical NLPs identical.
+per cycle, the fatigue-only objective, and a `0.002 rad` absolute terminal
+crank-angle slack. The combined report exposes Fatrop's RK4/no-state-scaling
+mode as a configuration difference.
 
-A preliminary IPOPT job builds one content-addressed, physically certified
-assisted seed. All three benchmark jobs download exactly that immutable artifact.
-MadNLP additionally runs the periodic IPOPT hot start, and its cost remains
-visible in `initial_guess_preparation_time_s`; the warm RHO wall times are
-therefore reported separately from end-to-end time.
+A preliminary IPOPT job builds one physically certified assisted solution for
+the full formulation and one for the reduced formulation. Every solver in a
+formulation downloads exactly the same immutable target solution and disables
+its solver-specific IPOPT warmup. The seed-construction time remains separate
+from the measured benchmark jobs.
 
 Each job determines its effective CPU allocation with `nproc` and passes that
 value to `--n-threads`. Nested OpenMP, BLAS, NumExpr, and Julia pools stay at
@@ -365,6 +382,7 @@ gh workflow run cycling_solver_benchmark_linux.yml \
   --ref codex/acados-pr-refresh \
   -f runner_label=ubuntu-24.04 \
   -f cycles=100 \
+  -f cycles_per_window=1 \
   -f crank_assistance_nm=0.20 \
   -f terminal_wheel_q_slack=0.002 \
   -f solver_max_iterations=2000
@@ -374,8 +392,9 @@ The production action pins the combined Fatrop/MadNLP Bioptim integration
 commit, so IPOPT, Fatrop and MadNLP use the same Bioptim revision. Each job
 first asserts that IPOPT and its target plugin coexist in the same CasADi
 runtime. The MadNLP job additionally pins and builds the libMad PARDISO/MKL
-runtime, exercises `PardisoMKLSolver` through libMad's C example, then repeats
-that check through CasADi before starting the OCP. The official CasADi 3.7.2
+runtime, exercises the selected `PardisoMKLSolver` or `MumpsSolver` through
+libMad's C example, then repeats that check through CasADi before starting the
+OCP. The official CasADi 3.7.2
 wheel still targets the obsolete `libmadnlp_c.so` ABI, so the MadNLP job builds
 the pinned post-release CasADi 3.7.2 source revision that targets
 `libMad.so`; a symbolic link between these libraries would not be ABI-safe.

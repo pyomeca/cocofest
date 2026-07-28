@@ -2,7 +2,6 @@ import importlib.util
 import math
 from pathlib import Path
 
-
 _SCRIPT = (
     Path(__file__).resolve().parents[1]
     / ".github"
@@ -127,8 +126,7 @@ def test_markdown_distinguishes_successful_windows_from_strict_prefix():
     assert "RHO résolus" in markdown
     assert "Préfixe strict" in markdown
     assert (
-        "| MADNLP/FULL | 1.0e-08 | 1.0e-05 | non | 99/100 | 85/100 | 86 |"
-        in markdown
+        "| MADNLP/FULL | 1.0e-08 | 1.0e-05 | non | 99/100 | 85/100 | 86 |" in markdown
     )
     assert "même si les fenêtres suivantes récupèrent" in markdown
 
@@ -188,6 +186,55 @@ def test_requested_rho_count_accounts_for_multi_cycle_window():
     }
 
     assert summary._requested_rho_count(entry) == 30
+
+
+def test_madnlp_cases_include_the_linear_solver_backend():
+    def entry(linear_solver):
+        return {
+            "configuration": {
+                "mechanical_formulation": "full",
+                "madnlp_linear_solver": linear_solver,
+            },
+            "result": {"solver": "madnlp"},
+        }
+
+    assert summary._entry_case(entry("pardiso_mkl")) == "madnlp-pardiso/full"
+    assert summary._entry_case(entry("mumps")) == "madnlp-mumps/full"
+
+
+def test_mechanical_comparison_keeps_madnlp_backends_separate():
+    def entry(mechanics, linear_solver, value):
+        return {
+            "configuration": {
+                "mechanical_formulation": mechanics,
+                "madnlp_linear_solver": linear_solver,
+            },
+            "result": {
+                "solver": "madnlp",
+                "stimulation_patterns": {
+                    "cycle_10": {
+                        "available": True,
+                        "cycle": 10,
+                        "crank_phase_rad": [0.0, 1.0],
+                        "muscles": {"Biceps": {"pulse_width_s": [value, value]}},
+                    }
+                },
+            },
+        }
+
+    comparisons = summary.mechanical_stimulation_comparisons(
+        [
+            entry("full", "pardiso_mkl", 100e-6),
+            entry("reduced", "pardiso_mkl", 101e-6),
+            entry("full", "mumps", 200e-6),
+            entry("reduced", "mumps", 202e-6),
+        ]
+    )
+
+    assert {row["case"] for row in comparisons} == {
+        "madnlp-pardiso/reduced",
+        "madnlp-mumps/reduced",
+    }
 
 
 def test_mechanical_pattern_comparison_uses_full_as_reference():

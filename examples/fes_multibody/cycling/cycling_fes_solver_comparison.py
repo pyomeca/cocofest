@@ -83,6 +83,8 @@ BENCHMARK_CONFIGURATION_FIELDS = (
     "standard_warmup_seed",
     "standard_warmup_seed_continuation",
     "legacy_standard_warmup_seed_signed_torque",
+    "common_initial_solution",
+    "common_initial_solution_output",
     "ipopt_hsl_library",
     "ipopt_c_compile",
     "ipopt_print_level",
@@ -562,11 +564,7 @@ def _external_crank_power_metrics(result: dict, cycle_count: int) -> dict:
     if qdot is None:
         return metrics
     qdot = np.asarray(qdot, dtype=float)
-    if (
-        qdot.ndim != 2
-        or qdot.shape[0] <= velocity_index
-        or qdot.shape[1] == 0
-    ):
+    if qdot.ndim != 2 or qdot.shape[0] <= velocity_index or qdot.shape[1] == 0:
         return metrics
 
     power = float(torque) * qdot[velocity_index, :]
@@ -581,9 +579,7 @@ def _external_crank_power_metrics(result: dict, cycle_count: int) -> dict:
     role = (
         "driving"
         if mean_power > power_tolerance
-        else "resistive"
-        if mean_power < -power_tolerance
-        else "neutral"
+        else "resistive" if mean_power < -power_tolerance else "neutral"
     )
     metrics.update(
         mean_power_w=mean_power,
@@ -1658,11 +1654,9 @@ def _run_benchmark_case(
     start = perf_counter()
     try:
         uses_c_codegen = (
-            solver_name == "ipopt" and getattr(args, "ipopt_c_compile", False)
-        ) or (
-            solver_name == "fatrop" and getattr(args, "fatrop_c_compile", False)
-        ) or (
-            solver_name == "madnlp" and getattr(args, "madnlp_c_compile", False)
+            (solver_name == "ipopt" and getattr(args, "ipopt_c_compile", False))
+            or (solver_name == "fatrop" and getattr(args, "fatrop_c_compile", False))
+            or (solver_name == "madnlp" and getattr(args, "madnlp_c_compile", False))
         )
         if uses_c_codegen:
             previous_cwd = Path.cwd()
@@ -1715,9 +1709,7 @@ def _benchmark_window_rows(result: dict) -> list[dict]:
             if index < len(statuses) and statuses[index] is not None
             else None
         )
-        window_feasibility = (
-            feasibility[index] if index < len(feasibility) else None
-        )
+        window_feasibility = feasibility[index] if index < len(feasibility) else None
         solver_stats = stats_by_window.get(index) or {}
         madnlp_stats = solver_stats.get("madnlp") or {}
         native_status = next(
@@ -1826,11 +1818,7 @@ def _stimulation_pattern_snapshot(result: dict, cycle: int) -> dict:
         velocity_index = 0
     if qdot is not None:
         qdot = np.asarray(qdot, dtype=float)
-        if (
-            qdot.ndim == 2
-            and qdot.shape[0] > velocity_index
-            and qdot.shape[1] >= stop
-        ):
+        if qdot.ndim == 2 and qdot.shape[0] > velocity_index and qdot.shape[1] >= stop:
             crank_velocity = qdot[velocity_index, start:stop]
             if np.all(np.isfinite(crank_velocity)):
                 snapshot["crank_velocity_rad_s"] = crank_velocity.tolist()
@@ -1853,12 +1841,8 @@ def _stimulation_pattern_snapshot(result: dict, cycle: int) -> dict:
         if lower is not None and upper is not None and upper > lower:
             normalized = (cycle_values - lower) / (upper - lower)
             bound_tolerance = max(1e-12, (upper - lower) * 1e-3)
-            lower_fraction = float(
-                np.mean(cycle_values <= lower + bound_tolerance)
-            )
-            upper_fraction = float(
-                np.mean(cycle_values >= upper - bound_tolerance)
-            )
+            lower_fraction = float(np.mean(cycle_values <= lower + bound_tolerance))
+            upper_fraction = float(np.mean(cycle_values >= upper - bound_tolerance))
         else:
             normalized = np.full(cycle_values.shape, np.nan)
             lower_fraction = None
@@ -1954,9 +1938,7 @@ def solver_overview_rows(results: dict[str, dict]) -> list[dict]:
             if window["wall_time_s"] is not None
         )
         end_to_end_wall_time = _finite_float(result.get("end_to_end_wall_time_s"))
-        preparation_time = _finite_float(
-            result.get("initial_guess_preparation_time_s")
-        )
+        preparation_time = _finite_float(result.get("initial_guess_preparation_time_s"))
         unattributed_wall_time = (
             end_to_end_wall_time - preparation_time - attempted_rho_wall_time
             if end_to_end_wall_time is not None and preparation_time is not None
@@ -2165,6 +2147,7 @@ def main(
     n_windows: int = 2,
     mechanical_formulation: str = "full",
     reduced_cycling_profile: str | Path | None = None,
+    experimental_reduced_acados: bool = False,
     n_threads: int | None = None,
     compact_rho_output: bool = False,
     resistive_torque: float = DEFAULT_CRANK_TORQUE_NM,
@@ -2177,6 +2160,8 @@ def main(
     standard_warmup_seed: str | Path | None = None,
     standard_warmup_seed_continuation: bool = False,
     legacy_standard_warmup_seed_signed_torque: float | None = None,
+    common_initial_solution: str | Path | None = None,
+    common_initial_solution_output: str | Path | None = None,
     ipopt_hsl_library: str | None = None,
     ipopt_c_compile: bool = False,
     ipopt_print_level: int = 0,
@@ -2561,12 +2546,8 @@ def main(
     ipopt_args.warmup_ipopt_linear_solver = warmup_ipopt_linear_solver
     ipopt_args.standard_warmup_seed = standard_warmup_seed
     acados_args.standard_warmup_seed = standard_warmup_seed
-    ipopt_args.standard_warmup_seed_continuation = (
-        standard_warmup_seed_continuation
-    )
-    acados_args.standard_warmup_seed_continuation = (
-        standard_warmup_seed_continuation
-    )
+    ipopt_args.standard_warmup_seed_continuation = standard_warmup_seed_continuation
+    acados_args.standard_warmup_seed_continuation = standard_warmup_seed_continuation
     ipopt_args.standard_warmup_max_iterations = standard_warmup_max_iter
     acados_args.standard_warmup_max_iterations = standard_warmup_max_iter
     ipopt_args.legacy_standard_warmup_seed_signed_torque = (
@@ -2575,6 +2556,11 @@ def main(
     acados_args.legacy_standard_warmup_seed_signed_torque = (
         legacy_standard_warmup_seed_signed_torque
     )
+    ipopt_args.common_initial_solution = common_initial_solution
+    acados_args.common_initial_solution = common_initial_solution
+    ipopt_args.common_initial_solution_output = common_initial_solution_output
+    acados_args.common_initial_solution_output = common_initial_solution_output
+    acados_args.experimental_reduced_acados = experimental_reduced_acados
     for name, value in (
         ("ipopt_print_level", ipopt_print_level),
         ("ipopt_print_timing_statistics", ipopt_print_timing_statistics),
@@ -2772,13 +2758,16 @@ def main(
     if mechanical_formulation not in ("full", "reduced"):
         raise ValueError("mechanical_formulation must be 'full' or 'reduced'.")
     if mechanical_formulation == "reduced":
-        unsupported = set(solvers) - {"ipopt", "madnlp"}
+        supported = {"ipopt", "madnlp"}
+        if experimental_reduced_acados:
+            supported.add("acados")
+        unsupported = set(solvers) - supported
         if unsupported:
             raise ValueError(
                 "Reduced mechanics are currently certified only for IPOPT and "
                 f"MadNLP; remove {', '.join(sorted(unsupported))}."
             )
-        for solver_name in ("ipopt", "madnlp"):
+        for solver_name in supported:
             solver_args[solver_name].mechanical_formulation = "reduced"
             solver_args[solver_name].reduced_cycling_profile = (
                 None
@@ -2787,9 +2776,8 @@ def main(
             )
             solver_args[solver_name].model_formulation = "periodic_node"
             solver_args[solver_name].torque_application = "constant"
-            solver_args[
-                solver_name
-            ].disable_periodic_fes_warmup_projection = True
+            if solver_name != "acados":
+                solver_args[solver_name].disable_periodic_fes_warmup_projection = True
     else:
         for solver_configuration in solver_args.values():
             solver_configuration.mechanical_formulation = "full"
@@ -2860,6 +2848,14 @@ def build_cli() -> argparse.ArgumentParser:
         type=Path,
         default=None,
         help="Optional cached .npz profile used in reduced mode.",
+    )
+    parser.add_argument(
+        "--experimental-reduced-acados",
+        action="store_true",
+        help=(
+            "Enable the uncertified reduced ACADOS SQP path for one-cycle "
+            "rollout/projection diagnostics."
+        ),
     )
     parser.add_argument(
         "--n-threads",
@@ -2948,6 +2944,24 @@ def build_cli() -> argparse.ArgumentParser:
         help=(
             "Explicit signed-torque assertion required to reuse a legacy "
             "--standard-warmup-seed without metadata."
+        ),
+    )
+    parser.add_argument(
+        "--common-initial-solution",
+        type=Path,
+        default=None,
+        help=(
+            "Converged periodic target solution applied identically to every "
+            "selected backend."
+        ),
+    )
+    parser.add_argument(
+        "--common-initial-solution-output",
+        type=Path,
+        default=None,
+        help=(
+            "Write the first converged target window as a solver-neutral "
+            "periodic initial solution."
         ),
     )
     parser.add_argument(
@@ -3110,13 +3124,9 @@ def build_cli() -> argparse.ArgumentParser:
     parser.add_argument("--alpaqa-max-wall-time", type=float, default=None)
     parser.add_argument("--alpaqa-initial-penalty", type=float, default=None)
     parser.add_argument("--alpaqa-initial-tolerance", type=float, default=None)
-    parser.add_argument(
-        "--alpaqa-penalty-update-factor", type=float, default=None
-    )
+    parser.add_argument("--alpaqa-penalty-update-factor", type=float, default=None)
     parser.add_argument("--alpaqa-maximum-penalty", type=float, default=None)
-    parser.add_argument(
-        "--alpaqa-panoc-max-wall-time", type=float, default=None
-    )
+    parser.add_argument("--alpaqa-panoc-max-wall-time", type=float, default=None)
     parser.add_argument("--alpaqa-max-no-progress", type=int, default=None)
     optional_seed_group = parser.add_mutually_exclusive_group()
     optional_seed_group.add_argument(
@@ -3683,6 +3693,7 @@ if __name__ == "__main__":
         n_windows=args.n_windows,
         mechanical_formulation=args.mechanical_formulation,
         reduced_cycling_profile=args.reduced_cycling_profile,
+        experimental_reduced_acados=args.experimental_reduced_acados,
         n_threads=args.n_threads,
         compact_rho_output=args.compact_rho_output,
         resistive_torque=args.resistive_torque,
@@ -3693,12 +3704,12 @@ if __name__ == "__main__":
         ipopt_linear_solver=args.ipopt_linear_solver,
         warmup_ipopt_linear_solver=args.warmup_ipopt_linear_solver,
         standard_warmup_seed=args.standard_warmup_seed,
-        standard_warmup_seed_continuation=(
-            args.standard_warmup_seed_continuation
-        ),
+        standard_warmup_seed_continuation=(args.standard_warmup_seed_continuation),
         legacy_standard_warmup_seed_signed_torque=(
             args.legacy_standard_warmup_seed_signed_torque
         ),
+        common_initial_solution=args.common_initial_solution,
+        common_initial_solution_output=args.common_initial_solution_output,
         ipopt_hsl_library=args.ipopt_hsl_library,
         ipopt_c_compile=args.ipopt_c_compile,
         ipopt_print_level=args.ipopt_print_level,

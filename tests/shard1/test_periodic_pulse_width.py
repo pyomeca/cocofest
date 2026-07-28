@@ -503,6 +503,34 @@ def test_acados_example_defaults_to_the_assisted_periodic_profile():
     assert ipopt_args.acados_control_homotopy_keep_final_radius is False
 
 
+def test_common_target_seed_enables_the_robust_acados_reference_preparation():
+    parser = periodic_example.build_argument_parser()
+    args = parser.parse_args(["--common-initial-solution", "common.npz"])
+
+    periodic_example.apply_assisted_hot_start_defaults(args)
+
+    assert args.periodic_fes_warmup_projection_strategy == "rollout"
+    assert args.full_dynamics_phase_one is True
+    assert args.acados_transfer_full_dynamics_rollout is True
+    assert args.acados_bind_first_node_fes_states is True
+    assert args.acados_dual_warm_start_mode == "reset"
+    assert args.acados_nlp_solver_type == "SQP"
+    assert args.acados_hessian_approx == "GAUSS_NEWTON"
+
+    disabled = parser.parse_args(
+        [
+            "--common-initial-solution",
+            "common.npz",
+            "--disable-acados-assisted-hot-start",
+        ]
+    )
+    periodic_example.apply_assisted_hot_start_defaults(disabled)
+    assert disabled.periodic_fes_warmup_projection_strategy == "sequential"
+    assert disabled.full_dynamics_phase_one is False
+    assert disabled.acados_transfer_full_dynamics_rollout is False
+    assert disabled.acados_bind_first_node_fes_states is False
+
+
 def test_solver_clis_distinguish_assistance_magnitude_from_signed_torque():
     periodic_parser = periodic_example.build_argument_parser()
     comparison_parser = comparison_example.build_cli()
@@ -576,6 +604,70 @@ def test_standard_warmup_cache_metadata_rejects_a_resistance_seed(tmp_path):
     assert loaded.metadata == metadata
     periodic_example._validate_standard_warmup_seed(loaded, args, assisted_path)
 
+
+def test_common_initial_solution_metadata_rejects_an_incompatible_horizon(tmp_path):
+    args = SimpleNamespace(
+        model_formulation="periodic_node",
+        mechanical_formulation="reduced",
+        cycles_per_window=1,
+        stimulations_per_cycle=30,
+        constant_crank_torque=-0.2,
+        torque_application="constant",
+        ode_solver="collocation",
+        nlp_ordering_strategy="time_major",
+        solver="ipopt",
+    )
+    metadata = periodic_example._common_initial_solution_metadata(args)
+    metadata["cycles_per_window"] = 2
+    seed = periodic_example._WarmupSolutionAdapter({}, {}, metadata=metadata)
+
+    with pytest.raises(ValueError, match="cycles_per_window"):
+        periodic_example._validate_common_initial_solution_metadata(
+            seed, args, tmp_path / "common.npz"
+        )
+
+
+def test_common_initial_solution_metadata_allows_a_transcription_change(tmp_path):
+    args = SimpleNamespace(
+        model_formulation="periodic_node",
+        mechanical_formulation="full",
+        cycles_per_window=1,
+        stimulations_per_cycle=30,
+        constant_crank_torque=-0.2,
+        torque_application="constant",
+        ode_solver="rk4",
+        nlp_ordering_strategy="time_major",
+        solver="fatrop",
+    )
+    metadata = periodic_example._common_initial_solution_metadata(args)
+    metadata["ode_solver"] = "collocation"
+    metadata["producer_solver"] = "ipopt"
+    seed = periodic_example._WarmupSolutionAdapter({}, {}, metadata=metadata)
+
+    periodic_example._validate_common_initial_solution_metadata(
+        seed, args, tmp_path / "common.npz"
+    )
+
+
+def test_periodic_node_projection_uses_all_five_ding_states():
+    keys = {
+        "Cn_Biceps",
+        "F_Biceps",
+        "A_Biceps",
+        "Tau1_Biceps",
+        "Km_Biceps",
+    }
+
+    assert periodic_example._projection_state_keys(
+        "Biceps", "all", available_keys=keys
+    ) == (
+        "Cn_Biceps",
+        "F_Biceps",
+        "A_Biceps",
+        "Tau1_Biceps",
+        "Km_Biceps",
+    )
+
     resistance_metadata = dict(metadata)
     resistance_metadata["signed_crank_torque_nm"] = 0.2
     resistance_metadata["crank_torque_role"] = "resistive"
@@ -608,9 +700,7 @@ def test_standard_warmup_cache_metadata_rejects_a_resistance_seed(tmp_path):
         solution,
         metadata=wrong_magnitude_metadata,
     )
-    wrong_magnitude_seed = periodic_example._load_warmup_cache(
-        wrong_magnitude_path
-    )
+    wrong_magnitude_seed = periodic_example._load_warmup_cache(wrong_magnitude_path)
     with np.testing.assert_raises_regex(ValueError, "signed crank torque"):
         periodic_example._validate_standard_warmup_seed(
             wrong_magnitude_seed,
@@ -797,9 +887,7 @@ def test_strict_fes_continuity_uses_a_distinct_periodic_ipopt_cache(
     assert relaxed != strict
 
 
-def test_target_integrator_uses_a_distinct_periodic_ipopt_cache(
-    tmp_path, monkeypatch
-):
+def test_target_integrator_uses_a_distinct_periodic_ipopt_cache(tmp_path, monkeypatch):
     parser = periodic_example.build_argument_parser()
     rk4_args = parser.parse_args(
         ["--periodic-ipopt-refinement-ode-solver", "target", "--ode-solver", "rk4"]
@@ -816,9 +904,7 @@ def test_target_integrator_uses_a_distinct_periodic_ipopt_cache(
     model_path.write_text("version 4\n")
     monkeypatch.setattr(periodic_example, "_cache_root", lambda: tmp_path)
 
-    rk4 = periodic_example._periodic_ipopt_refinement_cache_path(
-        rk4_args, model_path
-    )
+    rk4 = periodic_example._periodic_ipopt_refinement_cache_path(rk4_args, model_path)
     collocation = periodic_example._periodic_ipopt_refinement_cache_path(
         collocation_args, model_path
     )
@@ -826,9 +912,7 @@ def test_target_integrator_uses_a_distinct_periodic_ipopt_cache(
     assert rk4 != collocation
 
 
-def test_reduced_mechanics_uses_a_distinct_periodic_ipopt_cache(
-    tmp_path, monkeypatch
-):
+def test_reduced_mechanics_uses_a_distinct_periodic_ipopt_cache(tmp_path, monkeypatch):
     parser = periodic_example.build_argument_parser()
     full_args = parser.parse_args([])
     reduced_args = parser.parse_args(["--mechanical-formulation", "reduced"])
@@ -836,9 +920,7 @@ def test_reduced_mechanics_uses_a_distinct_periodic_ipopt_cache(
     model_path.write_text("version 4\n")
     monkeypatch.setattr(periodic_example, "_cache_root", lambda: tmp_path)
 
-    full = periodic_example._periodic_ipopt_refinement_cache_path(
-        full_args, model_path
-    )
+    full = periodic_example._periodic_ipopt_refinement_cache_path(full_args, model_path)
     reduced = periodic_example._periodic_ipopt_refinement_cache_path(
         reduced_args, model_path
     )
@@ -850,24 +932,22 @@ def test_standard_warmup_projects_reduced_mechanics_and_clips_pw():
     class FakeKinematics:
         @staticmethod
         def project_generalized_trajectory(q, qdot):
-            return q[2:3, :], qdot[2:3, :], {
-                "maximum_configuration_projection_error_rad": 0.0
-            }
+            return (
+                q[2:3, :],
+                qdot[2:3, :],
+                {"maximum_configuration_projection_error_rad": 0.0},
+            )
 
     warmup = periodic_example._WarmupSolutionAdapter(
         states={
             "q": np.array([[0.0, 0.0, 0.0], [0.0, 0.0, 0.0], [0.0, -1.0, -2.0]]),
-            "qdot": np.array(
-                [[0.0, 0.0, 0.0], [0.0, 0.0, 0.0], [-1.0, -1.0, -1.0]]
-            ),
+            "qdot": np.array([[0.0, 0.0, 0.0], [0.0, 0.0, 0.0], [-1.0, -1.0, -1.0]]),
         },
         controls={"last_pulse_width_Biceps": np.array([[0.0, 0.0007]])},
     )
     target_model = SimpleNamespace(
         reduced_dynamics=SimpleNamespace(kinematics=FakeKinematics()),
-        muscles_dynamics_model=[
-            SimpleNamespace(muscle_name="Biceps", pd0=0.000131405)
-        ],
+        muscles_dynamics_model=[SimpleNamespace(muscle_name="Biceps", pd0=0.000131405)],
     )
     target = SimpleNamespace(
         nlp=[
@@ -878,9 +958,7 @@ def test_standard_warmup_projects_reduced_mechanics_and_clips_pw():
                     "omega": SimpleNamespace(init=np.zeros((1, 3))),
                 },
                 u_init={
-                    "last_pulse_width_Biceps": SimpleNamespace(
-                        init=np.zeros((1, 2))
-                    )
+                    "last_pulse_width_Biceps": SimpleNamespace(init=np.zeros((1, 2)))
                 },
             )
         ]
@@ -892,9 +970,7 @@ def test_standard_warmup_projects_reduced_mechanics_and_clips_pw():
         )
 
     assert set(adapted.decision_states()) == {"theta", "omega"}
-    np.testing.assert_allclose(
-        adapted.decision_states()["theta"], [[0.0, -1.0, -2.0]]
-    )
+    np.testing.assert_allclose(adapted.decision_states()["theta"], [[0.0, -1.0, -2.0]])
     np.testing.assert_allclose(
         adapted.decision_controls()["last_pulse_width_Biceps"],
         [[0.000131405, 0.0006]],
@@ -1782,9 +1858,7 @@ def test_stimulation_snapshots_use_one_based_cycles_and_real_crank_phase():
                 1e-6 * np.repeat(np.arange(1, cycle_count + 1), shooting_per_cycle)
             )[np.newaxis, :]
         },
-        "control_bounds": {
-            "last_pulse_width_Biceps": {"lower": 0.0, "upper": 50e-6}
-        },
+        "control_bounds": {"last_pulse_width_Biceps": {"lower": 0.0, "upper": 50e-6}},
     }
 
     snapshots = comparison_example.stimulation_pattern_snapshots(result)
@@ -1953,9 +2027,7 @@ def test_external_crank_power_uses_generalized_power_sign():
 
     result["args"].constant_crank_torque = -0.2
     result["state_traces"]["omega"] = result["state_traces"].pop("qdot")[2:3, :]
-    reduced = comparison_example._external_crank_power_metrics(
-        result, cycle_count=3
-    )
+    reduced = comparison_example._external_crank_power_metrics(result, cycle_count=3)
     assert reduced["role"] == "driving"
     np.testing.assert_allclose(reduced["mean_power_w"], 0.4 * np.pi)
 
@@ -2008,9 +2080,7 @@ def test_cycle_boundary_wheel_angle_uses_fixed_absolute_reference():
     )
 
     assert metrics["absolute_reference_rad"] == 0.0
-    np.testing.assert_allclose(
-        metrics["errors_rad"], [-0.002, 0.002, 0.002, 0.002]
-    )
+    np.testing.assert_allclose(metrics["errors_rad"], [-0.002, 0.002, 0.002, 0.002])
     np.testing.assert_allclose(metrics["maximum_absolute_error_rad"], 0.002)
 
 
@@ -2050,9 +2120,7 @@ def test_wheel_trace_diagnostic_accepts_configured_cycle_slack():
 
 def test_wheel_trace_diagnostic_rejects_accumulated_same_sign_drift():
     per_cycle_error = 0.002
-    cycle_boundaries = np.arange(101, dtype=float) * (
-        -2.0 * np.pi + per_cycle_error
-    )
+    cycle_boundaries = np.arange(101, dtype=float) * (-2.0 * np.pi + per_cycle_error)
 
     diagnostics = periodic_example.diagnose_wheel_trace(
         cycle_boundaries,
@@ -2143,9 +2211,7 @@ def test_wheel_q_state_scaling_reads_crank_coordinate():
         ]
     )
 
-    assert periodic_example._wheel_q_state_scaling(nmpc) == pytest.approx(
-        2.0 * np.pi
-    )
+    assert periodic_example._wheel_q_state_scaling(nmpc) == pytest.approx(2.0 * np.pi)
 
 
 def test_wheel_trace_absolute_reference_accounts_for_consumed_warmup():
@@ -2864,9 +2930,7 @@ def test_feasibility_snapshot_is_not_recomputed_with_next_window_bounds():
             return {"u": np.zeros((1, 1))}
 
     solution = FakeSolution()
-    snapshot = periodic_example._solution_feasibility_summary(
-        solution, tolerance=1e-6
-    )
+    snapshot = periodic_example._solution_feasibility_summary(solution, tolerance=1e-6)
     solution._cocofest_feasibility_summary = snapshot
     solution.ocp.ocp_solver.limits["lbx"][:] = 10.0
     solution.ocp.ocp_solver.limits["ubx"][:] = 11.0
@@ -2955,9 +3019,7 @@ def test_github_benchmark_report_compares_patterns_and_writes_csv(tmp_path):
         entries, [], missing_solvers=("madnlp",)
     )
 
-    np.testing.assert_allclose(
-        comparisons[0]["root_mean_square_error_us"], 1.0
-    )
+    np.testing.assert_allclose(comparisons[0]["root_mean_square_error_us"], 1.0)
     assert "branches d’intégration Bioptim différentes" in markdown
     assert "# Benchmark cyclage FES — 30 RHO" in markdown
     assert "INCOMPLÈTE" in markdown
@@ -2989,9 +3051,7 @@ def test_github_benchmark_compares_physical_threshold_not_solver_tolerance():
 
     mismatches = benchmark_report.configuration_mismatches(entries)
 
-    assert [item["field"] for item in mismatches] == [
-        "primal_feasibility_threshold"
-    ]
+    assert [item["field"] for item in mismatches] == ["primal_feasibility_threshold"]
 
 
 def test_single_shot_requires_solver_and_feasibility_success():
@@ -3355,11 +3415,7 @@ def test_non_finite_historical_pulse_width_seed_is_rejected(tmp_path):
 
     with seed_path.open("wb") as seed_file:
         pickle.dump(
-            {
-                "last_pulse_width_Biceps": np.array(
-                    [model.pd0, np.nan, model.pd0]
-                )
-            },
+            {"last_pulse_width_Biceps": np.array([model.pd0, np.nan, model.pd0])},
             seed_file,
         )
 
@@ -4237,9 +4293,7 @@ def test_phase_shifted_warmup_shifts_reduced_theta_and_preserves_omega():
                     "omega": SimpleNamespace(init=omega_target),
                 },
                 u_init={
-                    "last_pulse_width_Biceps": SimpleNamespace(
-                        init=pulse_width_target
-                    )
+                    "last_pulse_width_Biceps": SimpleNamespace(init=pulse_width_target)
                 },
             )
         ],
@@ -4575,11 +4629,7 @@ def test_reduced_theta_target_uses_absolute_cycle_reference_without_drift():
         use_signed_wheel_shift=True,
         first_node_state_slack={"theta": [0.0]},
         terminal_state_slack={"theta": [0.002]},
-        nlp=[
-            SimpleNamespace(
-                x_bounds={"theta": theta_bounds, "omega": omega_bounds}
-            )
-        ],
+        nlp=[SimpleNamespace(x_bounds={"theta": theta_bounds, "omega": omega_bounds})],
         _wheel_cycle_shift=lambda states: -2.0 * np.pi,
         _state_slack_for=lambda key, index: 0.0,
         _terminal_state_slack_for=lambda key, index: (
@@ -4595,10 +4645,8 @@ def test_reduced_theta_target_uses_absolute_cycle_reference_without_drift():
             [
                 [
                     -2.0 * np.pi * cycle_index + 0.005 * cycle_index,
-                    -2.0 * np.pi * (cycle_index + 1)
-                    + 0.005 * (cycle_index + 1),
-                    -2.0 * np.pi * (cycle_index + 2)
-                    + 0.005 * (cycle_index + 2),
+                    -2.0 * np.pi * (cycle_index + 1) + 0.005 * (cycle_index + 1),
+                    -2.0 * np.pi * (cycle_index + 2) + 0.005 * (cycle_index + 2),
                 ]
             ]
         )
@@ -4612,12 +4660,8 @@ def test_reduced_theta_target_uses_absolute_cycle_reference_without_drift():
             nmpc, solution, n_cycles_simultaneous=2
         )
 
-    np.testing.assert_allclose(
-        theta_bounds.min[0, 2], -8.0 * np.pi - 0.002
-    )
-    np.testing.assert_allclose(
-        theta_bounds.max[0, 2], -8.0 * np.pi + 0.002
-    )
+    np.testing.assert_allclose(theta_bounds.min[0, 2], -8.0 * np.pi - 0.002)
+    np.testing.assert_allclose(theta_bounds.max[0, 2], -8.0 * np.pi + 0.002)
     assert nmpc.absolute_wheel_q_cycle_index == 2
 
 
@@ -4677,9 +4721,7 @@ def test_acados_cycle_boundary_is_applied_as_scaled_stage_state_bound():
                     x_bounds={"q": SimpleNamespace(min=q_min, max=q_max)},
                     states={"q": SimpleNamespace(index=np.array([0, 1, 2]))},
                     x_scaling={
-                        "q": SimpleNamespace(
-                            scaling=np.array([[1.0], [1.0], [2.0]])
-                        )
+                        "q": SimpleNamespace(scaling=np.array([[1.0], [1.0], [2.0]]))
                     },
                 )
             ],
@@ -4692,9 +4734,7 @@ def test_acados_cycle_boundary_is_applied_as_scaled_stage_state_bound():
         nparams=1,
         x_bound_min=np.column_stack((path_lower, path_lower, path_lower)),
         x_bound_max=np.column_stack((path_upper, path_upper, path_upper)),
-        acados_ocp=SimpleNamespace(
-            solver_options=SimpleNamespace(N_horizon=6)
-        ),
+        acados_ocp=SimpleNamespace(solver_options=SimpleNamespace(N_horizon=6)),
     )
 
     summary = periodic_example.apply_acados_wheel_cycle_boundary_bounds(interface)
@@ -4727,16 +4767,12 @@ def test_acados_cycle_boundary_bounds_cover_every_internal_seam():
                             min=np.array(
                                 [[-5.0] * 3, [-5.0] * 3, [-1.0, -20.0, -20.0]]
                             ),
-                            max=np.array(
-                                [[5.0] * 3, [5.0] * 3, [-1.0, 20.0, 20.0]]
-                            ),
+                            max=np.array([[5.0] * 3, [5.0] * 3, [-1.0, 20.0, 20.0]]),
                         )
                     },
                     states={"q": SimpleNamespace(index=np.array([0, 1, 2]))},
                     x_scaling={
-                        "q": SimpleNamespace(
-                            scaling=np.array([[1.0], [1.0], [2.0]])
-                        )
+                        "q": SimpleNamespace(scaling=np.array([[1.0], [1.0], [2.0]]))
                     },
                 )
             ],
@@ -4818,9 +4854,7 @@ def test_periodic_refinement_requires_measured_primal_feasibility():
     }
 
     assert (
-        periodic_example.periodic_refinement_acceptance(0, high_violation)[
-            "accepted"
-        ]
+        periodic_example.periodic_refinement_acceptance(0, high_violation)["accepted"]
         is False
     )
     assert (

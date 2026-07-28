@@ -10,7 +10,6 @@ import json
 import math
 from pathlib import Path
 
-
 COMPARABILITY_FIELDS = (
     "objective",
     "objective_shape",
@@ -21,6 +20,7 @@ COMPARABILITY_FIELDS = (
     "collocation_degree",
     "collocation_method",
     "use_sx",
+    "nlp_ordering_strategy",
     "state_scaling",
     "pulse_width_scaling",
     "pulse_width_active_set",
@@ -37,9 +37,11 @@ DEFAULT_EXPECTED_SOLVERS = ("ipopt", "fatrop", "madnlp")
 DEFAULT_EXPECTED_CASES = (
     "ipopt/full",
     "fatrop/full",
-    "madnlp/full",
+    "madnlp-pardiso/full",
+    "madnlp-mumps/full",
     "ipopt/reduced",
-    "madnlp/reduced",
+    "madnlp-pardiso/reduced",
+    "madnlp-mumps/reduced",
 )
 
 
@@ -68,10 +70,21 @@ def _mechanical_formulation(entry: dict) -> str:
 
 
 def _entry_case(entry: dict) -> str:
-    return (
-        f"{entry['result'].get('solver', 'unknown').lower()}/"
-        f"{_mechanical_formulation(entry)}"
-    )
+    return f"{_solver_variant(entry)}/{_mechanical_formulation(entry)}"
+
+
+def _solver_variant(entry: dict) -> str:
+    solver = entry["result"].get("solver", "unknown").lower()
+    if solver != "madnlp":
+        return solver
+    linear_solver = str(
+        entry.get("configuration", {}).get("madnlp_linear_solver") or ""
+    ).lower()
+    if linear_solver in {"pardiso_mkl", "pardisomklsolver"}:
+        return "madnlp-pardiso"
+    if linear_solver in {"mumps", "mumpssolver"}:
+        return "madnlp-mumps"
+    return solver
 
 
 def _entry_label(entry: dict) -> str:
@@ -80,9 +93,7 @@ def _entry_label(entry: dict) -> str:
 
 def _requested_rho_count(entry: dict) -> int | None:
     requested_cycles = entry.get("configuration", {}).get("n_windows")
-    cycles_per_window = (
-        entry.get("configuration", {}).get("cycles_per_window") or 1
-    )
+    cycles_per_window = entry.get("configuration", {}).get("cycles_per_window") or 1
     try:
         requested_cycles = int(requested_cycles)
         cycles_per_window = int(cycles_per_window)
@@ -110,7 +121,7 @@ def load_benchmark_files(paths: list[Path]) -> list[dict]:
     entries.sort(
         key=lambda entry: (
             mechanics_order.get(_mechanical_formulation(entry), 99),
-            entry["result"]["solver"],
+            _solver_variant(entry),
         )
     )
     return entries
@@ -123,16 +134,10 @@ def configuration_mismatches(entries: list[dict]) -> list[dict]:
     formulations = dict.fromkeys(_mechanical_formulation(entry) for entry in entries)
     for formulation in formulations:
         group = [
-            entry
-            for entry in entries
-            if _mechanical_formulation(entry) == formulation
+            entry for entry in entries if _mechanical_formulation(entry) == formulation
         ]
         reference = next(
-            (
-                entry
-                for entry in group
-                if entry["result"].get("solver") == "ipopt"
-            ),
+            (entry for entry in group if entry["result"].get("solver") == "ipopt"),
             group[0],
         )
         for entry in group:
@@ -159,9 +164,7 @@ def _pattern_comparison(reference: dict, compared: dict) -> dict | None:
         return None
     differences = [
         float(compared_value) - float(reference_value)
-        for reference_value, compared_value in zip(
-            reference_values, compared_values
-        )
+        for reference_value, compared_value in zip(reference_values, compared_values)
     ]
     mae = sum(abs(value) for value in differences) / len(differences)
     rmse = math.sqrt(sum(value * value for value in differences) / len(differences))
@@ -169,16 +172,10 @@ def _pattern_comparison(reference: dict, compared: dict) -> dict | None:
     compared_mean = sum(compared_values) / len(compared_values)
     covariance = sum(
         (reference_value - reference_mean) * (compared_value - compared_mean)
-        for reference_value, compared_value in zip(
-            reference_values, compared_values
-        )
+        for reference_value, compared_value in zip(reference_values, compared_values)
     )
-    reference_energy = sum(
-        (value - reference_mean) ** 2 for value in reference_values
-    )
-    compared_energy = sum(
-        (value - compared_mean) ** 2 for value in compared_values
-    )
+    reference_energy = sum((value - reference_mean) ** 2 for value in reference_values)
+    compared_energy = sum((value - compared_mean) ** 2 for value in compared_values)
     denominator = math.sqrt(reference_energy * compared_energy)
     return {
         "sample_count": len(differences),
@@ -187,8 +184,7 @@ def _pattern_comparison(reference: dict, compared: dict) -> dict | None:
         "maximum_absolute_error_s": max(abs(value) for value in differences),
         "mean_absolute_error_us": 1e6 * mae,
         "root_mean_square_error_us": 1e6 * rmse,
-        "maximum_absolute_error_us": 1e6
-        * max(abs(value) for value in differences),
+        "maximum_absolute_error_us": 1e6 * max(abs(value) for value in differences),
         "correlation": covariance / denominator if denominator else None,
     }
 
@@ -270,9 +266,7 @@ def _paired_stimulation_comparisons(
     comparison_kind: str,
 ) -> list[dict]:
     rows = []
-    reference_patterns = (
-        reference_entry["result"].get("stimulation_patterns") or {}
-    )
+    reference_patterns = reference_entry["result"].get("stimulation_patterns") or {}
     compared_patterns = compared_entry["result"].get("stimulation_patterns") or {}
     for checkpoint, reference_snapshot in reference_patterns.items():
         compared_snapshot = compared_patterns.get(checkpoint) or {}
@@ -285,8 +279,7 @@ def _paired_stimulation_comparisons(
             "checkpoint": checkpoint,
         }
         if not (
-            reference_snapshot.get("available")
-            and compared_snapshot.get("available")
+            reference_snapshot.get("available") and compared_snapshot.get("available")
         ):
             rows.append(
                 {
@@ -314,9 +307,7 @@ def _paired_stimulation_comparisons(
                         math.cos(float(compared) - float(reference)),
                     )
                     ** 2
-                    for reference, compared in zip(
-                        reference_phase, compared_phase
-                    )
+                    for reference, compared in zip(reference_phase, compared_phase)
                 )
                 / len(reference_phase)
             )
@@ -360,16 +351,10 @@ def stimulation_comparisons(entries: list[dict]) -> list[dict]:
         _mechanical_formulation(entry) for entry in entries
     ):
         group = [
-            entry
-            for entry in entries
-            if _mechanical_formulation(entry) == formulation
+            entry for entry in entries if _mechanical_formulation(entry) == formulation
         ]
         reference_entry = next(
-            (
-                entry
-                for entry in group
-                if entry["result"].get("solver") == "ipopt"
-            ),
+            (entry for entry in group if entry["result"].get("solver") == "ipopt"),
             None,
         )
         if reference_entry is None:
@@ -391,12 +376,12 @@ def mechanical_stimulation_comparisons(entries: list[dict]) -> list[dict]:
     """Compare full and reduced mechanics for each solver at cycles 10 and 30."""
 
     rows = []
-    for solver in dict.fromkeys(entry["result"]["solver"] for entry in entries):
+    for solver_variant in dict.fromkeys(_solver_variant(entry) for entry in entries):
         full_entry = next(
             (
                 entry
                 for entry in entries
-                if entry["result"]["solver"] == solver
+                if _solver_variant(entry) == solver_variant
                 and _mechanical_formulation(entry) == "full"
             ),
             None,
@@ -405,7 +390,7 @@ def mechanical_stimulation_comparisons(entries: list[dict]) -> list[dict]:
             (
                 entry
                 for entry in entries
-                if entry["result"]["solver"] == solver
+                if _solver_variant(entry) == solver_variant
                 and _mechanical_formulation(entry) == "reduced"
             ),
             None,
@@ -522,9 +507,9 @@ def write_stimulation_csv(path: Path, entries: list[dict]) -> None:
                                 ),
                                 "pulse_width_s": pulse_width,
                                 "pulse_width_us": pattern["pulse_width_us"][index],
-                                "normalized_to_bounds": pattern[
-                                    "normalized_to_bounds"
-                                ][index],
+                                "normalized_to_bounds": pattern["normalized_to_bounds"][
+                                    index
+                                ],
                             }
                         )
 
@@ -565,9 +550,7 @@ def render_markdown(
             f"**ÉCHEC ({len(mismatches)} écarts)**"
         )
     else:
-        comparability = (
-            "Comparabilité du problème et des critères physiques : **OK**"
-        )
+        comparability = "Comparabilité du problème et des critères physiques : **OK**"
     lines = [
         f"# Benchmark cyclage FES — {horizon_label}",
         "",
@@ -594,8 +577,7 @@ def render_markdown(
             row.get(
                 "validated_cycles",
                 sum(
-                    bool(window.get("validated"))
-                    for window in row.get("windows") or []
+                    bool(window.get("validated")) for window in row.get("windows") or []
                 ),
             ),
         )
@@ -681,9 +663,7 @@ def render_markdown(
     )
     for entry in entries:
         solver = _entry_label(entry)
-        for snapshot in (
-            entry["result"].get("stimulation_patterns") or {}
-        ).values():
+        for snapshot in (entry["result"].get("stimulation_patterns") or {}).values():
             if not snapshot.get("available"):
                 lines.append(
                     f"| {solver} | {snapshot.get('cycle')} | indisponible: "
@@ -797,9 +777,7 @@ def main() -> None:
             if solver.strip()
         )
     )
-    present_solvers = {
-        entry["result"].get("solver", "").lower() for entry in entries
-    }
+    present_solvers = {entry["result"].get("solver", "").lower() for entry in entries}
     missing_solvers = tuple(
         solver for solver in expected_solvers if solver not in present_solvers
     )
@@ -824,9 +802,7 @@ def main() -> None:
         {
             entry["runtime"].get("provenance", {}).get("BIOPTIM_BENCHMARK_COMMIT")
             for entry in entries
-            if entry["runtime"]
-            .get("provenance", {})
-            .get("BIOPTIM_BENCHMARK_COMMIT")
+            if entry["runtime"].get("provenance", {}).get("BIOPTIM_BENCHMARK_COMMIT")
         }
     )
     combined = {
@@ -861,8 +837,7 @@ def main() -> None:
     )
     if missing_cases:
         raise SystemExit(
-            "Incomplete solver/formulation matrix; missing: "
-            + ", ".join(missing_cases)
+            "Incomplete solver/formulation matrix; missing: " + ", ".join(missing_cases)
         )
 
 
