@@ -4099,7 +4099,8 @@ def test_terminal_wheel_target_uses_absolute_cycle_reference_without_drift():
     nmpc = SimpleNamespace(
         before_window_advance=None,
         nodes_per_cycle=1,
-        time_idx_to_cycle=1,
+        cycle_len=30,
+        time_idx_to_cycle=30,
         n_cycles_simultaneous=2,
         debugg_bounds=False,
         transfer_debug=False,

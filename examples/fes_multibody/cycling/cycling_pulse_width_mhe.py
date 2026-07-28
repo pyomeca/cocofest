@@ -211,7 +211,25 @@ class MyCyclicNMPC(FesNmpcMsk):
         # --- Get states results --- #
         states = sol.decision_states(to_merge=SolutionMerge.NODES)
         states_keys = states.keys()
-        advance_cycles = int(getattr(self, "time_idx_to_cycle", 1))
+        # Bioptim expresses ``time_idx_to_cycle`` in shooting intervals, not
+        # in physical pedal cycles.  For example, a one-cycle RHO with 30
+        # stimulations advances by 30 intervals.  Convert that value before
+        # updating the absolute unwrapped crank reference; otherwise the first
+        # RHO is incorrectly constrained to advance by 30 full revolutions.
+        advance_intervals = int(getattr(self, "time_idx_to_cycle", 1))
+        intervals_per_cycle = int(getattr(self, "cycle_len", 1))
+        if intervals_per_cycle < 1:
+            raise ValueError(
+                "The absolute crank reference requires a positive cycle length."
+            )
+        advance_cycles, remaining_intervals = divmod(
+            advance_intervals, intervals_per_cycle
+        )
+        if remaining_intervals:
+            raise ValueError(
+                "The absolute crank reference requires the window advance "
+                "to contain a whole number of pedal cycles."
+            )
         if advance_cycles < 1:
             raise ValueError(
                 "The absolute crank reference requires a positive window advance."
