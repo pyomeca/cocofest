@@ -5280,6 +5280,52 @@ def _window_feasibility_tolerance(args: argparse.Namespace) -> float | None:
     return args.nlp_tolerance if threshold is None else float(threshold) / 10.0
 
 
+def _wheel_cycle_diagnostic_tolerances(
+    args: argparse.Namespace,
+    wheel_q_scaling: float = 1.0,
+) -> tuple[float, float]:
+    """Return progress and fixed-reference tolerances for crank-angle audits."""
+
+    if not np.isfinite(wheel_q_scaling) or wheel_q_scaling <= 0.0:
+        raise ValueError("wheel_q_scaling must be finite and strictly positive.")
+    solver_tolerance = (
+        args.acados_tolerance
+        if args.solver == "acados" and args.acados_tolerance is not None
+        else args.nlp_tolerance
+    )
+    scaled_feasibility_threshold = getattr(
+        args, "primal_feasibility_threshold", None
+    )
+    if args.solver == "acados" or scaled_feasibility_threshold is None:
+        scaled_feasibility_threshold = 10.0 * solver_tolerance
+    # The independent feasibility audit operates on the scaled decision
+    # vector. Convert its accepted q violation back to physical radians.
+    numerical_margin = float(scaled_feasibility_threshold) * wheel_q_scaling
+    terminal_slack = args.acados_terminal_wheel_q_slack
+    first_node_slack = args.acados_wheel_q_slack
+    progress_tolerance = (
+        max(2.0 * terminal_slack, first_node_slack + terminal_slack)
+        + 2.0 * numerical_margin
+    )
+    absolute_tolerance = max(first_node_slack, terminal_slack) + numerical_margin
+    return progress_tolerance, absolute_tolerance
+
+
+def _wheel_q_state_scaling(nmpc) -> float:
+    """Return the wheel-angle decision scaling used by the NLP."""
+
+    try:
+        scaling = np.asarray(
+            nmpc.nlp[0].x_scaling["q"].scaling, dtype=float
+        ).reshape((-1,))
+        wheel_q_scaling = float(scaling[2])
+    except (AttributeError, IndexError, KeyError, TypeError):
+        return 1.0
+    if not np.isfinite(wheel_q_scaling) or wheel_q_scaling <= 0.0:
+        raise RuntimeError("The crank-position state scaling must be positive.")
+    return wheel_q_scaling
+
+
 def _native_solver_status(nmpc) -> str | None:
     """Extract the native status retained by the optional Bioptim interfaces."""
 
@@ -5326,6 +5372,8 @@ def summarize_windows(
     feasibility_tolerance: float | None = None,
     expected_cycle_shift: float = -2.0 * np.pi,
     cycle_progress_tolerance: float = 0.5,
+    absolute_cycle_reference: float | None = None,
+    absolute_cycle_tolerance: float | None = None,
 ) -> None:
     def _fmt(value) -> str:
         return "None" if value is None else f"{value:.6f}"
@@ -5346,6 +5394,8 @@ def summarize_windows(
         requested_windows=requested_windows,
         expected_cycle_shift=expected_cycle_shift,
         cycle_progress_tolerance=cycle_progress_tolerance,
+        absolute_cycle_reference=absolute_cycle_reference,
+        absolute_cycle_tolerance=absolute_cycle_tolerance,
     )
     window_feasibility = [
         _solution_feasibility_summary(solution, feasibility_tolerance)
@@ -5411,6 +5461,8 @@ def build_window_summary(
     feasibility_tolerance: float | None = None,
     expected_cycle_shift: float = -2.0 * np.pi,
     cycle_progress_tolerance: float = 0.5,
+    absolute_cycle_reference: float | None = None,
+    absolute_cycle_tolerance: float | None = None,
 ) -> dict:
     (
         merged_solution,
@@ -5442,6 +5494,8 @@ def build_window_summary(
         requested_windows=requested_windows,
         expected_cycle_shift=expected_cycle_shift,
         cycle_progress_tolerance=cycle_progress_tolerance,
+        absolute_cycle_reference=absolute_cycle_reference,
+        absolute_cycle_tolerance=absolute_cycle_tolerance,
     )
     solver_success = (
         accounting["covered_cycles"] >= requested_windows
@@ -5470,6 +5524,7 @@ def build_window_summary(
         "failed_windows": accounting["failed_windows"],
         "exported_cycles": accounting["exported_cycles"],
         "covered_cycles": accounting["covered_cycles"],
+        "absolute_wheel_q_reference": absolute_cycle_reference,
         "window_statuses": accounting["window_statuses"],
         "window_iterations": [
             getattr(window_solution, "iterations", None)
@@ -5508,6 +5563,8 @@ def build_single_shot_summary(
     cycle_count: int = 1,
     expected_cycle_shift: float = -2.0 * np.pi,
     cycle_progress_tolerance: float = 0.5,
+    absolute_cycle_reference: float | None = None,
+    absolute_cycle_tolerance: float | None = None,
 ) -> dict:
     wheel_trace = sol.decision_states(to_merge=SolutionMerge.NODES)["q"][2, :]
     state_traces = {
@@ -5528,6 +5585,8 @@ def build_single_shot_summary(
         requested_windows=cycle_count,
         expected_cycle_shift=expected_cycle_shift,
         cycle_progress_tolerance=cycle_progress_tolerance,
+        absolute_cycle_reference=absolute_cycle_reference,
+        absolute_cycle_tolerance=absolute_cycle_tolerance,
     )
     feasibility = _solution_feasibility_summary(sol, feasibility_tolerance)
     solver_success = _status_is_success(sol.status) and feasibility["passes_tolerance"]
@@ -5557,6 +5616,7 @@ def build_single_shot_summary(
         "failed_windows": int(not solver_success),
         "exported_cycles": int(solver_success),
         "covered_cycles": int(solver_success),
+        "absolute_wheel_q_reference": absolute_cycle_reference,
         "solver_success": bool(solver_success),
         "physical_success": bool(physical_success),
         "diagnostics": diagnostics,
@@ -5569,11 +5629,17 @@ def diagnose_wheel_trace(
     requested_windows: int,
     expected_cycle_shift: float = -2.0 * np.pi,
     cycle_progress_tolerance: float = 0.5,
+    absolute_cycle_reference: float | None = None,
+    absolute_cycle_tolerance: float | None = None,
 ) -> dict:
     if requested_windows < 1:
         raise ValueError("requested_windows must be at least one.")
     if cycle_progress_tolerance < 0:
         raise ValueError("cycle_progress_tolerance must be non-negative.")
+    if absolute_cycle_tolerance is None:
+        absolute_cycle_tolerance = cycle_progress_tolerance
+    if absolute_cycle_tolerance < 0:
+        raise ValueError("absolute_cycle_tolerance must be non-negative.")
     trace = np.asarray(wheel_trace, dtype=float).squeeze()
     finite = bool(np.all(np.isfinite(trace)))
     final_angle = float(trace[-1]) if trace.size else float("nan")
@@ -5602,17 +5668,20 @@ def diagnose_wheel_trace(
         maximum_cycle_progress_error = float(np.max(np.abs(cycle_progress_errors)))
         if maximum_cycle_progress_error > cycle_progress_tolerance:
             issues.append("wheel_cycle_progress_out_of_bounds")
-        absolute_targets = (
+        reference = (
             cycle_boundaries[0]
-            + np.arange(cycle_boundaries.size, dtype=float)
-            * float(expected_cycle_shift)
+            if absolute_cycle_reference is None
+            else float(absolute_cycle_reference)
         )
+        absolute_targets = reference + np.arange(
+            cycle_boundaries.size, dtype=float
+        ) * float(expected_cycle_shift)
         absolute_cycle_errors = cycle_boundaries - absolute_targets
         maximum_absolute_cycle_error = float(
             np.max(np.abs(absolute_cycle_errors))
         )
         final_absolute_cycle_error = float(absolute_cycle_errors[-1])
-        if maximum_absolute_cycle_error > cycle_progress_tolerance:
+        if maximum_absolute_cycle_error > absolute_cycle_tolerance:
             issues.append("wheel_absolute_progress_out_of_bounds")
     elif finite:
         issues.append("wheel_cycle_grid_mismatch")
@@ -5627,6 +5696,12 @@ def diagnose_wheel_trace(
         "jump_limit": jump_limit,
         "expected_cycle_shift": float(expected_cycle_shift),
         "cycle_progress_tolerance": float(cycle_progress_tolerance),
+        "absolute_cycle_reference": (
+            None
+            if absolute_cycle_reference is None
+            else float(absolute_cycle_reference)
+        ),
+        "absolute_cycle_tolerance": float(absolute_cycle_tolerance),
         "cycle_progress_errors": cycle_progress_errors.tolist(),
         "maximum_cycle_progress_error": maximum_cycle_progress_error,
         "absolute_cycle_errors": absolute_cycle_errors.tolist(),
@@ -11357,6 +11432,14 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
             )
 
     window_feasibility_tolerance = _window_feasibility_tolerance(args)
+    wheel_q_scaling = _wheel_q_state_scaling(nmpc)
+    (
+        wheel_cycle_progress_tolerance,
+        wheel_absolute_cycle_tolerance,
+    ) = _wheel_cycle_diagnostic_tolerances(args, wheel_q_scaling)
+    absolute_wheel_q_reference = getattr(
+        nmpc, "absolute_wheel_q_reference", None
+    )
 
     def snapshot_completed_window(_nmpc, solution):
         # Every stored RHO solution references the same mutable OCP. Snapshot
@@ -12330,18 +12413,9 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
             sol,
             feasibility_tolerance=window_feasibility_tolerance,
             cycle_count=args.cycles_per_window,
-            cycle_progress_tolerance=(
-                max(
-                    2.0 * args.acados_terminal_wheel_q_slack,
-                    args.acados_wheel_q_slack + args.acados_terminal_wheel_q_slack,
-                )
-                + 10.0
-                * (
-                    args.acados_tolerance
-                    if args.solver == "acados" and args.acados_tolerance is not None
-                    else args.nlp_tolerance
-                )
-            ),
+            cycle_progress_tolerance=wheel_cycle_progress_tolerance,
+            absolute_cycle_reference=absolute_wheel_q_reference,
+            absolute_cycle_tolerance=wheel_absolute_cycle_tolerance,
         )
         if args.solver == "acados" and args.acados_diagnostics:
             summary["acados_diagnostics"] = collect_acados_diagnostics(sol)
@@ -12360,6 +12434,7 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
         summary["standard_warmup_cache_hit"] = standard_warmup_cache_hit
         summary["warmup_cycles_consumed"] = args.warmup_cycles_consumed
         summary["fatigue_capacity_scales"] = fatigue_capacity_scales
+        summary["wheel_q_scaling"] = wheel_q_scaling
         summary["native_solver_status"] = _native_solver_status(nmpc)
         if control_homotopy_summaries:
             summary["control_homotopy_summaries"] = control_homotopy_summaries
@@ -12414,18 +12489,9 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
             requested_windows=args.n_windows,
             cycles_per_window=args.cycles_per_window,
             feasibility_tolerance=window_feasibility_tolerance,
-            cycle_progress_tolerance=(
-                max(
-                    2.0 * args.acados_terminal_wheel_q_slack,
-                    args.acados_wheel_q_slack + args.acados_terminal_wheel_q_slack,
-                )
-                + 10.0
-                * (
-                    args.acados_tolerance
-                    if args.solver == "acados" and args.acados_tolerance is not None
-                    else args.nlp_tolerance
-                )
-            ),
+            cycle_progress_tolerance=wheel_cycle_progress_tolerance,
+            absolute_cycle_reference=absolute_wheel_q_reference,
+            absolute_cycle_tolerance=wheel_absolute_cycle_tolerance,
         )
         if args.solver == "acados" and args.acados_diagnostics:
             if not acados_window_diagnostics:
@@ -12435,18 +12501,9 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
         requested_windows=args.n_windows,
         cycles_per_window=args.cycles_per_window,
         feasibility_tolerance=window_feasibility_tolerance,
-        cycle_progress_tolerance=(
-            max(
-                2.0 * args.acados_terminal_wheel_q_slack,
-                args.acados_wheel_q_slack + args.acados_terminal_wheel_q_slack,
-            )
-            + 10.0
-            * (
-                args.acados_tolerance
-                if args.solver == "acados" and args.acados_tolerance is not None
-                else args.nlp_tolerance
-            )
-        ),
+        cycle_progress_tolerance=wheel_cycle_progress_tolerance,
+        absolute_cycle_reference=absolute_wheel_q_reference,
+        absolute_cycle_tolerance=wheel_absolute_cycle_tolerance,
     )
     if args.solver == "acados" and args.acados_diagnostics:
         summary["acados_diagnostics"] = acados_window_diagnostics
@@ -12520,6 +12577,7 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
     summary["standard_warmup_cache_hit"] = standard_warmup_cache_hit
     summary["warmup_cycles_consumed"] = args.warmup_cycles_consumed
     summary["fatigue_capacity_scales"] = fatigue_capacity_scales
+    summary["wheel_q_scaling"] = wheel_q_scaling
     summary["native_solver_status"] = _native_solver_status(nmpc)
     return summary
 

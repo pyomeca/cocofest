@@ -1869,6 +1869,32 @@ def test_cycle_boundary_wheel_angle_reports_turn_error():
     np.testing.assert_allclose(metrics["maximum_cycle_progress_error_rad"], 0.05)
 
 
+def test_cycle_boundary_wheel_angle_uses_fixed_absolute_reference():
+    result = _benchmark_result([0, 0], solver_success=True, success=True)
+    result["absolute_wheel_q_reference"] = 0.0
+    result["wheel_angle_trace"] = np.array(
+        [
+            -0.002,
+            -np.pi,
+            -2.0 * np.pi + 0.002,
+            -3.0 * np.pi,
+            -4.0 * np.pi + 0.002,
+            -5.0 * np.pi,
+            -6.0 * np.pi + 0.002,
+        ]
+    )
+
+    metrics = comparison_example._cycle_boundary_wheel_angle_metrics(
+        result, cycle_count=3
+    )
+
+    assert metrics["absolute_reference_rad"] == 0.0
+    np.testing.assert_allclose(
+        metrics["errors_rad"], [-0.002, 0.002, 0.002, 0.002]
+    )
+    np.testing.assert_allclose(metrics["maximum_absolute_error_rad"], 0.002)
+
+
 def test_wheel_trace_diagnostic_rejects_wrong_rotation_direction():
     trace = np.linspace(0.0, 4.0 * np.pi, 5)
 
@@ -1923,6 +1949,84 @@ def test_wheel_trace_diagnostic_rejects_accumulated_same_sign_drift():
     assert diagnostics["maximum_absolute_cycle_error"] > 0.19
     assert "wheel_absolute_progress_out_of_bounds" in diagnostics["issues"]
     assert diagnostics["is_physical"] is False
+
+
+def test_wheel_trace_diagnostic_uses_distinct_absolute_tolerance():
+    trace = np.array(
+        [
+            -0.002,
+            -2.0 * np.pi + 0.002,
+            -4.0 * np.pi + 0.002,
+        ]
+    )
+
+    diagnostics = periodic_example.diagnose_wheel_trace(
+        trace,
+        requested_windows=2,
+        expected_cycle_shift=-2.0 * np.pi,
+        cycle_progress_tolerance=0.0041,
+        absolute_cycle_reference=0.0,
+        absolute_cycle_tolerance=0.0021,
+    )
+
+    assert diagnostics["is_physical"] is True
+    np.testing.assert_allclose(
+        diagnostics["absolute_cycle_errors"], [-0.002, 0.002, 0.002]
+    )
+    np.testing.assert_allclose(diagnostics["maximum_absolute_cycle_error"], 0.002)
+    assert diagnostics["maximum_cycle_progress_error"] == pytest.approx(0.004)
+
+
+def test_wheel_cycle_diagnostic_tolerances_keep_absolute_slack():
+    args = SimpleNamespace(
+        solver="madnlp",
+        acados_tolerance=None,
+        nlp_tolerance=1e-8,
+        primal_feasibility_threshold=1e-5,
+        acados_terminal_wheel_q_slack=0.002,
+        acados_wheel_q_slack=0.0,
+    )
+
+    progress, absolute = periodic_example._wheel_cycle_diagnostic_tolerances(
+        args, wheel_q_scaling=2.0 * np.pi
+    )
+
+    assert progress == pytest.approx(0.004 + 4.0 * np.pi * 1e-5)
+    assert absolute == pytest.approx(0.002 + 2.0 * np.pi * 1e-5)
+
+
+def test_wheel_cycle_diagnostic_tolerances_keep_larger_first_node_slack():
+    args = SimpleNamespace(
+        solver="ipopt",
+        acados_tolerance=None,
+        nlp_tolerance=1e-6,
+        primal_feasibility_threshold=1e-5,
+        acados_terminal_wheel_q_slack=0.002,
+        acados_wheel_q_slack=0.003,
+    )
+
+    progress, absolute = periodic_example._wheel_cycle_diagnostic_tolerances(args)
+
+    assert progress == pytest.approx(0.00502)
+    assert absolute == pytest.approx(0.00301)
+
+
+def test_wheel_q_state_scaling_reads_crank_coordinate():
+    nmpc = SimpleNamespace(
+        nlp=[
+            SimpleNamespace(
+                x_scaling={
+                    "q": SimpleNamespace(
+                        scaling=np.array([[1.0], [1.0], [2.0 * np.pi]])
+                    )
+                }
+            )
+        ]
+    )
+
+    assert periodic_example._wheel_q_state_scaling(nmpc) == pytest.approx(
+        2.0 * np.pi
+    )
 
 
 def test_a_capacity_metrics_use_model_scale_instead_of_initial_state():

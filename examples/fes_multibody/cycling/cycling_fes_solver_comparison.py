@@ -589,6 +589,7 @@ def _cycle_boundary_wheel_angle_metrics(result: dict, cycle_count: int) -> dict:
 
     metrics = {
         "signed_cycle_shift_rad": None,
+        "absolute_reference_rad": None,
         "maximum_absolute_error_rad": None,
         "final_error_rad": None,
         "errors_rad": [],
@@ -613,11 +614,16 @@ def _cycle_boundary_wheel_angle_metrics(result: dict, cycle_count: int) -> dict:
 
     cycle_shift = float(np.sign(wheel_angle[-1] - wheel_angle[0]) * 2.0 * np.pi)
     boundaries = wheel_angle[::shooting_per_cycle]
-    expected = wheel_angle[0] + cycle_shift * np.arange(cycle_count + 1)
+    reference = result.get("absolute_wheel_q_reference")
+    if reference is None:
+        reference = wheel_angle[0]
+    reference = float(reference)
+    expected = reference + cycle_shift * np.arange(cycle_count + 1)
     errors = boundaries - expected
     progress_errors = np.diff(boundaries) - cycle_shift
     metrics.update(
         signed_cycle_shift_rad=cycle_shift,
+        absolute_reference_rad=reference,
         maximum_absolute_error_rad=float(np.max(np.abs(errors))),
         final_error_rad=float(errors[-1]),
         errors_rad=errors.tolist(),
