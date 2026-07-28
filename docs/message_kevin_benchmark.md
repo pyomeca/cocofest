@@ -171,8 +171,9 @@ ABI `libMad.so`. Le workflow construit donc maintenant la révision CasADi
 3.7.2 post-release épinglée qui intègre cette nouvelle ABI ; un simple lien
 symbolique aurait été incorrect. Ce runtime embarque MadNLP 0.9.2, où le
 niveau silencieux est l’énumération `ERROR=6` (`0` est invalide) ; ce réglage
-est maintenant appliqué au smoke test et à l’OCP. Cette voie est limitée à Linux x86-64 et
-n’est pas disponible nativement sur les Mac Apple Silicon. Elle n’a pas encore
-de résultat sur l’OCP complet : le prochain benchmark doit donc être
-interprété comme la première comparaison MadNLP-PARDISO face à IPOPT-MUMPS et
-Fatrop, avec la nouvelle contrainte angulaire absolue.
+est maintenant appliqué au smoke test via le véritable adaptateur Cocofest et
+à l’OCP. Cette voie est limitée à Linux x86-64 et n’est pas disponible
+nativement sur les Mac Apple Silicon. Elle n’a pas encore de résultat sur
+l’OCP complet : le prochain benchmark doit donc être interprété comme la
+première comparaison MadNLP-PARDISO face à IPOPT-MUMPS et Fatrop, avec la
+nouvelle contrainte angulaire absolue.

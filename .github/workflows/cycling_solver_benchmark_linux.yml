@@ -544,6 +544,8 @@ jobs:
           python - <<'PY'
           import math
           import os
+          from types import SimpleNamespace
+
           import casadi as cas
           import bioptim
           import biorbd_casadi as biorbd
@@ -579,13 +581,26 @@ jobs:
                   "acceptable_tol": 1e-8,
               }
           elif target == "madnlp":
-              plugin_options["madnlp"] = {
-                  # MadNLP 0.9.2 LogLevels: TRACE=1, ..., ERROR=6.
-                  "print_level": 6,
-                  "max_iter": 50,
-                  "tol": 1e-8,
-                  "linear_solver": "PardisoMKLSolver",
-              }
+              from cocofest.optimization.solver_backends import (
+                  MADNLP_QUIET_PRINT_LEVEL,
+                  configure_nlp_solver,
+              )
+
+              configured = configure_nlp_solver(
+                  "madnlp",
+                  max_iterations=50,
+                  tolerance=1e-8,
+                  madnlp_linear_solver="pardiso_mkl",
+              )
+              plugin_options = configured.as_dict(
+                  SimpleNamespace(options_common=plugin_options)
+              )
+              assert plugin_options["madnlp"]["print_level"] == (
+                  MADNLP_QUIET_PRINT_LEVEL
+              )
+              assert plugin_options["madnlp"]["linear_solver"] == (
+                  "PardisoMKLSolver"
+              )
           smoke = cas.nlpsol(
               f"{target}_smoke",
               target,
