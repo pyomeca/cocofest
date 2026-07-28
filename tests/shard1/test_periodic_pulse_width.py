@@ -511,7 +511,8 @@ def test_common_target_seed_enables_the_robust_acados_reference_preparation():
 
     assert args.periodic_fes_warmup_projection_strategy == "rollout"
     assert args.full_dynamics_phase_one is True
-    assert args.acados_transfer_full_dynamics_rollout is True
+    assert args.acados_transfer_full_dynamics_rollout is False
+    assert args.acados_transfer_irk_rollout is True
     assert args.acados_bind_first_node_fes_states is True
     assert args.acados_dual_warm_start_mode == "reset"
     assert args.acados_nlp_solver_type == "SQP"
@@ -528,6 +529,7 @@ def test_common_target_seed_enables_the_robust_acados_reference_preparation():
     assert disabled.periodic_fes_warmup_projection_strategy == "sequential"
     assert disabled.full_dynamics_phase_one is False
     assert disabled.acados_transfer_full_dynamics_rollout is False
+    assert disabled.acados_transfer_irk_rollout is False
     assert disabled.acados_bind_first_node_fes_states is False
 
 
@@ -604,70 +606,6 @@ def test_standard_warmup_cache_metadata_rejects_a_resistance_seed(tmp_path):
     assert loaded.metadata == metadata
     periodic_example._validate_standard_warmup_seed(loaded, args, assisted_path)
 
-
-def test_common_initial_solution_metadata_rejects_an_incompatible_horizon(tmp_path):
-    args = SimpleNamespace(
-        model_formulation="periodic_node",
-        mechanical_formulation="reduced",
-        cycles_per_window=1,
-        stimulations_per_cycle=30,
-        constant_crank_torque=-0.2,
-        torque_application="constant",
-        ode_solver="collocation",
-        nlp_ordering_strategy="time_major",
-        solver="ipopt",
-    )
-    metadata = periodic_example._common_initial_solution_metadata(args)
-    metadata["cycles_per_window"] = 2
-    seed = periodic_example._WarmupSolutionAdapter({}, {}, metadata=metadata)
-
-    with pytest.raises(ValueError, match="cycles_per_window"):
-        periodic_example._validate_common_initial_solution_metadata(
-            seed, args, tmp_path / "common.npz"
-        )
-
-
-def test_common_initial_solution_metadata_allows_a_transcription_change(tmp_path):
-    args = SimpleNamespace(
-        model_formulation="periodic_node",
-        mechanical_formulation="full",
-        cycles_per_window=1,
-        stimulations_per_cycle=30,
-        constant_crank_torque=-0.2,
-        torque_application="constant",
-        ode_solver="rk4",
-        nlp_ordering_strategy="time_major",
-        solver="fatrop",
-    )
-    metadata = periodic_example._common_initial_solution_metadata(args)
-    metadata["ode_solver"] = "collocation"
-    metadata["producer_solver"] = "ipopt"
-    seed = periodic_example._WarmupSolutionAdapter({}, {}, metadata=metadata)
-
-    periodic_example._validate_common_initial_solution_metadata(
-        seed, args, tmp_path / "common.npz"
-    )
-
-
-def test_periodic_node_projection_uses_all_five_ding_states():
-    keys = {
-        "Cn_Biceps",
-        "F_Biceps",
-        "A_Biceps",
-        "Tau1_Biceps",
-        "Km_Biceps",
-    }
-
-    assert periodic_example._projection_state_keys(
-        "Biceps", "all", available_keys=keys
-    ) == (
-        "Cn_Biceps",
-        "F_Biceps",
-        "A_Biceps",
-        "Tau1_Biceps",
-        "Km_Biceps",
-    )
-
     resistance_metadata = dict(metadata)
     resistance_metadata["signed_crank_torque_nm"] = 0.2
     resistance_metadata["crank_torque_role"] = "resistive"
@@ -707,6 +645,121 @@ def test_periodic_node_projection_uses_all_five_ding_states():
             args,
             wrong_magnitude_path,
         )
+
+
+def test_common_initial_solution_metadata_rejects_an_incompatible_horizon(tmp_path):
+    args = SimpleNamespace(
+        model_formulation="periodic_node",
+        mechanical_formulation="reduced",
+        cycles_per_window=1,
+        stimulations_per_cycle=30,
+        objective="fatigue",
+        objective_shape="quadratic",
+        constant_crank_torque=-0.2,
+        torque_application="constant",
+        enforce_start_constraints=False,
+        acados_wheel_q_slack=0.0,
+        acados_terminal_wheel_q_slack=0.002,
+        terminal_wheel_q_reference_mode="absolute_initial",
+        pulse_width_scaling=0.0025,
+        pulse_width_active_set="none",
+        ode_solver="collocation",
+        nlp_ordering_strategy="time_major",
+        solver="ipopt",
+    )
+    metadata = periodic_example._common_initial_solution_metadata(args)
+    metadata["cycles_per_window"] = 2
+    seed = periodic_example._WarmupSolutionAdapter({}, {}, metadata=metadata)
+
+    with pytest.raises(ValueError, match="cycles_per_window"):
+        periodic_example._validate_common_initial_solution_metadata(
+            seed, args, tmp_path / "common.npz"
+        )
+
+
+def test_common_initial_solution_metadata_allows_a_transcription_change(tmp_path):
+    args = SimpleNamespace(
+        model_formulation="periodic_node",
+        mechanical_formulation="full",
+        cycles_per_window=1,
+        stimulations_per_cycle=30,
+        objective="fatigue",
+        objective_shape="quadratic",
+        constant_crank_torque=-0.2,
+        torque_application="constant",
+        enforce_start_constraints=False,
+        acados_wheel_q_slack=0.0,
+        acados_terminal_wheel_q_slack=0.002,
+        terminal_wheel_q_reference_mode="absolute_initial",
+        pulse_width_scaling=0.0025,
+        pulse_width_active_set="none",
+        ode_solver="rk4",
+        nlp_ordering_strategy="time_major",
+        solver="fatrop",
+    )
+    metadata = periodic_example._common_initial_solution_metadata(args)
+    metadata["ode_solver"] = "collocation"
+    metadata["producer_solver"] = "ipopt"
+    seed = periodic_example._WarmupSolutionAdapter({}, {}, metadata=metadata)
+
+    periodic_example._validate_common_initial_solution_metadata(
+        seed, args, tmp_path / "common.npz"
+    )
+
+
+def test_periodic_node_projection_uses_all_five_ding_states():
+    keys = {
+        "Cn_Biceps",
+        "F_Biceps",
+        "A_Biceps",
+        "Tau1_Biceps",
+        "Km_Biceps",
+    }
+
+    assert periodic_example._projection_state_keys(
+        "Biceps", "all", available_keys=keys
+    ) == (
+        "Cn_Biceps",
+        "F_Biceps",
+        "A_Biceps",
+        "Tau1_Biceps",
+        "Km_Biceps",
+    )
+
+
+def test_phase_one_maps_reduced_mechanics_without_classifying_them_as_fes():
+    class Variable:
+        def __init__(self, index):
+            self.index = index
+
+    nlp = SimpleNamespace(
+        states={
+            "theta": Variable([0]),
+            "omega": Variable([1]),
+            "Cn_Biceps": Variable([2]),
+            "F_Biceps": Variable([3]),
+        }
+    )
+
+    blocks = periodic_example._phase_one_state_keys(nlp)
+
+    assert blocks == {
+        "q": ("theta",),
+        "qdot": ("omega",),
+        "fes": ("Cn_Biceps", "F_Biceps"),
+    }
+    scales = periodic_example._full_dynamics_defect_state_scales(
+        nlp,
+        np.array(
+            [
+                [-100.0, -106.0],
+                [-6.0, -6.1],
+                [0.2, 0.3],
+                [5.0, 6.0],
+            ]
+        ),
+    )
+    np.testing.assert_allclose(scales[0], 2.0 * np.pi)
 
 
 def test_legacy_warmup_requires_an_explicit_compatible_torque_assertion(tmp_path):

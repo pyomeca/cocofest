@@ -331,6 +331,7 @@ jobs:
             tests/shard1/test_periodic_pulse_width.py::test_common_initial_solution_metadata_rejects_an_incompatible_horizon \
             tests/shard1/test_periodic_pulse_width.py::test_common_initial_solution_metadata_allows_a_transcription_change \
             tests/shard1/test_periodic_pulse_width.py::test_periodic_node_projection_uses_all_five_ding_states \
+            tests/shard1/test_periodic_pulse_width.py::test_phase_one_maps_reduced_mechanics_without_classifying_them_as_fes \
             tests/shard1/test_periodic_pulse_width.py::test_common_target_seed_enables_the_robust_acados_reference_preparation
 
       - name: Run the focused ${{ matrix.solver }} option screen
@@ -775,7 +776,8 @@ jobs:
             )
           fi
           # Each mechanical formulation uses one immutable target solution,
-          # produced once by IPOPT and then reused bit-for-bit by every backend.
+          # produced once by IPOPT and reused as the same physical nodal
+          # trajectory by every backend.
           # Solver-specific periodic IPOPT refinements are deliberately disabled.
 
           set -o pipefail

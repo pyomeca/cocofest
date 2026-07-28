@@ -688,7 +688,13 @@ def apply_assisted_hot_start_defaults(args: argparse.Namespace) -> None:
         if args.periodic_fes_warmup_projection_strategy == "sequential":
             args.periodic_fes_warmup_projection_strategy = "rollout"
         args.full_dynamics_phase_one = True
-        args.acados_transfer_full_dynamics_rollout = True
+        if not (
+            args.acados_transfer_full_dynamics_rollout
+            or args.acados_transfer_irk_rollout
+        ):
+            # Once the ACADOS OCP exists, advance the shifted window with the
+            # exact generated IRK map used by the solver.
+            args.acados_transfer_irk_rollout = True
         args.acados_bind_first_node_fes_states = True
     if assisted_hot_start and args.acados_control_homotopy_radii is None:
         args.acados_control_homotopy_radii = DEFAULT_ASSISTED_CONTROL_HOMOTOPY_RADII
@@ -2972,8 +2978,18 @@ def _common_initial_solution_metadata(args: argparse.Namespace) -> dict:
         "mechanical_formulation": args.mechanical_formulation,
         "cycles_per_window": int(args.cycles_per_window),
         "stimulations_per_cycle": int(args.stimulations_per_cycle),
+        "objective": sorted(parse_objectives(args.objective)),
+        "objective_shape": args.objective_shape,
         "constant_crank_torque": float(args.constant_crank_torque),
         "torque_application": args.torque_application,
+        "enforce_start_constraints": bool(args.enforce_start_constraints),
+        "first_node_wheel_q_slack": float(args.acados_wheel_q_slack),
+        "terminal_wheel_q_slack": float(args.acados_terminal_wheel_q_slack),
+        "terminal_wheel_q_reference_mode": args.terminal_wheel_q_reference_mode,
+        "pulse_width_scaling": float(args.pulse_width_scaling),
+        "pulse_width_active_set": args.pulse_width_active_set,
+        "pulse_width_minimum_policy": "model_pd0",
+        "pulse_width_maximum_s": 0.0006,
         "ode_solver": args.ode_solver,
         "nlp_ordering_strategy": getattr(args, "nlp_ordering_strategy", None),
         "producer_solver": args.solver,
@@ -3000,7 +3016,17 @@ def _validate_common_initial_solution_metadata(
         "mechanical_formulation",
         "cycles_per_window",
         "stimulations_per_cycle",
+        "objective",
+        "objective_shape",
         "torque_application",
+        "enforce_start_constraints",
+        "first_node_wheel_q_slack",
+        "terminal_wheel_q_slack",
+        "terminal_wheel_q_reference_mode",
+        "pulse_width_scaling",
+        "pulse_width_active_set",
+        "pulse_width_minimum_policy",
+        "pulse_width_maximum_s",
     ):
         if metadata.get(field) != expected[field]:
             raise ValueError(
@@ -6205,13 +6231,37 @@ def _rk4_full_dynamics_step(
     return next_state
 
 
+def _phase_one_state_keys(nlp) -> dict[str, tuple[str, ...]]:
+    """Map generic phase-I blocks onto full or reduced mechanical states."""
+
+    state_keys = tuple(nlp.states.keys())
+    position_keys = (
+        ("q",) if "q" in state_keys else (("theta",) if "theta" in state_keys else ())
+    )
+    velocity_keys = (
+        ("qdot",)
+        if "qdot" in state_keys
+        else (("omega",) if "omega" in state_keys else ())
+    )
+    mechanical_keys = set(position_keys + velocity_keys)
+    return {
+        # Keep the historical public block names so existing CLI options such
+        # as --full-dynamics-phase-one-max-q-change remain compatible.
+        "q": position_keys,
+        "qdot": velocity_keys,
+        "fes": tuple(key for key in state_keys if key not in mechanical_keys),
+    }
+
+
 def _full_dynamics_defect_state_scales(nlp, states: np.ndarray) -> np.ndarray:
     """Use a turn-invariant scale for angular coordinates."""
 
     scales = np.maximum(np.max(np.abs(states), axis=1, keepdims=True), 1.0)
-    if "q" in nlp.states.keys():
-        q_indexes = np.asarray(nlp.states["q"].index).reshape((-1,)).tolist()
-        scales[q_indexes, :] = 2.0 * np.pi
+    for position_key in _phase_one_state_keys(nlp)["q"]:
+        position_indexes = (
+            np.asarray(nlp.states[position_key].index).reshape((-1,)).tolist()
+        )
+        scales[position_indexes, :] = 2.0 * np.pi
     return scales
 
 
@@ -6258,11 +6308,8 @@ def _full_dynamics_rollout_defect_details(
     absolute_by_block = {}
     scaled_by_block = {}
     key_defects = {}
-    for block_name, key_names in {
-        "q": ("q",),
-        "qdot": ("qdot",),
-        "fes": tuple(key for key in nlp.states.keys() if key not in ("q", "qdot")),
-    }.items():
+    phase_one_keys = _phase_one_state_keys(nlp)
+    for block_name, key_names in phase_one_keys.items():
         indexes = []
         for key in key_names:
             if key in nlp.states.keys():
@@ -6302,13 +6349,18 @@ def _full_dynamics_rollout_defect_details(
         return values
 
     def worst_qdot_nodes() -> list[dict]:
-        if "qdot" not in nlp.states.keys():
+        velocity_keys = phase_one_keys["qdot"]
+        if not velocity_keys:
             return []
 
-        qdot_indexes = np.asarray(nlp.states["qdot"].index).reshape((-1,)).tolist()
+        velocity_key = velocity_keys[0]
+        position_keys = phase_one_keys["q"]
+        qdot_indexes = (
+            np.asarray(nlp.states[velocity_key].index).reshape((-1,)).tolist()
+        )
         q_indexes = (
-            np.asarray(nlp.states["q"].index).reshape((-1,)).tolist()
-            if "q" in nlp.states.keys()
+            np.asarray(nlp.states[position_keys[0]].index).reshape((-1,)).tolist()
+            if position_keys
             else []
         )
         force_indexes = {
@@ -6625,23 +6677,14 @@ def project_full_dynamics_initial_guess(
         lower[indexes, :] = key_lower
         upper[indexes, :] = key_upper
 
+    phase_one_keys = _phase_one_state_keys(nlp)
     block_indexes = {
-        "q": (
-            np.asarray(nlp.states["q"].index).reshape((-1,)).tolist()
-            if "q" in nlp.states.keys()
-            else []
-        ),
-        "qdot": (
-            np.asarray(nlp.states["qdot"].index).reshape((-1,)).tolist()
-            if "qdot" in nlp.states.keys()
-            else []
-        ),
-        "fes": [
+        block: [
             index
-            for key in nlp.states.keys()
-            if key not in ("q", "qdot")
+            for key in key_names
             for index in np.asarray(nlp.states[key].index).reshape((-1,)).tolist()
-        ],
+        ]
+        for block, key_names in phase_one_keys.items()
     }
     mutable_indexes = [
         index for block in mutable_blocks for index in block_indexes[block]
@@ -6658,7 +6701,14 @@ def project_full_dynamics_initial_guess(
         for key in nlp.x_init.keys():
             values = nlp.x_init[key].init
             values[:, : start_node + 1] = state_snapshot[key][:, : start_node + 1]
-            block = key if key in ("q", "qdot") else "fes"
+            block = next(
+                (
+                    block_name
+                    for block_name, key_names in phase_one_keys.items()
+                    if key in key_names
+                ),
+                "fes",
+            )
             if block not in mutable_blocks:
                 values[:, :] = state_snapshot[key]
 
@@ -6708,9 +6758,8 @@ def project_full_dynamics_initial_guess(
     }
 
     state_keys_by_block = {
-        "q": tuple(key for key in state_snapshot if key == "q"),
-        "qdot": tuple(key for key in state_snapshot if key == "qdot"),
-        "fes": tuple(key for key in state_snapshot if key not in ("q", "qdot")),
+        block: tuple(key for key in keys if key in state_snapshot)
+        for block, keys in phase_one_keys.items()
     }
 
     def state_change_by_block(values: dict) -> dict[str, float]:

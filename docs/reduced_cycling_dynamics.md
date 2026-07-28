@@ -193,10 +193,12 @@ solver/formulation/backend pairs and compares pulse patterns at cycles 10 and
 
 ACADOS remains the next stage. Its convergence path starts from the common
 one-cycle reduced solution, maps variables by name, projects the five Ding
-states per muscle, performs a consistent rollout with the actual dynamics, and
-keeps the absolute terminal angle. Full SQP with zeroed duals is the reference;
-RTI and faster integrator/QP variants are tested only after repeated full-SQP
-convergence.
+states per muscle, performs a complete-dynamics phase I, and advances shifted
+windows with the generated ACADOS IRK map. The phase-I mechanical blocks map
+to `q/qdot` in the full model and `theta/omega` in the reduced model. The
+absolute terminal angle is retained. Full SQP with zeroed duals is the
+reference; RTI and faster integrator/QP variants are tested only after repeated
+full-SQP convergence.
 
 The reduced formulation is experimental until muscle force, fatigue,
 stimulation patterns and terminal progress have been compared over the same
