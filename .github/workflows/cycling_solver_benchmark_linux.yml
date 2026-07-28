@@ -1,4 +1,5 @@
 name: Cycling fatigue solvers — assisted benchmark
+run-name: Cycling fatigue solvers — assisted ${{ inputs.cycles }} RHO
 
 on:
   workflow_dispatch:
