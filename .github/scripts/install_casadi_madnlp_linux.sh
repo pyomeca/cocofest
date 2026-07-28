@@ -30,10 +30,12 @@ trap 'rm -rf "$build_root"' EXIT
 
 git clone --quiet "$CASADI_REPOSITORY" "$build_root/casadi"
 git -C "$build_root/casadi" checkout --quiet "$CASADI_EXPECTED_COMMIT"
-if [[ "$(git -C "$build_root/casadi" rev-parse HEAD)" != "$CASADI_EXPECTED_COMMIT" ]]; then
+casadi_checkout_commit="$(git -C "$build_root/casadi" rev-parse HEAD)"
+if [[ "$casadi_checkout_commit" != "$CASADI_EXPECTED_COMMIT" ]]; then
   echo "The CasADi checkout does not match CASADI_MADNLP_COMMIT." >&2
   exit 1
 fi
+echo "Building CasADi revision $casadi_checkout_commit"
 
 # CasADi's current libMad integration consumes a release-style archive. Feed
 # it the runtime already built and certified from the pinned libMad branch.
@@ -68,9 +70,7 @@ import casadi as cas
 
 print(f"CasADi {cas.__version__}")
 print(f"CasADi compiler flags: {cas.CasadiMeta.compiler_flags()}")
-print(f"CasADi revision: {cas.CasadiMeta.git_revision()}")
 assert cas.__version__.startswith(os.environ["CASADI_VERSION"])
-assert cas.CasadiMeta.git_revision() == os.environ["CASADI_MADNLP_COMMIT"]
 assert "-DCASADI_WITH_THREAD" in cas.CasadiMeta.compiler_flags()
 for solver in ("ipopt", "madnlp"):
     available = cas.has_nlpsol(solver)

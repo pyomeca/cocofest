@@ -240,6 +240,13 @@ jobs:
             .cache/madnlp-pardiso \
             "$JULIAC_COMMIT"
 
+      - name: Save the certified MadNLP runtime
+        if: matrix.solver == 'madnlp' && steps.screen-madnlp-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v6
+        with:
+          path: .cache/madnlp-pardiso
+          key: libmad-pardiso-${{ inputs.runner_label }}-${{ runner.arch }}-julia-${{ env.JULIA_VERSION }}-${{ env.LIBMAD_PARDISO_COMMIT }}-${{ env.JULIAC_COMMIT }}
+
       - name: Configure the MadNLP runtime
         if: matrix.solver == 'madnlp'
         run: |
@@ -494,6 +501,13 @@ jobs:
             .benchmark-deps/libMad \
             .cache/madnlp-pardiso \
             "$JULIAC_COMMIT"
+
+      - name: Save the certified MadNLP runtime
+        if: matrix.solver == 'madnlp' && steps.madnlp-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v6
+        with:
+          path: .cache/madnlp-pardiso
+          key: libmad-pardiso-${{ inputs.runner_label }}-${{ runner.arch }}-julia-${{ env.JULIA_VERSION }}-${{ env.LIBMAD_PARDISO_COMMIT }}-${{ env.JULIAC_COMMIT }}
 
       - name: Configure the MadNLP runtime
         if: matrix.solver == 'madnlp'
