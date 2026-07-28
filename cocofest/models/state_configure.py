@@ -2,6 +2,8 @@
 Registers the bioptim states/controls used by Cocofest's FES and musculoskeletal models.
 """
 
+from __future__ import annotations
+
 from bioptim import (
     ConfigureVariables,
     NonLinearProgram,

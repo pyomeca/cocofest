@@ -2,6 +2,8 @@
 Moving horizon estimation (MHE) for a single-muscle FES model.
 """
 
+from __future__ import annotations
+
 import numpy as np
 
 from casadi import SX

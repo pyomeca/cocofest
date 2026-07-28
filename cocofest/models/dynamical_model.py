@@ -2,6 +2,8 @@
 Musculoskeletal model driven by one or more FES muscle models.
 """
 
+from __future__ import annotations
+
 from typing import Callable, List
 import numpy as np
 

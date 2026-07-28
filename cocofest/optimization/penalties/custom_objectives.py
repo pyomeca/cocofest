@@ -3,6 +3,8 @@ This class regroups objective that are not available through Bioptim and can be 
 By adding definitions to this class, you can create your own custom objective.
 """
 
+from __future__ import annotations
+
 from casadi import MX, vertcat
 from bioptim import PenaltyController
 from ...models.fes_model import FesModel

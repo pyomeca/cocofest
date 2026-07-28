@@ -2,6 +2,8 @@
 Builds the optimal control problem used to optimize a single-muscle FES model.
 """
 
+from __future__ import annotations
+
 import numpy as np
 
 from bioptim import (

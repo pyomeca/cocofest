@@ -3,6 +3,8 @@ Plots the results of an FES optimal control problem, forward simulation, musculo
 model identification.
 """
 
+from __future__ import annotations
+
 from bioptim import Solution, SolutionMerge, InterpolationType
 import matplotlib.pyplot as plt
 import numpy as np

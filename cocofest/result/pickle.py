@@ -2,6 +2,8 @@
 Exports a bioptim Solution's time, states, controls and parameters to a pickle file for later reuse.
 """
 
+from __future__ import annotations
+
 import pickle
 import numpy as np
 from bioptim import SolutionMerge

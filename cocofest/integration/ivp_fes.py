@@ -2,6 +2,8 @@
 Code used to determine the Initial Value Problem.
 """
 
+from __future__ import annotations
+
 import numpy as np
 from bioptim import (
     ControlType,

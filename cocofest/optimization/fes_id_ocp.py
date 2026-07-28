@@ -2,6 +2,8 @@
 Builds the optimal control problem used to identify FES model parameters by fitting a tracked force curve.
 """
 
+from __future__ import annotations
+
 import numpy as np
 
 from bioptim import (
