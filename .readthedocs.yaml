@@ -1,0 +1,19 @@
+# https://docs.readthedocs.io/en/stable/config-file/v2.html
+version: 2
+
+build:
+  os: ubuntu-24.04
+  tools:
+    python: "mambaforge-23.11"
+
+conda:
+  environment: docs/sphinx/environment.yml
+
+python:
+  install:
+    - requirements: docs/sphinx/requirements.txt
+    - method: pip
+      path: .
+
+sphinx:
+  configuration: docs/sphinx/conf.py

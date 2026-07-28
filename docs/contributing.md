@@ -56,7 +56,7 @@ The cocofest test suite runs automatically on GitHub with every commit, but test
 pip install -e ".[dev]"
 ```
 
-Tests are split into two shards under [`tests/`](../tests): `shard1` holds the unit tests (models, dynamics, IVP, MHE, identification), while `shard2` holds `test_run_examples.py`, which runs every script listed in `EXAMPLE_MODULES` end-to-end. CI runs both shards in parallel; locally you can run everything with `pytest tests`, or a single shard with `pytest tests/shard1` / `pytest tests/shard2`.
+Tests are split into two shards under [`tests/`](https://github.com/pyomeca/cocofest/tree/main/tests): `shard1` holds the unit tests (models, dynamics, IVP, MHE, identification), while `shard2` holds `test_run_examples.py`, which runs every script listed in `EXAMPLE_MODULES` end-to-end. CI runs both shards in parallel; locally you can run everything with `pytest tests`, or a single shard with `pytest tests/shard1` / `pytest tests/shard2`.
 
 ## Commenting
 

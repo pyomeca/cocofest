@@ -14,3 +14,7 @@ example/*.pkl
 **/cycling/result/
 
 *.pkl
+
+docs/sphinx/_build/
+docs/sphinx/api/generated/
+docs/sphinx/_generated/
