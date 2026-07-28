@@ -4,7 +4,7 @@ import pytest
 from casadi import Function, SX
 from pathlib import Path
 from types import SimpleNamespace
-from bioptim import Node, Solver
+from bioptim import BoundsList, InitialGuessList, Node, Solver
 
 import examples.fes_multibody.cycling.cycling_pulse_width_mhe_acados_periodic as periodic_example
 import examples.fes_multibody.cycling.cycling_fes_solver_comparison as comparison_example
@@ -17,6 +17,7 @@ from cocofest.optimization.fes_nmpc_multibody import (
     CompactNmpcSolution,
     FesNmpcMsk,
 )
+from cocofest.optimization.fes_ocp_multibody import OcpFesMsk
 from cocofest.models.ding2007.ding2007_with_fatigue_periodic import (
     DingModelPulseWidthFrequencyWithFatiguePeriodic,
 )
@@ -227,6 +228,41 @@ def test_high_accuracy_integrator_diagnostic_handles_time_dependent_dynamics():
     assert [row["node"] for row in rows] == [0, 1]
     assert max(row["trajectory_vs_reference"] for row in rows) < 1e-12
     assert max(row["rk4_vs_reference"] for row in rows) < 1e-12
+
+
+def test_wheel_periodicity_diagnostic_supports_reduced_theta_state():
+    class Variables(dict):
+        def __init__(self, values, shape):
+            super().__init__(values)
+            self.shape = shape
+
+    states = Variables(
+        {
+            "theta": SimpleNamespace(index=[0]),
+            "omega": SimpleNamespace(index=[1]),
+        },
+        shape=2,
+    )
+    controls = Variables({"u": SimpleNamespace(index=[0])}, shape=1)
+    nlp = SimpleNamespace(
+        states=states,
+        controls=controls,
+        x_init={
+            "theta": SimpleNamespace(init=np.array([[0.4, 0.5, 0.6]])),
+            "omega": SimpleNamespace(init=np.array([[-6.0, -6.1, -6.2]])),
+        },
+        u_init={"u": SimpleNamespace(init=np.zeros((1, 2)))},
+        numerical_data_timeseries=None,
+        dynamics_func=lambda _time, state, *_args: np.array(
+            [state[1], np.sin(state[0])]
+        ),
+    )
+    nmpc = SimpleNamespace(nlp=[nlp], cycle_duration=1.0, cycle_len=2)
+
+    diagnostic = periodic_example.wheel_angle_periodicity_diagnostics(nmpc)
+
+    assert diagnostic["max_abs_rhs_difference"] < 1e-12
+    assert diagnostic["l2_rhs_difference"] < 1e-12
 
 
 def test_solution_trace_comparisons_reports_scaled_differences():
@@ -788,6 +824,81 @@ def test_target_integrator_uses_a_distinct_periodic_ipopt_cache(
     )
 
     assert rk4 != collocation
+
+
+def test_reduced_mechanics_uses_a_distinct_periodic_ipopt_cache(
+    tmp_path, monkeypatch
+):
+    parser = periodic_example.build_argument_parser()
+    full_args = parser.parse_args([])
+    reduced_args = parser.parse_args(["--mechanical-formulation", "reduced"])
+    model_path = tmp_path / "cycling.bioMod"
+    model_path.write_text("version 4\n")
+    monkeypatch.setattr(periodic_example, "_cache_root", lambda: tmp_path)
+
+    full = periodic_example._periodic_ipopt_refinement_cache_path(
+        full_args, model_path
+    )
+    reduced = periodic_example._periodic_ipopt_refinement_cache_path(
+        reduced_args, model_path
+    )
+
+    assert full != reduced
+
+
+def test_standard_warmup_projects_reduced_mechanics_and_clips_pw():
+    class FakeKinematics:
+        @staticmethod
+        def project_generalized_trajectory(q, qdot):
+            return q[2:3, :], qdot[2:3, :], {
+                "maximum_configuration_projection_error_rad": 0.0
+            }
+
+    warmup = periodic_example._WarmupSolutionAdapter(
+        states={
+            "q": np.array([[0.0, 0.0, 0.0], [0.0, 0.0, 0.0], [0.0, -1.0, -2.0]]),
+            "qdot": np.array(
+                [[0.0, 0.0, 0.0], [0.0, 0.0, 0.0], [-1.0, -1.0, -1.0]]
+            ),
+        },
+        controls={"last_pulse_width_Biceps": np.array([[0.0, 0.0007]])},
+    )
+    target_model = SimpleNamespace(
+        reduced_dynamics=SimpleNamespace(kinematics=FakeKinematics()),
+        muscles_dynamics_model=[
+            SimpleNamespace(muscle_name="Biceps", pd0=0.000131405)
+        ],
+    )
+    target = SimpleNamespace(
+        nlp=[
+            SimpleNamespace(
+                model=target_model,
+                x_init={
+                    "theta": SimpleNamespace(init=np.zeros((1, 3))),
+                    "omega": SimpleNamespace(init=np.zeros((1, 3))),
+                },
+                u_init={
+                    "last_pulse_width_Biceps": SimpleNamespace(
+                        init=np.zeros((1, 2))
+                    )
+                },
+            )
+        ]
+    )
+
+    with pytest.warns(RuntimeWarning, match="physical Ding bounds"):
+        adapted = periodic_example._adapt_warmup_solution_to_periodic_nodes(
+            target, warmup
+        )
+
+    assert set(adapted.decision_states()) == {"theta", "omega"}
+    np.testing.assert_allclose(
+        adapted.decision_states()["theta"], [[0.0, -1.0, -2.0]]
+    )
+    np.testing.assert_allclose(
+        adapted.decision_controls()["last_pulse_width_Biceps"],
+        [[0.000131405, 0.0006]],
+    )
 
 
 def test_control_homotopy_stops_on_failure_and_restores_bounds(monkeypatch):
@@ -1839,6 +1950,14 @@ def test_external_crank_power_uses_generalized_power_sign():
     assert resistive["role"] == "resistive"
     np.testing.assert_allclose(driving["mean_power_w"], 0.4 * np.pi)
     np.testing.assert_allclose(resistive["mean_power_w"], -0.4 * np.pi)
+
+    result["args"].constant_crank_torque = -0.2
+    result["state_traces"]["omega"] = result["state_traces"].pop("qdot")[2:3, :]
+    reduced = comparison_example._external_crank_power_metrics(
+        result, cycle_count=3
+    )
+    assert reduced["role"] == "driving"
+    np.testing.assert_allclose(reduced["mean_power_w"], 0.4 * np.pi)
 
 
 def test_cycle_boundary_wheel_angle_reports_turn_error():
@@ -3162,6 +3281,96 @@ def test_pulse_width_activity_margin_only_adds_free_nodes():
     np.testing.assert_array_equal(margin_four[:30], margin_four[30:])
 
 
+def test_generic_msk_pulse_width_initial_guess_uses_ding_pd0():
+    model = _muscle_model()
+    bio_model = SimpleNamespace(
+        muscles_dynamics_model=[model],
+        nb_tau=0,
+    )
+
+    _, initial_guesses = OcpFesMsk.set_u_bounds_msk(
+        BoundsList(),
+        InitialGuessList(),
+        bio_model,
+        with_residual_torque=False,
+    )
+
+    np.testing.assert_allclose(
+        initial_guesses["last_pulse_width_Biceps"].init,
+        [[model.pd0]],
+    )
+
+
+def test_reduced_theta_seed_is_recentered_on_absolute_cycle_targets():
+    theta = np.array([[0.1, -3.0, -6.0, -9.0, -12.1]])
+    omega = -np.ones_like(theta)
+
+    corrected, audit = mhe_example.recenter_reduced_theta_seed(
+        theta,
+        omega,
+        nodes_per_cycle=2,
+        cycles=2,
+    )
+
+    np.testing.assert_allclose(
+        corrected[0, [0, 2, 4]],
+        0.1 - np.arange(3) * 2.0 * np.pi,
+    )
+    assert audit["maximum_boundary_error_before_rad"] > 0.1
+    assert audit["maximum_theta_change_rad"] > 0.1
+
+
+def test_historical_pulse_width_seed_is_clipped_with_bound_warning(tmp_path):
+    model = _muscle_model()
+    seed_path = tmp_path / "legacy-seed.pkl"
+    seed_values = np.array(
+        [0.0, model.pd0, 0.0002, 0.0008],
+        dtype=float,
+    )
+    import pickle
+
+    with seed_path.open("wb") as seed_file:
+        pickle.dump({"last_pulse_width_Biceps": seed_values}, seed_file)
+
+    with pytest.warns(
+        RuntimeWarning,
+        match=r"violates the physical Ding bounds.*below pd0.*above the maximum",
+    ):
+        _, initial_guesses, _ = mhe_example.set_u_bounds_and_init(
+            SimpleNamespace(muscles_dynamics_model=[model]),
+            n_shooting=4,
+            init_file_path=seed_path,
+        )
+
+    np.testing.assert_allclose(
+        initial_guesses["last_pulse_width_Biceps"].init,
+        [[model.pd0, model.pd0, 0.0002, 0.0006]],
+    )
+
+
+def test_non_finite_historical_pulse_width_seed_is_rejected(tmp_path):
+    model = _muscle_model()
+    seed_path = tmp_path / "invalid-seed.pkl"
+    import pickle
+
+    with seed_path.open("wb") as seed_file:
+        pickle.dump(
+            {
+                "last_pulse_width_Biceps": np.array(
+                    [model.pd0, np.nan, model.pd0]
+                )
+            },
+            seed_file,
+        )
+
+    with pytest.raises(ValueError, match="non-finite"):
+        mhe_example.set_u_bounds_and_init(
+            SimpleNamespace(muscles_dynamics_model=[model]),
+            n_shooting=3,
+            init_file_path=seed_path,
+        )
+
+
 def test_pulse_width_active_set_cli_is_shared_by_benchmark():
     periodic_args = periodic_example.build_argument_parser().parse_args(
         [
@@ -3227,6 +3436,13 @@ def test_previous_control_and_terminal_velocity_targets_are_recentered():
     np.testing.assert_allclose(control_penalty.target, [[0.0002, 0.0004, 0.0004]])
     assert updated_terminal is True
     np.testing.assert_allclose(terminal_penalty.target[:, 0], [-1.0, -2.0, -6.5])
+
+    terminal_penalty.extra_parameters["key"] = "omega"
+    updated_omega = periodic_example.apply_terminal_qdot_regularization_target(
+        nmpc, [-6.25]
+    )
+    assert updated_omega is True
+    np.testing.assert_allclose(terminal_penalty.target[:, 0], [-6.25])
 
 
 def test_updated_targets_are_copied_to_acados_cached_yrefs():
@@ -4006,6 +4222,42 @@ def test_signed_wheel_transfer_preserves_seam_and_terminal_turn():
     np.testing.assert_allclose(qdot_initial_guess[0], qdot_source)
 
 
+def test_phase_shifted_warmup_shifts_reduced_theta_and_preserves_omega():
+    theta = np.array([[0.0, -1.0, -2.0]])
+    omega = np.array([[-6.0, -6.1, -6.2]])
+    pulse_width = np.array([[0.0002, 0.0003]])
+    theta_target = np.zeros_like(theta)
+    omega_target = np.zeros_like(omega)
+    pulse_width_target = np.zeros_like(pulse_width)
+    nmpc = SimpleNamespace(
+        nlp=[
+            SimpleNamespace(
+                x_init={
+                    "theta": SimpleNamespace(init=theta_target),
+                    "omega": SimpleNamespace(init=omega_target),
+                },
+                u_init={
+                    "last_pulse_width_Biceps": SimpleNamespace(
+                        init=pulse_width_target
+                    )
+                },
+            )
+        ],
+        _wheel_cycle_shift=lambda _states: -2.0 * np.pi,
+        _correct_init_guess_to_fit_bounds=lambda **_kwargs: None,
+    )
+    warmup = periodic_example._WarmupSolutionAdapter(
+        states={"theta": theta, "omega": omega},
+        controls={"last_pulse_width_Biceps": pulse_width},
+    )
+
+    periodic_example.apply_phase_shifted_warmup_initial_guess(nmpc, warmup)
+
+    np.testing.assert_allclose(theta_target, theta - 2.0 * np.pi)
+    np.testing.assert_allclose(omega_target, omega)
+    np.testing.assert_allclose(pulse_width_target, pulse_width)
+
+
 def test_collocation_control_transfer_uses_shooting_nodes_not_state_subnodes():
     controls = {"last_pulse_width_Biceps": np.arange(60, dtype=float)[None, :]}
     target = np.zeros((1, 60))
@@ -4288,6 +4540,84 @@ def test_terminal_wheel_target_uses_absolute_cycle_reference_without_drift():
 
     np.testing.assert_allclose(q_bounds.min[2, 2], -8.0 * np.pi - 0.002)
     np.testing.assert_allclose(q_bounds.max[2, 2], -8.0 * np.pi + 0.002)
+    assert nmpc.absolute_wheel_q_cycle_index == 2
+
+
+def test_reduced_theta_target_uses_absolute_cycle_reference_without_drift():
+    theta_bounds = SimpleNamespace(
+        min=np.full((1, 3), -100.0),
+        max=np.full((1, 3), 100.0),
+    )
+    omega_bounds = SimpleNamespace(
+        min=np.full((1, 3), -100.0),
+        max=np.full((1, 3), 100.0),
+    )
+    nmpc = SimpleNamespace(
+        before_window_advance=None,
+        position_state_key="theta",
+        velocity_state_key="omega",
+        wheel_state_index=0,
+        nodes_per_cycle=1,
+        cycle_len=30,
+        time_idx_to_cycle=30,
+        n_cycles_simultaneous=2,
+        debugg_bounds=False,
+        transfer_debug=False,
+        bound_first_node_all_states=True,
+        bound_first_node_wheel_qdot=False,
+        advance_wheel_q_bounds=True,
+        anchor_terminal_wheel_to_first_node=False,
+        anchor_wheel_q_to_absolute_reference=True,
+        absolute_wheel_q_reference=0.0,
+        absolute_wheel_q_cycle_shift=-2.0 * np.pi,
+        absolute_wheel_q_cycle_index=0,
+        wheel_q_path_margin=2.0,
+        use_signed_wheel_shift=True,
+        first_node_state_slack={"theta": [0.0]},
+        terminal_state_slack={"theta": [0.002]},
+        nlp=[
+            SimpleNamespace(
+                x_bounds={"theta": theta_bounds, "omega": omega_bounds}
+            )
+        ],
+        _wheel_cycle_shift=lambda states: -2.0 * np.pi,
+        _state_slack_for=lambda key, index: 0.0,
+        _terminal_state_slack_for=lambda key, index: (
+            0.002 if key == "theta" and index == 0 else 0.0
+        ),
+        update_stim=lambda: None,
+        _sync_acados_state_bounds=lambda: None,
+    )
+    omega = np.full((1, 3), -2.0 * np.pi)
+
+    for cycle_index in range(2):
+        theta = np.array(
+            [
+                [
+                    -2.0 * np.pi * cycle_index + 0.005 * cycle_index,
+                    -2.0 * np.pi * (cycle_index + 1)
+                    + 0.005 * (cycle_index + 1),
+                    -2.0 * np.pi * (cycle_index + 2)
+                    + 0.005 * (cycle_index + 2),
+                ]
+            ]
+        )
+        solution = SimpleNamespace(
+            decision_states=lambda to_merge=None, theta=theta: {
+                "theta": theta,
+                "omega": omega,
+            }
+        )
+        MyCyclicNMPC.advance_window_bounds_states(
+            nmpc, solution, n_cycles_simultaneous=2
+        )
+
+    np.testing.assert_allclose(
+        theta_bounds.min[0, 2], -8.0 * np.pi - 0.002
+    )
+    np.testing.assert_allclose(
+        theta_bounds.max[0, 2], -8.0 * np.pi + 0.002
+    )
     assert nmpc.absolute_wheel_q_cycle_index == 2
 
 

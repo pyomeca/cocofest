@@ -10,9 +10,9 @@ on:
         default: ubuntu-24.04
         type: string
       cycles:
-        description: Maximum one-cycle RHO windows, or "screen" for the option matrix
+        description: Number of RHO solves, or "screen" for the option matrix
         required: true
-        default: "100"
+        default: "30"
         type: string
       crank_assistance_nm:
         description: Driving crank assistance magnitude in N.m
@@ -117,9 +117,9 @@ jobs:
             --solvers ipopt \
             --objective fatigue \
             --ipopt-profile periodic_collocation \
-            --cycles-per-window 1 \
+            --cycles-per-window 2 \
             --stimulations-per-cycle 30 \
-            --n-windows 1 \
+            --n-windows 2 \
             --n-threads "$BENCHMARK_THREADS" \
             --crank-assistance "${{ inputs.crank_assistance_nm }}" \
             --standard-warmup-seed .github/benchmark-seeds/legacy-resistive-0p22-warmup.npz \
@@ -135,7 +135,10 @@ jobs:
             --compact-rho-output \
             --print-traces \
             --output-json "$GITHUB_WORKSPACE/benchmark-seed-result/seed-check.json"
-          jq -e '.results[0].success == true' \
+          jq -e '
+            .results[0] |
+            (.success == true and .attempted_windows == 1)
+          ' \
             "$GITHUB_WORKSPACE/benchmark-seed-result/seed-check.json"
           cp .github/benchmark-seeds/legacy-resistive-0p22-warmup.npz \
             benchmark-seed-result/common-continuation-warmup.npz
@@ -403,7 +406,7 @@ jobs:
           retention-days: 30
 
   benchmark:
-    name: ${{ matrix.solver }} — ${{ inputs.cycles }} RHO
+    name: ${{ matrix.solver }} / ${{ matrix.mechanics }} — ${{ matrix.benchmark_rhos }} RHO
     if: inputs.cycles != 'screen'
     needs: prepare-seed
     runs-on: ${{ inputs.runner_label }}
@@ -414,14 +417,37 @@ jobs:
       matrix:
         include:
           - solver: ipopt
+            mechanics: full
+            benchmark_rhos: ${{ inputs.cycles }}
+            cycles_per_window: 2
             bioptim_commit: 3523f1745e315f07761159d7e06bd2d876026704
             integration_branch: codex/fatrop-cocofest-benchmark
             casadi_cxx_abi: 0
           - solver: fatrop
+            mechanics: full
+            benchmark_rhos: ${{ inputs.cycles }}
+            cycles_per_window: 2
             bioptim_commit: 3523f1745e315f07761159d7e06bd2d876026704
             integration_branch: codex/fatrop-cocofest-benchmark
             casadi_cxx_abi: 0
           - solver: madnlp
+            mechanics: full
+            benchmark_rhos: ${{ inputs.cycles }}
+            cycles_per_window: 2
+            bioptim_commit: 3523f1745e315f07761159d7e06bd2d876026704
+            integration_branch: codex/fatrop-cocofest-benchmark
+            casadi_cxx_abi: 1
+          - solver: ipopt
+            mechanics: reduced
+            benchmark_rhos: ${{ inputs.cycles }}
+            cycles_per_window: 2
+            bioptim_commit: 3523f1745e315f07761159d7e06bd2d876026704
+            integration_branch: codex/fatrop-cocofest-benchmark
+            casadi_cxx_abi: 0
+          - solver: madnlp
+            mechanics: reduced
+            benchmark_rhos: ${{ inputs.cycles }}
+            cycles_per_window: 2
             bioptim_commit: 3523f1745e315f07761159d7e06bd2d876026704
             integration_branch: codex/fatrop-cocofest-benchmark
             casadi_cxx_abi: 1
@@ -626,6 +652,7 @@ jobs:
             tests/shard1/test_plot_backend.py \
             tests/test_cycling_benchmark_summary.py \
             tests/test_solver_option_screen_summary.py \
+            tests/shard1/test_reduced_cycling.py \
             tests/shard1/test_periodic_pulse_width.py::test_stimulation_snapshots_use_one_based_cycles_and_real_crank_phase \
             tests/shard1/test_periodic_pulse_width.py::test_common_primal_threshold_is_independent_of_nlp_solver_tolerance \
             tests/shard1/test_periodic_pulse_width.py::test_github_benchmark_compares_physical_threshold_not_solver_tolerance
@@ -633,7 +660,9 @@ jobs:
       - name: Run the ${{ matrix.solver }} assisted benchmark
         env:
           PYTHONPATH: ${{ github.workspace }}
-          BENCHMARK_CYCLES: ${{ inputs.cycles }}
+          BENCHMARK_RHOS: ${{ matrix.benchmark_rhos }}
+          BENCHMARK_MECHANICS: ${{ matrix.mechanics }}
+          BENCHMARK_CYCLES_PER_WINDOW: ${{ matrix.cycles_per_window }}
           BENCHMARK_ASSISTANCE: ${{ inputs.crank_assistance_nm }}
           BENCHMARK_Q_SLACK: ${{ inputs.terminal_wheel_q_slack }}
           BENCHMARK_MAX_ITER: ${{ inputs.solver_max_iterations }}
@@ -643,6 +672,11 @@ jobs:
           BIOPTIM_INTEGRATION_BRANCH: ${{ matrix.integration_branch }}
         run: |
           mkdir -p benchmark-results
+          if ! [[ "$BENCHMARK_RHOS" =~ ^[1-9][0-9]*$ ]]; then
+            echo "BENCHMARK_RHOS must be a strictly positive integer." >&2
+            exit 1
+          fi
+          BENCHMARK_CYCLES=$((BENCHMARK_RHOS + BENCHMARK_CYCLES_PER_WINDOW - 1))
           solver_options=()
           solver_tolerance=1e-6
           if [[ "$BENCHMARK_SOLVER" == "ipopt" ]]; then
@@ -674,13 +708,21 @@ jobs:
               --optional-nlp-periodic-ipopt-hot-start
             )
           fi
+          if [[ "$BENCHMARK_MECHANICS" == "reduced" ]]; then
+            solver_options+=(
+              --mechanical-formulation reduced
+            )
+          fi
+          # Both mechanics use the same validated two-cycle seed. The reduced
+          # adapter projects q/qdot onto theta/omega, and every loaded PW is
+          # explicitly clipped to [pd0, 600 us] with a visible warning.
 
           set -o pipefail
           python examples/fes_multibody/cycling/cycling_fes_solver_comparison.py \
             --solvers "$BENCHMARK_SOLVER" \
             --objective fatigue \
             --ipopt-profile periodic_collocation \
-            --cycles-per-window 1 \
+            --cycles-per-window "$BENCHMARK_CYCLES_PER_WINDOW" \
             --stimulations-per-cycle 30 \
             --n-windows "$BENCHMARK_CYCLES" \
             --n-threads "$BENCHMARK_THREADS" \
@@ -699,23 +741,24 @@ jobs:
             --terminal-wheel-q-slack "$BENCHMARK_Q_SLACK" \
             --compact-rho-output \
             --print-traces \
-            --output-json "$GITHUB_WORKSPACE/benchmark-results/${BENCHMARK_SOLVER}.json" \
+            --output-json "$GITHUB_WORKSPACE/benchmark-results/${BENCHMARK_SOLVER}-${BENCHMARK_MECHANICS}.json" \
             "${solver_options[@]}" \
-            2>&1 | tee "benchmark-results/${BENCHMARK_SOLVER}.log"
+            2>&1 | tee "benchmark-results/${BENCHMARK_SOLVER}-${BENCHMARK_MECHANICS}.log"
 
       - name: Add the result to the job summary
         if: always()
         shell: bash
         env:
           BENCHMARK_SOLVER: ${{ matrix.solver }}
+          BENCHMARK_MECHANICS: ${{ matrix.mechanics }}
         run: |
-          result="benchmark-results/${BENCHMARK_SOLVER}.json"
+          result="benchmark-results/${BENCHMARK_SOLVER}-${BENCHMARK_MECHANICS}.json"
           if [[ ! -f "$result" ]]; then
             echo "### ${BENCHMARK_SOLVER}: no JSON result" >> "$GITHUB_STEP_SUMMARY"
             exit 0
           fi
           {
-            echo "### ${BENCHMARK_SOLVER}"
+            echo "### ${BENCHMARK_SOLVER} / ${BENCHMARK_MECHANICS}"
             echo
             echo "| Field | Value |"
             echo "|---|---:|"
@@ -740,7 +783,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: cycling-fatigue-linux-${{ matrix.solver }}-${{ github.run_id }}
+          name: cycling-fatigue-linux-${{ matrix.solver }}-${{ matrix.mechanics }}-${{ github.run_id }}
           path: benchmark-results/
           if-no-files-found: warn
           retention-days: 30
@@ -750,8 +793,9 @@ jobs:
         shell: bash
         env:
           BENCHMARK_SOLVER: ${{ matrix.solver }}
+          BENCHMARK_MECHANICS: ${{ matrix.mechanics }}
         run: |
-          result="benchmark-results/${BENCHMARK_SOLVER}.json"
+          result="benchmark-results/${BENCHMARK_SOLVER}-${BENCHMARK_MECHANICS}.json"
           if [[ ! -f "$result" ]]; then
             echo "${BENCHMARK_SOLVER}: benchmark JSON is missing." >&2
             exit 1
@@ -845,7 +889,7 @@ jobs:
           fi
           python .github/scripts/summarize_cycling_benchmark.py \
             --output-dir benchmark-report \
-            --expected-solvers ipopt,fatrop,madnlp \
+            --expected-cases ipopt/full,fatrop/full,madnlp/full,ipopt/reduced,madnlp/reduced \
             "${result_files[@]}"
           cat benchmark-report/benchmark-comparison.md >> "$GITHUB_STEP_SUMMARY"
 

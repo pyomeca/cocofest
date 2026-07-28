@@ -126,5 +126,92 @@ def test_markdown_distinguishes_successful_windows_from_strict_prefix():
 
     assert "RHO résolus" in markdown
     assert "Préfixe strict" in markdown
-    assert "| MADNLP | 1.0e-08 | 1.0e-05 | non | 99/100 | 85/100 | 86 |" in markdown
+    assert (
+        "| MADNLP/FULL | 1.0e-08 | 1.0e-05 | non | 99/100 | 85/100 | 86 |"
+        in markdown
+    )
     assert "même si les fenêtres suivantes récupèrent" in markdown
+
+
+def test_markdown_states_that_internal_solver_tolerances_are_backend_specific():
+    entry = {
+        "runtime": {},
+        "configuration": {
+            "mechanical_formulation": "full",
+            "nlp_tolerance": 1e-8,
+            "primal_feasibility_threshold": 1e-5,
+        },
+        "result": {
+            "solver": "madnlp",
+            "windows": [],
+            "stimulation_patterns": {},
+        },
+    }
+
+    markdown = summary.render_markdown([entry], [])
+
+    assert "Comparabilité du problème et des critères physiques" in markdown
+    assert "tolérances internes sont propres à chaque backend" in markdown
+    assert "même seuil de faisabilité physique" in markdown
+
+
+def test_configuration_comparability_is_scoped_by_mechanical_formulation():
+    def entry(solver, mechanics, n_windows):
+        return {
+            "configuration": {
+                "mechanical_formulation": mechanics,
+                "n_windows": n_windows,
+            },
+            "result": {"solver": solver},
+        }
+
+    entries = [
+        entry("ipopt", "full", 31),
+        entry("madnlp", "full", 31),
+        entry("ipopt", "reduced", 31),
+        entry("madnlp", "reduced", 31),
+    ]
+
+    assert summary.configuration_mismatches(entries) == []
+    entries[-1]["configuration"]["n_windows"] = 30
+    mismatches = summary.configuration_mismatches(entries)
+
+    assert len(mismatches) == 1
+    assert mismatches[0]["case"] == "madnlp/reduced"
+    assert mismatches[0]["reference_case"] == "ipopt/reduced"
+
+
+def test_requested_rho_count_accounts_for_multi_cycle_window():
+    entry = {
+        "configuration": {"n_windows": 31, "cycles_per_window": 2},
+        "result": {"solver": "ipopt"},
+    }
+
+    assert summary._requested_rho_count(entry) == 30
+
+
+def test_mechanical_pattern_comparison_uses_full_as_reference():
+    def entry(mechanics, values):
+        return {
+            "configuration": {"mechanical_formulation": mechanics},
+            "result": {
+                "solver": "ipopt",
+                "stimulation_patterns": {
+                    "cycle_10": {
+                        "available": True,
+                        "cycle": 10,
+                        "crank_phase_rad": [0.0, 1.0],
+                        "muscles": {"Biceps": {"pulse_width_s": values}},
+                    }
+                },
+            },
+        }
+
+    comparisons = summary.mechanical_stimulation_comparisons(
+        [entry("full", [100e-6, 200e-6]), entry("reduced", [101e-6, 201e-6])]
+    )
+
+    assert len(comparisons) == 1
+    assert comparisons[0]["reference_case"] == "ipopt/full"
+    assert comparisons[0]["case"] == "ipopt/reduced"
+    assert math.isclose(comparisons[0]["root_mean_square_error_us"], 1.0)

@@ -15,6 +15,7 @@ COMPARABILITY_FIELDS = (
     "objective",
     "objective_shape",
     "model_formulation",
+    "mechanical_formulation",
     "torque_application",
     "ode_solver",
     "collocation_degree",
@@ -33,6 +34,13 @@ COMPARABILITY_FIELDS = (
     "primal_feasibility_threshold",
 )
 DEFAULT_EXPECTED_SOLVERS = ("ipopt", "fatrop", "madnlp")
+DEFAULT_EXPECTED_CASES = (
+    "ipopt/full",
+    "fatrop/full",
+    "madnlp/full",
+    "ipopt/reduced",
+    "madnlp/reduced",
+)
 
 
 def _finite(value) -> float | None:
@@ -53,6 +61,36 @@ def _fmt_scientific(value, digits: int = 1) -> str:
     return "—" if value is None else f"{value:.{digits}e}"
 
 
+def _mechanical_formulation(entry: dict) -> str:
+    return str(
+        entry.get("configuration", {}).get("mechanical_formulation") or "full"
+    ).lower()
+
+
+def _entry_case(entry: dict) -> str:
+    return (
+        f"{entry['result'].get('solver', 'unknown').lower()}/"
+        f"{_mechanical_formulation(entry)}"
+    )
+
+
+def _entry_label(entry: dict) -> str:
+    return _entry_case(entry).upper()
+
+
+def _requested_rho_count(entry: dict) -> int | None:
+    requested_cycles = entry.get("configuration", {}).get("n_windows")
+    cycles_per_window = (
+        entry.get("configuration", {}).get("cycles_per_window") or 1
+    )
+    try:
+        requested_cycles = int(requested_cycles)
+        cycles_per_window = int(cycles_per_window)
+    except (TypeError, ValueError):
+        return None
+    return max(0, requested_cycles - cycles_per_window + 1)
+
+
 def load_benchmark_files(paths: list[Path]) -> list[dict]:
     entries = []
     for path in paths:
@@ -68,35 +106,49 @@ def load_benchmark_files(paths: list[Path]) -> list[dict]:
                     "result": result,
                 }
             )
-    entries.sort(key=lambda entry: entry["result"]["solver"])
+    mechanics_order = {"full": 0, "reduced": 1}
+    entries.sort(
+        key=lambda entry: (
+            mechanics_order.get(_mechanical_formulation(entry), 99),
+            entry["result"]["solver"],
+        )
+    )
     return entries
 
 
 def configuration_mismatches(entries: list[dict]) -> list[dict]:
     if not entries:
         return []
-    reference = next(
-        (
+    mismatches = []
+    formulations = dict.fromkeys(_mechanical_formulation(entry) for entry in entries)
+    for formulation in formulations:
+        group = [
             entry
             for entry in entries
-            if entry["result"].get("solver") == "ipopt"
-        ),
-        entries[0],
-    )
-    mismatches = []
-    for entry in entries:
-        for field in COMPARABILITY_FIELDS:
-            expected = reference["configuration"].get(field)
-            observed = entry["configuration"].get(field)
-            if observed != expected:
-                mismatches.append(
-                    {
-                        "solver": entry["result"]["solver"],
-                        "field": field,
-                        "expected": expected,
-                        "observed": observed,
-                    }
-                )
+            if _mechanical_formulation(entry) == formulation
+        ]
+        reference = next(
+            (
+                entry
+                for entry in group
+                if entry["result"].get("solver") == "ipopt"
+            ),
+            group[0],
+        )
+        for entry in group:
+            for field in COMPARABILITY_FIELDS:
+                expected = reference["configuration"].get(field)
+                observed = entry["configuration"].get(field)
+                if observed != expected:
+                    mismatches.append(
+                        {
+                            "case": _entry_case(entry),
+                            "reference_case": _entry_case(reference),
+                            "field": field,
+                            "expected": expected,
+                            "observed": observed,
+                        }
+                    )
     return mismatches
 
 
@@ -211,103 +263,170 @@ def _phase_aligned_pattern_comparison(
     )
 
 
+def _paired_stimulation_comparisons(
+    reference_entry: dict,
+    compared_entry: dict,
+    *,
+    comparison_kind: str,
+) -> list[dict]:
+    rows = []
+    reference_patterns = (
+        reference_entry["result"].get("stimulation_patterns") or {}
+    )
+    compared_patterns = compared_entry["result"].get("stimulation_patterns") or {}
+    for checkpoint, reference_snapshot in reference_patterns.items():
+        compared_snapshot = compared_patterns.get(checkpoint) or {}
+        base = {
+            "comparison_kind": comparison_kind,
+            "reference_case": _entry_case(reference_entry),
+            "case": _entry_case(compared_entry),
+            "solver": compared_entry["result"]["solver"],
+            "mechanical_formulation": _mechanical_formulation(compared_entry),
+            "checkpoint": checkpoint,
+        }
+        if not (
+            reference_snapshot.get("available")
+            and compared_snapshot.get("available")
+        ):
+            rows.append(
+                {
+                    **base,
+                    "available": False,
+                    "reason": (
+                        reference_snapshot.get("reason")
+                        or compared_snapshot.get("reason")
+                        or "missing_snapshot"
+                    ),
+                }
+            )
+            continue
+        common_muscles = sorted(
+            set(reference_snapshot.get("muscles") or {})
+            & set(compared_snapshot.get("muscles") or {})
+        )
+        reference_phase = reference_snapshot.get("crank_phase_rad") or []
+        compared_phase = compared_snapshot.get("crank_phase_rad") or []
+        if len(reference_phase) == len(compared_phase) and reference_phase:
+            crank_phase_rmse = math.sqrt(
+                sum(
+                    math.atan2(
+                        math.sin(float(compared) - float(reference)),
+                        math.cos(float(compared) - float(reference)),
+                    )
+                    ** 2
+                    for reference, compared in zip(
+                        reference_phase, compared_phase
+                    )
+                )
+                / len(reference_phase)
+            )
+        else:
+            crank_phase_rmse = None
+        for muscle in common_muscles:
+            metrics = _pattern_comparison(
+                reference_snapshot["muscles"][muscle],
+                compared_snapshot["muscles"][muscle],
+            )
+            phase_aligned_metrics = _phase_aligned_pattern_comparison(
+                reference_snapshot["muscles"][muscle],
+                compared_snapshot["muscles"][muscle],
+                reference_phase,
+                compared_phase,
+            )
+            rows.append(
+                {
+                    **base,
+                    "cycle": reference_snapshot.get("cycle"),
+                    "muscle": muscle,
+                    "available": metrics is not None,
+                    "crank_phase_root_mean_square_error_rad": crank_phase_rmse,
+                    **(metrics or {"reason": "incompatible_pattern_dimensions"}),
+                    **(
+                        {
+                            f"phase_aligned_{key}": value
+                            for key, value in phase_aligned_metrics.items()
+                        }
+                        if phase_aligned_metrics
+                        else {}
+                    ),
+                }
+            )
+    return rows
+
+
 def stimulation_comparisons(entries: list[dict]) -> list[dict]:
-    reference_entry = next(
-        (
+    rows = []
+    for formulation in dict.fromkeys(
+        _mechanical_formulation(entry) for entry in entries
+    ):
+        group = [
             entry
             for entry in entries
-            if entry["result"].get("solver") == "ipopt"
-        ),
-        None,
-    )
-    if reference_entry is None:
-        return []
-    reference_patterns = reference_entry["result"].get("stimulation_patterns") or {}
-    rows = []
-    for entry in entries:
-        solver = entry["result"]["solver"]
-        if solver == "ipopt":
+            if _mechanical_formulation(entry) == formulation
+        ]
+        reference_entry = next(
+            (
+                entry
+                for entry in group
+                if entry["result"].get("solver") == "ipopt"
+            ),
+            None,
+        )
+        if reference_entry is None:
             continue
-        compared_patterns = entry["result"].get("stimulation_patterns") or {}
-        for checkpoint, reference_snapshot in reference_patterns.items():
-            compared_snapshot = compared_patterns.get(checkpoint) or {}
-            if not (
-                reference_snapshot.get("available")
-                and compared_snapshot.get("available")
-            ):
-                rows.append(
-                    {
-                        "reference_solver": "ipopt",
-                        "solver": solver,
-                        "checkpoint": checkpoint,
-                        "available": False,
-                        "reason": (
-                            reference_snapshot.get("reason")
-                            or compared_snapshot.get("reason")
-                            or "missing_snapshot"
-                        ),
-                    }
-                )
+        for entry in group:
+            if entry is reference_entry:
                 continue
-            common_muscles = sorted(
-                set(reference_snapshot.get("muscles") or {})
-                & set(compared_snapshot.get("muscles") or {})
+            rows.extend(
+                _paired_stimulation_comparisons(
+                    reference_entry,
+                    entry,
+                    comparison_kind="solver_within_formulation",
+                )
             )
-            reference_phase = reference_snapshot.get("crank_phase_rad") or []
-            compared_phase = compared_snapshot.get("crank_phase_rad") or []
-            if len(reference_phase) == len(compared_phase) and reference_phase:
-                crank_phase_rmse = math.sqrt(
-                    sum(
-                        math.atan2(
-                            math.sin(float(compared) - float(reference)),
-                            math.cos(float(compared) - float(reference)),
-                        )
-                        ** 2
-                        for reference, compared in zip(
-                            reference_phase, compared_phase
-                        )
-                    )
-                    / len(reference_phase)
-                )
-            else:
-                crank_phase_rmse = None
-            for muscle in common_muscles:
-                metrics = _pattern_comparison(
-                    reference_snapshot["muscles"][muscle],
-                    compared_snapshot["muscles"][muscle],
-                )
-                phase_aligned_metrics = _phase_aligned_pattern_comparison(
-                    reference_snapshot["muscles"][muscle],
-                    compared_snapshot["muscles"][muscle],
-                    reference_phase,
-                    compared_phase,
-                )
-                rows.append(
-                    {
-                        "reference_solver": "ipopt",
-                        "solver": solver,
-                        "checkpoint": checkpoint,
-                        "cycle": reference_snapshot.get("cycle"),
-                        "muscle": muscle,
-                        "available": metrics is not None,
-                        "crank_phase_root_mean_square_error_rad": crank_phase_rmse,
-                        **(metrics or {"reason": "incompatible_pattern_dimensions"}),
-                        **(
-                            {
-                                f"phase_aligned_{key}": value
-                                for key, value in phase_aligned_metrics.items()
-                            }
-                            if phase_aligned_metrics
-                            else {}
-                        ),
-                    }
-                )
+    return rows
+
+
+def mechanical_stimulation_comparisons(entries: list[dict]) -> list[dict]:
+    """Compare full and reduced mechanics for each solver at cycles 10 and 30."""
+
+    rows = []
+    for solver in dict.fromkeys(entry["result"]["solver"] for entry in entries):
+        full_entry = next(
+            (
+                entry
+                for entry in entries
+                if entry["result"]["solver"] == solver
+                and _mechanical_formulation(entry) == "full"
+            ),
+            None,
+        )
+        reduced_entry = next(
+            (
+                entry
+                for entry in entries
+                if entry["result"]["solver"] == solver
+                and _mechanical_formulation(entry) == "reduced"
+            ),
+            None,
+        )
+        if full_entry is None or reduced_entry is None:
+            continue
+        rows.extend(
+            _paired_stimulation_comparisons(
+                full_entry,
+                reduced_entry,
+                comparison_kind="reduced_against_full",
+            )
+        )
     return rows
 
 
 def write_rho_csv(path: Path, entries: list[dict]) -> None:
     fieldnames = (
         "solver",
+        "mechanical_formulation",
+        "case",
         "rho",
         "status",
         "native_status",
@@ -331,12 +450,16 @@ def write_rho_csv(path: Path, entries: list[dict]) -> None:
                 writer.writerow(
                     {
                         "solver": solver,
+                        "mechanical_formulation": _mechanical_formulation(entry),
+                        "case": _entry_case(entry),
                         **{
                             field: window.get(field)
                             for field in fieldnames
                             if field
                             not in {
                                 "solver",
+                                "mechanical_formulation",
+                                "case",
                                 "effective_primal_infeasibility",
                                 "inf_pr_available",
                             }
@@ -352,6 +475,8 @@ def write_rho_csv(path: Path, entries: list[dict]) -> None:
 def write_stimulation_csv(path: Path, entries: list[dict]) -> None:
     fieldnames = (
         "solver",
+        "mechanical_formulation",
+        "case",
         "cycle",
         "rho",
         "muscle",
@@ -379,6 +504,10 @@ def write_stimulation_csv(path: Path, entries: list[dict]) -> None:
                         writer.writerow(
                             {
                                 "solver": solver,
+                                "mechanical_formulation": _mechanical_formulation(
+                                    entry
+                                ),
+                                "case": _entry_case(entry),
                                 "cycle": snapshot.get("cycle"),
                                 "rho": snapshot.get("rho"),
                                 "muscle": muscle,
@@ -403,34 +532,42 @@ def write_stimulation_csv(path: Path, entries: list[dict]) -> None:
 def render_markdown(
     entries: list[dict],
     mismatches: list[dict],
-    missing_solvers: tuple[str, ...] = (),
+    missing_cases: tuple[str, ...] = (),
+    *,
+    missing_solvers: tuple[str, ...] | None = None,
 ) -> str:
+    if missing_solvers and not missing_cases:
+        missing_cases = missing_solvers
     bioptim_commits = {
         entry["runtime"].get("provenance", {}).get("BIOPTIM_BENCHMARK_COMMIT")
         for entry in entries
         if entry["runtime"].get("provenance", {}).get("BIOPTIM_BENCHMARK_COMMIT")
     }
     requested_horizons = {
-        entry["configuration"].get("n_windows")
+        _requested_rho_count(entry)
         for entry in entries
-        if entry["configuration"].get("n_windows") is not None
+        if _requested_rho_count(entry) is not None
     }
     horizon_label = (
         f"{next(iter(requested_horizons))} RHO"
         if len(requested_horizons) == 1
         else "horizons mixtes"
     )
-    if missing_solvers:
+    if missing_cases:
         comparability = (
-            "Comparabilité des configurations : **INCOMPLÈTE** "
-            f"(solveurs manquants : {', '.join(name.upper() for name in missing_solvers)})"
+            "Comparabilité du problème et des critères physiques : "
+            "**INCOMPLÈTE** "
+            f"(cas manquants : {', '.join(name.upper() for name in missing_cases)})"
         )
     elif mismatches:
         comparability = (
-            f"Comparabilité des configurations : **ÉCHEC ({len(mismatches)} écarts)**"
+            "Comparabilité du problème et des critères physiques : "
+            f"**ÉCHEC ({len(mismatches)} écarts)**"
         )
     else:
-        comparability = "Comparabilité des configurations : **OK**"
+        comparability = (
+            "Comparabilité du problème et des critères physiques : **OK**"
+        )
     lines = [
         f"# Benchmark cyclage FES — {horizon_label}",
         "",
@@ -440,16 +577,31 @@ def render_markdown(
             if len(bioptim_commits) <= 1
             else "**Attention : branches d’intégration Bioptim différentes selon le backend.**"
         ),
+        (
+            "Les tolérances internes sont propres à chaque backend et ne font "
+            "volontairement pas partie de ce verdict; elles sont affichées "
+            "séparément. Le même seuil de faisabilité physique est exigé."
+        ),
         "",
-        "| Solveur | Tol. interne | Seuil physique | Convergence | RHO résolus | Préfixe strict | 1er échec | Mur-à-mur (s) | Préparation (s) | Mur/RHO médian (s) | Mur/RHO P90 (s) | Arrêt |",
-        "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|",
+        "| Solveur/formulation | Tol. interne | Seuil physique | Convergence | RHO résolus | Préfixe strict | 1er échec | Mur-à-mur (s) | Préparation (s) | Profil réduit (s) | Mur/RHO médian (s) | Mur/RHO P90 (s) | Arrêt |",
+        "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|",
     ]
     for entry in entries:
         row = entry["result"]
-        requested = entry["configuration"].get("n_windows")
+        requested = _requested_rho_count(entry)
+        validated_windows = row.get(
+            "validated_windows",
+            row.get(
+                "validated_cycles",
+                sum(
+                    bool(window.get("validated"))
+                    for window in row.get("windows") or []
+                ),
+            ),
+        )
         lines.append(
-            "| {solver} | {solver_tolerance} | {physical_threshold} | {success} | {successful}/{attempted} | {validated}/{requested} | {first_failed_rho} | {e2e} | {prep} | {median} | {p90} | {stop} |".format(
-                solver=row["solver"].upper(),
+            "| {case} | {solver_tolerance} | {physical_threshold} | {success} | {successful}/{attempted} | {validated}/{requested} | {first_failed_rho} | {e2e} | {prep} | {profile} | {median} | {p90} | {stop} |".format(
+                case=_entry_label(entry),
                 solver_tolerance=_fmt_scientific(
                     entry["configuration"].get("nlp_tolerance")
                 ),
@@ -459,11 +611,12 @@ def render_markdown(
                 success="oui" if row.get("success") else "non",
                 successful=row.get("successful_windows", 0),
                 attempted=row.get("attempted_windows", 0),
-                validated=row.get("validated_cycles", 0),
+                validated=validated_windows,
                 requested=requested if requested is not None else "—",
                 first_failed_rho=row.get("first_failed_rho") or "—",
                 e2e=_fmt(row.get("end_to_end_wall_time_s")),
                 prep=_fmt(row.get("initial_guess_preparation_time_s")),
+                profile=_fmt(row.get("reduced_profile_build_time_s")),
                 median=_fmt(row.get("hot_wall_time_median_s")),
                 p90=_fmt(row.get("hot_wall_time_p90_s")),
                 stop=(row.get("stop") or {}).get("label", "—"),
@@ -484,13 +637,14 @@ def render_markdown(
                 "",
                 "## Écarts de configuration",
                 "",
-                "| Solveur | Champ | Référence | Observé |",
-                "|---|---|---|---|",
+                "| Cas | Référence | Champ | Référence | Observé |",
+                "|---|---|---|---|---|",
             ]
         )
         for mismatch in mismatches:
             lines.append(
-                f"| {mismatch['solver']} | {mismatch['field']} | "
+                f"| {mismatch['case']} | {mismatch['reference_case']} | "
+                f"{mismatch['field']} | "
                 f"`{mismatch['expected']}` | `{mismatch['observed']}` |"
             )
 
@@ -499,12 +653,12 @@ def render_markdown(
             "",
             "## Temps de chaque RHO",
             "",
-            "| Solveur | RHO | Statut | Statut natif | Faisable | Validé | Itérations | Mur (s) | Solveur (s) |",
+            "| Solveur/formulation | RHO | Statut | Statut natif | Faisable | Validé | Itérations | Mur (s) | Solveur (s) |",
             "|---|---:|---:|---|---:|---:|---:|---:|---:|",
         ]
     )
     for entry in entries:
-        solver = entry["result"]["solver"].upper()
+        solver = _entry_label(entry)
         for row in entry["result"].get("windows") or []:
             lines.append(
                 f"| {solver} | {row.get('rho')} | {row.get('status')} | "
@@ -521,12 +675,12 @@ def render_markdown(
             "",
             "Les points de contrôle sont des cycles/RHO du même run, pas des OCP contenant simultanément ce nombre de cycles.",
             "",
-            "| Solveur | Cycle | Muscle | Min (µs) | Moyenne (µs) | Max (µs) | Borne basse | Borne haute |",
+            "| Solveur/formulation | Cycle | Muscle | Min (µs) | Moyenne (µs) | Max (µs) | Borne basse | Borne haute |",
             "|---|---:|---|---:|---:|---:|---:|---:|",
         ]
     )
     for entry in entries:
-        solver = entry["result"]["solver"].upper()
+        solver = _entry_label(entry)
         for snapshot in (
             entry["result"].get("stimulation_patterns") or {}
         ).values():
@@ -549,24 +703,53 @@ def render_markdown(
     lines.extend(
         [
             "",
-            "### Écarts des patrons par rapport à IPOPT",
+            "### Écarts des patrons par rapport à IPOPT de la même formulation",
             "",
             "La comparaison brute est faite par indice de stimulation. La comparaison réalignée interpole le patron du solveur selon l’angle réel du pédalier sur la grille angulaire IPOPT.",
             "",
-            "| Solveur | Cycle | Muscle | RMSE brute (µs) | RMSE réalignée (µs) | Max abs. brut (µs) | Corr. brute | Corr. réalignée | RMSE phase (rad) |",
+            "| Solveur/formulation | Cycle | Muscle | RMSE brute (µs) | RMSE réalignée (µs) | Max abs. brut (µs) | Corr. brute | Corr. réalignée | RMSE phase (rad) |",
             "|---|---:|---|---:|---:|---:|---:|---:|---:|",
         ]
     )
     for comparison in stimulation_comparisons(entries):
         if not comparison.get("available"):
             lines.append(
-                f"| {comparison['solver'].upper()} | "
+                f"| {comparison['case'].upper()} | "
                 f"{comparison.get('cycle', '—')} | indisponible: "
                 f"{comparison.get('reason')} | — | — | — | — | — | — |"
             )
             continue
         lines.append(
-            f"| {comparison['solver'].upper()} | {comparison['cycle']} | "
+            f"| {comparison['case'].upper()} | {comparison['cycle']} | "
+            f"{comparison['muscle']} | "
+            f"{_fmt(comparison['root_mean_square_error_us'])} | "
+            f"{_fmt(comparison.get('phase_aligned_root_mean_square_error_us'))} | "
+            f"{_fmt(comparison['maximum_absolute_error_us'])} | "
+            f"{_fmt(comparison.get('correlation'))} | "
+            f"{_fmt(comparison.get('phase_aligned_correlation'))} | "
+            f"{_fmt(comparison.get('crank_phase_root_mean_square_error_rad'))} |"
+        )
+    lines.extend(
+        [
+            "",
+            "### Effet de la réduction mécanique sur les patrons",
+            "",
+            "La formulation complète est la référence; les écarts sont calculés séparément pour IPOPT et MadNLP.",
+            "",
+            "| Solveur/formulation réduite | Cycle | Muscle | RMSE brute (µs) | RMSE réalignée (µs) | Max abs. brut (µs) | Corr. brute | Corr. réalignée | RMSE phase (rad) |",
+            "|---|---:|---|---:|---:|---:|---:|---:|---:|",
+        ]
+    )
+    for comparison in mechanical_stimulation_comparisons(entries):
+        if not comparison.get("available"):
+            lines.append(
+                f"| {comparison['case'].upper()} | "
+                f"{comparison.get('cycle', '—')} | indisponible: "
+                f"{comparison.get('reason')} | — | — | — | — | — | — |"
+            )
+            continue
+        lines.append(
+            f"| {comparison['case'].upper()} | {comparison['cycle']} | "
             f"{comparison['muscle']} | "
             f"{_fmt(comparison['root_mean_square_error_us'])} | "
             f"{_fmt(comparison.get('phase_aligned_root_mean_square_error_us'))} | "
@@ -585,7 +768,18 @@ def main() -> None:
     parser.add_argument(
         "--expected-solvers",
         default=",".join(DEFAULT_EXPECTED_SOLVERS),
-        help="Comma-separated solver set required for a complete report.",
+        help=(
+            "Legacy comma-separated solver set required for a complete report. "
+            "Ignored when --expected-cases is provided."
+        ),
+    )
+    parser.add_argument(
+        "--expected-cases",
+        default=None,
+        help=(
+            "Comma-separated solver/formulation cases required for a complete "
+            "report, for example ipopt/full,ipopt/reduced."
+        ),
     )
     args = parser.parse_args()
 
@@ -595,6 +789,7 @@ def main() -> None:
     args.output_dir.mkdir(parents=True, exist_ok=True)
     mismatches = configuration_mismatches(entries)
     comparisons = stimulation_comparisons(entries)
+    mechanical_comparisons = mechanical_stimulation_comparisons(entries)
     expected_solvers = tuple(
         dict.fromkeys(
             solver.strip().lower()
@@ -608,6 +803,23 @@ def main() -> None:
     missing_solvers = tuple(
         solver for solver in expected_solvers if solver not in present_solvers
     )
+    expected_cases = (
+        tuple(
+            dict.fromkeys(
+                case.strip().lower()
+                for case in args.expected_cases.split(",")
+                if case.strip()
+            )
+        )
+        if args.expected_cases is not None
+        else ()
+    )
+    present_cases = {_entry_case(entry) for entry in entries}
+    missing_cases = (
+        tuple(case for case in expected_cases if case not in present_cases)
+        if expected_cases
+        else missing_solvers
+    )
     bioptim_commits = sorted(
         {
             entry["runtime"].get("provenance", {}).get("BIOPTIM_BENCHMARK_COMMIT")
@@ -619,16 +831,23 @@ def main() -> None:
     )
     combined = {
         "schema_version": 1,
-        "complete_solver_matrix": not missing_solvers,
+        "complete_solver_matrix": not missing_cases,
         "expected_solvers": expected_solvers,
         "present_solvers": sorted(present_solvers),
         "missing_solvers": missing_solvers,
-        "comparable_configuration": not mismatches and not missing_solvers,
+        "expected_cases": expected_cases,
+        "present_cases": sorted(present_cases),
+        "missing_cases": missing_cases,
+        "comparable_configuration": not mismatches and not missing_cases,
+        "comparable_problem_and_physical_criteria": (
+            not mismatches and not missing_cases
+        ),
         "configuration_mismatches": mismatches,
         "same_bioptim_commit": len(bioptim_commits) <= 1,
         "bioptim_commits": bioptim_commits,
         "entries": entries,
         "stimulation_comparisons_against_ipopt": comparisons,
+        "stimulation_comparisons_reduced_against_full": mechanical_comparisons,
     }
     (args.output_dir / "benchmark-comparison.json").write_text(
         json.dumps(combined, indent=2, sort_keys=True) + "\n",
@@ -637,12 +856,13 @@ def main() -> None:
     write_rho_csv(args.output_dir / "rho-timings.csv", entries)
     write_stimulation_csv(args.output_dir / "stimulation-patterns.csv", entries)
     (args.output_dir / "benchmark-comparison.md").write_text(
-        render_markdown(entries, mismatches, missing_solvers),
+        render_markdown(entries, mismatches, missing_cases),
         encoding="utf-8",
     )
-    if missing_solvers:
+    if missing_cases:
         raise SystemExit(
-            "Incomplete solver matrix; missing: " + ", ".join(missing_solvers)
+            "Incomplete solver/formulation matrix; missing: "
+            + ", ".join(missing_cases)
         )
 
 

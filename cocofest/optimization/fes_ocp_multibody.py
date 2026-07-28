@@ -274,7 +274,11 @@ class OcpFesMsk(OcpFes):
             max_bound = max_bound if max_bound else 0.0006
             for model in models:
                 key = "last_pulse_width_" + str(model.muscle_name)
-                u_init.add(key=key, initial_guess=[0], phase=0)
+                # ``pd0`` is the physical zero-recruitment pulse width in the
+                # Ding model.  A zero-valued initial guess is outside the
+                # admissible domain and would produce a negative recruitment
+                # if it were evaluated before the NLP projects it.
+                u_init.add(key=key, initial_guess=[model.pd0], phase=0)
                 u_bounds.add(key=key, min_bound=[model.pd0], max_bound=[max_bound], phase=0)
 
         if isinstance(models[0], DingModelPulseIntensityFrequency):

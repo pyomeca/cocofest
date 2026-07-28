@@ -52,6 +52,7 @@ BENCHMARK_CONFIGURATION_FIELDS = (
     "objective",
     "objective_shape",
     "model_formulation",
+    "mechanical_formulation",
     "torque_application",
     "ode_solver",
     "collocation_degree",
@@ -552,14 +553,23 @@ def _external_crank_power_metrics(result: dict, cycle_count: int) -> dict:
     metrics["torque_nm"] = float(torque)
 
     limited = _truncate_result_to_cycles(result, cycle_count)
-    qdot = limited.get("state_traces", {}).get("qdot")
+    state_traces = limited.get("state_traces", {})
+    qdot = state_traces.get("qdot")
+    velocity_index = 2
+    if qdot is None:
+        qdot = state_traces.get("omega")
+        velocity_index = 0
     if qdot is None:
         return metrics
     qdot = np.asarray(qdot, dtype=float)
-    if qdot.ndim != 2 or qdot.shape[0] < 3 or qdot.shape[1] == 0:
+    if (
+        qdot.ndim != 2
+        or qdot.shape[0] <= velocity_index
+        or qdot.shape[1] == 0
+    ):
         return metrics
 
-    power = float(torque) * qdot[2, :]
+    power = float(torque) * qdot[velocity_index, :]
     if not np.all(np.isfinite(power)):
         return metrics
     if power.size == 1:
@@ -1808,11 +1818,20 @@ def _stimulation_pattern_snapshot(result: dict, cycle: int) -> dict:
         crank_direction * (cycle_wheel_angle - wheel_angle[start]),
         2.0 * np.pi,
     ).tolist()
-    qdot = limited.get("state_traces", {}).get("qdot")
+    state_traces = limited.get("state_traces", {})
+    qdot = state_traces.get("qdot")
+    velocity_index = 2
+    if qdot is None:
+        qdot = state_traces.get("omega")
+        velocity_index = 0
     if qdot is not None:
         qdot = np.asarray(qdot, dtype=float)
-        if qdot.ndim == 2 and qdot.shape[0] >= 3 and qdot.shape[1] >= stop:
-            crank_velocity = qdot[2, start:stop]
+        if (
+            qdot.ndim == 2
+            and qdot.shape[0] > velocity_index
+            and qdot.shape[1] >= stop
+        ):
+            crank_velocity = qdot[velocity_index, start:stop]
             if np.all(np.isfinite(crank_velocity)):
                 snapshot["crank_velocity_rad_s"] = crank_velocity.tolist()
 
@@ -1953,6 +1972,7 @@ def solver_overview_rows(results: dict[str, dict]) -> list[dict]:
                 "solver_success": bool(result.get("solver_success")),
                 "physical_success": bool(result.get("physical_success")),
                 "status": None if status is None else int(status),
+                "validated_windows": performance["successful_prefix_windows"],
                 "validated_cycles": performance["validated_cycles"],
                 "attempted_windows": result.get("attempted_windows"),
                 "successful_windows": result.get("successful_windows"),
@@ -1975,6 +1995,9 @@ def solver_overview_rows(results: dict[str, dict]) -> list[dict]:
                     result.get("end_to_end_wall_time_s")
                 ),
                 "initial_guess_preparation_time_s": preparation_time,
+                "reduced_profile_build_time_s": _finite_float(
+                    result.get("reduced_profile_build_time_s")
+                ),
                 "attempted_rho_wall_time_sum_s": attempted_rho_wall_time,
                 "unattributed_wall_time_s": unattributed_wall_time,
                 "validated_solver_time_s": performance["successful_solver_time_s"],
@@ -2140,6 +2163,8 @@ def main(
     cycles_per_window: int = 1,
     stimulations_per_cycle: int = 30,
     n_windows: int = 2,
+    mechanical_formulation: str = "full",
+    reduced_cycling_profile: str | Path | None = None,
     n_threads: int | None = None,
     compact_rho_output: bool = False,
     resistive_torque: float = DEFAULT_CRANK_TORQUE_NM,
@@ -2744,6 +2769,30 @@ def main(
         "madnlp": madnlp_args,
         "alpaqa": alpaqa_args,
     }
+    if mechanical_formulation not in ("full", "reduced"):
+        raise ValueError("mechanical_formulation must be 'full' or 'reduced'.")
+    if mechanical_formulation == "reduced":
+        unsupported = set(solvers) - {"ipopt", "madnlp"}
+        if unsupported:
+            raise ValueError(
+                "Reduced mechanics are currently certified only for IPOPT and "
+                f"MadNLP; remove {', '.join(sorted(unsupported))}."
+            )
+        for solver_name in ("ipopt", "madnlp"):
+            solver_args[solver_name].mechanical_formulation = "reduced"
+            solver_args[solver_name].reduced_cycling_profile = (
+                None
+                if reduced_cycling_profile is None
+                else Path(reduced_cycling_profile)
+            )
+            solver_args[solver_name].model_formulation = "periodic_node"
+            solver_args[solver_name].torque_application = "constant"
+            solver_args[
+                solver_name
+            ].disable_periodic_fes_warmup_projection = True
+    else:
+        for solver_configuration in solver_args.values():
+            solver_configuration.mechanical_formulation = "full"
     print(f"NLP reference profile: {ipopt_label}")
     results = {}
     for solver_name in solvers:
@@ -2796,6 +2845,21 @@ def build_cli() -> argparse.ArgumentParser:
             "Number of cycles to validate; overlapping solve count is "
             "n_windows - cycles_per_window + 1."
         ),
+    )
+    parser.add_argument(
+        "--mechanical-formulation",
+        choices=("full", "reduced"),
+        default="full",
+        help=(
+            "Benchmark the full constrained mechanics or the experimental "
+            "theta/omega reduction. Reduced mode accepts IPOPT and MadNLP."
+        ),
+    )
+    parser.add_argument(
+        "--reduced-cycling-profile",
+        type=Path,
+        default=None,
+        help="Optional cached .npz profile used in reduced mode.",
     )
     parser.add_argument(
         "--n-threads",
@@ -3617,6 +3681,8 @@ if __name__ == "__main__":
         cycles_per_window=args.cycles_per_window,
         stimulations_per_cycle=args.stimulations_per_cycle,
         n_windows=args.n_windows,
+        mechanical_formulation=args.mechanical_formulation,
+        reduced_cycling_profile=args.reduced_cycling_profile,
         n_threads=args.n_threads,
         compact_rho_output=args.compact_rho_output,
         resistive_torque=args.resistive_torque,

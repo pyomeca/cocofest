@@ -14,6 +14,7 @@ from pathlib import Path
 import sys
 from sys import platform as sys_platform
 from time import perf_counter
+import warnings
 
 import numpy as np
 
@@ -46,11 +47,23 @@ from cocofest.optimization.solver_backends import (
     NLP_SOLVER_NAMES,
     configure_nlp_solver,
 )
+from cocofest.dynamics.reduced_cycling import (
+    ReducedCyclingDynamics,
+    build_reduced_cycling_dynamics,
+)
 
 try:
-    from .cycling_pulse_width_mhe import prepare_nmpc, set_fes_model
+    from .cycling_pulse_width_mhe import (
+        prepare_nmpc,
+        set_fes_model,
+        validate_and_clip_pulse_width_seed,
+    )
 except ImportError:
-    from cycling_pulse_width_mhe import prepare_nmpc, set_fes_model
+    from cycling_pulse_width_mhe import (
+        prepare_nmpc,
+        set_fes_model,
+        validate_and_clip_pulse_width_seed,
+    )
 
 OBJECTIVE_TO_WEIGHT_INDEX = {"force": 0, "fatigue": 1, "control": 2}
 DEFAULT_CRANK_ASSISTANCE_NM = 0.2
@@ -832,6 +845,25 @@ def build_argument_parser() -> argparse.ArgumentParser:
         help=(
             "Use exact node-wise periodic calcium forcing, the continuous periodic surrogate, "
             "or the historical finite stimulation history."
+        ),
+    )
+    parser.add_argument(
+        "--mechanical-formulation",
+        choices=("full", "reduced"),
+        default="full",
+        help=(
+            "Use the full three-coordinate constrained mechanics or the "
+            "experimental theta/omega tangent-projected mechanics. The "
+            "reduced formulation currently targets IPOPT and MadNLP validation."
+        ),
+    )
+    parser.add_argument(
+        "--reduced-cycling-profile",
+        type=Path,
+        default=None,
+        help=(
+            "Optional .npz reduced-mechanics profile. When omitted in reduced "
+            "mode, a profile is generated once under result/cache."
         ),
     )
     parser.add_argument(
@@ -2748,13 +2780,14 @@ def _warmup_cache_path(
 def _periodic_ipopt_refinement_cache_path(
     args: argparse.Namespace,
     model_path: Path,
-    cache_version: int = 4,
+    cache_version: int = 5,
 ) -> Path:
     repository_root = Path(__file__).resolve().parents[3]
     payload = {
         "kind": "periodic_ipopt_refinement",
         "cache_version": int(cache_version),
         "model_formulation": args.model_formulation,
+        "mechanical_formulation": args.mechanical_formulation,
         "cycles_per_window": args.cycles_per_window,
         "stimulations_per_cycle": args.stimulations_per_cycle,
         "objective": args.objective,
@@ -2791,6 +2824,15 @@ def _periodic_ipopt_refinement_cache_path(
             _source_stamp(
                 repository_root / "cocofest" / "models" / "dynamical_model.py"
             ),
+            _source_stamp(
+                repository_root / "cocofest" / "dynamics" / "reduced_cycling.py"
+            ),
+            _source_stamp(
+                repository_root
+                / "cocofest"
+                / "models"
+                / "reduced_cycling_model.py"
+            ),
         ],
     }
     if cache_version >= 3:
@@ -2799,6 +2841,18 @@ def _periodic_ipopt_refinement_cache_path(
         )
     if cache_version >= 4:
         payload["terminal_wheel_q_reference_mode"] = "absolute_initial"
+    if cache_version >= 5 and args.mechanical_formulation == "reduced":
+        reduced_profile = getattr(args, "reduced_cycling_profile", None)
+        payload["reduced_cycling_profile"] = (
+            _source_stamp(Path(reduced_profile))
+            if reduced_profile is not None
+            else {
+                "source": "auto_generated",
+                "sample_count": 181,
+                "kinematic_order": 12,
+                "dynamics_order": 12,
+            }
+        )
     return _cache_root() / f"periodic_ipopt_{_short_hash(payload)}.npz"
 
 
@@ -3405,11 +3459,17 @@ def _split_receding_solution(sol) -> tuple:
 def _wheel_trace_from_exported_cycles(
     merged_solution, exported_cycle_solutions: list
 ) -> np.ndarray:
+    def wheel_trace(solution):
+        states = solution.decision_states(to_merge=SolutionMerge.NODES)
+        if "theta" in states:
+            return np.asarray(states["theta"])[0, :]
+        return np.asarray(states["q"])[2, :]
+
     if not exported_cycle_solutions:
-        return merged_solution.decision_states(to_merge=SolutionMerge.NODES)["q"][2, :]
+        return wheel_trace(merged_solution)
 
     cycle_traces = [
-        cycle_solution.decision_states(to_merge=SolutionMerge.NODES)["q"][2, :]
+        wheel_trace(cycle_solution)
         for cycle_solution in exported_cycle_solutions
     ]
     return np.concatenate(
@@ -5315,10 +5375,12 @@ def _wheel_q_state_scaling(nmpc) -> float:
     """Return the wheel-angle decision scaling used by the NLP."""
 
     try:
+        position_key = getattr(nmpc, "position_state_key", "q")
+        position_index = getattr(nmpc, "wheel_state_index", 2)
         scaling = np.asarray(
-            nmpc.nlp[0].x_scaling["q"].scaling, dtype=float
+            nmpc.nlp[0].x_scaling[position_key].scaling, dtype=float
         ).reshape((-1,))
-        wheel_q_scaling = float(scaling[2])
+        wheel_q_scaling = float(scaling[position_index])
     except (AttributeError, IndexError, KeyError, TypeError):
         return 1.0
     if not np.isfinite(wheel_q_scaling) or wheel_q_scaling <= 0.0:
@@ -5590,10 +5652,15 @@ def build_single_shot_summary(
     absolute_cycle_reference: float | None = None,
     absolute_cycle_tolerance: float | None = None,
 ) -> dict:
-    wheel_trace = sol.decision_states(to_merge=SolutionMerge.NODES)["q"][2, :]
+    states = sol.decision_states(to_merge=SolutionMerge.NODES)
+    wheel_trace = (
+        np.asarray(states["theta"])[0, :]
+        if "theta" in states
+        else np.asarray(states["q"])[2, :]
+    )
     state_traces = {
         key: np.asarray(values)
-        for key, values in sol.decision_states(to_merge=SolutionMerge.NODES).items()
+        for key, values in states.items()
     }
     control_traces = {
         key: np.asarray(values)
@@ -6775,9 +6842,22 @@ def wheel_angle_periodicity_diagnostics(nmpc, node: int = 0) -> dict[str, float]
     n_control_nodes = nlp.u_init[first_control_key].init.shape[1]
     states = _stack_initial_guess_values(nlp.x_init, nlp.states, n_state_nodes)
     controls = _stack_initial_guess_values(nlp.u_init, nlp.controls, n_control_nodes)
-    q_indexes = np.asarray(nlp.states["q"].index).reshape((-1,))
-    if q_indexes.size < 3:
-        raise ValueError("The cycling model must expose the crank as q[2].")
+    if "q" in nlp.states:
+        crank_indexes = np.asarray(nlp.states["q"].index).reshape((-1,))
+        if crank_indexes.size < 3:
+            raise ValueError("The full cycling model must expose the crank as q[2].")
+        crank_state_index = int(crank_indexes[2])
+    elif "theta" in nlp.states:
+        crank_indexes = np.asarray(nlp.states["theta"].index).reshape((-1,))
+        if crank_indexes.size != 1:
+            raise ValueError(
+                "The reduced cycling model must expose one scalar theta state."
+            )
+        crank_state_index = int(crank_indexes[0])
+    else:
+        raise KeyError(
+            "The cycling model must expose the crank angle as q[2] or theta."
+        )
     if node < 0 or node >= n_control_nodes:
         raise ValueError("The periodicity diagnostic node is outside the horizon.")
 
@@ -6785,7 +6865,7 @@ def wheel_angle_periodicity_diagnostics(nmpc, node: int = 0) -> dict[str, float]
     numerical_data = _numerical_timeseries_at_node(nlp, node)
     base_state = states[:, node].copy()
     shifted_state = base_state.copy()
-    shifted_state[int(q_indexes[2])] += 2.0 * np.pi
+    shifted_state[crank_state_index] += 2.0 * np.pi
     base_rhs = _full_dynamics_rhs(
         nlp, node * dt, dt, base_state, controls[:, node], numerical_data
     )
@@ -8421,14 +8501,102 @@ def _adapt_warmup_solution_to_periodic_nodes(
     target_state_len = periodic_nmpc.nlp[0].x_init[first_state_key].init.shape[1]
     target_control_len = periodic_nmpc.nlp[0].u_init[first_control_key].init.shape[1]
 
-    adapted_states = {
+    resampled_states = {
         key: _resample_warmup_data(values, target_state_len, has_terminal_node=True)
         for key, values in warmup_states.items()
     }
-    adapted_controls = {
-        key: _resample_warmup_data(values, target_control_len, has_terminal_node=False)
-        for key, values in warmup_controls.items()
+    target_state_keys = set(periodic_nmpc.nlp[0].x_init.keys())
+    if (
+        {"theta", "omega"} <= target_state_keys
+        and "q" in resampled_states
+        and "qdot" in resampled_states
+    ):
+        reduced_dynamics = getattr(
+            periodic_nmpc.nlp[0].model, "reduced_dynamics", None
+        )
+        if reduced_dynamics is None:
+            raise RuntimeError(
+                "The reduced warm-start target does not expose reduced_dynamics."
+            )
+        theta, omega, projection_audit = (
+            reduced_dynamics.kinematics.project_generalized_trajectory(
+                resampled_states["q"],
+                resampled_states["qdot"],
+            )
+        )
+        maximum_projection_error = projection_audit[
+            "maximum_configuration_projection_error_rad"
+        ]
+        if maximum_projection_error <= 1e-2:
+            resampled_states["theta"] = theta
+            resampled_states["omega"] = omega
+        else:
+            # A legacy q/qdot trajectory can belong to a visibly different
+            # contact/phase convention. Keep its Ding states and controls, but
+            # do not let that mechanical mismatch move the absolute crank
+            # reference of the reduced OCP.
+            resampled_states["theta"] = np.asarray(
+                periodic_nmpc.nlp[0].x_init["theta"].init, dtype=float
+            ).copy()
+            resampled_states["omega"] = np.asarray(
+                periodic_nmpc.nlp[0].x_init["omega"].init, dtype=float
+            ).copy()
+            warnings.warn(
+                "The loaded full-mechanics warm-start requires a "
+                f"{maximum_projection_error:.3e} rad projection correction, "
+                "above the 1e-2 rad safety threshold. Its mechanical q/qdot "
+                "seed was rejected; the contact-consistent theta/omega seed "
+                "was retained while Ding states and pulse widths were reused.",
+                RuntimeWarning,
+                stacklevel=2,
+            )
+    adapted_states = {
+        key: values
+        for key, values in resampled_states.items()
+        if key in target_state_keys
     }
+    missing_states = target_state_keys - set(adapted_states)
+    if missing_states:
+        raise KeyError(
+            "Warm-start seed is missing target state(s): "
+            + ", ".join(sorted(missing_states))
+        )
+    target_control_keys = set(periodic_nmpc.nlp[0].u_init.keys())
+    target_muscle_models = getattr(
+        getattr(periodic_nmpc.nlp[0], "model", None),
+        "muscles_dynamics_model",
+        (),
+    )
+    pulse_width_lower_bounds = {
+        f"last_pulse_width_{model.muscle_name}": float(model.pd0)
+        for model in target_muscle_models
+        if hasattr(model, "pd0")
+    }
+    adapted_controls = {
+        key: _resample_warmup_data(
+            (
+                validate_and_clip_pulse_width_seed(
+                    values,
+                    key=key,
+                    pd0=pulse_width_lower_bounds[key],
+                    maximum=0.0006,
+                    source="standard warm-start",
+                )
+                if key in pulse_width_lower_bounds
+                else values
+            ),
+            target_control_len,
+            has_terminal_node=False,
+        )
+        for key, values in warmup_controls.items()
+        if key in target_control_keys
+    }
+    missing_controls = target_control_keys - set(adapted_controls)
+    if missing_controls:
+        raise KeyError(
+            "Warm-start seed is missing target control(s): "
+            + ", ".join(sorted(missing_controls))
+        )
     return _WarmupSolutionAdapter(adapted_states, adapted_controls)
 
 
@@ -8842,6 +9010,12 @@ def apply_phase_shifted_warmup_initial_guess(
         values = np.asarray(states[key], dtype=float).copy()
         if key == "q":
             values[-1, :] += wheel_shift
+        elif key == "theta":
+            if values.shape[0] != 1:
+                raise ValueError(
+                    "The reduced cycling warm-start must expose one theta row."
+                )
+            values[0, :] += wheel_shift
         target = periodic_nmpc.nlp[0].x_init[key].init
         if values.shape != target.shape:
             raise ValueError(
@@ -9399,7 +9573,7 @@ def apply_terminal_qdot_regularization_target(periodic_nmpc, target) -> bool:
         if not penalty:
             continue
         key = getattr(penalty, "extra_parameters", {}).get("key")
-        if key != "qdot" or not penalty.node or penalty.node[0] != Node.END:
+        if key not in ("qdot", "omega") or not penalty.node or penalty.node[0] != Node.END:
             continue
         penalty.target = target
         return True
@@ -9563,22 +9737,30 @@ def set_acados_runtime_control_regularization_weight(
 def set_terminal_wheel_q_bound_slack(periodic_nmpc, slack: float) -> None:
     if slack < 0:
         raise ValueError("Terminal wheel q slack must be non-negative.")
-    bounds = periodic_nmpc.nlp[0].x_bounds["q"]
+    position_key = getattr(periodic_nmpc, "position_state_key", "q")
+    position_index = getattr(periodic_nmpc, "wheel_state_index", 2)
+    bounds = periodic_nmpc.nlp[0].x_bounds[position_key]
     center = getattr(periodic_nmpc, "_cocofest_terminal_wheel_q_center", None)
     if center is None:
-        q_init = np.asarray(periodic_nmpc.nlp[0].x_init["q"].init, dtype=float)
-        center = float(q_init[2, -1])
+        q_init = np.asarray(
+            periodic_nmpc.nlp[0].x_init[position_key].init, dtype=float
+        )
+        center = float(q_init[position_index, -1])
         periodic_nmpc._cocofest_terminal_wheel_q_center = center
-    bounds.min[2, 2] = center - slack
-    bounds.max[2, 2] = center + slack
+    bounds.min[position_index, 2] = center - slack
+    bounds.max[position_index, 2] = center + slack
     periodic_nmpc._sync_acados_state_bounds()
 
 
 def recenter_terminal_wheel_q_bound_slack(periodic_nmpc, slack: float) -> dict:
     """Recenter a terminal-angle continuation after the MHE bounds shift."""
 
-    bounds = periodic_nmpc.nlp[0].x_bounds["q"]
-    center = 0.5 * float(bounds.min[2, 2] + bounds.max[2, 2])
+    position_key = getattr(periodic_nmpc, "position_state_key", "q")
+    position_index = getattr(periodic_nmpc, "wheel_state_index", 2)
+    bounds = periodic_nmpc.nlp[0].x_bounds[position_key]
+    center = 0.5 * float(
+        bounds.min[position_index, 2] + bounds.max[position_index, 2]
+    )
     periodic_nmpc._cocofest_terminal_wheel_q_center = center
     set_terminal_wheel_q_bound_slack(periodic_nmpc, slack)
     return {
@@ -10337,6 +10519,75 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
     model_path = (
         example_dir / "../../msk_models/Wu/Modified_Wu_Shoulder_Model_Cycling.bioMod"
     )
+    reduced_cycling_dynamics = None
+    reduced_profile_build_time_s = 0.0
+    if args.mechanical_formulation == "reduced":
+        if not args.compact_rho_output:
+            warnings.warn(
+                "Reduced mechanics currently use compact RHO output because "
+                "Bioptim's aggregate multibody solution builder expects a "
+                "BiorbdModel. Compact output preserves all benchmark traces "
+                "without reconstructing that incompatible aggregate model.",
+                RuntimeWarning,
+                stacklevel=2,
+            )
+            args.compact_rho_output = True
+        if args.solver == "acados":
+            raise ValueError(
+                "The reduced theta/omega OCP must first be certified with "
+                "IPOPT and MadNLP before enabling ACADOS RTI."
+            )
+        if args.torque_application != "constant":
+            raise ValueError(
+                "Reduced mechanics require --torque-application constant."
+            )
+        reduced_profile_path = (
+            args.reduced_cycling_profile
+            if args.reduced_cycling_profile is not None
+            else example_dir
+            / "result"
+            / "cache"
+            / "reduced_cycling_fourier12.npz"
+        )
+        if reduced_profile_path.exists():
+            try:
+                reduced_cycling_dynamics = ReducedCyclingDynamics.load(
+                    reduced_profile_path
+                )
+            except (KeyError, ValueError) as error:
+                warnings.warn(
+                    f"Ignoring stale reduced mechanics profile "
+                    f"'{reduced_profile_path}': {error}",
+                    RuntimeWarning,
+                    stacklevel=2,
+                )
+        if (
+            reduced_cycling_dynamics is None
+            or reduced_cycling_dynamics.muscle_geometry is None
+        ):
+            reduced_build_start = perf_counter()
+            reduced_cycling_dynamics, reduced_build_audit = (
+                build_reduced_cycling_dynamics(
+                    model_path,
+                    sample_count=181,
+                    kinematic_order=12,
+                    dynamics_order=12,
+                )
+            )
+            reduced_profile_path.parent.mkdir(parents=True, exist_ok=True)
+            reduced_cycling_dynamics.save(reduced_profile_path)
+            reduced_profile_build_time_s = perf_counter() - reduced_build_start
+            if echo:
+                print(
+                    "reduced_mechanics_profile: generated "
+                    f"({reduced_profile_path}, "
+                    f"{reduced_profile_build_time_s:.3f} s, "
+                    "fit_error="
+                    f"{reduced_build_audit['maximum_kinematic_fit_error_rad']:.3e} rad)"
+                )
+        elif echo:
+            print(f"reduced_mechanics_profile: loaded ({reduced_profile_path})")
+    args.reduced_profile_build_time_s = reduced_profile_build_time_s
     acados_seed_cache_path = (
         _acados_seed_cache_path(args, model_path) if args.solver == "acados" else None
     )
@@ -10446,6 +10697,8 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
             if historical_init_guess_path is not None
             else None
         ),
+        "mechanical_formulation": args.mechanical_formulation,
+        "reduced_cycling_dynamics": reduced_cycling_dynamics,
     }
     nmpc_simulation_conditions = dict(simulation_conditions)
     if args.solver == "acados":
@@ -10502,9 +10755,22 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
     # numerical backend. Apply them to periodic IPOPT diagnostics as well so a
     # backend comparison starts from the same bounds and primal trajectory.
     if args.solver == "acados" or periodic_cn_sum_approximation:
+        position_key = nmpc.position_state_key
+        velocity_key = nmpc.velocity_state_key
+        wheel_index = nmpc.wheel_state_index
+        position_slack = (
+            [args.acados_wheel_q_slack]
+            if position_key == "theta"
+            else [0.0, 0.0, args.acados_wheel_q_slack]
+        )
+        velocity_slack = (
+            [args.acados_wheel_qdot_slack]
+            if velocity_key == "omega"
+            else [0.0, 0.0, args.acados_wheel_qdot_slack]
+        )
         nmpc.first_node_state_slack = {
-            "q": [0.0, 0.0, args.acados_wheel_q_slack],
-            "qdot": [0.0, 0.0, args.acados_wheel_qdot_slack],
+            position_key: position_slack,
+            velocity_key: velocity_slack,
             "Cn_": 5e-3,
             "Cn_sum_": 5e-3,
             "F_": 1e-2,
@@ -10513,7 +10779,11 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
             "Km_": 5e-3,
         }
         nmpc.terminal_state_slack = {
-            "q": [0.0, 0.0, args.acados_terminal_wheel_q_slack],
+            position_key: (
+                [args.acados_terminal_wheel_q_slack]
+                if position_key == "theta"
+                else [0.0, 0.0, args.acados_terminal_wheel_q_slack]
+            ),
         }
         set_terminal_wheel_q_bound_slack(nmpc, args.acados_terminal_wheel_q_slack)
         # The periodic-node states have the same physical meaning as the
@@ -10529,7 +10799,9 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
         nmpc.anchor_terminal_wheel_to_first_node = False
         nmpc.anchor_wheel_q_to_absolute_reference = True
         nmpc.absolute_wheel_q_reference = float(
-            np.asarray(nmpc.nlp[0].x_init["q"].init, dtype=float)[2, 0]
+            np.asarray(
+                nmpc.nlp[0].x_init[position_key].init, dtype=float
+            )[wheel_index, 0]
         )
         nmpc.absolute_wheel_q_cycle_shift = -2.0 * np.pi
         nmpc.absolute_wheel_q_cycle_index = 0
@@ -10561,6 +10833,12 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
 
     if echo:
         print(f"model_formulation: {args.model_formulation}")
+        print(f"mechanical_formulation: {args.mechanical_formulation}")
+        if args.mechanical_formulation == "reduced":
+            print(
+                "reduced_profile_build_time_s: "
+                f"{args.reduced_profile_build_time_s:.6f}"
+            )
         print(f"torque_application: {args.torque_application}")
         print(f"crank_torque_nm: {args.constant_crank_torque}")
         print(f"crank_torque_role: {args.crank_torque_role}")
@@ -11310,7 +11588,10 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
             )
 
     if args.terminal_qdot_regularization_weight:
-        qdot_guess = np.asarray(nmpc.nlp[0].x_init["qdot"].init, dtype=float)
+        velocity_key = "omega" if "omega" in nmpc.nlp[0].x_init else "qdot"
+        qdot_guess = np.asarray(
+            nmpc.nlp[0].x_init[velocity_key].init, dtype=float
+        )
         terminal_qdot = (
             qdot_guess[:, 0]
             if args.terminal_qdot_regularization_target_source == "first_node"
@@ -11501,9 +11782,13 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
             acados_window_diagnostics.append(completed_window_diagnostics)
         if echo and _sol is not None:
             states = _sol.decision_states(to_merge=SolutionMerge.NODES)
+            position_key = _nmpc.position_state_key
+            velocity_key = _nmpc.velocity_state_key
+            wheel_index = _nmpc.wheel_state_index
             print(
-                f"window {cycle_idx - 1} terminal wheel q={states['q'][2, -1]:.6f} "
-                f"qdot={states['qdot'][2, -1]:.6f}"
+                f"window {cycle_idx - 1} terminal wheel q="
+                f"{states[position_key][wheel_index, -1]:.6f} "
+                f"qdot={states[velocity_key][wheel_index, -1]:.6f}"
             )
         if args.solver in NLP_SOLVER_NAMES and _sol is not None:
             dual_mode = getattr(args, f"{args.solver}_dual_warm_start_mode", "off")
@@ -11582,10 +11867,16 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
             ):
                 if args.terminal_qdot_regularization_target_source == "previous":
                     previous_states = _sol.decision_states(to_merge=SolutionMerge.NODES)
-                    terminal_qdot_target = previous_states["qdot"][:, -1]
+                    velocity_key = (
+                        "omega" if "omega" in previous_states else "qdot"
+                    )
+                    terminal_qdot_target = previous_states[velocity_key][:, -1]
                 else:
+                    velocity_key = (
+                        "omega" if "omega" in _nmpc.nlp[0].x_init else "qdot"
+                    )
                     terminal_qdot_target = np.asarray(
-                        _nmpc.nlp[0].x_init["qdot"].init, dtype=float
+                        _nmpc.nlp[0].x_init[velocity_key].init, dtype=float
                     )[:, 0]
                 targets_updated = (
                     apply_terminal_qdot_regularization_target(
@@ -12457,6 +12748,9 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
         summary["pulse_width_active_set_summary"] = pulse_width_active_set_summary(nmpc)
         summary["initial_guess_audits"] = initial_guess_audits
         summary["initial_guess_preparation_time_s"] = initial_guess_preparation_time_s
+        summary["reduced_profile_build_time_s"] = getattr(
+            args, "reduced_profile_build_time_s", 0.0
+        )
         summary["standard_warmup_cache_hit"] = standard_warmup_cache_hit
         summary["warmup_cycles_consumed"] = args.warmup_cycles_consumed
         summary["fatigue_capacity_scales"] = fatigue_capacity_scales
@@ -12505,6 +12799,9 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
         )
         summary["initial_guess_audits"] = initial_guess_audits
         summary["initial_guess_preparation_time_s"] = initial_guess_preparation_time_s
+        summary["reduced_profile_build_time_s"] = getattr(
+            args, "reduced_profile_build_time_s", 0.0
+        )
         summary["standard_warmup_cache_hit"] = standard_warmup_cache_hit
         summary["warmup_cycles_consumed"] = args.warmup_cycles_consumed
         summary["fatigue_capacity_scales"] = fatigue_capacity_scales
@@ -12606,6 +12903,9 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
     summary["pulse_width_active_set_summary"] = pulse_width_active_set_summary(nmpc)
     summary["initial_guess_audits"] = initial_guess_audits
     summary["initial_guess_preparation_time_s"] = initial_guess_preparation_time_s
+    summary["reduced_profile_build_time_s"] = getattr(
+        args, "reduced_profile_build_time_s", 0.0
+    )
     summary["standard_warmup_cache_hit"] = standard_warmup_cache_hit
     summary["warmup_cycles_consumed"] = args.warmup_cycles_consumed
     summary["fatigue_capacity_scales"] = fatigue_capacity_scales

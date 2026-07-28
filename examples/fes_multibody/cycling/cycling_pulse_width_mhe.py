@@ -4,6 +4,7 @@ This example will perform an optimal control program moving time horizon for a h
 
 import os
 import pickle
+import warnings
 from itertools import product
 from pathlib import Path
 import sys
@@ -44,6 +45,8 @@ from cocofest import (
     DingModelPulseWidthFrequencyWithFatiguePeriodic,
     DingModelPulseWidthFrequencyWithFatiguePeriodicNode,
     FesMskModel,
+    ReducedCyclingDynamics,
+    ReducedFesCyclingModel,
     inverse_kinematics_cycling,
     OcpFesMsk,
     FesNmpcMsk,
@@ -74,8 +77,17 @@ class MyCyclicNMPC(FesNmpcMsk):
         self.advance_wheel_q_bounds = False
         self.anchor_terminal_wheel_to_first_node = False
         self.anchor_wheel_q_to_absolute_reference = False
+        self.position_state_key = (
+            "theta" if "theta" in self.nlp[0].states else "q"
+        )
+        self.velocity_state_key = (
+            "omega" if "omega" in self.nlp[0].states else "qdot"
+        )
+        self.wheel_state_index = 0 if self.position_state_key == "theta" else 2
         self.absolute_wheel_q_reference = float(
-            np.asarray(self.nlp[0].x_init["q"].init, dtype=float)[2, 0]
+            np.asarray(
+                self.nlp[0].x_init[self.position_state_key].init, dtype=float
+            )[self.wheel_state_index, 0]
         )
         self.absolute_wheel_q_cycle_shift = None
         self.absolute_wheel_q_cycle_index = 0
@@ -163,10 +175,17 @@ class MyCyclicNMPC(FesNmpcMsk):
         return float(configured)
 
     def _wheel_cycle_shift(self, states) -> float:
-        wheel_start = float(states["q"][2][0])
-        wheel_next_cycle = float(states["q"][2][self.nodes_per_cycle])
+        position_key = getattr(self, "position_state_key", "q")
+        velocity_key = getattr(self, "velocity_state_key", "qdot")
+        wheel_index = getattr(self, "wheel_state_index", 2)
+        wheel_start = float(states[position_key][wheel_index][0])
+        wheel_next_cycle = float(
+            states[position_key][wheel_index][self.nodes_per_cycle]
+        )
         delta = wheel_next_cycle - wheel_start
-        wheel_speed = float(states["qdot"][2][self.nodes_per_cycle])
+        wheel_speed = float(
+            states[velocity_key][wheel_index][self.nodes_per_cycle]
+        )
         if not np.isclose(wheel_speed, 0.0):
             return float(np.sign(wheel_speed) * abs(self.pedal_turn_in_one_cycle))
         if not np.isclose(delta, 0.0):
@@ -211,6 +230,9 @@ class MyCyclicNMPC(FesNmpcMsk):
         # --- Get states results --- #
         states = sol.decision_states(to_merge=SolutionMerge.NODES)
         states_keys = states.keys()
+        position_state_key = getattr(self, "position_state_key", "q")
+        velocity_state_key = getattr(self, "velocity_state_key", "qdot")
+        wheel_state_index = getattr(self, "wheel_state_index", 2)
         # Bioptim expresses ``time_idx_to_cycle`` in shooting intervals, not
         # in physical pedal cycles.  For example, a one-cycle RHO with 30
         # stimulations advances by 30 intervals.  Convert that value before
@@ -253,15 +275,18 @@ class MyCyclicNMPC(FesNmpcMsk):
         for key in states_keys:
             for i in range(states[key].shape[0]):
                 # --- Only doing wheel to prevent over constraining the system --- #
-                if key == "q" or key == "qdot":
-                    if i == 2:
-                        if key == "qdot" and not self.bound_first_node_wheel_qdot:
+                if key in (position_state_key, velocity_state_key):
+                    if i == wheel_state_index:
+                        if (
+                            key == velocity_state_key
+                            and not self.bound_first_node_wheel_qdot
+                        ):
                             continue
                         center = states[key][i][self.nodes_per_cycle]
                         slack = self._state_slack_for(key, i)
                         self.nlp[0].x_bounds[key].min[i, 0] = center - slack
                         self.nlp[0].x_bounds[key].max[i, 0] = center + slack
-                        if key == "q" and self.advance_wheel_q_bounds:
+                        if key == position_state_key and self.advance_wheel_q_bounds:
                             cycle_shift = self._wheel_cycle_shift(states)
                             boundary_cycle_shift = cycle_shift
                             boundary_reference = float(center)
@@ -329,7 +354,10 @@ class MyCyclicNMPC(FesNmpcMsk):
                             self._cocofest_terminal_wheel_q_center = float(
                                 terminal_center
                             )
-                        elif key == "q" and not self.use_signed_wheel_shift:
+                        elif (
+                            key == position_state_key
+                            and not self.use_signed_wheel_shift
+                        ):
                             self.nlp[0].x_bounds[key].min[
                                 i, 0
                             ] += self.pedal_turn_in_one_cycle
@@ -345,19 +373,40 @@ class MyCyclicNMPC(FesNmpcMsk):
                     self.nlp[0].x_bounds[key].max[i, 0] = center + slack
 
         if self.transfer_debug:
-            q_cycle = states["q"][2][self.nodes_per_cycle]
-            qdot_cycle = states["qdot"][2][self.nodes_per_cycle]
-            q_bound_min = self.nlp[0].x_bounds["q"].min[2, 0]
-            q_bound_max = self.nlp[0].x_bounds["q"].max[2, 0]
-            q_path_bound_min = self.nlp[0].x_bounds["q"].min[2, 1]
-            q_path_bound_max = self.nlp[0].x_bounds["q"].max[2, 1]
-            q_terminal_bound_min = self.nlp[0].x_bounds["q"].min[2, 2]
-            q_terminal_bound_max = self.nlp[0].x_bounds["q"].max[2, 2]
-            qdot_bound_min = self.nlp[0].x_bounds["qdot"].min[2, 0]
-            qdot_bound_max = self.nlp[0].x_bounds["qdot"].max[2, 0]
+            q_cycle = states[position_state_key][wheel_state_index][
+                self.nodes_per_cycle
+            ]
+            qdot_cycle = states[velocity_state_key][wheel_state_index][
+                self.nodes_per_cycle
+            ]
+            q_bound_min = self.nlp[0].x_bounds[position_state_key].min[
+                wheel_state_index, 0
+            ]
+            q_bound_max = self.nlp[0].x_bounds[position_state_key].max[
+                wheel_state_index, 0
+            ]
+            q_path_bound_min = self.nlp[0].x_bounds[position_state_key].min[
+                wheel_state_index, 1
+            ]
+            q_path_bound_max = self.nlp[0].x_bounds[position_state_key].max[
+                wheel_state_index, 1
+            ]
+            q_terminal_bound_min = self.nlp[0].x_bounds[position_state_key].min[
+                wheel_state_index, 2
+            ]
+            q_terminal_bound_max = self.nlp[0].x_bounds[position_state_key].max[
+                wheel_state_index, 2
+            ]
+            qdot_bound_min = self.nlp[0].x_bounds[velocity_state_key].min[
+                wheel_state_index, 0
+            ]
+            qdot_bound_max = self.nlp[0].x_bounds[velocity_state_key].max[
+                wheel_state_index, 0
+            ]
             print(
                 f"transfer first_node wheel q={q_cycle:.6f} qdot={qdot_cycle:.6f} "
-                f"slack_q={self._state_slack_for('q', 2):.6f} slack_qdot={self._state_slack_for('qdot', 2):.6f} "
+                f"slack_q={self._state_slack_for(position_state_key, wheel_state_index):.6f} "
+                f"slack_qdot={self._state_slack_for(velocity_state_key, wheel_state_index):.6f} "
                 f"bound_q=[{q_bound_min:.6f}, {q_bound_max:.6f}] "
                 f"path_q=[{q_path_bound_min:.6f}, {q_path_bound_max:.6f}] "
                 f"terminal_q=[{q_terminal_bound_min:.6f}, {q_terminal_bound_max:.6f}] "
@@ -394,11 +443,15 @@ class MyCyclicNMPC(FesNmpcMsk):
         # --- Get states results --- #
         states = sol.decision_states(to_merge=SolutionMerge.NODES)
         states_keys = states.keys()
+        position_state_key = getattr(self, "position_state_key", "q")
+        velocity_state_key = getattr(self, "velocity_state_key", "qdot")
+        wheel_state_index = getattr(self, "wheel_state_index", 2)
         cyclical_keys = [
             s
             for s in states
             if any(
-                s.startswith(prefix) for prefix in ("Cn_", "Cn_sum_", "F_", "q", "qdot")
+                s.startswith(prefix)
+                for prefix in ("Cn_", "Cn_sum_", "F_", "q", "qdot", "theta", "omega")
             )
         ]
         continuous_keys = [
@@ -410,12 +463,15 @@ class MyCyclicNMPC(FesNmpcMsk):
         for key in states_keys:
             for i in range(states[key].shape[0]):
                 if key in cyclical_keys:
-                    if key == "q" and i == states[key].shape[0] - 1:
+                    if (
+                        key == position_state_key
+                        and i == wheel_state_index
+                    ):
                         # Special case for the wheel position
                         self.set_init_cyclical_wheel(states, key, i)
                     elif (
-                        key == "qdot"
-                        and i == states[key].shape[0] - 1
+                        key == velocity_state_key
+                        and i == wheel_state_index
                         and self.use_signed_wheel_shift
                     ):
                         self.set_init_cyclical_wheel_velocity(states, key, i)
@@ -584,7 +640,9 @@ class MyCyclicNMPC(FesNmpcMsk):
     def set_init_cyclical_wheel_velocity(self, states, key, i):
         self.set_init_cyclical(states, key, i)
         if self.transfer_initial_guess_mode == "historical":
-            wheel_q = states["q"][-1]
+            position_key = getattr(self, "position_state_key", "q")
+            wheel_index = getattr(self, "wheel_state_index", 2)
+            wheel_q = states[position_key][wheel_index]
             last_cycle_q = wheel_q[-self.nodes_per_cycle - 1 :]
             observed_cycle_shift = last_cycle_q[-1] - last_cycle_q[0]
             target_cycle_shift = self._wheel_cycle_shift(states)
@@ -846,6 +904,12 @@ def prepare_nmpc(
     wheel_cycle_boundary_slack = simulation_conditions.get(
         "wheel_cycle_boundary_slack"
     )
+    mechanical_formulation = simulation_conditions.get(
+        "mechanical_formulation", "full"
+    )
+    if mechanical_formulation not in ("full", "reduced"):
+        raise ValueError("mechanical_formulation must be 'full' or 'reduced'.")
+    reduced_dynamics = simulation_conditions.get("reduced_cycling_dynamics")
     # --- Pickle file info --- #
     initial_guess_path = simulation_conditions["init_guess_file_path"]
 
@@ -854,6 +918,11 @@ def prepare_nmpc(
     numerical_time_series = {}
     external_force_set = None
     if external_force is not None:
+        if mechanical_formulation == "reduced":
+            raise ValueError(
+                "Reduced cycling currently supports the crank assistance as a "
+                "constant generalized torque, not as an external-force series."
+            )
         numerical_time_series, external_force_set = set_external_forces(
             n_shooting=window_n_shooting,
             external_force_dict=external_force,
@@ -872,7 +941,7 @@ def prepare_nmpc(
 
     # --- Set states --- #
     # --- Set q (position and speed) initial guesses --- #
-    x_init = set_q_qdot_init(
+    full_mechanical_init = set_q_qdot_init(
         n_shooting=window_n_shooting,
         pedal_config=pedal_config,
         turn_number=turn_number,
@@ -881,14 +950,85 @@ def prepare_nmpc(
     )
 
     # --- Set bounds and FES initial guesses --- #
-    x_bounds, x_init = set_x_bounds(
-        model=model,
-        x_init=x_init,
-        n_shooting=window_n_shooting,
-        ode_solver=ode_solver,
-        init_file_path=initial_guess_path,
-        wheel_qdot_bound_margin=wheel_qdot_bound_margin,
-    )
+    if mechanical_formulation == "reduced":
+        if reduced_dynamics is None:
+            raise ValueError(
+                "reduced_cycling_dynamics is required for the reduced formulation."
+            )
+        if isinstance(reduced_dynamics, (str, os.PathLike)):
+            reduced_dynamics = ReducedCyclingDynamics.load(reduced_dynamics)
+        theta_init, omega_init, projection_audit = (
+            reduced_dynamics.kinematics.project_generalized_trajectory(
+                np.asarray(full_mechanical_init["q"].init, dtype=float),
+                np.asarray(full_mechanical_init["qdot"].init, dtype=float),
+            )
+        )
+        state_nodes_per_cycle = cycle_len * (
+            ode_solver.polynomial_degree + 1
+            if ode_solver.is_direct_collocation
+            else 1
+        )
+        theta_init, recenter_audit = recenter_reduced_theta_seed(
+            theta_init,
+            omega_init,
+            nodes_per_cycle=state_nodes_per_cycle,
+            cycles=n_cycles_simultaneous,
+        )
+        if recenter_audit["maximum_theta_change_rad"] > 1e-4:
+            warnings.warn(
+                "The reduced mechanical warm-start contained cycle-boundary "
+                f"drift of {recenter_audit['maximum_boundary_error_before_rad']:.3e} rad. "
+                "Theta was recentered to the absolute ±2*pi cycle targets "
+                f"(maximum correction {recenter_audit['maximum_theta_change_rad']:.3e} rad).",
+                RuntimeWarning,
+                stacklevel=2,
+            )
+        if projection_audit["maximum_configuration_projection_error_rad"] > 1e-4:
+            warnings.warn(
+                "Full warm-start mechanics were projected onto the reduced "
+                "contact manifold with a maximum configuration correction of "
+                f"{projection_audit['maximum_configuration_projection_error_rad']:.3e} rad.",
+                RuntimeWarning,
+                stacklevel=2,
+            )
+        x_init = InitialGuessList()
+        mechanical_interpolation = (
+            InterpolationType.ALL_POINTS
+            if ode_solver.is_direct_collocation
+            else InterpolationType.EACH_FRAME
+        )
+        x_init.add(
+            "theta", theta_init, interpolation=mechanical_interpolation
+        )
+        x_init.add(
+            "omega", omega_init, interpolation=mechanical_interpolation
+        )
+        model = ReducedFesCyclingModel(
+            reduced_dynamics=reduced_dynamics,
+            muscles_model=model.muscles_dynamics_model,
+            external_crank_torque=float(constant_crank_torque or 0.0),
+            activate_force_length_relationship=model.activate_force_length_relationship,
+            activate_force_velocity_relationship=model.activate_force_velocity_relationship,
+            activate_passive_force_relationship=model.activate_passive_force_relationship,
+        )
+        x_bounds, x_init = set_reduced_x_bounds(
+            model=model,
+            x_init=x_init,
+            n_shooting=window_n_shooting,
+            ode_solver=ode_solver,
+            init_file_path=initial_guess_path,
+            omega_bound_margin=wheel_qdot_bound_margin,
+        )
+    else:
+        x_init = full_mechanical_init
+        x_bounds, x_init = set_x_bounds(
+            model=model,
+            x_init=x_init,
+            n_shooting=window_n_shooting,
+            ode_solver=ode_solver,
+            init_file_path=initial_guess_path,
+            wheel_qdot_bound_margin=wheel_qdot_bound_margin,
+        )
 
     # --- Set states scaling --- #
     x_scaling = set_x_scaling(model, mode=state_scaling)
@@ -914,6 +1054,10 @@ def prepare_nmpc(
         cycle_len=cycle_len,
         n_cycles_simultaneous=n_cycles_simultaneous,
         wheel_cycle_boundary_slack=wheel_cycle_boundary_slack,
+        position_state_key=(
+            "theta" if mechanical_formulation == "reduced" else "q"
+        ),
+        position_state_index=0 if mechanical_formulation == "reduced" else 2,
     )
 
     # --- Set objective --- #
@@ -923,28 +1067,45 @@ def prepare_nmpc(
         minimize_fatigue,
         minimize_control,
         cost_fun_weight,
-        target=x_init["q"].init[2][-1],
+        target=(
+            x_init["theta"].init[0][-1]
+            if mechanical_formulation == "reduced"
+            else x_init["q"].init[2][-1]
+        ),
         objective_shape=objective_shape,
         control_regularization_weight=control_regularization_weight,
         control_regularization_target=control_regularization_target,
         wheel_qdot_regularization_weight=wheel_qdot_regularization_weight,
         wheel_qdot_regularization_target=wheel_qdot_regularization_target,
         terminal_qdot_regularization_weight=terminal_qdot_regularization_weight,
-        terminal_qdot_regularization_target=x_init["qdot"].init[:, -1],
+        terminal_qdot_regularization_target=(
+            x_init["omega"].init[:, -1]
+            if mechanical_formulation == "reduced"
+            else x_init["qdot"].init[:, -1]
+        ),
         terminal_wheel_regularization_weight=terminal_wheel_regularization_weight,
+        position_state_key=(
+            "theta" if mechanical_formulation == "reduced" else "q"
+        ),
+        position_state_index=0 if mechanical_formulation == "reduced" else 2,
+        velocity_state_key=(
+            "omega" if mechanical_formulation == "reduced" else "qdot"
+        ),
+        velocity_state_index=0 if mechanical_formulation == "reduced" else 2,
     )
 
     # --- Update model for resistive torque --- #
-    model = updating_model(
-        model=model,
-        external_force_set=external_force_set,
-        parameters=ParameterList(use_sx=use_sx),
-        constant_external_torque=(
-            build_constant_crank_torque_vector(model, constant_crank_torque)
-            if constant_crank_torque is not None
-            else None
-        ),
-    )
+    if mechanical_formulation == "full":
+        model = updating_model(
+            model=model,
+            external_force_set=external_force_set,
+            parameters=ParameterList(use_sx=use_sx),
+            constant_external_torque=(
+                build_constant_crank_torque_vector(model, constant_crank_torque)
+                if constant_crank_torque is not None
+                else None
+            ),
+        )
 
     nmpc_options = dict(
         bio_model=[model],
@@ -1145,6 +1306,84 @@ def set_x_bounds(
     return x_bounds, x_init
 
 
+def set_reduced_x_bounds(
+    model: ReducedFesCyclingModel,
+    x_init: InitialGuessList,
+    n_shooting: int,
+    ode_solver: OdeSolver,
+    init_file_path: str | os.PathLike | None,
+    omega_bound_margin: float = 3.0,
+) -> tuple[BoundsList, InitialGuessList]:
+    """Set bounds for 20 Ding states and the reduced ``theta, omega`` pair."""
+
+    if omega_bound_margin <= 0:
+        raise ValueError("omega_bound_margin must be strictly positive.")
+    interpolation_type = InterpolationType.EACH_FRAME
+    state_intervals = n_shooting
+    if ode_solver.is_direct_collocation:
+        state_intervals *= ode_solver.polynomial_degree + 1
+        interpolation_type = InterpolationType.ALL_POINTS
+
+    x_bounds, default_fes_init = OcpFesMsk.set_x_bounds_fes(model)
+    data = None
+    if init_file_path:
+        with open(init_file_path, "rb") as file:
+            data = pickle.load(file)
+    for key in default_fes_init.keys():
+        initial_guess = (
+            np.asarray(data[key], dtype=float)
+            if data is not None
+            else np.full(
+                (1, state_intervals + 1),
+                float(default_fes_init[key].init[0][0]),
+            )
+        )
+        x_init.add(
+            key=key,
+            initial_guess=initial_guess,
+            phase=0,
+            interpolation=interpolation_type,
+        )
+
+    theta_values = np.asarray(x_init["theta"].init, dtype=float)
+    omega_values = np.asarray(x_init["omega"].init, dtype=float)
+    theta_start = float(theta_values[0, 0])
+    theta_end = float(theta_values[0, -1])
+    theta_slack = 0.05
+    x_bounds.add(
+        "theta",
+        min_bound=np.array(
+            [[
+                theta_start,
+                min(theta_start, theta_end) - 2.0,
+                theta_end - theta_slack,
+            ]]
+        ),
+        max_bound=np.array(
+            [[
+                theta_start,
+                max(theta_start, theta_end) + 2.0,
+                theta_end + theta_slack,
+            ]]
+        ),
+        interpolation=InterpolationType.CONSTANT_WITH_FIRST_AND_LAST_DIFFERENT,
+    )
+    expected_omega = float(np.median(omega_values))
+    if np.isclose(expected_omega, 0.0):
+        expected_omega = -2.0 * np.pi
+    x_bounds.add(
+        "omega",
+        min_bound=np.array(
+            [[expected_omega - omega_bound_margin] * 3]
+        ),
+        max_bound=np.array(
+            [[expected_omega + omega_bound_margin] * 3]
+        ),
+        interpolation=InterpolationType.CONSTANT_WITH_FIRST_AND_LAST_DIFFERENT,
+    )
+    return x_bounds, x_init
+
+
 def set_x_scaling(bio_model, mode: str = "none") -> VariableScalingList | None:
     if mode == "none":
         return None
@@ -1154,8 +1393,12 @@ def set_x_scaling(bio_model, mode: str = "none") -> VariableScalingList | None:
     x_scaling = VariableScalingList()
 
     if mode == "full":
-        x_scaling.add(key="q", scaling=[2.0, 2.0, 2 * np.pi])
-        x_scaling.add(key="qdot", scaling=[10.0, 14.0, 2 * np.pi])
+        if isinstance(bio_model, ReducedFesCyclingModel):
+            x_scaling.add(key="theta", scaling=[2 * np.pi])
+            x_scaling.add(key="omega", scaling=[2 * np.pi])
+        else:
+            x_scaling.add(key="q", scaling=[2.0, 2.0, 2 * np.pi])
+            x_scaling.add(key="qdot", scaling=[10.0, 14.0, 2 * np.pi])
 
     for model in bio_model.muscles_dynamics_model:
         muscle_name = model.muscle_name
@@ -1214,6 +1457,109 @@ def periodic_pulse_width_activity_mask(
     return np.tile(phase_active, cycles_per_window)
 
 
+def validate_and_clip_pulse_width_seed(
+    values,
+    *,
+    key: str,
+    pd0: float,
+    maximum: float = 0.0006,
+    source: str | os.PathLike | None = None,
+) -> np.ndarray:
+    """Validate and project a pulse-width seed onto its physical bounds.
+
+    Historical seeds predate the explicit ``pd0`` lower bound in a few code
+    paths.  They are safe to reuse after projection, but the correction must be
+    visible because evaluating Ding's recruitment law below ``pd0`` produces
+    an unphysical negative recruitment.
+    """
+
+    pulse_widths = np.asarray(values, dtype=float)
+    if not np.all(np.isfinite(pulse_widths)):
+        invalid_count = int(np.count_nonzero(~np.isfinite(pulse_widths)))
+        source_text = f" in {source}" if source is not None else ""
+        raise ValueError(
+            f"Pulse-width seed '{key}'{source_text} contains "
+            f"{invalid_count} non-finite value(s)."
+        )
+    if not np.isfinite(pd0) or not np.isfinite(maximum) or pd0 > maximum:
+        raise ValueError(
+            f"Invalid pulse-width bounds for '{key}': [{pd0}, {maximum}] s."
+        )
+
+    below = pulse_widths < float(pd0)
+    above = pulse_widths > float(maximum)
+    clipped_count = int(np.count_nonzero(below | above))
+    if clipped_count:
+        source_text = f" loaded from {source}" if source is not None else ""
+        warnings.warn(
+            (
+                f"Pulse-width seed '{key}'{source_text} violates the physical "
+                f"Ding bounds [{pd0:.9g}, {maximum:.9g}] s: "
+                f"{int(np.count_nonzero(below))} value(s) below pd0 and "
+                f"{int(np.count_nonzero(above))} above the maximum "
+                f"(observed range [{float(np.min(pulse_widths)):.9g}, "
+                f"{float(np.max(pulse_widths)):.9g}] s). "
+                "The seed was clipped to the admissible interval; the NLP "
+                "solution remains subject to the same bounds."
+            ),
+            RuntimeWarning,
+            stacklevel=2,
+        )
+    return np.clip(pulse_widths, float(pd0), float(maximum))
+
+
+def recenter_reduced_theta_seed(
+    theta: np.ndarray,
+    omega: np.ndarray,
+    *,
+    nodes_per_cycle: int,
+    cycles: int,
+) -> tuple[np.ndarray, dict[str, float]]:
+    """Remove accumulated cycle-boundary drift from a reduced warm-start."""
+
+    theta = np.asarray(theta, dtype=float).reshape((1, -1))
+    omega = np.asarray(omega, dtype=float).reshape((1, -1))
+    expected_nodes = int(nodes_per_cycle) * int(cycles) + 1
+    if theta.shape[1] != expected_nodes or omega.shape[1] != expected_nodes:
+        raise ValueError(
+            "Reduced mechanical seed must contain exactly "
+            f"{expected_nodes} state nodes; received theta={theta.shape[1]} "
+            f"and omega={omega.shape[1]}."
+        )
+    direction = float(np.sign(np.median(omega)))
+    if direction == 0.0:
+        direction = -1.0
+    signed_cycle_shift = direction * 2.0 * np.pi
+    corrected = theta.copy()
+    reference = float(theta[0, 0])
+    maximum_change = 0.0
+    maximum_boundary_error = 0.0
+    for cycle in range(int(cycles)):
+        start = cycle * int(nodes_per_cycle)
+        stop = (cycle + 1) * int(nodes_per_cycle)
+        target_start = reference + cycle * signed_cycle_shift
+        target_stop = reference + (cycle + 1) * signed_cycle_shift
+        maximum_boundary_error = max(
+            maximum_boundary_error,
+            abs(float(theta[0, start]) - target_start),
+            abs(float(theta[0, stop]) - target_stop),
+        )
+        correction = np.linspace(
+            target_start - float(theta[0, start]),
+            target_stop - float(theta[0, stop]),
+            stop - start + 1,
+        )
+        corrected[0, start : stop + 1] = (
+            theta[0, start : stop + 1] + correction
+        )
+        maximum_change = max(maximum_change, float(np.max(np.abs(correction))))
+    return corrected, {
+        "signed_cycle_shift_rad": signed_cycle_shift,
+        "maximum_boundary_error_before_rad": maximum_boundary_error,
+        "maximum_theta_change_rad": maximum_change,
+    }
+
+
 def set_u_bounds_and_init(
     bio_model,
     n_shooting,
@@ -1251,7 +1597,17 @@ def set_u_bounds_and_init(
     for model in models:
         key = "last_pulse_width_" + str(model.muscle_name)
         if init_file_path:
-            initial_guess = np.asarray(data[key], dtype=float).reshape((1, -1))
+            if key not in data:
+                raise KeyError(
+                    f"Pulse-width seed '{key}' is missing from {init_file_path}."
+                )
+            initial_guess = validate_and_clip_pulse_width_seed(
+                data[key],
+                key=key,
+                pd0=float(model.pd0),
+                maximum=0.0006,
+                source=init_file_path,
+            ).reshape((1, -1))
         else:
             initial_guess = np.array([[model.pd0] * n_shooting])
         if initial_guess.shape[1] != n_shooting:
@@ -1261,7 +1617,13 @@ def set_u_bounds_and_init(
             )
         if active_set_mode != "none":
             reference = (
-                np.asarray(active_reference[key], dtype=float).reshape((1, -1))
+                validate_and_clip_pulse_width_seed(
+                    active_reference[key],
+                    key=key,
+                    pd0=float(model.pd0),
+                    maximum=0.0006,
+                    source="warmup active-set reference",
+                ).reshape((1, -1))
                 if active_set_mode == "warmup"
                 else initial_guess
             )
@@ -1306,12 +1668,14 @@ def wheel_cycle_boundary_constraint(
     controller,
     boundary_cycle_index: int,
     wheel_cycle_boundary_slack: float,
+    position_state_key: str = "q",
+    position_state_index: int = 2,
 ):
     """Return the absolute crank angle at an executed-cycle boundary."""
 
     # Retained in metadata to recenter RHO bounds.
     del boundary_cycle_index, wheel_cycle_boundary_slack
-    return controller.states["q"].cx[2]
+    return controller.states[position_state_key].cx[position_state_index]
 
 
 def set_constraints(
@@ -1322,9 +1686,13 @@ def set_constraints(
     cycle_len: int | None = None,
     n_cycles_simultaneous: int = 1,
     wheel_cycle_boundary_slack: float | None = None,
+    position_state_key: str = "q",
+    position_state_index: int = 2,
 ):
     constraints = ConstraintList()
-    if enforce_start_constraints:
+    if enforce_start_constraints and not isinstance(
+        bio_model, ReducedFesCyclingModel
+    ):
         # --- Constraining wheel center position to a fix position --- #
         constraints.add(
             ConstraintFcn.TRACK_MARKERS_VELOCITY,
@@ -1347,7 +1715,9 @@ def set_constraints(
     if x_init is None or cycle_len is None:
         raise ValueError("Cycle-boundary constraints require x_init and cycle_len.")
 
-    q_reference = np.asarray(x_init["q"].init, dtype=float)[2, :]
+    q_reference = np.asarray(
+        x_init[position_state_key].init, dtype=float
+    )[position_state_index, :]
     net_progress = float(q_reference[-1] - q_reference[0])
     if np.isclose(net_progress, 0.0):
         raise ValueError("Cannot infer the crank rotation direction from q_init.")
@@ -1360,6 +1730,8 @@ def set_constraints(
             node=cycle_index * cycle_len,
             boundary_cycle_index=cycle_index,
             wheel_cycle_boundary_slack=float(wheel_cycle_boundary_slack),
+            position_state_key=position_state_key,
+            position_state_index=position_state_index,
             min_bound=center - float(wheel_cycle_boundary_slack),
             max_bound=center + float(wheel_cycle_boundary_slack),
         )
@@ -1381,6 +1753,10 @@ def set_objective_functions(
     terminal_qdot_regularization_weight: float = 0.0,
     terminal_qdot_regularization_target: np.ndarray | None = None,
     terminal_wheel_regularization_weight: float = 1e-2,
+    position_state_key: str = "q",
+    position_state_index: int = 2,
+    velocity_state_key: str = "qdot",
+    velocity_state_index: int = 2,
 ):
     objective_functions = ObjectiveList()
     is_quadratic = objective_shape == "quadratic"
@@ -1430,8 +1806,8 @@ def set_objective_functions(
     if wheel_qdot_regularization_weight:
         objective_functions.add(
             ObjectiveFcn.Lagrange.MINIMIZE_STATE,
-            key="qdot",
-            index=2,
+            key=velocity_state_key,
+            index=velocity_state_index,
             weight=wheel_qdot_regularization_weight,
             target=np.array([[wheel_qdot_regularization_target]]),
             quadratic=True,
@@ -1445,7 +1821,7 @@ def set_objective_functions(
             )
         objective_functions.add(
             ObjectiveFcn.Mayer.MINIMIZE_STATE,
-            key="qdot",
+            key=velocity_state_key,
             node=Node.END,
             weight=terminal_qdot_regularization_weight,
             target=np.asarray(terminal_qdot_regularization_target, dtype=float).reshape(
@@ -1459,8 +1835,8 @@ def set_objective_functions(
     if not any([minimize_force, minimize_fatigue, minimize_control]):
         objective_functions.add(
             ObjectiveFcn.Mayer.MINIMIZE_STATE,
-            key="q",
-            index=2,
+            key=position_state_key,
+            index=position_state_index,
             node=Node.END,
             weight=1e6,
             target=target,
@@ -1471,8 +1847,8 @@ def set_objective_functions(
     elif terminal_wheel_regularization_weight:
         objective_functions.add(
             ObjectiveFcn.Mayer.MINIMIZE_STATE,
-            key="q",
-            index=2,
+            key=position_state_key,
+            index=position_state_index,
             node=Node.END,
             weight=terminal_wheel_regularization_weight,
             target=target,

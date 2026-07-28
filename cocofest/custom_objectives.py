@@ -6,11 +6,19 @@ from casadi import MX, vertcat
 from bioptim import PenaltyController
 from .models.fes_model import FesModel
 from .models.ding2007.ding2007 import DingModelPulseWidthFrequency
-from .models.dynamical_model import FesMskModel
 from .models.hmed2018.hmed2018 import DingModelPulseIntensityFrequency
 
 
 class CustomObjective:
+    @staticmethod
+    def _muscle_names(controller: PenaltyController) -> list[str]:
+        if hasattr(controller.model, "muscles_dynamics_model"):
+            return [
+                str(model.muscle_name)
+                for model in controller.model.muscles_dynamics_model
+            ]
+        return list(controller.model.bio_model.muscle_names)
+
     @staticmethod
     def minimize_overall_muscle_fatigue(controller: PenaltyController) -> MX:
         """
@@ -25,7 +33,7 @@ class CustomObjective:
         -------
         The sum of each force scaling factor
         """
-        muscle_name_list = controller.model.bio_model.muscle_names
+        muscle_name_list = CustomObjective._muscle_names(controller)
         muscle_model = controller.model.muscles_dynamics_model
         muscle_fatigue = vertcat(
             *[
@@ -49,7 +57,7 @@ class CustomObjective:
         -------
         The sum of each force
         """
-        muscle_name_list = controller.model.bio_model.muscle_names
+        muscle_name_list = CustomObjective._muscle_names(controller)
         muscle_model = controller.model.muscles_dynamics_model
         muscle_force = vertcat(
             *[
@@ -73,8 +81,8 @@ class CustomObjective:
         -------
         The sum of each stimulation control
         """
-        if isinstance(controller.model, FesMskModel):
-            muscle_name_list = controller.model.bio_model.muscle_names
+        if hasattr(controller.model, "muscles_dynamics_model"):
+            muscle_name_list = CustomObjective._muscle_names(controller)
             if isinstance(controller.model.muscles_dynamics_model[0], DingModelPulseWidthFrequency):
                 stim_charge = vertcat(
                     *[

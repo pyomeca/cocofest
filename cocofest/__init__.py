@@ -32,6 +32,7 @@ from cocofest.models.veltink1992.veltink1992_and_riener1998 import (
     VeltinkRienerModelPulseIntensityWithFatigue,
 )
 from .models.dynamical_model import FesMskModel
+from .models.reduced_cycling_model import ReducedFesCyclingModel
 from .models.model_maker import ModelMaker
 from .optimization.fes_ocp import OcpFes
 from .optimization.fes_id_ocp import OcpFesId
@@ -44,6 +45,15 @@ from .dynamics.inverse_kinematics_and_dynamics import (
     get_circle_coord,
     inverse_kinematics_cycling,
     inverse_dynamics_cycling,
+)
+from .dynamics.reduced_cycling import (
+    PeriodicFourierSeries,
+    ReducedCyclingDynamics,
+    ReducedCyclingKinematics,
+    benchmark_reduced_casadi_mechanical_kernel,
+    build_reduced_cycling_dynamics,
+    solve_cycling_contact_kinematics,
+    validate_reduced_cycling_dynamics,
 )
 from .result.plot import PlotCyclingResult
 from .result.pickle import SolutionToPickle
