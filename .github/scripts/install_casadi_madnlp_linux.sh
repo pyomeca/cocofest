@@ -68,7 +68,9 @@ import casadi as cas
 
 print(f"CasADi {cas.__version__}")
 print(f"CasADi compiler flags: {cas.CasadiMeta.compiler_flags()}")
-assert cas.__version__ == os.environ["CASADI_VERSION"]
+print(f"CasADi revision: {cas.CasadiMeta.git_revision()}")
+assert cas.__version__.startswith(os.environ["CASADI_VERSION"])
+assert cas.CasadiMeta.git_revision() == os.environ["CASADI_MADNLP_COMMIT"]
 assert "-DCASADI_WITH_THREAD" in cas.CasadiMeta.compiler_flags()
 for solver in ("ipopt", "madnlp"):
     available = cas.has_nlpsol(solver)
