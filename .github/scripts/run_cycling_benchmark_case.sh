@@ -65,6 +65,8 @@ if [[ "$mechanics" == "reduced" ]]; then
   solver_options+=(--mechanical-formulation reduced)
 fi
 
+# Keep the standard bridge enabled: the certified common seed records one
+# consumed warmup cycle and rejects consumers configured with zero.
 set +e
 set -o pipefail
 python examples/fes_multibody/cycling/cycling_fes_solver_comparison.py \
@@ -83,7 +85,6 @@ python examples/fes_multibody/cycling/cycling_fes_solver_comparison.py \
   --legacy-standard-warmup-seed-signed-torque 0.22 \
   --standard-warmup-seed-continuation \
   --common-initial-solution "benchmark-seed/common-${mechanics}.npz" \
-  --ipopt-disable-standard-warmup \
   --no-optional-nlp-periodic-ipopt-hot-start \
   --warmup-ipopt-linear-solver mumps \
   --ipopt-linear-solver mumps \

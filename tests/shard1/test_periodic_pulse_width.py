@@ -3458,12 +3458,6 @@ def test_github_acados_runner_uses_reference_and_option_profiles_sequentially():
         / "scripts"
         / "run_cycling_benchmark_case.sh"
     ).read_text(encoding="utf-8")
-    assert "--ipopt-disable-standard-warmup" in (
-        Path(__file__).resolve().parents[2]
-        / ".github"
-        / "scripts"
-        / "run_cycling_benchmark_case.sh"
-    ).read_text(encoding="utf-8")
     assert "merge-multiple: true" in workflow  # ACADOS remains a single artifact.
 
 
