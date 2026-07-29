@@ -82,6 +82,7 @@ BENCHMARK_CONFIGURATION_FIELDS = (
     "acados_control_homotopy_stage_iterations",
     "acados_control_homotopy_keep_final_radius",
     "acados_control_homotopy_window_growth",
+    "acados_control_homotopy_window_max_radius",
     "acados_transfer_irk_rollout",
     "acados_transfer_phase_one",
     "acados_transfer_mechanical_restoration",
@@ -2226,6 +2227,7 @@ def main(
     acados_max_iter: int = 100,
     acados_control_homotopy_keep_final_radius: bool | None = None,
     acados_control_homotopy_window_growth: float = 1.0,
+    acados_control_homotopy_window_max_radius: float | None = None,
     control_regularization_weight: float = 0.0,
     acados_control_regularization_weight: float | None = None,
     control_regularization_target: float | None = None,
@@ -2615,6 +2617,9 @@ def main(
     )
     acados_args.acados_control_homotopy_window_growth = (
         acados_control_homotopy_window_growth
+    )
+    acados_args.acados_control_homotopy_window_max_radius = (
+        acados_control_homotopy_window_max_radius
     )
     acados_args.acados_dual_warm_start_mode = acados_dual_warm_start_mode
     acados_args.acados_proximal_control_weights = acados_proximal_control_weights
@@ -3407,6 +3412,12 @@ def build_cli() -> argparse.ArgumentParser:
         help="Factor applied to the retained control radius after each RHO window.",
     )
     parser.add_argument(
+        "--acados-control-homotopy-window-max-radius",
+        type=float,
+        default=None,
+        help="Maximum retained control radius, in seconds, after inter-window growth.",
+    )
+    parser.add_argument(
         "--acados-integrator-type", choices=("ERK", "IRK", "DISCRETE"), default="IRK"
     )
     parser.add_argument(
@@ -3805,6 +3816,9 @@ if __name__ == "__main__":
         ),
         acados_control_homotopy_window_growth=(
             args.acados_control_homotopy_window_growth
+        ),
+        acados_control_homotopy_window_max_radius=(
+            args.acados_control_homotopy_window_max_radius
         ),
         control_regularization_weight=args.control_regularization_weight,
         acados_control_regularization_weight=args.acados_control_regularization_weight,

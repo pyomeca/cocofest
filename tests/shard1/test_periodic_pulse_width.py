@@ -329,6 +329,8 @@ def test_control_homotopy_radii_are_parsed_as_an_increasing_sequence():
             "--acados-control-homotopy-each-window",
             "--acados-control-homotopy-window-growth",
             "1.25",
+            "--acados-control-homotopy-window-max-radius",
+            "1e-4",
             "--acados-control-homotopy-max-restarts",
             "3",
             "--acados-control-homotopy-stage-iterations",
@@ -340,8 +342,23 @@ def test_control_homotopy_radii_are_parsed_as_an_increasing_sequence():
     assert args.acados_control_homotopy_keep_final_radius is True
     assert args.acados_control_homotopy_each_window is True
     assert args.acados_control_homotopy_window_growth == 1.25
+    assert args.acados_control_homotopy_window_max_radius == 1e-4
     assert args.acados_control_homotopy_max_restarts == 3
     assert args.acados_control_homotopy_stage_iterations == 40
+
+
+def test_control_homotopy_window_radius_growth_respects_its_physical_cap():
+    radius = 1e-7
+    observed = []
+    for _ in range(5):
+        radius = periodic_example.next_acados_control_homotopy_radius(
+            radius,
+            growth=10.0,
+            maximum_radius=1e-4,
+        )
+        observed.append(radius)
+
+    np.testing.assert_allclose(observed, [1e-6, 1e-5, 1e-4, 1e-4, 1e-4])
 
 
 def test_proximal_control_weights_are_parsed_as_a_decreasing_sequence():
@@ -3213,8 +3230,10 @@ def test_github_acados_smoke_uses_the_robust_reference_profile():
     assert "--acados-stationarity-tolerance 1e-3" in workflow
     assert "--acados-stationarity-tolerance 5e-3" in workflow
     assert "--acados-control-homotopy-window-growth 10" in workflow
+    assert "--acados-control-homotopy-window-max-radius 1e-4" in workflow
     assert ".acados_control_homotopy_keep_final_radius == true" in workflow
     assert ".acados_control_homotopy_window_growth == 10" in workflow
+    assert ".acados_control_homotopy_window_max_radius == 1e-4" in workflow
     assert "--max-consecutive-failing 2" in workflow
     assert ".terminal_wheel_q_reference_mode == \"absolute_initial\"" in workflow
 
@@ -5932,6 +5951,8 @@ def test_shared_transfer_rollout_cli_is_available_to_ipopt():
             "--acados-control-homotopy-release-final-radius",
             "--acados-control-homotopy-window-growth",
             "10",
+            "--acados-control-homotopy-window-max-radius",
+            "1e-4",
             "--acados-newton-iter",
             "3",
         ]
@@ -5979,6 +6000,7 @@ def test_shared_transfer_rollout_cli_is_available_to_ipopt():
     assert comparison_args.acados_terminal_wheel_q_homotopy_each_window is True
     assert comparison_args.acados_control_homotopy_keep_final_radius is False
     assert comparison_args.acados_control_homotopy_window_growth == 10
+    assert comparison_args.acados_control_homotopy_window_max_radius == 1e-4
     assert comparison_args.acados_newton_iter == 3
     assert (
         comparison_example.IPOPT_PROFILE_DEFAULTS["acados_like"]["model_formulation"]

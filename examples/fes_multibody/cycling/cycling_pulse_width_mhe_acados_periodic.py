@@ -705,6 +705,27 @@ def apply_assisted_hot_start_defaults(args: argparse.Namespace) -> None:
         )
 
 
+def next_acados_control_homotopy_radius(
+    current_radius: float,
+    growth: float,
+    maximum_radius: float | None = None,
+) -> float:
+    """Grow the inter-window control radius without silently releasing it."""
+
+    if current_radius <= 0.0:
+        raise ValueError("The current control-homotopy radius must be positive.")
+    if growth < 1.0:
+        raise ValueError("The control-homotopy radius growth must be at least one.")
+    if maximum_radius is not None and maximum_radius <= 0.0:
+        raise ValueError("The maximum control-homotopy radius must be positive.")
+    grown_radius = current_radius * growth
+    return (
+        grown_radius
+        if maximum_radius is None
+        else min(grown_radius, maximum_radius)
+    )
+
+
 def _terminal_wheel_objective_weight(args: argparse.Namespace) -> float:
     configured = getattr(args, "terminal_wheel_regularization_weight", None)
     if configured is not None:
@@ -2086,6 +2107,15 @@ def build_argument_parser() -> argparse.ArgumentParser:
         type=float,
         default=1.0,
         help=("Factor applied to the retained homotopy radius after each MHE window."),
+    )
+    parser.add_argument(
+        "--acados-control-homotopy-window-max-radius",
+        type=float,
+        default=None,
+        help=(
+            "Optional physical pulse-width radius cap, in seconds, retained across "
+            "MHE windows after applying the growth factor."
+        ),
     )
     parser.add_argument(
         "--acados-proximal-control-weights",
@@ -10515,6 +10545,13 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
             "--acados-control-homotopy-window-growth must be greater than or equal to one."
         )
     if (
+        args.acados_control_homotopy_window_max_radius is not None
+        and args.acados_control_homotopy_window_max_radius <= 0.0
+    ):
+        raise ValueError(
+            "--acados-control-homotopy-window-max-radius must be strictly positive."
+        )
+    if (
         args.acados_control_homotopy_radii is not None
         and args.acados_pulse_width_trust_radius is not None
     ):
@@ -11097,6 +11134,10 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
             print(
                 "acados_control_homotopy_window_growth: "
                 f"{args.acados_control_homotopy_window_growth}"
+            )
+            print(
+                "acados_control_homotopy_window_max_radius: "
+                f"{args.acados_control_homotopy_window_max_radius}"
             )
             print(
                 "acados_proximal_control_weights: "
@@ -12606,9 +12647,10 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
             )
         ):
             if retained_homotopy_radius is not None:
-                transfer_radius = (
-                    retained_homotopy_radius
-                    * args.acados_control_homotopy_window_growth
+                transfer_radius = next_acados_control_homotopy_radius(
+                    retained_homotopy_radius,
+                    args.acados_control_homotopy_window_growth,
+                    args.acados_control_homotopy_window_max_radius,
                 )
                 _nmpc._cocofest_retained_control_homotopy_radius = transfer_radius
             else:

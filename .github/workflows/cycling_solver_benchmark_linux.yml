@@ -545,6 +545,7 @@ jobs:
               --experimental-reduced-acados
               --acados-stationarity-tolerance 5e-3
               --acados-control-homotopy-window-growth 10
+              --acados-control-homotopy-window-max-radius 1e-4
             )
           else
             mechanics_options+=(
@@ -606,7 +607,8 @@ jobs:
                 .mechanical_formulation != "reduced" or
                 (
                   .acados_control_homotopy_keep_final_radius == true and
-                  .acados_control_homotopy_window_growth == 10
+                  .acados_control_homotopy_window_growth == 10 and
+                  .acados_control_homotopy_window_max_radius == 1e-4
                 )
               )
             )
