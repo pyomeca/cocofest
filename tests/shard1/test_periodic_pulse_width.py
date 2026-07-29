@@ -3416,13 +3416,55 @@ def test_github_acados_runner_uses_reference_and_option_profiles_sequentially():
     assert "--acados-control-homotopy-window-max-radius 1e-5" in workflow
     assert "--max-consecutive-failing 2" in workflow
     assert "cycling-acados-smoke-${{ github.run_id }}" in workflow
-    assert "run_case fatrop-rk4 fatrop full structured rk4" in workflow
-    assert "run_case fatrop-rk4 fatrop reduced structured rk4" in workflow
     assert (
-        "run_case fatrop-rk4-compiled-probe fatrop full structured rk4 "
+        "run_cycling_benchmark_case.sh fatrop-rk4 fatrop full structured rk4"
+        in workflow
+    )
+    assert (
+        "run_cycling_benchmark_case.sh fatrop-rk4 fatrop reduced structured rk4"
+        in workflow
+    )
+    assert (
+        "run_cycling_benchmark_case.sh fatrop-rk4-compiled-probe fatrop full "
+        "structured rk4 "
         "benchmark-probes 1 true"
     ) in workflow
-    assert "cycling-fatrop-compile-probes-${{ github.run_id }}" in workflow
+    assert "cycling-fatrop-compile-probe-full-${{ github.run_id }}" in workflow
+    assert "Checkpoint IPOPT full" in workflow
+    assert "Checkpoint Fatrop RK4 reduced" in workflow
+    assert "max-parallel: 3" in workflow
+    assert re.search(r"\n  benchmark:.*?\n    needs: prepare-seed", workflow, re.DOTALL)
+    assert re.search(
+        r"- solver: ipopt\b.*?- solver: fatrop\b.*?- solver: madnlp\b",
+        workflow,
+        flags=re.DOTALL,
+    )
+    assert "timeout_minutes: 360" in workflow
+    assert "Screen IPOPT SX full over 30 RHO" in workflow
+    assert "Screen Fatrop RK4 SX reduced over 30 RHO" in workflow
+    assert "Screen Fatrop collocation SX full over 30 RHO" in workflow
+    assert "Screen MadNLP MUMPS SX reduced over 30 RHO" in workflow
+    assert "expected_graph_screens=4" in workflow
+    assert "Download the SX graph-mode screens" in workflow
+    assert "--ipopt-use-sx" in (
+        Path(__file__).resolve().parents[2]
+        / ".github"
+        / "scripts"
+        / "run_cycling_benchmark_case.sh"
+    ).read_text(encoding="utf-8")
+    assert "--ipopt-no-use-sx" in (
+        Path(__file__).resolve().parents[2]
+        / ".github"
+        / "scripts"
+        / "run_cycling_benchmark_case.sh"
+    ).read_text(encoding="utf-8")
+    assert "--ipopt-disable-standard-warmup" in (
+        Path(__file__).resolve().parents[2]
+        / ".github"
+        / "scripts"
+        / "run_cycling_benchmark_case.sh"
+    ).read_text(encoding="utf-8")
+    assert "merge-multiple: true" in workflow  # ACADOS remains a single artifact.
 
 
 def test_acados_transfer_restoration_time_is_attributed_to_the_next_rho():

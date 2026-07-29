@@ -217,7 +217,10 @@ jobs:
 
   prepare-madnlp-stack:
     name: Prepare the cached MadNLP numerical stack
-    if: inputs.cycles != 'acados'
+    # The long benchmark MadNLP runner restores/builds its own stack so IPOPT
+    # and Fatrop never wait for MadNLP preparation. This pre-warm job is only
+    # retained for the focused solver-option screen.
+    if: inputs.cycles == 'screen'
     runs-on: ${{ inputs.runner_label }}
     timeout-minutes: 90
     env:
@@ -1034,17 +1037,28 @@ jobs:
   benchmark:
     name: ${{ matrix.case_slug }} — sequential full/reduced
     if: ${{ inputs.cycles != 'screen' && inputs.cycles != 'acados' }}
-    needs: [prepare-seed, prepare-madnlp-stack]
+    needs: prepare-seed
     runs-on: ${{ inputs.runner_label }}
-    timeout-minutes: 350
+    timeout-minutes: ${{ matrix.timeout_minutes }}
     strategy:
       fail-fast: false
       max-parallel: 3
       matrix:
         include:
-          - solver: official
+          - solver: ipopt
             backend: mumps
-            case_slug: ipopt-fatrop
+            case_slug: ipopt
+            timeout_minutes: 300
+            benchmark_rhos: ${{ inputs.cycles }}
+            cycles_per_window: ${{ inputs.cycles_per_window }}
+            bioptim_commit: 3523f1745e315f07761159d7e06bd2d876026704
+            integration_branch: codex/fatrop-cocofest-benchmark
+            casadi_cxx_abi: 0
+          - solver: fatrop
+            backend: structured
+            case_slug: fatrop
+            # GitHub-hosted jobs are capped at six hours.
+            timeout_minutes: 360
             benchmark_rhos: ${{ inputs.cycles }}
             cycles_per_window: ${{ inputs.cycles_per_window }}
             bioptim_commit: 3523f1745e315f07761159d7e06bd2d876026704
@@ -1053,6 +1067,7 @@ jobs:
           - solver: madnlp
             backend: pardiso_mkl
             case_slug: madnlp
+            timeout_minutes: 420
             benchmark_rhos: ${{ inputs.cycles }}
             cycles_per_window: ${{ inputs.cycles_per_window }}
             bioptim_commit: 3523f1745e315f07761159d7e06bd2d876026704
@@ -1062,6 +1077,16 @@ jobs:
       # IPOPT/Fatrop use the wheel ABI; source-built CasADi/libMad follows
       # Conda's modern libstdc++ ABI.
       CASADI_CXX_ABI: ${{ matrix.casadi_cxx_abi }}
+      PYTHONPATH: ${{ github.workspace }}
+      BENCHMARK_RHOS: ${{ matrix.benchmark_rhos }}
+      BENCHMARK_CYCLES_PER_WINDOW: ${{ matrix.cycles_per_window }}
+      BENCHMARK_ASSISTANCE: ${{ inputs.crank_assistance_nm }}
+      BENCHMARK_Q_SLACK: ${{ inputs.terminal_wheel_q_slack }}
+      BENCHMARK_MAX_ITER: ${{ inputs.solver_max_iterations }}
+      BENCHMARK_SOLVER: ${{ matrix.solver }}
+      COCOFEST_BENCHMARK_COMMIT: ${{ github.sha }}
+      BIOPTIM_BENCHMARK_COMMIT: ${{ matrix.bioptim_commit }}
+      BIOPTIM_INTEGRATION_BRANCH: ${{ matrix.integration_branch }}
     defaults:
       run:
         shell: bash -el {0}
@@ -1078,7 +1103,7 @@ jobs:
           path: .benchmark-deps/bioptim
 
       - name: Apply the Fatrop C-compile plugin-name fix
-        if: matrix.solver == 'official'
+        if: matrix.solver == 'fatrop'
         run: |
           git -C .benchmark-deps/bioptim apply \
             "$GITHUB_WORKSPACE/.github/patches/bioptim-fatrop-c-compile-plugin-case.patch"
@@ -1231,18 +1256,17 @@ jobs:
           compiler_flags = cas.CasadiMeta.compiler_flags()
           print(f"CasADi compiler flags: {compiler_flags}")
           assert "-DCASADI_WITH_THREAD" in compiler_flags
-          solvers = ("ipopt", "fatrop") if target == "official" else ("ipopt", target)
-          for solver in solvers:
+          for solver in dict.fromkeys(("ipopt", target)):
               available = cas.has_nlpsol(solver)
               print(f"{solver}: {available}")
               assert available, solver
           if target == "madnlp":
               assert hasattr(bioptim.Solver, "MADNLP")
-          elif target in {"fatrop", "official"}:
+          elif target == "fatrop":
               assert hasattr(bioptim.Solver, "FATROP")
 
           x = cas.MX.sym("x")
-          smoke_target = "fatrop" if target == "official" else target
+          smoke_target = target
           plugin_options = {"print_time": False}
           if smoke_target == "ipopt":
               plugin_options["ipopt"] = {"print_level": 0, "max_iter": 50}
@@ -1312,20 +1336,7 @@ jobs:
             tests/shard1/test_periodic_pulse_width.py::test_common_primal_threshold_is_independent_of_nlp_solver_tolerance \
             tests/shard1/test_periodic_pulse_width.py::test_github_benchmark_compares_physical_threshold_not_solver_tolerance
 
-      - name: Run all ${{ matrix.solver }} formulations sequentially
-        env:
-          PYTHONPATH: ${{ github.workspace }}
-          BENCHMARK_RHOS: ${{ matrix.benchmark_rhos }}
-          BENCHMARK_CYCLES_PER_WINDOW: ${{ matrix.cycles_per_window }}
-          BENCHMARK_ASSISTANCE: ${{ inputs.crank_assistance_nm }}
-          BENCHMARK_Q_SLACK: ${{ inputs.terminal_wheel_q_slack }}
-          BENCHMARK_MAX_ITER: ${{ inputs.solver_max_iterations }}
-          BENCHMARK_SOLVER: ${{ matrix.solver }}
-          BENCHMARK_BACKEND: ${{ matrix.backend }}
-          BENCHMARK_CASE_SLUG: ${{ matrix.case_slug }}
-          COCOFEST_BENCHMARK_COMMIT: ${{ github.sha }}
-          BIOPTIM_BENCHMARK_COMMIT: ${{ matrix.bioptim_commit }}
-          BIOPTIM_INTEGRATION_BRANCH: ${{ matrix.integration_branch }}
+      - name: Prepare sequential case directories
         run: |
           mkdir -p benchmark-results benchmark-probes
           if ! [[ "$BENCHMARK_RHOS" =~ ^[1-9][0-9]*$ ]]; then
@@ -1333,112 +1344,267 @@ jobs:
             exit 1
           fi
           BENCHMARK_CYCLES=$((BENCHMARK_RHOS + BENCHMARK_CYCLES_PER_WINDOW - 1))
-          run_case() {
-            local case_slug="$1"
-            local solver="$2"
-            local mechanics="$3"
-            local backend="$4"
-            local ode_solver="$5"
-            local case_root="${6:-benchmark-results}"
-            local case_windows="${7:-$BENCHMARK_CYCLES}"
-            local compile_mode="${8:-false}"
-            local case_dir="$GITHUB_WORKSPACE/${case_root}/${case_slug}-${mechanics}"
-            local result="$case_dir/result.json"
-            local solver_options=()
-            local solver_tolerance=1e-6
-            mkdir -p "$case_dir"
+          echo "BENCHMARK_CYCLES=$BENCHMARK_CYCLES" >> "$GITHUB_ENV"
 
-            if [[ "$solver" == "ipopt" ]]; then
-              solver_options+=(
-                --ipopt-max-iter "$BENCHMARK_MAX_ITER"
-                --ipopt-dual-warm-start-mode bounds
-              )
-            elif [[ "$solver" == "fatrop" ]]; then
-              solver_options+=(
-                --fatrop-max-iter 1000
-                --fatrop-structure-detection auto
-                --fatrop-bound-tightening-factor 1e-8
-                --fatrop-state-scaling none
-                --fatrop-dual-warm-start-mode off
-              )
-              if [[ "$compile_mode" == "true" ]]; then
-                solver_options+=(--fatrop-c-compile)
-              fi
-              if [[ "$ode_solver" == "rk4" ]]; then
-                solver_options+=(--ipopt-ode-solver rk4 --ipopt-rk-steps 5)
-              else
-                solver_options+=(
-                  --ipopt-ode-solver collocation
-                  --ipopt-collocation-degree 3
-                  --ipopt-collocation-method radau
-                )
-              fi
-            elif [[ "$solver" == "madnlp" ]]; then
-              solver_tolerance=1e-8
-              solver_options+=(
-                --madnlp-max-iter "$BENCHMARK_MAX_ITER"
-                --madnlp-linear-solver "$backend"
-                --madnlp-dual-warm-start-mode off
-              )
-            fi
-            if [[ "$mechanics" == "reduced" ]]; then
-              solver_options+=(--mechanical-formulation reduced)
-            fi
+      - name: Run IPOPT full
+        if: matrix.solver == 'ipopt'
+        run: bash .github/scripts/run_cycling_benchmark_case.sh ipopt ipopt full mumps collocation
+      - name: Checkpoint IPOPT full
+        if: ${{ always() && matrix.solver == 'ipopt' }}
+        continue-on-error: true
+        uses: actions/upload-artifact@v7
+        with:
+          name: cycling-fatigue-linux-ipopt-full-${{ github.run_id }}
+          path: benchmark-results/ipopt-full/
+          if-no-files-found: warn
+          retention-days: 30
 
-            set +e
-            set -o pipefail
-            python examples/fes_multibody/cycling/cycling_fes_solver_comparison.py \
-              --solvers "$solver" \
-              --objective fatigue \
-              --ipopt-profile periodic_collocation \
-              --cycles-per-window "$BENCHMARK_CYCLES_PER_WINDOW" \
-              --stimulations-per-cycle 30 \
-              --n-windows "$case_windows" \
-              --n-threads "$BENCHMARK_THREADS" \
-              --crank-assistance "$BENCHMARK_ASSISTANCE" \
-              --nlp-tolerance "$solver_tolerance" \
-              --primal-feasibility-threshold 1e-5 \
-              --max-consecutive-failing 2 \
-              --standard-warmup-seed .github/benchmark-seeds/legacy-resistive-0p22-warmup.npz \
-              --legacy-standard-warmup-seed-signed-torque 0.22 \
-              --standard-warmup-seed-continuation \
-              --common-initial-solution "benchmark-seed/common-${mechanics}.npz" \
-              --no-optional-nlp-periodic-ipopt-hot-start \
-              --warmup-ipopt-linear-solver mumps \
-              --ipopt-linear-solver mumps \
-              --ipopt-disable-historical-initial-guess \
-              --state-scaling full \
-              --first-node-wheel-q-slack 0 \
-              --terminal-wheel-q-slack "$BENCHMARK_Q_SLACK" \
-              --compact-rho-output \
-              --print-traces \
-              --output-json "$result" \
-              "${solver_options[@]}" \
-              2>&1 | tee "$case_dir/solver.log"
-            local solver_exit="${PIPESTATUS[0]}"
-            set -e
-            echo "$solver_exit" > "$case_dir/process-exit-code.txt"
-          }
+      - name: Run IPOPT reduced
+        if: matrix.solver == 'ipopt'
+        run: bash .github/scripts/run_cycling_benchmark_case.sh ipopt ipopt reduced mumps collocation
+      - name: Checkpoint IPOPT reduced
+        if: ${{ always() && matrix.solver == 'ipopt' }}
+        continue-on-error: true
+        uses: actions/upload-artifact@v7
+        with:
+          name: cycling-fatigue-linux-ipopt-reduced-${{ github.run_id }}
+          path: benchmark-results/ipopt-reduced/
+          if-no-files-found: warn
+          retention-days: 30
 
-          if [[ "$BENCHMARK_SOLVER" == "official" ]]; then
-            run_case ipopt ipopt full mumps collocation
-            run_case ipopt ipopt reduced mumps collocation
-            run_case fatrop-rk4 fatrop full structured rk4
-            run_case fatrop-rk4 fatrop reduced structured rk4
-            run_case fatrop-collocation fatrop full structured collocation
-            run_case fatrop-collocation fatrop reduced structured collocation
-            # Bioptim currently rebuilds the symbolic NLP when the moving
-            # horizon changes absolute bounds. C compilation is therefore
-            # measured on one isolated RHO per formulation, not repeated over
-            # the 100-RHO hot benchmark.
-            run_case fatrop-rk4-compiled-probe fatrop full structured rk4 benchmark-probes 1 true
-            run_case fatrop-rk4-compiled-probe fatrop reduced structured rk4 benchmark-probes 1 true
-          else
-            run_case madnlp-pardiso madnlp full pardiso_mkl collocation
-            run_case madnlp-pardiso madnlp reduced pardiso_mkl collocation
-            run_case madnlp-mumps madnlp full mumps collocation
-            run_case madnlp-mumps madnlp reduced mumps collocation
-          fi
+      - name: Screen IPOPT SX full over 30 RHO
+        if: matrix.solver == 'ipopt'
+        run: bash .github/scripts/run_cycling_benchmark_case.sh ipopt-sx ipopt full mumps collocation benchmark-graph-screen 30 false sx
+      - name: Checkpoint IPOPT SX full
+        if: ${{ always() && matrix.solver == 'ipopt' }}
+        continue-on-error: true
+        uses: actions/upload-artifact@v7
+        with:
+          name: cycling-graph-screen-ipopt-sx-full-${{ github.run_id }}
+          path: benchmark-graph-screen/ipopt-sx-full/
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Screen IPOPT SX reduced over 30 RHO
+        if: matrix.solver == 'ipopt'
+        run: bash .github/scripts/run_cycling_benchmark_case.sh ipopt-sx ipopt reduced mumps collocation benchmark-graph-screen 30 false sx
+      - name: Checkpoint IPOPT SX reduced
+        if: ${{ always() && matrix.solver == 'ipopt' }}
+        continue-on-error: true
+        uses: actions/upload-artifact@v7
+        with:
+          name: cycling-graph-screen-ipopt-sx-reduced-${{ github.run_id }}
+          path: benchmark-graph-screen/ipopt-sx-reduced/
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Run Fatrop RK4 full
+        if: matrix.solver == 'fatrop'
+        run: bash .github/scripts/run_cycling_benchmark_case.sh fatrop-rk4 fatrop full structured rk4
+      - name: Checkpoint Fatrop RK4 full
+        if: ${{ always() && matrix.solver == 'fatrop' }}
+        continue-on-error: true
+        uses: actions/upload-artifact@v7
+        with:
+          name: cycling-fatigue-linux-fatrop-rk4-full-${{ github.run_id }}
+          path: benchmark-results/fatrop-rk4-full/
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Run Fatrop RK4 reduced
+        if: matrix.solver == 'fatrop'
+        run: bash .github/scripts/run_cycling_benchmark_case.sh fatrop-rk4 fatrop reduced structured rk4
+      - name: Checkpoint Fatrop RK4 reduced
+        if: ${{ always() && matrix.solver == 'fatrop' }}
+        continue-on-error: true
+        uses: actions/upload-artifact@v7
+        with:
+          name: cycling-fatigue-linux-fatrop-rk4-reduced-${{ github.run_id }}
+          path: benchmark-results/fatrop-rk4-reduced/
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Run Fatrop collocation full
+        if: matrix.solver == 'fatrop'
+        run: bash .github/scripts/run_cycling_benchmark_case.sh fatrop-collocation fatrop full structured collocation
+      - name: Checkpoint Fatrop collocation full
+        if: ${{ always() && matrix.solver == 'fatrop' }}
+        continue-on-error: true
+        uses: actions/upload-artifact@v7
+        with:
+          name: cycling-fatigue-linux-fatrop-collocation-full-${{ github.run_id }}
+          path: benchmark-results/fatrop-collocation-full/
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Run Fatrop collocation reduced
+        if: matrix.solver == 'fatrop'
+        run: bash .github/scripts/run_cycling_benchmark_case.sh fatrop-collocation fatrop reduced structured collocation
+      - name: Checkpoint Fatrop collocation reduced
+        if: ${{ always() && matrix.solver == 'fatrop' }}
+        continue-on-error: true
+        uses: actions/upload-artifact@v7
+        with:
+          name: cycling-fatigue-linux-fatrop-collocation-reduced-${{ github.run_id }}
+          path: benchmark-results/fatrop-collocation-reduced/
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Screen Fatrop RK4 SX full over 30 RHO
+        if: matrix.solver == 'fatrop'
+        run: bash .github/scripts/run_cycling_benchmark_case.sh fatrop-rk4-sx fatrop full structured rk4 benchmark-graph-screen 30 false sx
+      - name: Checkpoint Fatrop RK4 SX full
+        if: ${{ always() && matrix.solver == 'fatrop' }}
+        continue-on-error: true
+        uses: actions/upload-artifact@v7
+        with:
+          name: cycling-graph-screen-fatrop-rk4-sx-full-${{ github.run_id }}
+          path: benchmark-graph-screen/fatrop-rk4-sx-full/
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Screen Fatrop RK4 SX reduced over 30 RHO
+        if: matrix.solver == 'fatrop'
+        run: bash .github/scripts/run_cycling_benchmark_case.sh fatrop-rk4-sx fatrop reduced structured rk4 benchmark-graph-screen 30 false sx
+      - name: Checkpoint Fatrop RK4 SX reduced
+        if: ${{ always() && matrix.solver == 'fatrop' }}
+        continue-on-error: true
+        uses: actions/upload-artifact@v7
+        with:
+          name: cycling-graph-screen-fatrop-rk4-sx-reduced-${{ github.run_id }}
+          path: benchmark-graph-screen/fatrop-rk4-sx-reduced/
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Screen Fatrop collocation SX full over 30 RHO
+        if: matrix.solver == 'fatrop'
+        run: bash .github/scripts/run_cycling_benchmark_case.sh fatrop-collocation-sx fatrop full structured collocation benchmark-graph-screen 30 false sx
+      - name: Checkpoint Fatrop collocation SX full
+        if: ${{ always() && matrix.solver == 'fatrop' }}
+        continue-on-error: true
+        uses: actions/upload-artifact@v7
+        with:
+          name: cycling-graph-screen-fatrop-collocation-sx-full-${{ github.run_id }}
+          path: benchmark-graph-screen/fatrop-collocation-sx-full/
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Screen Fatrop collocation SX reduced over 30 RHO
+        if: matrix.solver == 'fatrop'
+        run: bash .github/scripts/run_cycling_benchmark_case.sh fatrop-collocation-sx fatrop reduced structured collocation benchmark-graph-screen 30 false sx
+      - name: Checkpoint Fatrop collocation SX reduced
+        if: ${{ always() && matrix.solver == 'fatrop' }}
+        continue-on-error: true
+        uses: actions/upload-artifact@v7
+        with:
+          name: cycling-graph-screen-fatrop-collocation-sx-reduced-${{ github.run_id }}
+          path: benchmark-graph-screen/fatrop-collocation-sx-reduced/
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Run Fatrop compiled full probe
+        if: matrix.solver == 'fatrop'
+        run: bash .github/scripts/run_cycling_benchmark_case.sh fatrop-rk4-compiled-probe fatrop full structured rk4 benchmark-probes 1 true
+      - name: Checkpoint Fatrop compiled full probe
+        if: ${{ always() && matrix.solver == 'fatrop' }}
+        continue-on-error: true
+        uses: actions/upload-artifact@v7
+        with:
+          name: cycling-fatrop-compile-probe-full-${{ github.run_id }}
+          path: benchmark-probes/fatrop-rk4-compiled-probe-full/
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Run Fatrop compiled reduced probe
+        if: matrix.solver == 'fatrop'
+        run: bash .github/scripts/run_cycling_benchmark_case.sh fatrop-rk4-compiled-probe fatrop reduced structured rk4 benchmark-probes 1 true
+      - name: Checkpoint Fatrop compiled reduced probe
+        if: ${{ always() && matrix.solver == 'fatrop' }}
+        continue-on-error: true
+        uses: actions/upload-artifact@v7
+        with:
+          name: cycling-fatrop-compile-probe-reduced-${{ github.run_id }}
+          path: benchmark-probes/fatrop-rk4-compiled-probe-reduced/
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Run MadNLP PARDISO full
+        if: matrix.solver == 'madnlp'
+        run: bash .github/scripts/run_cycling_benchmark_case.sh madnlp-pardiso madnlp full pardiso_mkl collocation
+      - name: Checkpoint MadNLP PARDISO full
+        if: ${{ always() && matrix.solver == 'madnlp' }}
+        continue-on-error: true
+        uses: actions/upload-artifact@v7
+        with:
+          name: cycling-fatigue-linux-madnlp-pardiso-full-${{ github.run_id }}
+          path: benchmark-results/madnlp-pardiso-full/
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Run MadNLP PARDISO reduced
+        if: matrix.solver == 'madnlp'
+        run: bash .github/scripts/run_cycling_benchmark_case.sh madnlp-pardiso madnlp reduced pardiso_mkl collocation
+      - name: Checkpoint MadNLP PARDISO reduced
+        if: ${{ always() && matrix.solver == 'madnlp' }}
+        continue-on-error: true
+        uses: actions/upload-artifact@v7
+        with:
+          name: cycling-fatigue-linux-madnlp-pardiso-reduced-${{ github.run_id }}
+          path: benchmark-results/madnlp-pardiso-reduced/
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Run MadNLP MUMPS full
+        if: matrix.solver == 'madnlp'
+        run: bash .github/scripts/run_cycling_benchmark_case.sh madnlp-mumps madnlp full mumps collocation
+      - name: Checkpoint MadNLP MUMPS full
+        if: ${{ always() && matrix.solver == 'madnlp' }}
+        continue-on-error: true
+        uses: actions/upload-artifact@v7
+        with:
+          name: cycling-fatigue-linux-madnlp-mumps-full-${{ github.run_id }}
+          path: benchmark-results/madnlp-mumps-full/
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Run MadNLP MUMPS reduced
+        if: matrix.solver == 'madnlp'
+        run: bash .github/scripts/run_cycling_benchmark_case.sh madnlp-mumps madnlp reduced mumps collocation
+      - name: Checkpoint MadNLP MUMPS reduced
+        if: ${{ always() && matrix.solver == 'madnlp' }}
+        continue-on-error: true
+        uses: actions/upload-artifact@v7
+        with:
+          name: cycling-fatigue-linux-madnlp-mumps-reduced-${{ github.run_id }}
+          path: benchmark-results/madnlp-mumps-reduced/
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Screen MadNLP MUMPS SX full over 30 RHO
+        if: matrix.solver == 'madnlp'
+        run: bash .github/scripts/run_cycling_benchmark_case.sh madnlp-mumps-sx madnlp full mumps collocation benchmark-graph-screen 30 false sx
+      - name: Checkpoint MadNLP MUMPS SX full
+        if: ${{ always() && matrix.solver == 'madnlp' }}
+        continue-on-error: true
+        uses: actions/upload-artifact@v7
+        with:
+          name: cycling-graph-screen-madnlp-mumps-sx-full-${{ github.run_id }}
+          path: benchmark-graph-screen/madnlp-mumps-sx-full/
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Screen MadNLP MUMPS SX reduced over 30 RHO
+        if: matrix.solver == 'madnlp'
+        run: bash .github/scripts/run_cycling_benchmark_case.sh madnlp-mumps-sx madnlp reduced mumps collocation benchmark-graph-screen 30 false sx
+      - name: Checkpoint MadNLP MUMPS SX reduced
+        if: ${{ always() && matrix.solver == 'madnlp' }}
+        continue-on-error: true
+        uses: actions/upload-artifact@v7
+        with:
+          name: cycling-graph-screen-madnlp-mumps-sx-reduced-${{ github.run_id }}
+          path: benchmark-graph-screen/madnlp-mumps-sx-reduced/
+          if-no-files-found: warn
+          retention-days: 30
 
       - name: Add every sequential result to the job summary
         if: always()
@@ -1467,34 +1633,17 @@ jobs:
             } >> "$GITHUB_STEP_SUMMARY"
           done < <(find benchmark-results -name result.json -type f | sort)
 
-      - name: Upload separated benchmark case directories
-        if: always()
-        uses: actions/upload-artifact@v7
-        with:
-          name: cycling-fatigue-linux-${{ matrix.case_slug }}-${{ github.run_id }}
-          path: benchmark-results/
-          if-no-files-found: warn
-          retention-days: 30
-
-      - name: Upload the isolated Fatrop C-compilation probes
-        if: ${{ always() && matrix.solver == 'official' }}
-        uses: actions/upload-artifact@v7
-        with:
-          name: cycling-fatrop-compile-probes-${{ github.run_id }}
-          path: benchmark-probes/
-          if-no-files-found: warn
-          retention-days: 30
-
       - name: Require every expected case without infrastructure errors
         if: always()
         shell: bash
         env:
           BENCHMARK_SOLVER: ${{ matrix.solver }}
         run: |
-          expected=6
-          if [[ "$BENCHMARK_SOLVER" == "madnlp" ]]; then
-            expected=4
-          fi
+          case "$BENCHMARK_SOLVER" in
+            ipopt) expected=2 ;;
+            fatrop|madnlp) expected=4 ;;
+            *) echo "Unexpected benchmark solver: $BENCHMARK_SOLVER" >&2; exit 1 ;;
+          esac
           mapfile -t results < <(find benchmark-results -name result.json -type f | sort)
           if [[ "${#results[@]}" -ne "$expected" ]]; then
             echo "${BENCHMARK_SOLVER}: expected $expected JSON files, found ${#results[@]}." >&2
@@ -1506,7 +1655,7 @@ jobs:
               (.attempted_windows > 0 and .error == null)
             ' "$result"
           done
-          if [[ "$BENCHMARK_SOLVER" == "official" ]]; then
+          if [[ "$BENCHMARK_SOLVER" == "fatrop" ]]; then
             mapfile -t probes < <(
               find benchmark-probes -name result.json -type f | sort
             )
@@ -1521,6 +1670,23 @@ jobs:
               ' "$result"
             done
           fi
+          case "$BENCHMARK_SOLVER" in
+            ipopt|madnlp) expected_graph_screens=2 ;;
+            fatrop) expected_graph_screens=4 ;;
+          esac
+          mapfile -t graph_screens < <(
+            find benchmark-graph-screen -name result.json -type f | sort
+          )
+          if [[ "${#graph_screens[@]}" -ne "$expected_graph_screens" ]]; then
+            echo "${BENCHMARK_SOLVER}: expected ${expected_graph_screens} SX JSON files, found ${#graph_screens[@]}." >&2
+            exit 1
+          fi
+          for result in "${graph_screens[@]}"; do
+            jq -e '
+              .results[0] |
+              (.attempted_windows > 0 and .error == null)
+            ' "$result"
+          done
 
   screen-report:
     name: Aggregate solver option screen
@@ -1592,7 +1758,6 @@ jobs:
         with:
           pattern: cycling-fatigue-linux-*-${{ github.run_id }}
           path: benchmark-results-all
-          merge-multiple: true
 
       - name: Download the ACADOS baseline and option artifacts
         uses: actions/download-artifact@v8
@@ -1601,6 +1766,13 @@ jobs:
           pattern: cycling-acados-smoke-${{ github.run_id }}
           path: benchmark-acados-all
           merge-multiple: true
+
+      - name: Download the SX graph-mode screens
+        uses: actions/download-artifact@v8
+        continue-on-error: true
+        with:
+          pattern: cycling-graph-screen-*-${{ github.run_id }}
+          path: benchmark-graph-screen-all
 
       - name: Build the comparison report
         run: |
@@ -1632,5 +1804,6 @@ jobs:
             benchmark-report/
             benchmark-results-all/
             benchmark-acados-all/
+            benchmark-graph-screen-all/
           if-no-files-found: warn
           retention-days: 30
