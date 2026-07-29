@@ -32,6 +32,7 @@ try:
         parse_crank_assistance,
         parse_proximal_control_weights,
         parse_terminal_wheel_q_slacks,
+        parse_transfer_bound_homotopy_fractions,
         solve_case,
     )
 except ImportError:
@@ -43,6 +44,7 @@ except ImportError:
         parse_crank_assistance,
         parse_proximal_control_weights,
         parse_terminal_wheel_q_slacks,
+        parse_transfer_bound_homotopy_fractions,
         solve_case,
     )
 
@@ -2524,6 +2526,18 @@ def main(
     acados_transfer_phase_one_max_q_change: float | None = None,
     acados_transfer_phase_one_max_qdot_change: float | None = None,
     acados_transfer_phase_one_max_fes_change: float | None = None,
+    acados_transfer_bound_homotopy: bool = False,
+    acados_transfer_bound_homotopy_fractions: tuple[float, ...] = (
+        0.0,
+        0.25,
+        0.5,
+        0.75,
+        1.0,
+    ),
+    acados_transfer_bound_homotopy_padding: float = 0.05,
+    acados_transfer_bound_homotopy_iterations: int = 30,
+    acados_transfer_bound_homotopy_tolerance: float = 1e-4,
+    acados_transfer_bound_homotopy_solver_tolerance: float | None = None,
     shared_initial_phase_one: bool = False,
     shared_transfer_rollout_substeps: int = 5,
     shared_transfer_rollout_max_bound_violation: float = 1.0,
@@ -2963,6 +2977,24 @@ def main(
     )
     acados_args.full_dynamics_phase_one_max_fes_change = (
         acados_transfer_phase_one_max_fes_change
+    )
+    acados_args.acados_transfer_bound_homotopy = (
+        acados_transfer_bound_homotopy
+    )
+    acados_args.acados_transfer_bound_homotopy_fractions = (
+        acados_transfer_bound_homotopy_fractions
+    )
+    acados_args.acados_transfer_bound_homotopy_padding = (
+        acados_transfer_bound_homotopy_padding
+    )
+    acados_args.acados_transfer_bound_homotopy_iterations = (
+        acados_transfer_bound_homotopy_iterations
+    )
+    acados_args.acados_transfer_bound_homotopy_tolerance = (
+        acados_transfer_bound_homotopy_tolerance
+    )
+    acados_args.acados_transfer_bound_homotopy_solver_tolerance = (
+        acados_transfer_bound_homotopy_solver_tolerance
     )
 
     fatrop_args = _nlp_solver_config(
@@ -3489,6 +3521,39 @@ def build_cli() -> argparse.ArgumentParser:
             type=float,
             default=None,
         )
+    parser.add_argument(
+        "--acados-transfer-bound-homotopy",
+        action="store_true",
+        help=(
+            "Restore the transferred ACADOS trajectory through relaxed state "
+            "bounds before the next fatigue-optimal RHO solve."
+        ),
+    )
+    parser.add_argument(
+        "--acados-transfer-bound-homotopy-fractions",
+        type=parse_transfer_bound_homotopy_fractions,
+        default=(0.0, 0.25, 0.5, 0.75, 1.0),
+    )
+    parser.add_argument(
+        "--acados-transfer-bound-homotopy-padding",
+        type=float,
+        default=0.05,
+    )
+    parser.add_argument(
+        "--acados-transfer-bound-homotopy-iterations",
+        type=int,
+        default=30,
+    )
+    parser.add_argument(
+        "--acados-transfer-bound-homotopy-tolerance",
+        type=float,
+        default=1e-4,
+    )
+    parser.add_argument(
+        "--acados-transfer-bound-homotopy-solver-tolerance",
+        type=float,
+        default=None,
+    )
     parser.add_argument(
         "--shared-initial-phase-one",
         action="store_true",
@@ -4223,6 +4288,24 @@ if __name__ == "__main__":
         ),
         acados_transfer_phase_one_max_fes_change=(
             args.acados_transfer_phase_one_max_fes_change
+        ),
+        acados_transfer_bound_homotopy=(
+            args.acados_transfer_bound_homotopy
+        ),
+        acados_transfer_bound_homotopy_fractions=(
+            args.acados_transfer_bound_homotopy_fractions
+        ),
+        acados_transfer_bound_homotopy_padding=(
+            args.acados_transfer_bound_homotopy_padding
+        ),
+        acados_transfer_bound_homotopy_iterations=(
+            args.acados_transfer_bound_homotopy_iterations
+        ),
+        acados_transfer_bound_homotopy_tolerance=(
+            args.acados_transfer_bound_homotopy_tolerance
+        ),
+        acados_transfer_bound_homotopy_solver_tolerance=(
+            args.acados_transfer_bound_homotopy_solver_tolerance
         ),
         shared_initial_phase_one=args.shared_initial_phase_one,
         shared_transfer_rollout_substeps=args.shared_transfer_rollout_substeps,

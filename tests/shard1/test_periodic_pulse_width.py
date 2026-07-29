@@ -6144,6 +6144,17 @@ def test_shared_transfer_rollout_cli_is_available_to_ipopt():
             "2",
             "--acados-transfer-phase-one-max-fes-change",
             "3",
+            "--acados-transfer-bound-homotopy",
+            "--acados-transfer-bound-homotopy-fractions",
+            "0,1",
+            "--acados-transfer-bound-homotopy-padding",
+            "0.05",
+            "--acados-transfer-bound-homotopy-iterations",
+            "20",
+            "--acados-transfer-bound-homotopy-tolerance",
+            "1e-4",
+            "--acados-transfer-bound-homotopy-solver-tolerance",
+            "1e-4",
             "--shared-initial-phase-one",
             "--shared-transfer-rollout-substeps",
             "7",
@@ -6197,6 +6208,14 @@ def test_shared_transfer_rollout_cli_is_available_to_ipopt():
     assert comparison_args.acados_transfer_phase_one_max_q_change == 1
     assert comparison_args.acados_transfer_phase_one_max_qdot_change == 2
     assert comparison_args.acados_transfer_phase_one_max_fes_change == 3
+    assert comparison_args.acados_transfer_bound_homotopy is True
+    assert comparison_args.acados_transfer_bound_homotopy_fractions == (0.0, 1.0)
+    assert comparison_args.acados_transfer_bound_homotopy_padding == 0.05
+    assert comparison_args.acados_transfer_bound_homotopy_iterations == 20
+    assert comparison_args.acados_transfer_bound_homotopy_tolerance == 1e-4
+    assert (
+        comparison_args.acados_transfer_bound_homotopy_solver_tolerance == 1e-4
+    )
     assert comparison_args.shared_initial_phase_one is True
     assert comparison_args.shared_transfer_rollout_substeps == 7
     assert comparison_args.shared_transfer_ding_force_compensation is True
