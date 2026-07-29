@@ -544,7 +544,7 @@ jobs:
               --mechanical-formulation reduced
               --experimental-reduced-acados
               --acados-stationarity-tolerance 5e-3
-              --acados-control-homotopy-release-final-radius
+              --acados-control-homotopy-window-growth 10
             )
           else
             mechanics_options+=(
@@ -604,7 +604,10 @@ jobs:
               .terminal_wheel_q_reference_mode == "absolute_initial" and
               (
                 .mechanical_formulation != "reduced" or
-                .acados_control_homotopy_keep_final_radius == false
+                (
+                  .acados_control_homotopy_keep_final_radius == true and
+                  .acados_control_homotopy_window_growth == 10
+                )
               )
             )
           ' "$result"

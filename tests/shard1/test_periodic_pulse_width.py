@@ -3212,8 +3212,9 @@ def test_github_acados_smoke_uses_the_robust_reference_profile():
     assert "--acados-collocation-type GAUSS_LEGENDRE" in workflow
     assert "--acados-stationarity-tolerance 1e-3" in workflow
     assert "--acados-stationarity-tolerance 5e-3" in workflow
-    assert "--acados-control-homotopy-release-final-radius" in workflow
-    assert ".acados_control_homotopy_keep_final_radius == false" in workflow
+    assert "--acados-control-homotopy-window-growth 10" in workflow
+    assert ".acados_control_homotopy_keep_final_radius == true" in workflow
+    assert ".acados_control_homotopy_window_growth == 10" in workflow
     assert "--max-consecutive-failing 2" in workflow
     assert ".terminal_wheel_q_reference_mode == \"absolute_initial\"" in workflow
 
@@ -5929,6 +5930,8 @@ def test_shared_transfer_rollout_cli_is_available_to_ipopt():
             "0.2,0.1,0.02",
             "--acados-terminal-wheel-q-homotopy-each-window",
             "--acados-control-homotopy-release-final-radius",
+            "--acados-control-homotopy-window-growth",
+            "10",
             "--acados-newton-iter",
             "3",
         ]
@@ -5975,6 +5978,7 @@ def test_shared_transfer_rollout_cli_is_available_to_ipopt():
     )
     assert comparison_args.acados_terminal_wheel_q_homotopy_each_window is True
     assert comparison_args.acados_control_homotopy_keep_final_radius is False
+    assert comparison_args.acados_control_homotopy_window_growth == 10
     assert comparison_args.acados_newton_iter == 3
     assert (
         comparison_example.IPOPT_PROFILE_DEFAULTS["acados_like"]["model_formulation"]
