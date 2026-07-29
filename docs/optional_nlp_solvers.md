@@ -194,16 +194,24 @@ initialization pipeline is:
    when IPOPT reports a measured primal infeasibility below the threshold;
 5. solve ACADOS first with controls fixed to the IPOPT reference, then release
    them over the measured radii `1e-8` and `1e-7 s`;
-6. retain the largest converged radius, then recenter that trust region after
-   every RHO shift.
+6. retain and recenter the largest converged radius after every RHO shift; for
+   the experimental reduced model, grow it from `0.1` to `10 microseconds`
+   and cap it there.
 
-On the local one-cycle assisted test, the periodic IPOPT bridge converged with
-`inf_pr=4.73e-9` in `62.5 s` and was then cached. ACADOS reproduced its cost
-(`3.69957`) in `1.40 s`. A five-cycle MHE smoke test subsequently completed
-all five physical cycles: four windows converged in 3--7 SQP iterations and
-one non-consecutive window reached the 100-iteration limit; total ACADOS
-solver time was `37.4 s`, including `29.8 s` for that outlier. This is why
-`--max-consecutive-failing 2` remains useful for endurance runs.
+The Linux 30-RHO reference run `30415853682` attempted every window. Full
+mechanics reached `ACADOS_SUCCESS` on 29/30 windows, with a `0.158 s` hot
+wall-time median and `0.379 s` p90. Its only failure was RHO 30 at the
+100-SQP limit; dynamics (`3.8e-10`) and complementarity (`3.9e-9`) were tight,
+but stationarity remained above the `1e-3` target. Reduced mechanics also
+reached 29/30, with a `0.167 s` median and `0.548 s` p90. Its isolated RHO-26
+failure was followed by four successful windows, which confirms why
+`--max-consecutive-failing 2` is useful rather than merely permissive.
+
+The reduced trust-region screen was decisive. Releasing the radius immediately
+gave 0/2 successes; growing without a cap or capping at `100 microseconds`
+gave 4/5; a recentered `10 microseconds` cap gave 5/5 before the 30-RHO run.
+The radius constrains only each local SQP step and is recentered, so it does
+not prevent cumulative adaptation of the stimulation pattern.
 
 For explicit two-cycle experiments, ACADOS now receives stage-wise crank-angle
 bounds at every internal cycle seam. The old underconstrained formulation
@@ -346,10 +354,10 @@ The manually triggered
 now runs IPOPT-MUMPS, Fatrop-RK4, MadNLP-PARDISO and MadNLP-MUMPS in parallel
 on separate Linux runners. IPOPT and both MadNLP backends are evaluated on the
 full and reduced mechanical formulations; Fatrop currently covers the full
-formulation. Two isolated ACADOS SQP smoke jobs additionally exercise the full
-and experimental reduced formulations. They default to five RHO through
+formulation. Two isolated ACADOS SQP jobs additionally exercise the full and
+experimental reduced formulations. They default to 30 RHO through
 `acados_smoke_rhos`; their artifacts remain separate from the production
-comparison until both paths are repeatable.
+comparison because each formulation still has one isolated non-convergence.
 Alpaqa was removed from the endurance matrix after the option screen and the
 30-RHO confirmation: it validated no RHO, consumed two 600-second limits, and
 its second shifted window reached `4.57e-2` infeasibility. Its integration,
@@ -407,10 +415,10 @@ gh workflow run cycling_solver_benchmark_linux.yml \
   -f crank_assistance_nm=0.20 \
   -f terminal_wheel_q_slack=0.002 \
   -f solver_max_iterations=2000 \
-  -f acados_smoke_rhos=5
+  -f acados_smoke_rhos=30
 ```
 
-The ACADOS smoke is enabled only when `cycles_per_window=1`, so its horizon
+The ACADOS benchmark is enabled only when `cycles_per_window=1`, so its horizon
 matches the immutable formulation-specific seed. A two-cycle dispatch skips
 both the ACADOS stack build and its smoke matrix. The job runs IRK
 Gauss--Legendre with full SQP, Gauss--Newton, the robust HPIPM defaults, two
@@ -431,7 +439,7 @@ gh workflow run cycling_solver_benchmark_linux.yml \
   -f cycles_per_window=1 \
   -f crank_assistance_nm=0.20 \
   -f terminal_wheel_q_slack=0.002 \
-  -f acados_smoke_rhos=5
+  -f acados_smoke_rhos=30
 ```
 
 The production action pins the combined Fatrop/MadNLP Bioptim integration

@@ -3218,6 +3218,11 @@ def test_github_acados_smoke_uses_the_robust_reference_profile():
     ).read_text(encoding="utf-8")
 
     assert "acados_smoke_rhos:" in workflow
+    assert re.search(
+        r"acados_smoke_rhos:\s+"
+        r"description:.*\s+required: true\s+default: \"30\"",
+        workflow,
+    )
     assert "inputs.cycles != 'screen' && inputs.cycles != 'acados'" in workflow
     assert "prepare-acados-stack:" in workflow
     assert "ACADOS_COMMIT: 48e223e85f0408ebfd1d8c6d6fb0589e9c41b3aa" in workflow

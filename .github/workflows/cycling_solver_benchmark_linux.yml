@@ -42,7 +42,7 @@ on:
       acados_smoke_rhos:
         description: ACADOS SQP smoke-test RHO count (full and experimental reduced mechanics)
         required: true
-        default: "5"
+        default: "30"
         type: string
 
 permissions:

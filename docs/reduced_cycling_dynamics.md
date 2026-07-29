@@ -195,11 +195,11 @@ All sparse NLP cases use time-major ordering. The aggregate report separates
 solver/formulation/backend pairs and compares pulse patterns at cycles 10 and
 30, including a full-versus-reduced comparison for each supported solver.
 
-ACADOS is now evaluated by two separate CI smoke jobs, one for each mechanical
-formulation. They default to five RHO so that a failure of the experimental
-reduced transcription does not hide the production NLP benchmark. The RHO
-count is controlled by `acados_smoke_rhos` and can be raised to 30 after the
-short jobs are repeatable. They run only for the one-cycle benchmark; a
+ACADOS is now evaluated by two separate CI jobs, one for each mechanical
+formulation. They default to 30 RHO and remain isolated so that a failure of
+the experimental reduced transcription does not hide the production NLP
+benchmark. The RHO count is controlled by `acados_smoke_rhos`. They run only
+for the one-cycle benchmark; a
 two-cycle dispatch skips ACADOS because its common seeds have a different
 horizon. Both jobs start from the corresponding common
 one-cycle solution, map variables by name, project the five Ding states per
@@ -214,6 +214,13 @@ profile. RTI and faster integrator/QP variants are tested only after repeated
 full-SQP convergence. ACADOS results are uploaded separately and are not yet
 included in the Kevin aggregate table.
 
-The reduced formulation is experimental until muscle force, fatigue,
-stimulation patterns and terminal progress have been compared over the same
-30- and 100-RHO trajectories.
+Linux run `30415853682` produced 29/30 solver-success windows for both models.
+The reduced model recovered after its isolated RHO-26 failure and stayed below
+one second on every successful window; its hot median was `0.167 s`, versus
+`0.158 s` for the full model. It therefore brought no solve-time advantage in
+this experiment. It also produced a much larger accumulated objective
+(`2956.1` versus `179.6`), fatigue AUC (`3.03` versus `1.21`) and maximum mean
+normalized fatigue (`0.0680` versus `0.0149`). That discrepancy is too large
+to treat the reduced model as a drop-in replacement: muscle forces,
+stimulation patterns and reduced mechanical power must be audited before RTI
+or a 100-RHO endurance claim.
