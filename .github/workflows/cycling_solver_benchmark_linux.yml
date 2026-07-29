@@ -586,6 +586,27 @@ jobs:
                 --acados-qpscaling-scale-constraints NO_CONSTRAINT_SCALING
               )
             fi
+            if [[ "$nlp_solver" == "SQP_WITH_FEASIBLE_QP" ]]; then
+              # Let ACADOS prioritize restoration when the nominal QP is
+              # inconsistent, then switch back to the nominal optimality step.
+              solver_options+=(
+                --acados-search-direction-mode BYRD_OMOJOKUN
+              )
+            fi
+            if [[ "$variant" == "sqp-irk-two-stage" ]]; then
+              # Reuse the already compiled SQP OCP. Between RHO solves, first
+              # restore a feasible transferred trajectory with relaxed state
+              # bounds, tighten those bounds to the physical problem, and only
+              # then run the normal fatigue-optimal SQP solve.
+              solver_options+=(
+                --acados-transfer-bound-homotopy
+                --acados-transfer-bound-homotopy-fractions 0,1
+                --acados-transfer-bound-homotopy-padding 0.05
+                --acados-transfer-bound-homotopy-iterations 20
+                --acados-transfer-bound-homotopy-tolerance 1e-4
+                --acados-transfer-bound-homotopy-solver-tolerance 1e-4
+              )
+            fi
 
             set +e
             set -o pipefail
@@ -636,6 +657,8 @@ jobs:
 
           for mechanics in full reduced; do
             run_case sqp-irk-reference "$mechanics" "$ACADOS_SMOKE_RHOS" SQP IRK 5 5
+            run_case sqp-irk-two-stage "$mechanics" "$ACADOS_SMOKE_RHOS" SQP IRK 5 5
+            run_case sqp-feasible-qp-irk "$mechanics" "$ACADOS_OPTION_RHOS" SQP_WITH_FEASIBLE_QP IRK 5 5
             run_case sqp-rti-irk "$mechanics" "$ACADOS_OPTION_RHOS" SQP_RTI IRK 5 5
             run_case sqp-erk "$mechanics" "$ACADOS_OPTION_RHOS" SQP ERK 20 5
             run_case sqp-irk-light "$mechanics" "$ACADOS_OPTION_RHOS" SQP IRK 2 3
@@ -669,7 +692,7 @@ jobs:
         if: always()
         run: |
           output="acados-smoke-results/acados-option-screen.csv"
-          echo "case,nlp_solver,integrator,sim_steps,newton_iter,validated_cycles,attempted_rho,hot_median_s,hot_p90_s,executed_fatigue_objective,minimum_capacity_ratio,first_failed_rho" > "$output"
+          echo "case,nlp_solver,search_direction,integrator,sim_steps,newton_iter,transfer_bound_homotopy,validated_cycles,attempted_rho,hot_median_s,hot_p90_s,executed_fatigue_objective,minimum_capacity_ratio,first_failed_rho" > "$output"
           while IFS= read -r result; do
             case_name="$(basename "$(dirname "$result")")"
             jq -r --arg case "$case_name" '
@@ -678,9 +701,11 @@ jobs:
               [
                 $case,
                 $config.acados_nlp_solver_type,
+                $config.acados_search_direction_mode,
                 $config.acados_integrator_type,
                 $config.acados_sim_steps,
                 $config.acados_newton_iter,
+                $config.acados_transfer_bound_homotopy,
                 .validated_cycles,
                 .attempted_windows,
                 .hot_wall_time_median_s,
@@ -705,8 +730,8 @@ jobs:
         if: always()
         run: |
           mapfile -t results < <(find acados-smoke-results -name result.json -type f | sort)
-          if [[ "${#results[@]}" -ne 8 ]]; then
-            echo "ACADOS: expected 8 JSON files, found ${#results[@]}." >&2
+          if [[ "${#results[@]}" -ne 12 ]]; then
+            echo "ACADOS: expected 12 JSON files, found ${#results[@]}." >&2
             exit 1
           fi
           for result in "${results[@]}"; do

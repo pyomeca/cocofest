@@ -3391,6 +3391,13 @@ def test_github_acados_runner_uses_reference_and_option_profiles_sequentially():
     assert "--experimental-reduced-acados" in workflow
     assert "--common-initial-solution" in workflow
     assert "run_case sqp-irk-reference" in workflow
+    assert "run_case sqp-irk-two-stage" in workflow
+    assert "--acados-transfer-bound-homotopy-fractions 0,1" in workflow
+    assert "--acados-transfer-bound-homotopy-iterations 20" in workflow
+    assert "--acados-transfer-bound-homotopy-solver-tolerance 1e-4" in workflow
+    assert "run_case sqp-feasible-qp-irk" in workflow
+    assert "SQP_WITH_FEASIBLE_QP IRK" in workflow
+    assert "--acados-search-direction-mode BYRD_OMOJOKUN" in workflow
     assert "run_case sqp-rti-irk" in workflow
     assert "SQP_RTI IRK" in workflow
     assert "--acados-control-homotopy-radii 1e-6,1e-5" in workflow
