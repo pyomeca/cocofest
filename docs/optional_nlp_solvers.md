@@ -42,11 +42,14 @@ starting trajectory are common, but the report deliberately marks the
 transcription and scaling differences because they affect conditioning and
 timing.
 
-The periodic seed is committed only when IPOPT exposes a measured primal
-infeasibility below the acceptance threshold. Disable it with
-`--no-optional-nlp-periodic-ipopt-hot-start` to measure cold robustness. The
-one-off IPOPT time is reported as warm-start preparation and is not part of
-the hot-window solver timing.
+The common target seed is committed only when IPOPT exposes a measured primal
+infeasibility below the acceptance threshold. Its metadata records how many
+continuation warm-up cycles were consumed. A consumer must replay the same
+continuation before loading the seed, otherwise its first-node fatigue bounds
+describe a different absolute cycle and the seed is rejected. Since the common
+seed is already a certified target solution, the production benchmark uses
+`--no-optional-nlp-periodic-ipopt-hot-start` and does not pay for a redundant
+solver-specific IPOPT refinement.
 
 The CasADi build used for the assisted endurance benchmark must expose both
 `ipopt` and the target plugin. A local diagnostic build containing only
@@ -392,9 +395,10 @@ The production action pins the combined Fatrop/MadNLP Bioptim integration
 commit, so IPOPT, Fatrop and MadNLP use the same Bioptim revision. Each job
 first asserts that IPOPT and its target plugin coexist in the same CasADi
 runtime. The MadNLP job additionally pins and builds the libMad PARDISO/MKL
-runtime, exercises the selected `PardisoMKLSolver` or `MumpsSolver` through
-libMad's C example, then repeats that check through CasADi before starting the
-OCP. The official CasADi 3.7.2
+runtime, exercises the selected PARDISO/MKL or MUMPS backend through libMad's
+C example, then repeats that check through CasADi before starting the OCP.
+The libMad option is `PardisoMKLSolver` for PARDISO and the lowercase `mumps`
+identifier for MUMPS. The official CasADi 3.7.2
 wheel still targets the obsolete `libmadnlp_c.so` ABI, so the MadNLP job builds
 the pinned post-release CasADi 3.7.2 source revision that targets
 `libMad.so`; a symbolic link between these libraries would not be ABI-safe.

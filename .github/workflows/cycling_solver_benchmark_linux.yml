@@ -67,6 +67,7 @@ env:
   MKL_NUM_THREADS: "1"
   NUMEXPR_NUM_THREADS: "1"
   JULIA_NUM_THREADS: "1"
+  PYTHONUNBUFFERED: "1"
   MPLBACKEND: Agg
   MPLCONFIGDIR: /tmp/cocofest-matplotlib
 
@@ -330,6 +331,7 @@ jobs:
             tests/shard1/test_periodic_pulse_width.py::test_github_benchmark_compares_physical_threshold_not_solver_tolerance \
             tests/shard1/test_periodic_pulse_width.py::test_common_initial_solution_metadata_rejects_an_incompatible_horizon \
             tests/shard1/test_periodic_pulse_width.py::test_common_initial_solution_metadata_allows_a_transcription_change \
+            tests/shard1/test_periodic_pulse_width.py::test_common_initial_solution_metadata_rejects_a_different_warmup_cycle \
             tests/shard1/test_periodic_pulse_width.py::test_periodic_node_projection_uses_all_five_ding_states \
             tests/shard1/test_periodic_pulse_width.py::test_phase_one_maps_reduced_mechanics_without_classifying_them_as_fes \
             tests/shard1/test_periodic_pulse_width.py::test_common_target_seed_enables_the_robust_acados_reference_preparation
@@ -365,10 +367,13 @@ jobs:
               --nlp-tolerance "$tolerance" \
               --primal-feasibility-threshold 1e-5 \
               --max-consecutive-failing 2 \
+              --standard-warmup-seed .github/benchmark-seeds/legacy-resistive-0p22-warmup.npz \
+              --legacy-standard-warmup-seed-signed-torque 0.22 \
+              --standard-warmup-seed-continuation \
               --common-initial-solution benchmark-seed/common-full.npz \
+              --no-optional-nlp-periodic-ipopt-hot-start \
               --warmup-ipopt-linear-solver mumps \
               --ipopt-linear-solver mumps \
-              --ipopt-disable-standard-warmup \
               --ipopt-disable-historical-initial-guess \
               --state-scaling full \
               --first-node-wheel-q-slack 0 \
@@ -683,8 +688,12 @@ jobs:
               )
               expected_linear_solver = {
                   "pardiso_mkl": "PardisoMKLSolver",
-                  "mumps": "MumpsSolver",
+                  "mumps": "mumps",
               }[backend]
+              print(
+                  "MadNLP linear solver option: "
+                  f"{plugin_options['madnlp']['linear_solver']}"
+              )
               assert plugin_options["madnlp"]["linear_solver"] == expected_linear_solver
           smoke = cas.nlpsol(
               f"{target}_smoke",
@@ -748,11 +757,13 @@ jobs:
             # Fatrop exploits a direct-shooting, time-major OCP. RK4 avoids
             # exposing collocation variables as an unstructured control block,
             # which made the two-cycle CasADi structure detector assert.
+            # Keep MX graphs, as in the last successful Fatrop CI. This avoids
+            # eagerly expanding the full RK4 graph in SX; unbuffered output
+            # will distinguish construction time from solve time next run.
             # CasADi 3.7.2 bounds Fatrop's native max_iter option to 1000.
             solver_options+=(
               --ipopt-ode-solver rk4
               --ipopt-rk-steps 5
-              --ipopt-use-sx
               --fatrop-max-iter 1000
               --fatrop-structure-detection auto
               --fatrop-bound-tightening-factor 1e-8
@@ -777,8 +788,10 @@ jobs:
           fi
           # Each mechanical formulation uses one immutable target solution,
           # produced once by IPOPT and reused as the same physical nodal
-          # trajectory by every backend.
-          # Solver-specific periodic IPOPT refinements are deliberately disabled.
+          # trajectory by every backend. Reapply the exact continuation warm-up
+          # used by the producer so that the seed and first-node bounds describe
+          # the same absolute fatigue cycle. The common target solution then
+          # makes a solver-specific IPOPT refinement redundant.
 
           set -o pipefail
           python examples/fes_multibody/cycling/cycling_fes_solver_comparison.py \
@@ -793,10 +806,13 @@ jobs:
             --nlp-tolerance "$solver_tolerance" \
             --primal-feasibility-threshold 1e-5 \
             --max-consecutive-failing 2 \
+            --standard-warmup-seed .github/benchmark-seeds/legacy-resistive-0p22-warmup.npz \
+            --legacy-standard-warmup-seed-signed-torque 0.22 \
+            --standard-warmup-seed-continuation \
             --common-initial-solution "benchmark-seed/common-${BENCHMARK_MECHANICS}.npz" \
+            --no-optional-nlp-periodic-ipopt-hot-start \
             --warmup-ipopt-linear-solver mumps \
             --ipopt-linear-solver mumps \
-            --ipopt-disable-standard-warmup \
             --ipopt-disable-historical-initial-guess \
             --state-scaling full \
             --first-node-wheel-q-slack 0 \

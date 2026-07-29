@@ -666,6 +666,7 @@ def test_common_initial_solution_metadata_rejects_an_incompatible_horizon(tmp_pa
         ode_solver="collocation",
         nlp_ordering_strategy="time_major",
         solver="ipopt",
+        warmup_cycles_consumed=1,
     )
     metadata = periodic_example._common_initial_solution_metadata(args)
     metadata["cycles_per_window"] = 2
@@ -696,6 +697,7 @@ def test_common_initial_solution_metadata_allows_a_transcription_change(tmp_path
         ode_solver="rk4",
         nlp_ordering_strategy="time_major",
         solver="fatrop",
+        warmup_cycles_consumed=1,
     )
     metadata = periodic_example._common_initial_solution_metadata(args)
     metadata["ode_solver"] = "collocation"
@@ -705,6 +707,39 @@ def test_common_initial_solution_metadata_allows_a_transcription_change(tmp_path
     periodic_example._validate_common_initial_solution_metadata(
         seed, args, tmp_path / "common.npz"
     )
+
+
+def test_common_initial_solution_metadata_rejects_a_different_warmup_cycle(
+    tmp_path,
+):
+    args = SimpleNamespace(
+        model_formulation="periodic_node",
+        mechanical_formulation="full",
+        cycles_per_window=1,
+        stimulations_per_cycle=30,
+        objective="fatigue",
+        objective_shape="quadratic",
+        constant_crank_torque=-0.2,
+        torque_application="constant",
+        enforce_start_constraints=False,
+        acados_wheel_q_slack=0.0,
+        acados_terminal_wheel_q_slack=0.002,
+        terminal_wheel_q_reference_mode="absolute_initial",
+        pulse_width_scaling=0.0025,
+        pulse_width_active_set="none",
+        ode_solver="collocation",
+        nlp_ordering_strategy="time_major",
+        solver="madnlp",
+        warmup_cycles_consumed=1,
+    )
+    metadata = periodic_example._common_initial_solution_metadata(args)
+    metadata["warmup_cycles_consumed"] = 0
+    seed = periodic_example._WarmupSolutionAdapter({}, {}, metadata=metadata)
+
+    with pytest.raises(ValueError, match="warmup_cycles_consumed"):
+        periodic_example._validate_common_initial_solution_metadata(
+            seed, args, tmp_path / "common.npz"
+        )
 
 
 def test_periodic_node_projection_uses_all_five_ding_states():

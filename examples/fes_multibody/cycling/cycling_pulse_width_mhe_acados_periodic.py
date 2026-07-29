@@ -2973,7 +2973,7 @@ def _common_initial_solution_metadata(args: argparse.Namespace) -> dict:
     """Describe the physical OCP represented by a shared target seed."""
 
     return {
-        "schema": "cocofest-common-periodic-initial-solution-v1",
+        "schema": "cocofest-common-periodic-initial-solution-v2",
         "model_formulation": args.model_formulation,
         "mechanical_formulation": args.mechanical_formulation,
         "cycles_per_window": int(args.cycles_per_window),
@@ -2990,6 +2990,9 @@ def _common_initial_solution_metadata(args: argparse.Namespace) -> dict:
         "pulse_width_active_set": args.pulse_width_active_set,
         "pulse_width_minimum_policy": "model_pd0",
         "pulse_width_maximum_s": 0.0006,
+        "warmup_cycles_consumed": int(
+            getattr(args, "warmup_cycles_consumed", 0)
+        ),
         "ode_solver": args.ode_solver,
         "nlp_ordering_strategy": getattr(args, "nlp_ordering_strategy", None),
         "producer_solver": args.solver,
@@ -3027,6 +3030,7 @@ def _validate_common_initial_solution_metadata(
         "pulse_width_active_set",
         "pulse_width_minimum_policy",
         "pulse_width_maximum_s",
+        "warmup_cycles_consumed",
     ):
         if metadata.get(field) != expected[field]:
             raise ValueError(
