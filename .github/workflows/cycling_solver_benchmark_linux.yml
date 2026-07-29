@@ -1452,6 +1452,7 @@ jobs:
 
       - name: Screen Fatrop RK4 SX full over 30 RHO
         if: matrix.solver == 'fatrop'
+        continue-on-error: true
         run: bash .github/scripts/run_cycling_benchmark_case.sh fatrop-rk4-sx fatrop full structured rk4 benchmark-graph-screen 30 false sx
       - name: Checkpoint Fatrop RK4 SX full
         if: ${{ always() && matrix.solver == 'fatrop' }}
@@ -1465,6 +1466,7 @@ jobs:
 
       - name: Screen Fatrop RK4 SX reduced over 30 RHO
         if: matrix.solver == 'fatrop'
+        continue-on-error: true
         run: bash .github/scripts/run_cycling_benchmark_case.sh fatrop-rk4-sx fatrop reduced structured rk4 benchmark-graph-screen 30 false sx
       - name: Checkpoint Fatrop RK4 SX reduced
         if: ${{ always() && matrix.solver == 'fatrop' }}
@@ -1478,6 +1480,7 @@ jobs:
 
       - name: Screen Fatrop collocation SX full over 30 RHO
         if: matrix.solver == 'fatrop'
+        continue-on-error: true
         run: bash .github/scripts/run_cycling_benchmark_case.sh fatrop-collocation-sx fatrop full structured collocation benchmark-graph-screen 30 false sx
       - name: Checkpoint Fatrop collocation SX full
         if: ${{ always() && matrix.solver == 'fatrop' }}
@@ -1491,6 +1494,7 @@ jobs:
 
       - name: Screen Fatrop collocation SX reduced over 30 RHO
         if: matrix.solver == 'fatrop'
+        continue-on-error: true
         run: bash .github/scripts/run_cycling_benchmark_case.sh fatrop-collocation-sx fatrop reduced structured collocation benchmark-graph-screen 30 false sx
       - name: Checkpoint Fatrop collocation SX reduced
         if: ${{ always() && matrix.solver == 'fatrop' }}

@@ -3443,6 +3443,11 @@ def test_github_acados_runner_uses_reference_and_option_profiles_sequentially():
     assert "Screen IPOPT MX full over 30 RHO" in workflow
     assert "Screen Fatrop RK4 SX reduced over 30 RHO" in workflow
     assert "Screen Fatrop collocation SX full over 30 RHO" in workflow
+    assert re.search(
+        r"- name: Screen Fatrop RK4 SX full over 30 RHO\s+"
+        r"if: matrix\.solver == 'fatrop'\s+continue-on-error: true",
+        workflow,
+    )
     assert "Screen MadNLP MUMPS MX reduced over 30 RHO" in workflow
     assert "expected_graph_screens=4" in workflow
     assert "Download the SX graph-mode screens" in workflow

@@ -30,6 +30,7 @@ Supports predictive musculoskeletal simulation driven by FES, moving time horizo
   - [Available FES models](#available-fes-models)
   - [Musculoskeletal model driven by FES](#musculoskeletal-model-driven-by-fes)
   - [Moving time horizons](#moving-time-horizons)
+  - [Cycling fatigue solver benchmark](#cycling-fatigue-solver-benchmark)
   - [Identification](#identification)
   - [Initial value problem](#initial-value-problem)
   - [Summation truncation](#summation-truncation)
@@ -232,6 +233,151 @@ For longer time span simulation and apprehend muscle fatigue apparition, `Cocofe
 The cycling fatigue MHE can also benchmark the optional MadNLP and Alpaqa
 Bioptim integrations. See the
 [solver setup, warm-start policy, and benchmark results](docs/optional_nlp_solvers.md).
+
+<a id="cycling-fatigue-solver-benchmark"></a>
+## Cycling fatigue solver benchmark
+
+The endurance benchmark minimizes fatigue with four Ding fatigue muscle
+models. Its default is **one pedalling cycle per OCP** and 30 pulse-width
+controls per muscle and cycle. Therefore, `cycles=100` means 100 consecutive
+one-cycle receding-horizon optimizations (100 RHO), not a single OCP containing
+100 cycles. A two-cycle OCP remains available with `cycles_per_window=2`, but
+ACADOS is currently benchmarked only with one cycle.
+
+The benchmark uses zero external crank assistance, an absolute terminal crank
+angle target with a `0.002 rad` tolerance, and two allowed consecutive
+failures. Pulse widths are validated and clipped to each muscle's physical
+interval `[pd0, 600 us]`; `pd0` is the Ding model's zero-recruitment pulse
+duration, approximately `131.405 us`, rather than a numerical pulse width of
+zero.
+
+### Changes made during the solver study
+
+1. The sign of the external crank torque was made explicit and the current
+   endurance problem was changed to `0 N.m` assistance to expose fatigue
+   earlier.
+2. The terminal crank target was made absolute in cycle count. It no longer
+   follows the previous solution, which prevents accumulated angular drift.
+3. Historical seeds are validated at load time, including model,
+   transcription, torque, horizon and pulse-width metadata. Pulse widths are
+   clipped to `[pd0, 600 us]`, with warnings for repaired legacy values.
+4. A common, solver-independent primal seed is produced once with IPOPT and
+   consumed by IPOPT, Fatrop, MadNLP and ACADOS. Its recorded consumed warmup
+   cycle must be preserved by every consumer.
+5. NLP variables use time-major ordering for the sparse IPOPT, Fatrop and
+   MadNLP interfaces. ACADOS retains its native stage-major organization.
+6. A reduced mechanical formulation keeps only crank angle `theta` and speed
+   `omega`, while retaining all 20 Ding muscle/fatigue states. It does not
+   impose constant crank speed.
+7. IPOPT, MadNLP/MUMPS, MadNLP/PARDISO, Fatrop/RK4,
+   Fatrop/collocation and ACADOS are run from the same physical seed and
+   feasibility threshold. Alpaqa is documented but excluded from endurance
+   runs because its current sparse CasADi/Bioptim path is not operational.
+8. The Linux action uses independent IPOPT, Fatrop, MadNLP and ACADOS runners.
+   Full and reduced formulations remain sequential on their solver's machine
+   so setup is paid once. Every completed case is uploaded immediately.
+9. ACADOS screens full SQP, feasible-QP SQP, SQP-RTI, IRK, ERK, bound
+   homotopy, control trust regions, rollout/projection and reduced mechanics.
+10. SX and MX graphs are compared on 30 RHO. IPOPT and MadNLP now default to
+    SX; ACADOS was already SX. Fatrop remains MX because its first SX screen
+    failed before producing a numerical result.
+
+### Linux results
+
+The following reference was measured on GitHub Actions run
+[`30475768127`](https://github.com/mickaelbegon/cocofest/actions/runs/30475768127),
+with 100 one-cycle RHO, zero assistance and the common physical seed. The
+100-RHO reference used MX; the subsequent 30-RHO screen established the SX
+default for IPOPT and MadNLP.
+
+| Solver and formulation | Valid RHO | Hot median (s) | Hot P90 (s) | End-to-end (s) | Fatigue cost | Fatigue AUC | Minimum `A/A_scale` |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| IPOPT full | 100/100 | 5.331 | 6.096 | 583.9 | 4429.09 | 10.0179 | 0.9059 |
+| IPOPT reduced | 100/100 | 2.829 | 3.293 | 377.7 | 657.74 | 4.8246 | 0.9769 |
+| MadNLP/MUMPS full | 100/100 | 5.988 | 6.796 | 651.2 | 4433.09 | 10.0248 | 0.9074 |
+| MadNLP/MUMPS reduced | 100/100 | 2.980 | 3.467 | 345.5 | 653.54 | 4.8134 | 0.9771 |
+| MadNLP/PARDISO full | 100/100 | 6.086 | 7.083 | 670.8 | 4433.09 | 10.0248 | 0.9074 |
+| MadNLP/PARDISO reduced | 100/100 | 3.106 | 3.542 | 399.8 | 653.54 | 4.8134 | 0.9771 |
+| Fatrop/collocation full | 100/100 | 8.151 | 9.336 | 863.5 | 4449.07 | 10.0356 | 0.9070 |
+| Fatrop/collocation reduced | 100/100 | 4.257 | 5.040 | 478.3 | 638.32 | 4.7574 | 0.9776 |
+| Fatrop/RK4 full | 100/100 | 52.715 | 58.490 | 5359.7 | 4043.48 | 9.8687 | 0.9169 |
+| Fatrop/RK4 reduced | 100/100 | 13.473 | 15.024 | 1452.1 | 1465.26 | 6.4980 | 0.9521 |
+
+The reduced formulation is approximately 1.9 times faster for IPOPT,
+2.0 times faster for MadNLP/MUMPS and 1.9 times faster for
+Fatrop/collocation. Its fatigue optimum is substantially different from the
+full-mechanics optimum, so this speedup is not yet evidence that both models
+are physiologically interchangeable. RK4 and collocation also reach different
+Fatrop solutions; the Fatrop comparison must therefore be interpreted as a
+solver/transcription pair, not as a pure solver comparison.
+
+PARDISO/MKL did not outperform MUMPS on the four-core GitHub runner. The hot
+MUMPS median was about 1.6% lower in the full formulation and 4.1% lower in
+the reduced formulation. A larger self-hosted machine may change this result,
+but sparse factorization is only part of the total RHO cost.
+
+The 30-RHO graph screen gave:
+
+| Solver and formulation | MX median (s) | SX median (s) | SX reduction |
+|---|---:|---:|---:|
+| IPOPT full | 5.549 | 2.328 | 58.0% |
+| IPOPT reduced | 2.972 | 1.263 | 57.5% |
+| MadNLP/MUMPS full | 6.182 | 2.584 | 58.2% |
+| MadNLP/MUMPS reduced | 3.002 | 1.187 | 60.5% |
+
+All four SX cases validated 30/30 RHO. Their accumulated cost was also about
+3.2% lower, so the change is not obtained by accepting a less feasible
+solution.
+
+ACADOS remains much faster when it converges: reduced IRK SQP has a hot median
+near `0.068 s`. However, it validates only 8 RHO before the two allowed
+consecutive failures. Full mechanics, ERK and RTI are not yet physically
+robust. Feasible-QP SQP reaches the same 8 RHO but is slower, and a homotopy
+that relaxes only state bounds does not repair the dominant dynamics defects.
+
+### Next numerical steps
+
+For ACADOS, the next feasibility stage should introduce bounded virtual
+controls or explicit dynamics slacks and minimize them before transferring the
+zero-slack trajectory to the fatigue OCP. Both OCPs can be generated once and
+reused; the feasibility OCP should be called only after rollout or nominal SQP
+failure. Other priorities are an ACADOS-consistent IRK/discrete rollout,
+parameterized absolute terminal targets, an adaptive pulse-width trust region,
+and only then a two-cycle anticipation study and SQP-RTI tracking.
+
+For IPOPT and MadNLP, CasADi/Bioptim already expose:
+
+```text
+--ipopt-c-compile
+--madnlp-c-compile
+```
+
+The useful target is a persistent compiled SX library containing the
+objective, constraints, dynamics, Jacobian and Hessian functions for each of
+the full and reduced formulations. The library should be built once and reused
+for all RHO. To make that possible, the absolute crank target, previous state,
+fatigue state and changing bounds must be numerical parameters rather than
+constants embedded in a newly generated graph. Compiling a graph that is
+rebuilt at every RHO usually increases end-to-end time. Compilation must
+therefore be evaluated with separate graph construction, first-solve and hot
+RHO timings.
+
+Launch the current 100-RHO Linux benchmark with:
+
+```bash
+gh workflow run cycling_solver_benchmark_linux.yml \
+  --repo mickaelbegon/cocofest \
+  --ref codex/acados-pr-refresh \
+  -f runner_label=ubuntu-24.04 \
+  -f cycles=100 \
+  -f cycles_per_window=1 \
+  -f crank_assistance_nm=0.00 \
+  -f terminal_wheel_q_slack=0.002 \
+  -f solver_max_iterations=2000 \
+  -f seed_validation_max_iterations=2000 \
+  -f acados_smoke_rhos=100 \
+  -f acados_option_rhos=5
+```
 
 <a id="initial-value-problem"></a>
 ## 🎯 Initial value problem
