@@ -11,6 +11,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import re
 import sys
 from sys import platform as sys_platform
 from time import perf_counter
@@ -2172,7 +2173,11 @@ def build_argument_parser() -> argparse.ArgumentParser:
         "--codegen-tag",
         type=str,
         default=None,
-        help="Optional suffix added to the generated ACADOS code folder and model name.",
+        help=(
+            "Optional suffix added to the generated ACADOS code folder and "
+            "model name. Non-identifier characters are normalized before "
+            "CasADi function generation."
+        ),
     )
     parser.add_argument(
         "--acados-seed-cache-tag",
@@ -10195,12 +10200,25 @@ def run_standard_ipopt_warmup(
     return warmup_sol
 
 
+def _casadi_identifier_slug(value: str) -> str:
+    """Return a deterministic, collision-resistant CasADi identifier fragment."""
+
+    raw = str(value)
+    slug = re.sub(r"[^A-Za-z0-9]+", "_", raw)
+    slug = re.sub(r"_+", "_", slug).strip("_") or "run"
+    if slug != raw:
+        digest = hashlib.sha256(raw.encode("utf-8")).hexdigest()[:8]
+        slug = f"{slug}_{digest}"
+    return slug
+
+
 def build_codegen_names(args: argparse.Namespace) -> tuple[str, str]:
     objective_slug = args.objective.replace(",", "_")
     signature = _codegen_signature(args)
-    suffix = args.codegen_tag or (
+    raw_suffix = args.codegen_tag or (
         f"{args.solver}_{args.model_formulation}_{objective_slug}_{args.objective_shape}_{args.n_windows}mhe_{args.cycles_per_window}cyc"
     )
+    suffix = _casadi_identifier_slug(raw_suffix)
     return (
         f"cycling_fes_periodic_{suffix}_{signature}",
         f"result/acados/c_generated_code_{suffix}_{signature}",

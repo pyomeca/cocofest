@@ -1,6 +1,7 @@
 import importlib.util
 import numpy as np
 import pytest
+import re
 from casadi import Function, SX
 from pathlib import Path
 from types import SimpleNamespace
@@ -4316,6 +4317,19 @@ def test_codegen_signature_ignores_run_only_options():
     assert periodic_example._horizon_seed_cache_signature(
         reference
     ) != periodic_example._horizon_seed_cache_signature(longer_diagnostic_run)
+
+
+def test_codegen_names_normalize_user_tag_for_casadi():
+    parser = periodic_example.build_argument_parser()
+    unsafe = parser.parse_args(["--codegen-tag", "ci-reduced / smoke__test"])
+    other = parser.parse_args(["--codegen-tag", "ci_reduced_smoke_test"])
+
+    unsafe_model, unsafe_directory = periodic_example.build_codegen_names(unsafe)
+    other_model, _ = periodic_example.build_codegen_names(other)
+
+    assert re.fullmatch(r"[A-Za-z][A-Za-z0-9]*(?:_[A-Za-z0-9]+)*", unsafe_model)
+    assert Path(unsafe_directory).name.startswith("c_generated_code_ci_reduced_smoke_test_")
+    assert unsafe_model != other_model
 
 
 def test_acados_qp_warm_start_cli_options_are_explicit():

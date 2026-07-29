@@ -516,6 +516,7 @@ jobs:
             tests/shard1/test_reduced_cycling.py \
             tests/shard1/test_periodic_pulse_width.py::test_acados_example_defaults_to_the_assisted_periodic_profile \
             tests/shard1/test_periodic_pulse_width.py::test_common_target_seed_enables_the_robust_acados_reference_preparation \
+            tests/shard1/test_periodic_pulse_width.py::test_codegen_names_normalize_user_tag_for_casadi \
             tests/shard1/test_periodic_pulse_width.py::test_phase_one_maps_reduced_mechanics_without_classifying_them_as_fes \
             tests/shard1/test_periodic_pulse_width.py::test_reduced_theta_target_uses_absolute_cycle_reference_without_drift \
             tests/shard1/test_periodic_pulse_width.py::test_acados_irk_transfer_rollout_uses_scaled_variables_and_stage_data
