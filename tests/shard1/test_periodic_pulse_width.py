@@ -3402,7 +3402,7 @@ def test_github_acados_runner_uses_reference_and_option_profiles_sequentially():
     assert "run_case sqp-erk" in workflow
     assert "--acados-stationarity-tolerance \"$stationarity\"" in workflow
     assert "--acados-control-homotopy-window-growth 10" in workflow
-    assert "--acados-control-homotopy-window-max-radius 5e-5" in workflow
+    assert "--acados-control-homotopy-window-max-radius 1e-5" in workflow
     assert "--max-consecutive-failing 2" in workflow
     assert "cycling-acados-smoke-${{ github.run_id }}" in workflow
     assert "run_case fatrop-rk4 fatrop full structured rk4" in workflow

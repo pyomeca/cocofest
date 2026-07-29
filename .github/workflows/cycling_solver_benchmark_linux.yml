@@ -559,16 +559,16 @@ jobs:
             fi
             if [[ "$mechanics" == "reduced" ]]; then
               stationarity=5e-3
-              # The 10 us cap was hit by the triceps and coincided with
-              # isolated SQP stationarity failures at RHO 34 and 79. A
-              # 50 us trust region covers the observed triceps transitions;
-              # rare larger recruitment switches still require the physical
-              # [pd0, 600 us] fallback outside this benchmark screen.
+              # Keep the stable 10 us continuation region. A 50 us screen
+              # allowed the triceps to consume the full radius and produced
+              # consecutive dynamics failures at RHO 7-8. Rare recruitment
+              # switches therefore need a projected retry, not a permanently
+              # wider trust region.
               mechanics_options+=(
                 --mechanical-formulation reduced
                 --experimental-reduced-acados
                 --acados-control-homotopy-window-growth 10
-                --acados-control-homotopy-window-max-radius 5e-5
+                --acados-control-homotopy-window-max-radius 1e-5
               )
             else
               # The full model needs the homotopy to construct a nearby
