@@ -62,6 +62,8 @@ env:
   LIBMAD_PARDISO_COMMIT: 5529f23a6bff33c566ad954da38d352f1f172356
   JULIAC_COMMIT: 73be8587a80bbb65dab7acd71d406f72867a3571
   JULIA_VERSION: "1.12.6"
+  CONDA_ENV_NAME: cocofest-cycling-benchmark
+  NUMERICAL_STACK_CACHE_VERSION: v1
   OMP_NUM_THREADS: "1"
   OPENBLAS_NUM_THREADS: "1"
   MKL_NUM_THREADS: "1"
@@ -95,9 +97,23 @@ jobs:
         uses: conda-incubator/setup-miniconda@v4
         with:
           miniforge-version: latest
-          activate-environment: cocofest-cycling-benchmark
-          environment-file: .github/cycling-benchmark-linux-environment.yml
+          activate-environment: ${{ env.CONDA_ENV_NAME }}
           conda-remove-defaults: true
+
+      - name: Restore the official numerical stack
+        id: official-stack-cache
+        uses: actions/cache/restore@v6
+        with:
+          path: ${{ env.CONDA }}/envs/${{ env.CONDA_ENV_NAME }}
+          key: numerical-stack-${{ env.NUMERICAL_STACK_CACHE_VERSION }}-${{ inputs.runner_label }}-${{ runner.arch }}-official-casadi-${{ env.CASADI_VERSION }}-${{ hashFiles('.github/cycling-benchmark-linux-environment.yml', '.github/scripts/install_biorbd_casadi_linux.sh') }}
+
+      - name: Install the benchmark dependencies
+        if: steps.official-stack-cache.outputs.cache-hit != 'true'
+        run: |
+          conda env update \
+            --name "$CONDA_ENV_NAME" \
+            --file .github/cycling-benchmark-linux-environment.yml \
+            --prune
 
       - name: Detect the CPU allocation
         run: |
@@ -109,10 +125,24 @@ jobs:
           lscpu
 
       - name: Install the reference numerical stack
+        if: steps.official-stack-cache.outputs.cache-hit != 'true'
         run: |
           python -m pip install --no-deps "casadi==$CASADI_VERSION"
           bash .github/scripts/install_biorbd_casadi_linux.sh
-          python -m pip install --no-deps -e .benchmark-deps/bioptim
+
+      - name: Validate the restored official stack
+        run: |
+          python -c 'import casadi, biorbd_casadi, numpy, pytest'
+
+      - name: Save the official numerical stack
+        if: steps.official-stack-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v6
+        with:
+          path: ${{ env.CONDA }}/envs/${{ env.CONDA_ENV_NAME }}
+          key: numerical-stack-${{ env.NUMERICAL_STACK_CACHE_VERSION }}-${{ inputs.runner_label }}-${{ runner.arch }}-official-casadi-${{ env.CASADI_VERSION }}-${{ hashFiles('.github/cycling-benchmark-linux-environment.yml', '.github/scripts/install_biorbd_casadi_linux.sh') }}
+
+      - name: Install the pinned Bioptim integration
+        run: python -m pip install --no-deps -e .benchmark-deps/bioptim
 
       - name: Validate the seed on the assisted target
         env:
@@ -173,10 +203,118 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
+  prepare-madnlp-stack:
+    name: Prepare the cached MadNLP numerical stack
+    runs-on: ${{ inputs.runner_label }}
+    timeout-minutes: 90
+    env:
+      CASADI_CXX_ABI: "1"
+    defaults:
+      run:
+        shell: bash -el {0}
+
+    steps:
+      - name: Checkout Cocofest
+        uses: actions/checkout@v6
+
+      - name: Checkout the pinned libMad PARDISO runtime
+        uses: actions/checkout@v6
+        with:
+          repository: ${{ env.LIBMAD_REPOSITORY }}
+          ref: ${{ env.LIBMAD_PARDISO_COMMIT }}
+          path: .benchmark-deps/libMad
+
+      - name: Set up the Linux benchmark environment
+        uses: conda-incubator/setup-miniconda@v4
+        with:
+          miniforge-version: latest
+          activate-environment: ${{ env.CONDA_ENV_NAME }}
+          conda-remove-defaults: true
+
+      - name: Restore the MadNLP numerical stack
+        id: madnlp-stack-cache
+        uses: actions/cache/restore@v6
+        with:
+          path: ${{ env.CONDA }}/envs/${{ env.CONDA_ENV_NAME }}
+          key: numerical-stack-${{ env.NUMERICAL_STACK_CACHE_VERSION }}-${{ inputs.runner_label }}-${{ runner.arch }}-madnlp-${{ env.CASADI_MADNLP_COMMIT }}-${{ env.LIBMAD_PARDISO_COMMIT }}-${{ hashFiles('.github/cycling-benchmark-linux-environment.yml', '.github/scripts/install_biorbd_casadi_linux.sh', '.github/scripts/install_casadi_madnlp_linux.sh') }}
+
+      - name: Install the benchmark dependencies
+        if: steps.madnlp-stack-cache.outputs.cache-hit != 'true'
+        run: |
+          conda env update \
+            --name "$CONDA_ENV_NAME" \
+            --file .github/cycling-benchmark-linux-environment.yml \
+            --prune
+
+      - name: Detect the CPU allocation
+        run: |
+          available_cores="$(env -u OMP_NUM_THREADS -u OMP_THREAD_LIMIT nproc)"
+          echo "CMAKE_BUILD_PARALLEL_LEVEL=$available_cores" >> "$GITHUB_ENV"
+
+      - name: Restore the MadNLP runtime
+        id: prepared-madnlp-runtime
+        uses: actions/cache/restore@v6
+        with:
+          path: .cache/madnlp-pardiso
+          key: libmad-pardiso-${{ inputs.runner_label }}-${{ runner.arch }}-julia-${{ env.JULIA_VERSION }}-${{ env.LIBMAD_PARDISO_COMMIT }}-${{ env.JULIAC_COMMIT }}
+
+      - name: Verify the MadNLP host runtime
+        run: bash .github/scripts/check_libmad_pardiso_host_linux.sh
+
+      - name: Install Julia for the MadNLP PARDISO runtime
+        if: steps.prepared-madnlp-runtime.outputs.cache-hit != 'true'
+        uses: julia-actions/install-juliaup@05d98a2ef433ca0723a8221e38c4723ea92b0c5f # v3.1.4
+        with:
+          channel: ${{ env.JULIA_VERSION }}
+
+      - name: Build the MadNLP PARDISO runtime
+        if: steps.prepared-madnlp-runtime.outputs.cache-hit != 'true'
+        run: |
+          bash .github/scripts/install_libmad_pardiso_linux.sh \
+            .benchmark-deps/libMad \
+            .cache/madnlp-pardiso \
+            "$JULIAC_COMMIT"
+
+      - name: Save the certified MadNLP runtime
+        if: steps.prepared-madnlp-runtime.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v6
+        with:
+          path: .cache/madnlp-pardiso
+          key: libmad-pardiso-${{ inputs.runner_label }}-${{ runner.arch }}-julia-${{ env.JULIA_VERSION }}-${{ env.LIBMAD_PARDISO_COMMIT }}-${{ env.JULIAC_COMMIT }}
+
+      - name: Configure the MadNLP runtime
+        run: |
+          echo "LD_LIBRARY_PATH=$GITHUB_WORKSPACE/.cache/madnlp-pardiso/lib:$GITHUB_WORKSPACE/.cache/madnlp-pardiso/share/julia/lib:${LD_LIBRARY_PATH:-}" \
+            >> "$GITHUB_ENV"
+
+      - name: Build the MadNLP numerical stack
+        if: steps.madnlp-stack-cache.outputs.cache-hit != 'true'
+        run: |
+          bash .github/scripts/install_casadi_madnlp_linux.sh .cache/madnlp-pardiso
+          bash .github/scripts/install_biorbd_casadi_linux.sh
+
+      - name: Validate the MadNLP numerical stack
+        run: |
+          python - <<'PY'
+          import biorbd_casadi
+          import casadi as cas
+
+          assert cas.has_nlpsol("ipopt")
+          assert cas.has_nlpsol("madnlp")
+          print(f"CasADi {cas.__version__}; biorbd {biorbd_casadi.__version__}")
+          PY
+
+      - name: Save the MadNLP numerical stack
+        if: steps.madnlp-stack-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v6
+        with:
+          path: ${{ env.CONDA }}/envs/${{ env.CONDA_ENV_NAME }}
+          key: numerical-stack-${{ env.NUMERICAL_STACK_CACHE_VERSION }}-${{ inputs.runner_label }}-${{ runner.arch }}-madnlp-${{ env.CASADI_MADNLP_COMMIT }}-${{ env.LIBMAD_PARDISO_COMMIT }}-${{ hashFiles('.github/cycling-benchmark-linux-environment.yml', '.github/scripts/install_biorbd_casadi_linux.sh', '.github/scripts/install_casadi_madnlp_linux.sh') }}
+
   screen-options:
     name: Option screen — ${{ matrix.solver }}
     if: inputs.cycles == 'screen'
-    needs: prepare-seed
+    needs: [prepare-seed, prepare-madnlp-stack]
     runs-on: ${{ inputs.runner_label }}
     timeout-minutes: 180
     strategy:
@@ -223,9 +361,24 @@ jobs:
         uses: conda-incubator/setup-miniconda@v4
         with:
           miniforge-version: latest
-          activate-environment: cocofest-cycling-benchmark
-          environment-file: .github/cycling-benchmark-linux-environment.yml
+          activate-environment: ${{ env.CONDA_ENV_NAME }}
           conda-remove-defaults: true
+
+      - name: Restore the MadNLP numerical stack
+        if: matrix.solver == 'madnlp'
+        id: screen-numerical-stack-cache
+        uses: actions/cache/restore@v6
+        with:
+          path: ${{ env.CONDA }}/envs/${{ env.CONDA_ENV_NAME }}
+          key: numerical-stack-${{ env.NUMERICAL_STACK_CACHE_VERSION }}-${{ inputs.runner_label }}-${{ runner.arch }}-madnlp-${{ env.CASADI_MADNLP_COMMIT }}-${{ env.LIBMAD_PARDISO_COMMIT }}-${{ hashFiles('.github/cycling-benchmark-linux-environment.yml', '.github/scripts/install_biorbd_casadi_linux.sh', '.github/scripts/install_casadi_madnlp_linux.sh') }}
+
+      - name: Install the benchmark dependencies
+        if: matrix.solver != 'madnlp' || steps.screen-numerical-stack-cache.outputs.cache-hit != 'true'
+        run: |
+          conda env update \
+            --name "$CONDA_ENV_NAME" \
+            --file .github/cycling-benchmark-linux-environment.yml \
+            --prune
 
       - name: Detect the CPU allocation
         run: |
@@ -284,7 +437,7 @@ jobs:
           echo "LIBMAD_BENCHMARK_COMMIT=$LIBMAD_PARDISO_COMMIT" >> "$GITHUB_ENV"
 
       - name: Build CasADi with the libMad ABI
-        if: matrix.solver == 'madnlp'
+        if: matrix.solver == 'madnlp' && steps.screen-numerical-stack-cache.outputs.cache-hit != 'true'
         run: bash .github/scripts/install_casadi_madnlp_linux.sh .cache/madnlp-pardiso
 
       - name: Build CasADi with IPOPT and Alpaqa
@@ -293,7 +446,10 @@ jobs:
 
       - name: Install biorbd and Bioptim
         run: |
-          bash .github/scripts/install_biorbd_casadi_linux.sh
+          if [[ "${{ matrix.solver }}" != "madnlp" || \
+                "${{ steps.screen-numerical-stack-cache.outputs.cache-hit }}" != "true" ]]; then
+            bash .github/scripts/install_biorbd_casadi_linux.sh
+          fi
           python -m pip install --no-deps -e .benchmark-deps/bioptim
 
       - name: Download the validated common continuation seed
@@ -439,7 +595,7 @@ jobs:
   benchmark:
     name: ${{ matrix.case_slug }} / ${{ matrix.mechanics }} — ${{ matrix.benchmark_rhos }} RHO
     if: inputs.cycles != 'screen'
-    needs: prepare-seed
+    needs: [prepare-seed, prepare-madnlp-stack]
     runs-on: ${{ inputs.runner_label }}
     timeout-minutes: 350
     strategy:
@@ -541,9 +697,34 @@ jobs:
         uses: conda-incubator/setup-miniconda@v4
         with:
           miniforge-version: latest
-          activate-environment: cocofest-cycling-benchmark
-          environment-file: .github/cycling-benchmark-linux-environment.yml
+          activate-environment: ${{ env.CONDA_ENV_NAME }}
           conda-remove-defaults: true
+
+      - name: Restore the official numerical stack
+        if: matrix.solver != 'madnlp'
+        id: benchmark-official-stack-cache
+        uses: actions/cache/restore@v6
+        with:
+          path: ${{ env.CONDA }}/envs/${{ env.CONDA_ENV_NAME }}
+          key: numerical-stack-${{ env.NUMERICAL_STACK_CACHE_VERSION }}-${{ inputs.runner_label }}-${{ runner.arch }}-official-casadi-${{ env.CASADI_VERSION }}-${{ hashFiles('.github/cycling-benchmark-linux-environment.yml', '.github/scripts/install_biorbd_casadi_linux.sh') }}
+
+      - name: Restore the MadNLP numerical stack
+        if: matrix.solver == 'madnlp'
+        id: benchmark-madnlp-stack-cache
+        uses: actions/cache/restore@v6
+        with:
+          path: ${{ env.CONDA }}/envs/${{ env.CONDA_ENV_NAME }}
+          key: numerical-stack-${{ env.NUMERICAL_STACK_CACHE_VERSION }}-${{ inputs.runner_label }}-${{ runner.arch }}-madnlp-${{ env.CASADI_MADNLP_COMMIT }}-${{ env.LIBMAD_PARDISO_COMMIT }}-${{ hashFiles('.github/cycling-benchmark-linux-environment.yml', '.github/scripts/install_biorbd_casadi_linux.sh', '.github/scripts/install_casadi_madnlp_linux.sh') }}
+
+      - name: Install the benchmark dependencies
+        if: |
+          (matrix.solver == 'madnlp' && steps.benchmark-madnlp-stack-cache.outputs.cache-hit != 'true') ||
+          (matrix.solver != 'madnlp' && steps.benchmark-official-stack-cache.outputs.cache-hit != 'true')
+        run: |
+          conda env update \
+            --name "$CONDA_ENV_NAME" \
+            --file .github/cycling-benchmark-linux-environment.yml \
+            --prune
 
       - name: Detect the CPU allocation
         run: |
@@ -604,16 +785,23 @@ jobs:
           echo "LIBMAD_BENCHMARK_COMMIT=$LIBMAD_PARDISO_COMMIT" >> "$GITHUB_ENV"
 
       - name: Install official CasADi with IPOPT and Fatrop
-        if: matrix.solver != 'madnlp'
+        if: matrix.solver != 'madnlp' && steps.benchmark-official-stack-cache.outputs.cache-hit != 'true'
         run: python -m pip install --no-deps "casadi==$CASADI_VERSION"
 
       - name: Build CasADi with the libMad ABI
-        if: matrix.solver == 'madnlp'
+        if: matrix.solver == 'madnlp' && steps.benchmark-madnlp-stack-cache.outputs.cache-hit != 'true'
         run: bash .github/scripts/install_casadi_madnlp_linux.sh .cache/madnlp-pardiso
 
       - name: Install biorbd and Bioptim
         run: |
-          bash .github/scripts/install_biorbd_casadi_linux.sh
+          if [[ "${{ matrix.solver }}" == "madnlp" ]]; then
+            stack_cache_hit="${{ steps.benchmark-madnlp-stack-cache.outputs.cache-hit }}"
+          else
+            stack_cache_hit="${{ steps.benchmark-official-stack-cache.outputs.cache-hit }}"
+          fi
+          if [[ "$stack_cache_hit" != "true" ]]; then
+            bash .github/scripts/install_biorbd_casadi_linux.sh
+          fi
           python -m pip install --no-deps -e .benchmark-deps/bioptim
 
       - name: Download the validated common continuation seed

@@ -376,6 +376,18 @@ one thread so that CasADi owns the runner-wide parallelism instead of
 oversubscribing every worker. The same value is used to compile the
 source-built CasADi-compatible biorbd dependency.
 
+Machine preparation follows the coordinated-cache pattern used by Bioptim's
+GitHub Actions. The seed job publishes an official CasADi/biorbd Conda stack,
+while a second preparation job builds and publishes the libMad-compatible
+CasADi/biorbd stack in parallel. The solver matrix starts only after both
+producers complete and restores the exact stack selected by its ABI. Cache
+keys include the runner label and architecture, the relevant CasADi/libMad
+revisions, the environment specification, and the installer scripts. A cache
+miss therefore performs each expensive source build once per workflow instead
+of once per formulation/backend; a later run normally restores both stacks.
+Bioptim remains an editable one-second installation outside the cache so each
+job is tied explicitly to its pinned integration commit.
+
 The default GitHub-hosted runner can be replaced at dispatch time by the label
 of a larger Linux or self-hosted runner. For example:
 
