@@ -3421,6 +3421,39 @@ def test_github_acados_runner_uses_reference_and_option_profiles_sequentially():
     assert "cycling-fatrop-compile-probes-${{ github.run_id }}" in workflow
 
 
+def test_acados_transfer_restoration_time_is_attributed_to_the_next_rho():
+    timing = comparison_example.acados_transfer_restoration_timing(
+        {
+            "transfer_bound_homotopy_summaries": [
+                {
+                    "window": 4,
+                    "stages": [
+                        {
+                            "fraction": 0.0,
+                            "attempt": 0,
+                            "accepted": True,
+                            "solver_time_s": 0.02,
+                            "wall_time_s": 0.025,
+                        },
+                        {
+                            "fraction": 1.0,
+                            "attempt": 0,
+                            "accepted": True,
+                            "solver_time_s": 0.03,
+                            "wall_time_s": 0.035,
+                        },
+                    ],
+                }
+            ]
+        }
+    )
+
+    assert timing["available"] is True
+    assert timing["total_wall_time_s"] == pytest.approx(0.06)
+    assert timing["by_target_rho_wall_time_s"] == {5: pytest.approx(0.06)}
+    assert [stage["target_rho"] for stage in timing["stages"]] == [5, 5]
+
+
 def test_single_shot_requires_solver_and_feasibility_success():
     class FakeSolution:
         status = 1

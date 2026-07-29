@@ -2044,6 +2044,41 @@ def pulse_width_cycle_variation(result: dict, cycle_count: int) -> dict:
     return summary
 
 
+def acados_transfer_restoration_timing(result: dict) -> dict:
+    """Attribute inter-window feasibility-restoration solves to the next RHO."""
+
+    by_rho: dict[int, float] = {}
+    stages = []
+    for homotopy in result.get("transfer_bound_homotopy_summaries") or []:
+        source_rho = homotopy.get("window")
+        try:
+            target_rho = int(source_rho) + 1
+        except (TypeError, ValueError):
+            target_rho = None
+        for stage in homotopy.get("stages") or []:
+            wall_time_s = _finite_float(stage.get("wall_time_s"))
+            if wall_time_s is None:
+                continue
+            stage_row = {
+                "source_rho": source_rho,
+                "target_rho": target_rho,
+                "fraction": _finite_float(stage.get("fraction")),
+                "attempt": stage.get("attempt"),
+                "accepted": bool(stage.get("accepted")),
+                "wall_time_s": wall_time_s,
+                "solver_time_s": _finite_float(stage.get("solver_time_s")),
+            }
+            stages.append(stage_row)
+            if target_rho is not None:
+                by_rho[target_rho] = by_rho.get(target_rho, 0.0) + wall_time_s
+    return {
+        "available": bool(stages),
+        "total_wall_time_s": sum(row["wall_time_s"] for row in stages),
+        "by_target_rho_wall_time_s": by_rho,
+        "stages": stages,
+    }
+
+
 def solver_overview_rows(results: dict[str, dict]) -> list[dict]:
     """Build JSON-safe fatigue and timing outcomes for every selected backend."""
 
@@ -2051,6 +2086,16 @@ def solver_overview_rows(results: dict[str, dict]) -> list[dict]:
     for solver_name, result in results.items():
         performance = _window_performance(result)
         window_rows = _benchmark_window_rows(result)
+        restoration_timing = acados_transfer_restoration_timing(result)
+        restoration_by_rho = restoration_timing["by_target_rho_wall_time_s"]
+        for window in window_rows:
+            restoration_wall_time = restoration_by_rho.get(window["rho"], 0.0)
+            window["feasibility_restoration_wall_time_s"] = restoration_wall_time
+            window["effective_wall_time_s"] = (
+                None
+                if window["wall_time_s"] is None
+                else window["wall_time_s"] + restoration_wall_time
+            )
         consecutive_failures = 0
         maximum_consecutive_failures = 0
         for window in window_rows:
@@ -2097,10 +2142,20 @@ def solver_overview_rows(results: dict[str, dict]) -> list[dict]:
             for window in window_rows
             if window["wall_time_s"] is not None
         )
+        attempted_effective_wall_time = sum(
+            window["effective_wall_time_s"]
+            for window in window_rows
+            if window["effective_wall_time_s"] is not None
+        )
+        strict_hot_effective_wall_times = [
+            window["effective_wall_time_s"]
+            for window in window_rows[1 : performance["successful_prefix_windows"]]
+            if window["validated"] and window["effective_wall_time_s"] is not None
+        ]
         end_to_end_wall_time = _finite_float(result.get("end_to_end_wall_time_s"))
         preparation_time = _finite_float(result.get("initial_guess_preparation_time_s"))
         unattributed_wall_time = (
-            end_to_end_wall_time - preparation_time - attempted_rho_wall_time
+            end_to_end_wall_time - preparation_time - attempted_effective_wall_time
             if end_to_end_wall_time is not None and preparation_time is not None
             else None
         )
@@ -2141,6 +2196,10 @@ def solver_overview_rows(results: dict[str, dict]) -> list[dict]:
                     result.get("reduced_profile_build_time_s")
                 ),
                 "attempted_rho_wall_time_sum_s": attempted_rho_wall_time,
+                "attempted_rho_effective_wall_time_sum_s": (
+                    attempted_effective_wall_time
+                ),
+                "feasibility_restoration": restoration_timing,
                 "unattributed_wall_time_s": unattributed_wall_time,
                 "validated_solver_time_s": performance["successful_solver_time_s"],
                 "validated_wall_time_s": performance["successful_wall_time_s"],
@@ -2151,6 +2210,16 @@ def solver_overview_rows(results: dict[str, dict]) -> list[dict]:
                 "hot_solver_time_p90_s": performance["hot_solver_time_p90_s"],
                 "hot_wall_time_median_s": performance["hot_wall_time_median_s"],
                 "hot_wall_time_p90_s": performance["hot_wall_time_p90_s"],
+                "hot_effective_wall_time_median_s": (
+                    None
+                    if not strict_hot_effective_wall_times
+                    else float(np.median(strict_hot_effective_wall_times))
+                ),
+                "hot_effective_wall_time_p90_s": (
+                    None
+                    if not strict_hot_effective_wall_times
+                    else float(np.percentile(strict_hot_effective_wall_times, 90))
+                ),
                 "min_A_capacity_ratio": _minimum_a_capacity_ratio(fatigue),
                 "max_mean_normalized_fatigue": mean_fatigue,
                 "fatigue_auc_cycles": fatigue_auc if a_rows else None,

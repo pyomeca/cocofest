@@ -630,8 +630,8 @@ def render_markdown(
             "séparément. Le même seuil de faisabilité physique est exigé."
         ),
         "",
-        "| Solveur/formulation | Tol. interne | Seuil physique | Convergence | RHO résolus | Préfixe strict | 1er échec | Mur-à-mur (s) | Préparation (s) | Profil réduit (s) | Mur/RHO médian (s) | Mur/RHO P90 (s) | Arrêt |",
-        "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|",
+        "| Solveur/formulation | Tol. interne | Seuil physique | Convergence | RHO résolus | Préfixe strict | 1er échec | Mur-à-mur (s) | Préparation (s) | Profil réduit (s) | Solve/RHO médian (s) | Effectif/RHO médian (s) | Effectif/RHO P90 (s) | Arrêt |",
+        "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|",
     ]
     for entry in entries:
         row = entry["result"]
@@ -646,7 +646,7 @@ def render_markdown(
             ),
         )
         lines.append(
-            "| {case} | {solver_tolerance} | {physical_threshold} | {success} | {successful}/{attempted} | {validated}/{requested} | {first_failed_rho} | {e2e} | {prep} | {profile} | {median} | {p90} | {stop} |".format(
+            "| {case} | {solver_tolerance} | {physical_threshold} | {success} | {successful}/{attempted} | {validated}/{requested} | {first_failed_rho} | {e2e} | {prep} | {profile} | {median} | {effective_median} | {effective_p90} | {stop} |".format(
                 case=_entry_label(entry),
                 solver_tolerance=_fmt_scientific(
                     entry["configuration"].get("nlp_tolerance")
@@ -664,7 +664,18 @@ def render_markdown(
                 prep=_fmt(row.get("initial_guess_preparation_time_s")),
                 profile=_fmt(row.get("reduced_profile_build_time_s")),
                 median=_fmt(row.get("hot_wall_time_median_s")),
-                p90=_fmt(row.get("hot_wall_time_p90_s")),
+                effective_median=_fmt(
+                    row.get(
+                        "hot_effective_wall_time_median_s",
+                        row.get("hot_wall_time_median_s"),
+                    )
+                ),
+                effective_p90=_fmt(
+                    row.get(
+                        "hot_effective_wall_time_p90_s",
+                        row.get("hot_wall_time_p90_s"),
+                    )
+                ),
                 stop=(row.get("stop") or {}).get("label", "—"),
             )
         )
@@ -733,8 +744,10 @@ def render_markdown(
             "",
             "## Temps de chaque RHO",
             "",
-            "| Solveur/formulation | RHO | Statut | Statut natif | Faisable | Validé | Itérations | Mur (s) | Solveur (s) |",
-            "|---|---:|---:|---|---:|---:|---:|---:|---:|",
+            "Le temps effectif inclut la restauration de faisabilité effectuée après le RHO précédent pour préparer celui-ci.",
+            "",
+            "| Solveur/formulation | RHO | Statut | Statut natif | Faisable | Validé | Itérations | Solve principal (s) | Restauration (s) | Effectif (s) | Solveur (s) |",
+            "|---|---:|---:|---|---:|---:|---:|---:|---:|---:|---:|",
         ]
     )
     for entry in entries:
@@ -745,7 +758,32 @@ def render_markdown(
                 f"{row.get('native_status')} | {row.get('primal_feasible')} | "
                 f"{row.get('validated')} | "
                 f"{row.get('iterations')} | {_fmt(row.get('wall_time_s'))} | "
+                f"{_fmt(row.get('feasibility_restoration_wall_time_s'))} | "
+                f"{_fmt(row.get('effective_wall_time_s', row.get('wall_time_s')))} | "
                 f"{_fmt(row.get('solver_time_s'))} |"
+            )
+
+    restoration_entries = [
+        entry
+        for entry in entries
+        if (entry["result"].get("feasibility_restoration") or {}).get("available")
+    ]
+    if restoration_entries:
+        lines.extend(
+            [
+                "",
+                "### Restauration de faisabilité ACADOS",
+                "",
+                "| Solveur/formulation | Temps total (s) | Étapes auxiliaires |",
+                "|---|---:|---:|",
+            ]
+        )
+        for entry in restoration_entries:
+            restoration = entry["result"]["feasibility_restoration"]
+            lines.append(
+                f"| {_entry_label(entry)} | "
+                f"{_fmt(restoration.get('total_wall_time_s'))} | "
+                f"{len(restoration.get('stages') or [])} |"
             )
 
     lines.extend(

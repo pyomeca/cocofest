@@ -692,7 +692,7 @@ jobs:
         if: always()
         run: |
           output="acados-smoke-results/acados-option-screen.csv"
-          echo "case,nlp_solver,search_direction,integrator,sim_steps,newton_iter,transfer_bound_homotopy,validated_cycles,attempted_rho,hot_median_s,hot_p90_s,executed_fatigue_objective,minimum_capacity_ratio,first_failed_rho" > "$output"
+          echo "case,nlp_solver,search_direction,integrator,sim_steps,newton_iter,transfer_bound_homotopy,validated_cycles,attempted_rho,solve_hot_median_s,effective_hot_median_s,effective_hot_p90_s,restoration_total_s,executed_fatigue_objective,minimum_capacity_ratio,first_failed_rho" > "$output"
           while IFS= read -r result; do
             case_name="$(basename "$(dirname "$result")")"
             jq -r --arg case "$case_name" '
@@ -709,7 +709,9 @@ jobs:
                 .validated_cycles,
                 .attempted_windows,
                 .hot_wall_time_median_s,
-                .hot_wall_time_p90_s,
+                .hot_effective_wall_time_median_s,
+                .hot_effective_wall_time_p90_s,
+                .feasibility_restoration.total_wall_time_s,
                 .executed_fatigue_objective,
                 .min_A_capacity_ratio,
                 .first_failed_rho

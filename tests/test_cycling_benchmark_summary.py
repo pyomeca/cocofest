@@ -181,6 +181,40 @@ def test_markdown_reports_total_and_per_muscle_fatigue_metrics():
     assert "| ACADOS/REDUCED | Biceps | 8.000 | 0.500 | 0.910000 |" in markdown
 
 
+def test_markdown_attributes_acados_restoration_time_to_effective_rho_time():
+    entry = {
+        "runtime": {},
+        "configuration": {"mechanical_formulation": "reduced"},
+        "result": {
+            "solver": "acados",
+            "hot_wall_time_median_s": 0.06,
+            "hot_effective_wall_time_median_s": 0.14,
+            "hot_effective_wall_time_p90_s": 0.18,
+            "feasibility_restoration": {
+                "available": True,
+                "total_wall_time_s": 0.8,
+                "stages": [{}, {}],
+            },
+            "windows": [
+                {
+                    "rho": 2,
+                    "wall_time_s": 0.06,
+                    "feasibility_restoration_wall_time_s": 0.08,
+                    "effective_wall_time_s": 0.14,
+                }
+            ],
+            "stimulation_patterns": {},
+        },
+    }
+
+    markdown = summary.render_markdown([entry], [])
+
+    assert "Effectif/RHO médian (s)" in markdown
+    assert "| ACADOS/REDUCED | 0.800 | 2 |" in markdown
+    assert "| ACADOS/REDUCED | 2 |" in markdown
+    assert "| 0.060 | 0.080 | 0.140 |" in markdown
+
+
 def test_configuration_comparability_is_scoped_by_mechanical_formulation():
     def entry(solver, mechanics, n_windows):
         return {
