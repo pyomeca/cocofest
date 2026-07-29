@@ -1346,7 +1346,6 @@ def set_reduced_x_bounds(
         )
 
     theta_values = np.asarray(x_init["theta"].init, dtype=float)
-    omega_values = np.asarray(x_init["omega"].init, dtype=float)
     theta_start = float(theta_values[0, 0])
     theta_end = float(theta_values[0, -1])
     theta_slack = 0.05
@@ -1368,9 +1367,9 @@ def set_reduced_x_bounds(
         ),
         interpolation=InterpolationType.CONSTANT_WITH_FIRST_AND_LAST_DIFFERENT,
     )
-    expected_omega = float(np.median(omega_values))
-    if np.isclose(expected_omega, 0.0):
-        expected_omega = -2.0 * np.pi
+    # Match the full formulation exactly. The warm-start omega remains
+    # variable, but it must not silently recenter the physical OCP bounds.
+    expected_omega = -2.0 * np.pi
     x_bounds.add(
         "omega",
         min_bound=np.array(

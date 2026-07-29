@@ -16,6 +16,8 @@ COMPARABILITY_FIELDS = (
     "model_formulation",
     "mechanical_formulation",
     "torque_application",
+    "wheel_qdot_regularization_target",
+    "wheel_qdot_bound_margin",
     "acados_terminal_wheel_q_slack",
     "cycles_per_window",
     "stimulations_per_cycle",

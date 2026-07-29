@@ -3014,6 +3014,8 @@ def test_benchmark_json_summary_contains_comparable_fatigue_metrics(tmp_path):
     result["args"].max_consecutive_failing = 2
     result["args"].ipopt_dual_warm_start_mode = "all"
     result["args"].max_ipopt_iterations = 2000
+    result["args"].wheel_qdot_regularization_target = -2.0 * np.pi
+    result["args"].wheel_qdot_bound_margin = 3.0
 
     output_path = comparison_example.write_benchmark_summary(
         tmp_path / "benchmark.json", {"madnlp": result}
@@ -3028,6 +3030,10 @@ def test_benchmark_json_summary_contains_comparable_fatigue_metrics(tmp_path):
     assert payload["configurations"]["madnlp"]["max_consecutive_failing"] == 2
     assert payload["configurations"]["madnlp"]["ipopt_dual_warm_start_mode"] == "all"
     assert payload["configurations"]["madnlp"]["max_ipopt_iterations"] == 2000
+    assert payload["configurations"]["madnlp"][
+        "wheel_qdot_regularization_target"
+    ] == pytest.approx(-2.0 * np.pi)
+    assert payload["configurations"]["madnlp"]["wheel_qdot_bound_margin"] == 3.0
     row = payload["results"][0]
     assert row["solver"] == "madnlp"
     assert row["success"] is True

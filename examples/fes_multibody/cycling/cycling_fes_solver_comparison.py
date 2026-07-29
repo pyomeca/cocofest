@@ -66,6 +66,8 @@ BENCHMARK_CONFIGURATION_FIELDS = (
     "pulse_width_active_set",
     "pulse_width_active_threshold",
     "pulse_width_active_margin",
+    "wheel_qdot_regularization_target",
+    "wheel_qdot_bound_margin",
     "acados_wheel_q_slack",
     "acados_terminal_wheel_q_slack",
     "max_acados_iterations",

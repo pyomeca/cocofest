@@ -316,3 +316,11 @@ def test_reduced_fes_ocp_has_twenty_ding_states_and_theta_omega():
     assert nmpc.nlp[0].states.shape == 22
     assert nmpc.nlp[0].controls.shape == 4
     assert nmpc.nlp[0].dynamics_func.numel_out() == 22
+    np.testing.assert_allclose(
+        nmpc.nlp[0].x_bounds["omega"].min,
+        -2.0 * np.pi - 3.0,
+    )
+    np.testing.assert_allclose(
+        nmpc.nlp[0].x_bounds["omega"].max,
+        -2.0 * np.pi + 3.0,
+    )
