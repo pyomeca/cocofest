@@ -3158,6 +3158,33 @@ def test_feasibility_snapshot_is_not_recomputed_with_next_window_bounds():
     assert feasibility["passes_tolerance"] is True
 
 
+def test_acados_shooting_residuals_are_part_of_the_physical_feasibility_audit():
+    base = {
+        "passes_tolerance": True,
+        "failure_reason": None,
+        "feasibility_threshold": 1e-5,
+        "constraint_infeasibility": 1e-9,
+        "effective_primal_infeasibility": 1e-9,
+        "maximum_bound_violation": 1e-9,
+    }
+
+    rejected = periodic_example.augment_feasibility_with_acados_residuals(
+        base,
+        {"residuals": np.array([0.2, 0.13, 1e-12, 1e-8])},
+    )
+    accepted = periodic_example.augment_feasibility_with_acados_residuals(
+        base,
+        {"residuals": np.array([0.2, 2e-7, 3e-8, 1e-8])},
+    )
+
+    assert rejected["passes_tolerance"] is False
+    assert rejected["failure_reason"] == "acados_primal_residual_above_threshold"
+    np.testing.assert_allclose(rejected["acados_primal_residual"], 0.13)
+    np.testing.assert_allclose(rejected["effective_primal_infeasibility"], 0.13)
+    assert accepted["passes_tolerance"] is True
+    np.testing.assert_allclose(accepted["acados_primal_residual"], 2e-7)
+
+
 def test_github_benchmark_report_compares_patterns_and_writes_csv(tmp_path):
     def entry(solver, pulse_width_us):
         return {

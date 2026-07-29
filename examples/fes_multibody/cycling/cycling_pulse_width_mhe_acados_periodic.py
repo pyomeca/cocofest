@@ -5464,6 +5464,97 @@ def _solution_feasibility_summary(
     }
 
 
+def augment_feasibility_with_acados_residuals(
+    feasibility: dict,
+    diagnostics: dict,
+) -> dict:
+    """Include ACADOS shooting residuals in the physical RHO audit.
+
+    Bioptim's exported constraint vector does not include the nonlinear
+    multiple-shooting defects reported by ACADOS. This matters especially for
+    SQP_RTI: a successful single QP can still leave a dynamically inconsistent
+    trajectory.
+    """
+
+    augmented = dict(feasibility)
+    residuals = diagnostics.get("residuals")
+    if residuals is None:
+        augmented.update(
+            {
+                "acados_residuals_available": False,
+                "acados_residuals_finite": False,
+                "acados_stationarity_residual": None,
+                "acados_dynamics_residual": None,
+                "acados_inequality_residual": None,
+                "acados_complementarity_residual": None,
+                "passes_tolerance": False,
+                "failure_reason": "acados_residuals_unavailable",
+            }
+        )
+        return augmented
+
+    values = np.asarray(residuals, dtype=float).reshape(-1)
+    finite = bool(values.size >= 4 and np.all(np.isfinite(values[:4])))
+    named = [None, None, None, None]
+    if values.size:
+        for index in range(min(4, values.size)):
+            named[index] = (
+                float(abs(values[index])) if np.isfinite(values[index]) else None
+            )
+    augmented.update(
+        {
+            "acados_residuals_available": values.size >= 4,
+            "acados_residuals_finite": finite,
+            "acados_stationarity_residual": named[0],
+            "acados_dynamics_residual": named[1],
+            "acados_inequality_residual": named[2],
+            "acados_complementarity_residual": named[3],
+        }
+    )
+    if not finite:
+        augmented["passes_tolerance"] = False
+        augmented["failure_reason"] = "acados_residuals_nonfinite"
+        return augmented
+
+    acados_primal_residual = max(named[1], named[2])
+    existing_constraint = augmented.get("constraint_infeasibility")
+    combined_constraint = max(
+        value
+        for value in (existing_constraint, acados_primal_residual)
+        if value is not None
+    )
+    existing_effective = augmented.get("effective_primal_infeasibility")
+    combined_effective = max(
+        value
+        for value in (existing_effective, acados_primal_residual)
+        if value is not None
+    )
+    threshold = augmented.get("feasibility_threshold")
+    passes_acados = threshold is None or acados_primal_residual <= threshold
+    augmented.update(
+        {
+            "acados_primal_residual": acados_primal_residual,
+            "constraint_infeasibility": combined_constraint,
+            "effective_primal_infeasibility": combined_effective,
+            "constraint_feasibility_available": True,
+            "maximum_bound_violation": max(
+                value
+                for value in (
+                    augmented.get("maximum_bound_violation"),
+                    acados_primal_residual,
+                )
+                if value is not None
+            ),
+            "passes_tolerance": bool(
+                augmented.get("passes_tolerance", False) and passes_acados
+            ),
+        }
+    )
+    if not passes_acados:
+        augmented["failure_reason"] = "acados_primal_residual_above_threshold"
+    return augmented
+
+
 def _window_feasibility_tolerance(args: argparse.Namespace) -> float | None:
     """Map the public absolute threshold to the legacy 10*tolerance audit."""
 
@@ -12006,9 +12097,15 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
         # Every stored RHO solution references the same mutable OCP. Snapshot
         # feasibility while its lbx/ubx still describe this window; otherwise
         # post-processing compares old decisions with the final window bounds.
-        solution._cocofest_feasibility_summary = _solution_feasibility_summary(
+        feasibility = _solution_feasibility_summary(
             solution, window_feasibility_tolerance
         )
+        if args.solver == "acados":
+            feasibility = augment_feasibility_with_acados_residuals(
+                feasibility,
+                snapshot_acados_diagnostics(solution),
+            )
+        solution._cocofest_feasibility_summary = feasibility
         save_common_initial_solution(solution)
         if args.solver == "acados" and horizon_seed_cache_path is not None:
             cache_first_successful_window(_nmpc, solution)
