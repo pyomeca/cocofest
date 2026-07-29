@@ -3185,6 +3185,19 @@ def test_acados_shooting_residuals_are_part_of_the_physical_feasibility_audit():
     np.testing.assert_allclose(accepted["acados_primal_residual"], 2e-7)
 
 
+def test_acados_uses_the_same_absolute_primal_feasibility_threshold_as_nlps():
+    args = periodic_example.build_argument_parser().parse_args(
+        [
+            "--solver",
+            "acados",
+            "--primal-feasibility-threshold",
+            "1e-5",
+        ]
+    )
+
+    assert periodic_example._window_feasibility_tolerance(args) == pytest.approx(1e-6)
+
+
 def test_github_benchmark_report_compares_patterns_and_writes_csv(tmp_path):
     def entry(solver, pulse_width_us):
         return {

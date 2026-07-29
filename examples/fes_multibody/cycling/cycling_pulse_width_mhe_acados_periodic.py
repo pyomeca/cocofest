@@ -5558,10 +5558,12 @@ def augment_feasibility_with_acados_residuals(
 def _window_feasibility_tolerance(args: argparse.Namespace) -> float | None:
     """Map the public absolute threshold to the legacy 10*tolerance audit."""
 
+    threshold = getattr(args, "primal_feasibility_threshold", None)
+    if threshold is not None:
+        return float(threshold) / 10.0
     if args.solver == "acados":
         return args.acados_tolerance
-    threshold = getattr(args, "primal_feasibility_threshold", None)
-    return args.nlp_tolerance if threshold is None else float(threshold) / 10.0
+    return args.nlp_tolerance
 
 
 def _wheel_cycle_diagnostic_tolerances(
