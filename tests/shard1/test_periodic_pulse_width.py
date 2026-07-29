@@ -3198,6 +3198,19 @@ def test_acados_uses_the_same_absolute_primal_feasibility_threshold_as_nlps():
     assert periodic_example._window_feasibility_tolerance(args) == pytest.approx(1e-6)
 
 
+def test_solver_comparison_forwards_the_physical_threshold_to_acados():
+    ipopt_args = SimpleNamespace()
+    acados_args = SimpleNamespace()
+
+    comparison_example._set_common_primal_feasibility_threshold(
+        (ipopt_args, acados_args),
+        1e-5,
+    )
+
+    assert ipopt_args.primal_feasibility_threshold == pytest.approx(1e-5)
+    assert acados_args.primal_feasibility_threshold == pytest.approx(1e-5)
+
+
 def test_github_benchmark_report_compares_patterns_and_writes_csv(tmp_path):
     def entry(solver, pulse_width_us):
         return {

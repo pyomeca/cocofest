@@ -153,6 +153,34 @@ def test_markdown_states_that_internal_solver_tolerances_are_backend_specific():
     assert "même seuil de faisabilité physique" in markdown
 
 
+def test_markdown_reports_total_and_per_muscle_fatigue_metrics():
+    entry = {
+        "runtime": {},
+        "configuration": {"mechanical_formulation": "reduced"},
+        "result": {
+            "solver": "acados",
+            "executed_fatigue_objective": 12.5,
+            "fatigue_auc_cycles": 0.75,
+            "min_A_capacity_ratio": 0.91,
+            "muscle_fatigue": [
+                {
+                    "muscle": "Biceps",
+                    "executed_fatigue_objective": 8.0,
+                    "cumulative_normalized_fatigue_cycles": 0.5,
+                    "final_capacity_ratio": 0.91,
+                }
+            ],
+            "windows": [],
+            "stimulation_patterns": {},
+        },
+    }
+
+    markdown = summary.render_markdown([entry], [])
+
+    assert "| ACADOS/REDUCED | 12.500 | 0.750 | 0.910000 |" in markdown
+    assert "| ACADOS/REDUCED | Biceps | 8.000 | 0.500 | 0.910000 |" in markdown
+
+
 def test_configuration_comparability_is_scoped_by_mechanical_formulation():
     def entry(solver, mechanics, n_windows):
         return {
@@ -177,6 +205,26 @@ def test_configuration_comparability_is_scoped_by_mechanical_formulation():
     assert len(mismatches) == 1
     assert mismatches[0]["case"] == "madnlp/reduced"
     assert mismatches[0]["reference_case"] == "ipopt/reduced"
+
+
+def test_numerical_transcription_choices_do_not_change_physical_comparability():
+    def entry(solver, ode_solver, state_scaling):
+        return {
+            "configuration": {
+                "mechanical_formulation": "full",
+                "n_windows": 100,
+                "ode_solver": ode_solver,
+                "state_scaling": state_scaling,
+            },
+            "result": {"solver": solver},
+        }
+
+    entries = [
+        entry("ipopt", "collocation", "full"),
+        entry("fatrop", "rk4", "none"),
+    ]
+
+    assert summary.configuration_mismatches(entries) == []
 
 
 def test_requested_rho_count_accounts_for_multi_cycle_window():

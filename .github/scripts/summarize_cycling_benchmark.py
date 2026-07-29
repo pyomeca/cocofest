@@ -16,14 +16,6 @@ COMPARABILITY_FIELDS = (
     "model_formulation",
     "mechanical_formulation",
     "torque_application",
-    "ode_solver",
-    "collocation_degree",
-    "collocation_method",
-    "use_sx",
-    "nlp_ordering_strategy",
-    "state_scaling",
-    "pulse_width_scaling",
-    "pulse_width_active_set",
     "acados_terminal_wheel_q_slack",
     "cycles_per_window",
     "stimulations_per_cycle",
@@ -681,10 +673,28 @@ def render_markdown(
             "`RHO résolus` compte chaque fenêtre dont le solveur converge et dont la faisabilité indépendante est certifiée. "
             "Le `préfixe strict` s’arrête au premier échec, même si les fenêtres suivantes récupèrent.",
             "",
-            "## Coût et fatigue cumulée par muscle",
+            "## Coût et fatigue cumulée",
             "",
             "Le coût est réévalué sur les cycles réellement exécutés, sans recompter les horizons qui se chevauchent. "
             "La fatigue cumulée est l’intégrale en cycles de `1 - A/A_scale`.",
+            "",
+            "| Solveur/formulation | Coût fatigue exécuté | Fatigue cumulée, 4 muscles (cycles) | Minimum A/A_scale |",
+            "|---|---:|---:|---:|",
+        ]
+    )
+    for entry in entries:
+        row = entry["result"]
+        lines.append(
+            f"| {_entry_label(entry)} | "
+            f"{_fmt(row.get('executed_fatigue_objective'))} | "
+            f"{_fmt(row.get('fatigue_auc_cycles'))} | "
+            f"{_fmt(row.get('min_A_capacity_ratio'), 6)} |"
+        )
+
+    lines.extend(
+        [
+            "",
+            "### Détail des quatre muscles",
             "",
             "| Solveur/formulation | Muscle | Coût fatigue exécuté | Fatigue cumulée (cycles) | A final/A_scale |",
             "|---|---|---:|---:|---:|",
@@ -829,7 +839,7 @@ def render_markdown(
             "",
             "### Effet de la réduction mécanique sur les patrons",
             "",
-            "La formulation complète est la référence; les écarts sont calculés séparément pour IPOPT et MadNLP.",
+            "La formulation complète est la référence; les écarts sont calculés séparément pour chaque solveur et chaque transcription.",
             "",
             "| Solveur/formulation réduite | Cycle | Muscle | RMSE brute (µs) | RMSE réalignée (µs) | Max abs. brut (µs) | Corr. brute | Corr. réalignée | RMSE phase (rad) |",
             "|---|---:|---|---:|---:|---:|---:|---:|---:|",

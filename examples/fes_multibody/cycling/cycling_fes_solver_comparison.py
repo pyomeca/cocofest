@@ -2293,6 +2293,16 @@ def _json_compatible(value):
     return _json_compatible(array.tolist())
 
 
+def _set_common_primal_feasibility_threshold(
+    solver_args: tuple[argparse.Namespace, ...],
+    threshold: float | None,
+) -> None:
+    """Forward the public physical threshold to every compared backend."""
+
+    for args in solver_args:
+        args.primal_feasibility_threshold = threshold
+
+
 def main(
     objective: str = "fatigue",
     objective_shape: str = "quadratic",
@@ -2721,7 +2731,10 @@ def main(
         periodic_ipopt_refinement_use_sx=periodic_ipopt_refinement_use_sx,
         warmup_state_comparison_limit=warmup_state_comparison_limit,
     )
-    ipopt_args.primal_feasibility_threshold = primal_feasibility_threshold
+    _set_common_primal_feasibility_threshold(
+        (ipopt_args, acados_args),
+        primal_feasibility_threshold,
+    )
     ipopt_args.max_consecutive_failing = max_consecutive_failing
     acados_args.max_consecutive_failing = max_consecutive_failing
     ipopt_args.warmup_ipopt_linear_solver = warmup_ipopt_linear_solver
