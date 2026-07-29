@@ -658,7 +658,7 @@ jobs:
           for mechanics in full reduced; do
             run_case sqp-irk-reference "$mechanics" "$ACADOS_SMOKE_RHOS" SQP IRK 5 5
             run_case sqp-irk-two-stage "$mechanics" "$ACADOS_SMOKE_RHOS" SQP IRK 5 5
-            run_case sqp-feasible-qp-irk "$mechanics" "$ACADOS_OPTION_RHOS" SQP_WITH_FEASIBLE_QP IRK 5 5
+            run_case sqp-feasible-qp-irk "$mechanics" "$ACADOS_SMOKE_RHOS" SQP_WITH_FEASIBLE_QP IRK 5 5
             run_case sqp-rti-irk "$mechanics" "$ACADOS_OPTION_RHOS" SQP_RTI IRK 5 5
             run_case sqp-erk "$mechanics" "$ACADOS_OPTION_RHOS" SQP ERK 20 5
             run_case sqp-irk-light "$mechanics" "$ACADOS_OPTION_RHOS" SQP IRK 2 3

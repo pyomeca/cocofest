@@ -3397,6 +3397,10 @@ def test_github_acados_runner_uses_reference_and_option_profiles_sequentially():
     assert "--acados-transfer-bound-homotopy-solver-tolerance 1e-4" in workflow
     assert "run_case sqp-feasible-qp-irk" in workflow
     assert "SQP_WITH_FEASIBLE_QP IRK" in workflow
+    assert (
+        'run_case sqp-feasible-qp-irk "$mechanics" "$ACADOS_SMOKE_RHOS"'
+        in workflow
+    )
     assert "--acados-search-direction-mode BYRD_OMOJOKUN" in workflow
     assert "run_case sqp-rti-irk" in workflow
     assert "SQP_RTI IRK" in workflow
