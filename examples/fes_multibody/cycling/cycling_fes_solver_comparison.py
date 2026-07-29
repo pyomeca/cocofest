@@ -2223,6 +2223,7 @@ def main(
     alpaqa_max_no_progress: int | None = None,
     optional_nlp_periodic_ipopt_hot_start: bool = True,
     acados_max_iter: int = 100,
+    acados_control_homotopy_keep_final_radius: bool | None = None,
     control_regularization_weight: float = 0.0,
     acados_control_regularization_weight: float | None = None,
     control_regularization_target: float | None = None,
@@ -2607,6 +2608,9 @@ def main(
         periodic_ipopt_refinement_ode_solver
     )
     acados_args.acados_stationarity_tolerance = acados_stationarity_tolerance
+    acados_args.acados_control_homotopy_keep_final_radius = (
+        acados_control_homotopy_keep_final_radius
+    )
     acados_args.acados_dual_warm_start_mode = acados_dual_warm_start_mode
     acados_args.acados_proximal_control_weights = acados_proximal_control_weights
     acados_args.acados_proximal_control_each_window = (
@@ -3379,6 +3383,18 @@ def build_cli() -> argparse.ArgumentParser:
         help="Do not load the historical initial guess file for the direct IPOPT-side solve.",
     )
     parser.add_argument("--acados-max-iter", type=int, default=100)
+    retained_radius_group = parser.add_mutually_exclusive_group()
+    retained_radius_group.add_argument(
+        "--acados-control-homotopy-keep-final-radius",
+        dest="acados_control_homotopy_keep_final_radius",
+        action="store_true",
+        default=None,
+    )
+    retained_radius_group.add_argument(
+        "--acados-control-homotopy-release-final-radius",
+        dest="acados_control_homotopy_keep_final_radius",
+        action="store_false",
+    )
     parser.add_argument(
         "--acados-integrator-type", choices=("ERK", "IRK", "DISCRETE"), default="IRK"
     )
@@ -3773,6 +3789,9 @@ if __name__ == "__main__":
             args.optional_nlp_periodic_ipopt_hot_start
         ),
         acados_max_iter=args.acados_max_iter,
+        acados_control_homotopy_keep_final_radius=(
+            args.acados_control_homotopy_keep_final_radius
+        ),
         control_regularization_weight=args.control_regularization_weight,
         acados_control_regularization_weight=args.acados_control_regularization_weight,
         control_regularization_target=args.control_regularization_target,

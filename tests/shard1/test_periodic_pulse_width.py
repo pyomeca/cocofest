@@ -5928,6 +5928,7 @@ def test_shared_transfer_rollout_cli_is_available_to_ipopt():
             "--acados-terminal-wheel-q-homotopy-slacks",
             "0.2,0.1,0.02",
             "--acados-terminal-wheel-q-homotopy-each-window",
+            "--acados-control-homotopy-release-final-radius",
             "--acados-newton-iter",
             "3",
         ]
@@ -5973,6 +5974,7 @@ def test_shared_transfer_rollout_cli_is_available_to_ipopt():
         0.02,
     )
     assert comparison_args.acados_terminal_wheel_q_homotopy_each_window is True
+    assert comparison_args.acados_control_homotopy_keep_final_radius is False
     assert comparison_args.acados_newton_iter == 3
     assert (
         comparison_example.IPOPT_PROFILE_DEFAULTS["acados_like"]["model_formulation"]
