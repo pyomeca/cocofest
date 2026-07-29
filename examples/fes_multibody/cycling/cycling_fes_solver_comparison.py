@@ -515,10 +515,10 @@ def _minimum_a_capacity_ratio(fatigue: list[dict]) -> float | None:
     return min(ratios) if ratios else None
 
 
-def _executed_fatigue_objective(
+def _executed_fatigue_objective_by_muscle(
     result: dict, cycle_count: int, *, weight: float = 10_000.0
-) -> float | None:
-    """Re-evaluate the fatigue cost on unique exported cycles.
+) -> list[dict]:
+    """Re-evaluate each muscle's fatigue cost on unique exported cycles.
 
     Receding-horizon window objectives overlap whenever a horizon contains
     more than one cycle but advances by one cycle. This common trapezoidal
@@ -526,9 +526,9 @@ def _executed_fatigue_objective(
     """
 
     if cycle_count <= 0:
-        return None
+        return []
     limited = _truncate_result_to_cycles(result, cycle_count)
-    squared_fatigue = None
+    rows = []
     for key, values in sorted(limited.get("state_traces", {}).items()):
         if not key.startswith("A_"):
             continue
@@ -542,14 +542,38 @@ def _executed_fatigue_objective(
             or not np.all(np.isfinite(trace))
         ):
             continue
-        term = np.square(1.0 - trace / float(capacity_scale))
-        squared_fatigue = term if squared_fatigue is None else squared_fatigue + term
+        normalized_fatigue = 1.0 - trace / float(capacity_scale)
+        squared_fatigue = np.square(normalized_fatigue)
+        dt = float(cycle_count) / (squared_fatigue.size - 1)
+        squared_integral = np.sum(
+            0.5 * (squared_fatigue[:-1] + squared_fatigue[1:]) * dt
+        )
+        fatigue_integral = np.sum(
+            0.5 * (normalized_fatigue[:-1] + normalized_fatigue[1:]) * dt
+        )
+        rows.append(
+            {
+                "muscle": key.removeprefix("A_"),
+                "state_key": key,
+                "executed_fatigue_objective": float(weight * squared_integral),
+                "cumulative_normalized_fatigue_cycles": float(fatigue_integral),
+                "final_capacity_ratio": float(trace[-1] / float(capacity_scale)),
+            }
+        )
+    return rows
 
-    if squared_fatigue is None:
+
+def _executed_fatigue_objective(
+    result: dict, cycle_count: int, *, weight: float = 10_000.0
+) -> float | None:
+    """Return the sum of the independently re-evaluated muscle costs."""
+
+    rows = _executed_fatigue_objective_by_muscle(
+        result, cycle_count, weight=weight
+    )
+    if not rows:
         return None
-    dt = float(cycle_count) / (squared_fatigue.size - 1)
-    integral = np.sum(0.5 * (squared_fatigue[:-1] + squared_fatigue[1:]) * dt)
-    return float(weight * integral)
+    return float(sum(row["executed_fatigue_objective"] for row in rows))
 
 
 def _external_crank_power_metrics(result: dict, cycle_count: int) -> dict:
@@ -1909,6 +1933,90 @@ def stimulation_pattern_snapshots(
     }
 
 
+def pulse_width_cycle_variation(result: dict, cycle_count: int) -> dict:
+    """Measure aligned pulse-width changes between consecutive executed cycles.
+
+    These percentiles are observations, not proposed hard bounds. An ACADOS
+    trust region must retain a safety margin and an out-of-distribution recovery
+    path.
+    """
+
+    summary = {
+        "available": False,
+        "reason": None,
+        "cycle_count": int(cycle_count),
+        "transition_count": max(0, int(cycle_count) - 1),
+        "stimulations_per_cycle": int(result["args"].stimulations_per_cycle),
+        "muscles": [],
+        "pooled_absolute_change_us": {},
+    }
+    if cycle_count < 2:
+        summary["reason"] = "at_least_two_validated_cycles_are_required"
+        return summary
+
+    shooting_per_cycle = summary["stimulations_per_cycle"]
+    limited = _truncate_result_to_cycles(result, cycle_count)
+    pooled_changes = []
+    for key, values in sorted(limited.get("control_traces", {}).items()):
+        if not key.startswith("last_pulse_width_"):
+            continue
+        trace = np.asarray(values, dtype=float).reshape(-1)
+        expected = cycle_count * shooting_per_cycle
+        if trace.size < expected or not np.all(np.isfinite(trace[:expected])):
+            summary["reason"] = f"invalid_control_trace_for_{key}"
+            summary["muscles"] = []
+            return summary
+        cycles = trace[:expected].reshape(cycle_count, shooting_per_cycle)
+        changes_us = 1e6 * np.diff(cycles, axis=0)
+        absolute_us = np.abs(changes_us)
+        pooled_changes.append(absolute_us.reshape(-1))
+        transitions = []
+        for index, transition in enumerate(changes_us):
+            transitions.append(
+                {
+                    "from_cycle": index + 1,
+                    "to_cycle": index + 2,
+                    "mean_absolute_change_us": float(np.mean(np.abs(transition))),
+                    "root_mean_square_change_us": float(
+                        np.sqrt(np.mean(np.square(transition)))
+                    ),
+                    "maximum_absolute_change_us": float(
+                        np.max(np.abs(transition))
+                    ),
+                }
+            )
+        summary["muscles"].append(
+            {
+                "muscle": key.removeprefix("last_pulse_width_"),
+                "control_key": key,
+                "sample_count": int(absolute_us.size),
+                "mean_absolute_change_us": float(np.mean(absolute_us)),
+                "median_absolute_change_us": float(np.median(absolute_us)),
+                "p90_absolute_change_us": float(np.percentile(absolute_us, 90)),
+                "p95_absolute_change_us": float(np.percentile(absolute_us, 95)),
+                "p99_absolute_change_us": float(np.percentile(absolute_us, 99)),
+                "maximum_absolute_change_us": float(np.max(absolute_us)),
+                "transitions": transitions,
+            }
+        )
+
+    if not pooled_changes:
+        summary["reason"] = "no_pulse_width_controls"
+        return summary
+    pooled = np.concatenate(pooled_changes)
+    summary["pooled_absolute_change_us"] = {
+        "sample_count": int(pooled.size),
+        "mean": float(np.mean(pooled)),
+        "median": float(np.median(pooled)),
+        "p90": float(np.percentile(pooled, 90)),
+        "p95": float(np.percentile(pooled, 95)),
+        "p99": float(np.percentile(pooled, 99)),
+        "maximum": float(np.max(pooled)),
+    }
+    summary["available"] = True
+    return summary
+
+
 def solver_overview_rows(results: dict[str, dict]) -> list[dict]:
     """Build JSON-safe fatigue and timing outcomes for every selected backend."""
 
@@ -1931,6 +2039,9 @@ def solver_overview_rows(results: dict[str, dict]) -> list[dict]:
             None,
         )
         fatigue = _fatigue_metrics(result, performance["validated_cycles"])
+        muscle_fatigue = _executed_fatigue_objective_by_muscle(
+            result, performance["validated_cycles"]
+        )
         saturation = _control_saturation_metrics(
             result, performance["validated_cycles"]
         )
@@ -2016,6 +2127,7 @@ def solver_overview_rows(results: dict[str, dict]) -> list[dict]:
                 "min_A_capacity_ratio": _minimum_a_capacity_ratio(fatigue),
                 "max_mean_normalized_fatigue": mean_fatigue,
                 "fatigue_auc_cycles": fatigue_auc if a_rows else None,
+                "muscle_fatigue": muscle_fatigue,
                 "fatigue_by_state": fatigue,
                 "external_crank_power": external_crank_power,
                 "cycle_boundary_wheel_angle": cycle_boundary_wheel_angle,
@@ -2028,6 +2140,9 @@ def solver_overview_rows(results: dict[str, dict]) -> list[dict]:
                 "native_solver_status": result.get("native_solver_status"),
                 "windows": window_rows,
                 "stimulation_patterns": stimulation_pattern_snapshots(result),
+                "pulse_width_cycle_variation": pulse_width_cycle_variation(
+                    result, performance["validated_cycles"]
+                ),
                 "nlp_solver_stats": result.get("nlp_solver_stats") or [],
                 "warm_start": {
                     "initial_guess_audits": result.get("initial_guess_audits") or [],
@@ -3613,7 +3728,7 @@ def build_cli() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--acados-nlp-solver-type",
-        choices=("SQP", "SQP_WITH_FEASIBLE_QP"),
+        choices=("SQP", "SQP_RTI", "SQP_WITH_FEASIBLE_QP"),
         default="SQP",
     )
     parser.add_argument(

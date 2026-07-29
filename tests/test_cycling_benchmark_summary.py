@@ -202,6 +202,19 @@ def test_madnlp_cases_include_the_linear_solver_backend():
     assert summary._entry_case(entry("mumps")) == "madnlp-mumps/full"
 
 
+def test_fatrop_cases_include_transcription_and_compilation():
+    entry = {
+        "configuration": {
+            "mechanical_formulation": "reduced",
+            "ode_solver": "rk4",
+            "fatrop_c_compile": True,
+        },
+        "result": {"solver": "fatrop"},
+    }
+
+    assert summary._entry_case(entry) == "fatrop-rk4-compiled/reduced"
+
+
 def test_mechanical_comparison_keeps_madnlp_backends_separate():
     def entry(mechanics, linear_solver, value):
         return {

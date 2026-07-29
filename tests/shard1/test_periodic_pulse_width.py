@@ -2050,6 +2050,24 @@ def test_stimulation_snapshot_rejects_cycle_outside_converged_prefix():
     assert snapshot["reason"] == "only_2_cycles_belong_to_the_converged_prefix"
 
 
+def test_pulse_width_cycle_variation_reports_aligned_transition_percentiles():
+    result = _benchmark_result([0, 0, 0], solver_success=True, success=True)
+
+    variation = comparison_example.pulse_width_cycle_variation(
+        result, cycle_count=3
+    )
+
+    assert variation["available"] is True
+    assert variation["transition_count"] == 2
+    muscle = variation["muscles"][0]
+    assert muscle["muscle"] == "Biceps"
+    np.testing.assert_allclose(
+        [row["mean_absolute_change_us"] for row in muscle["transitions"]],
+        [150.0, 200.0],
+    )
+    assert variation["pooled_absolute_change_us"]["maximum"] == pytest.approx(200.0)
+
+
 def test_benchmark_rejects_status_zero_window_above_feasibility_threshold():
     result = _benchmark_result([0, 0], solver_success=False, success=False)
     result["window_feasibility"] = [
@@ -2143,6 +2161,11 @@ def test_endurance_metrics_report_fatigue_and_control_saturation():
     executed_objective = comparison_example._executed_fatigue_objective(
         result, cycle_count=2
     )
+    muscle_objectives = (
+        comparison_example._executed_fatigue_objective_by_muscle(
+            result, cycle_count=2
+        )
+    )
     saturation = comparison_example._control_saturation_metrics(result, cycle_count=2)
 
     a_row = next(row for row in fatigue if row["key"] == "A_Biceps")
@@ -2157,6 +2180,15 @@ def test_endurance_metrics_report_fatigue_and_control_saturation():
         f"Biceps={a_row['relative_final']:.6f}"
     )
     assert executed_objective > 0
+    assert muscle_objectives == [
+        {
+            "muscle": "Biceps",
+            "state_key": "A_Biceps",
+            "executed_fatigue_objective": executed_objective,
+            "cumulative_normalized_fatigue_cycles": a_row["fatigue_auc_cycles"],
+            "final_capacity_ratio": a_row["relative_final"],
+        }
+    ]
     assert saturation[0]["upper_fraction"] == 0.25
 
 
@@ -2967,6 +2999,12 @@ def test_benchmark_json_summary_contains_comparable_fatigue_metrics(tmp_path):
     assert row["fatigue_auc_cycles"] > 0
     assert row["window_objective_sum"] == 12.5
     assert row["executed_fatigue_objective"] > 0
+    assert row["muscle_fatigue"][0]["muscle"] == "Biceps"
+    assert (
+        row["muscle_fatigue"][0]["executed_fatigue_objective"]
+        == row["executed_fatigue_objective"]
+    )
+    assert row["pulse_width_cycle_variation"]["available"] is True
     assert row["external_crank_power"]["role"] == "unavailable"
     assert row["cycle_boundary_wheel_angle"]["maximum_absolute_error_rad"] is not None
     assert row["stop"]["label"] == "completed_requested_horizon"
@@ -3209,7 +3247,7 @@ def test_github_benchmark_compares_physical_threshold_not_solver_tolerance():
     assert [item["field"] for item in mismatches] == ["primal_feasibility_threshold"]
 
 
-def test_github_acados_smoke_uses_the_robust_reference_profile():
+def test_github_acados_runner_uses_reference_and_option_profiles_sequentially():
     workflow = (
         Path(__file__).resolve().parents[2]
         / ".github"
@@ -3220,27 +3258,25 @@ def test_github_acados_smoke_uses_the_robust_reference_profile():
     assert "acados_smoke_rhos:" in workflow
     assert re.search(
         r"acados_smoke_rhos:\s+"
-        r"description:.*\s+required: true\s+default: \"30\"",
+        r"description:.*\s+required: true\s+default: \"100\"",
         workflow,
     )
+    assert "acados_option_rhos:" in workflow
     assert "inputs.cycles != 'screen' && inputs.cycles != 'acados'" in workflow
     assert "prepare-acados-stack:" in workflow
     assert "ACADOS_COMMIT: 48e223e85f0408ebfd1d8c6d6fb0589e9c41b3aa" in workflow
-    assert "mechanics: [full, reduced]" in workflow
+    assert "for mechanics in full reduced" in workflow
     assert "--experimental-reduced-acados" in workflow
     assert "--common-initial-solution" in workflow
-    assert "--acados-nlp-solver-type SQP" in workflow
-    assert "--acados-integrator-type IRK" in workflow
-    assert "--acados-collocation-type GAUSS_LEGENDRE" in workflow
-    assert "--acados-stationarity-tolerance 1e-3" in workflow
-    assert "--acados-stationarity-tolerance 5e-3" in workflow
+    assert "run_case sqp-irk-reference" in workflow
+    assert "run_case sqp-rti-irk" in workflow
+    assert "SQP_RTI IRK" in workflow
+    assert "run_case sqp-erk" in workflow
+    assert "--acados-stationarity-tolerance \"$stationarity\"" in workflow
     assert "--acados-control-homotopy-window-growth 10" in workflow
     assert "--acados-control-homotopy-window-max-radius 1e-5" in workflow
-    assert ".acados_control_homotopy_keep_final_radius == true" in workflow
-    assert ".acados_control_homotopy_window_growth == 10" in workflow
-    assert ".acados_control_homotopy_window_max_radius == 1e-5" in workflow
     assert "--max-consecutive-failing 2" in workflow
-    assert ".terminal_wheel_q_reference_mode == \"absolute_initial\"" in workflow
+    assert "cycling-acados-smoke-${{ github.run_id }}" in workflow
 
 
 def test_single_shot_requires_solver_and_feasibility_success():

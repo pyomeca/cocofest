@@ -36,12 +36,17 @@ COMPARABILITY_FIELDS = (
 DEFAULT_EXPECTED_SOLVERS = ("ipopt", "fatrop", "madnlp")
 DEFAULT_EXPECTED_CASES = (
     "ipopt/full",
-    "fatrop/full",
+    "fatrop-rk4-compiled/full",
+    "fatrop-collocation-compiled/full",
     "madnlp-pardiso/full",
     "madnlp-mumps/full",
+    "acados/full",
     "ipopt/reduced",
+    "fatrop-rk4-compiled/reduced",
+    "fatrop-collocation-compiled/reduced",
     "madnlp-pardiso/reduced",
     "madnlp-mumps/reduced",
+    "acados/reduced",
 )
 
 
@@ -75,6 +80,13 @@ def _entry_case(entry: dict) -> str:
 
 def _solver_variant(entry: dict) -> str:
     solver = entry["result"].get("solver", "unknown").lower()
+    if solver == "fatrop":
+        configuration = entry.get("configuration", {})
+        transcription = str(configuration.get("ode_solver") or "unknown").lower()
+        compilation = (
+            "-compiled" if configuration.get("fatrop_c_compile") is True else ""
+        )
+        return f"fatrop-{transcription}{compilation}"
     if solver != "madnlp":
         return solver
     linear_solver = str(
@@ -514,6 +526,64 @@ def write_stimulation_csv(path: Path, entries: list[dict]) -> None:
                         )
 
 
+def write_muscle_fatigue_csv(path: Path, entries: list[dict]) -> None:
+    fieldnames = (
+        "solver",
+        "mechanical_formulation",
+        "case",
+        "muscle",
+        "executed_fatigue_objective",
+        "cumulative_normalized_fatigue_cycles",
+        "final_capacity_ratio",
+    )
+    with path.open("w", newline="", encoding="utf-8") as stream:
+        writer = csv.DictWriter(stream, fieldnames=fieldnames)
+        writer.writeheader()
+        for entry in entries:
+            for row in entry["result"].get("muscle_fatigue") or []:
+                writer.writerow(
+                    {
+                        "solver": entry["result"]["solver"],
+                        "mechanical_formulation": _mechanical_formulation(entry),
+                        "case": _entry_case(entry),
+                        **{field: row.get(field) for field in fieldnames[3:]},
+                    }
+                )
+
+
+def write_pulse_width_variation_csv(path: Path, entries: list[dict]) -> None:
+    fieldnames = (
+        "solver",
+        "mechanical_formulation",
+        "case",
+        "muscle",
+        "from_cycle",
+        "to_cycle",
+        "mean_absolute_change_us",
+        "root_mean_square_change_us",
+        "maximum_absolute_change_us",
+    )
+    with path.open("w", newline="", encoding="utf-8") as stream:
+        writer = csv.DictWriter(stream, fieldnames=fieldnames)
+        writer.writeheader()
+        for entry in entries:
+            variation = entry["result"].get("pulse_width_cycle_variation") or {}
+            for muscle in variation.get("muscles") or []:
+                for transition in muscle.get("transitions") or []:
+                    writer.writerow(
+                        {
+                            "solver": entry["result"]["solver"],
+                            "mechanical_formulation": _mechanical_formulation(entry),
+                            "case": _entry_case(entry),
+                            "muscle": muscle.get("muscle"),
+                            **{
+                                field: transition.get(field)
+                                for field in fieldnames[4:]
+                            },
+                        }
+                    )
+
+
 def render_markdown(
     entries: list[dict],
     mismatches: list[dict],
@@ -610,8 +680,24 @@ def render_markdown(
             "",
             "`RHO résolus` compte chaque fenêtre dont le solveur converge et dont la faisabilité indépendante est certifiée. "
             "Le `préfixe strict` s’arrête au premier échec, même si les fenêtres suivantes récupèrent.",
+            "",
+            "## Coût et fatigue cumulée par muscle",
+            "",
+            "Le coût est réévalué sur les cycles réellement exécutés, sans recompter les horizons qui se chevauchent. "
+            "La fatigue cumulée est l’intégrale en cycles de `1 - A/A_scale`.",
+            "",
+            "| Solveur/formulation | Muscle | Coût fatigue exécuté | Fatigue cumulée (cycles) | A final/A_scale |",
+            "|---|---|---:|---:|---:|",
         ]
     )
+    for entry in entries:
+        for row in entry["result"].get("muscle_fatigue") or []:
+            lines.append(
+                f"| {_entry_label(entry)} | {row.get('muscle')} | "
+                f"{_fmt(row.get('executed_fatigue_objective'))} | "
+                f"{_fmt(row.get('cumulative_normalized_fatigue_cycles'))} | "
+                f"{_fmt(row.get('final_capacity_ratio'), 6)} |"
+            )
 
     if mismatches:
         lines.extend(
@@ -679,6 +765,35 @@ def render_markdown(
                     f"{_fmt(pattern.get('lower_bound_fraction'))} | "
                     f"{_fmt(pattern.get('upper_bound_fraction'))} |"
                 )
+
+    lines.extend(
+        [
+            "",
+            "### Variations de PW entre deux cycles",
+            "",
+            "Les percentiles décrivent les changements observés à phase de stimulation identique. "
+            "Ils ne constituent pas encore des bornes dures ACADOS; une marge et un mécanisme de récupération restent nécessaires.",
+            "",
+            "| Solveur/formulation | Muscle | ΔPW médian (µs) | P95 (µs) | P99 (µs) | Max (µs) |",
+            "|---|---|---:|---:|---:|---:|",
+        ]
+    )
+    for entry in entries:
+        variation = entry["result"].get("pulse_width_cycle_variation") or {}
+        if not variation.get("available"):
+            lines.append(
+                f"| {_entry_label(entry)} | indisponible: "
+                f"{variation.get('reason', 'non_mesuré')} | — | — | — | — |"
+            )
+            continue
+        for row in variation.get("muscles") or []:
+            lines.append(
+                f"| {_entry_label(entry)} | {row.get('muscle')} | "
+                f"{_fmt(row.get('median_absolute_change_us'))} | "
+                f"{_fmt(row.get('p95_absolute_change_us'))} | "
+                f"{_fmt(row.get('p99_absolute_change_us'))} | "
+                f"{_fmt(row.get('maximum_absolute_change_us'))} |"
+            )
 
     lines.extend(
         [
@@ -831,6 +946,10 @@ def main() -> None:
     )
     write_rho_csv(args.output_dir / "rho-timings.csv", entries)
     write_stimulation_csv(args.output_dir / "stimulation-patterns.csv", entries)
+    write_muscle_fatigue_csv(args.output_dir / "muscle-fatigue.csv", entries)
+    write_pulse_width_variation_csv(
+        args.output_dir / "pulse-width-cycle-variation.csv", entries
+    )
     (args.output_dir / "benchmark-comparison.md").write_text(
         render_markdown(entries, mismatches, missing_cases),
         encoding="utf-8",

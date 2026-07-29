@@ -1293,7 +1293,7 @@ def build_argument_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--acados-nlp-solver-type",
-        choices=("SQP", "SQP_WITH_FEASIBLE_QP"),
+        choices=("SQP", "SQP_RTI", "SQP_WITH_FEASIBLE_QP"),
         default="SQP",
         help="ACADOS NLP solver type.",
     )

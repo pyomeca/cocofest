@@ -1,5 +1,5 @@
-name: Cycling fatigue solvers — assisted benchmark
-run-name: Cycling fatigue solvers — assisted ${{ inputs.cycles }} RHO
+name: Cycling fatigue solvers — endurance benchmark
+run-name: Cycling fatigue solvers — ${{ inputs.cycles }} RHO, assistance ${{ inputs.crank_assistance_nm }} N.m
 
 on:
   workflow_dispatch:
@@ -12,7 +12,7 @@ on:
       cycles:
         description: Number of RHO solves, "screen" for options, or "acados" for ACADOS-only smoke tests
         required: true
-        default: "30"
+        default: "100"
         type: string
       cycles_per_window:
         description: Simultaneous cycles per OCP (1 for backend benchmark; 2 for memory/robustness study)
@@ -22,7 +22,7 @@ on:
       crank_assistance_nm:
         description: Driving crank assistance magnitude in N.m
         required: true
-        default: "0.20"
+        default: "0.00"
         type: string
       terminal_wheel_q_slack:
         description: Absolute cycle-count crank-angle slack in radians
@@ -42,7 +42,12 @@ on:
       acados_smoke_rhos:
         description: ACADOS SQP smoke-test RHO count (full and experimental reduced mechanics)
         required: true
-        default: "30"
+        default: "100"
+        type: string
+      acados_option_rhos:
+        description: Short RHO count for each ACADOS solver-option candidate
+        required: true
+        default: "5"
         type: string
 
 permissions:
@@ -433,16 +438,11 @@ jobs:
           key: numerical-stack-${{ env.NUMERICAL_STACK_CACHE_VERSION }}-${{ inputs.runner_label }}-${{ runner.arch }}-acados-${{ env.ACADOS_COMMIT }}-${{ env.ACADOS_INSTALL_SCRIPT_BLOB }}-casadi-${{ env.CASADI_VERSION }}-${{ hashFiles('.github/cycling-benchmark-linux-environment.yml', '.github/scripts/install_biorbd_casadi_linux.sh') }}
 
   acados-smoke:
-    name: ACADOS SQP / ${{ matrix.mechanics }} — ${{ inputs.acados_smoke_rhos }} RHO
+    name: ACADOS — sequential full/reduced and option screen
     if: ${{ inputs.cycles != 'screen' && inputs.cycles_per_window == '1' }}
     needs: [prepare-seed, prepare-acados-stack]
     runs-on: ${{ inputs.runner_label }}
     timeout-minutes: 240
-    strategy:
-      fail-fast: false
-      max-parallel: 2
-      matrix:
-        mechanics: [full, reduced]
     defaults:
       run:
         shell: bash -el {0}
@@ -522,152 +522,175 @@ jobs:
             tests/shard1/test_periodic_pulse_width.py::test_reduced_theta_target_uses_absolute_cycle_reference_without_drift \
             tests/shard1/test_periodic_pulse_width.py::test_acados_irk_transfer_rollout_uses_scaled_variables_and_stage_data
 
-      - name: Run the ACADOS assisted SQP smoke test
+      - name: Run ACADOS full/reduced and solver options sequentially
         env:
           PYTHONPATH: ${{ github.workspace }}
           ACADOS_SMOKE_RHOS: ${{ inputs.acados_smoke_rhos }}
-          ACADOS_MECHANICS: ${{ matrix.mechanics }}
+          ACADOS_OPTION_RHOS: ${{ inputs.acados_option_rhos }}
           BENCHMARK_ASSISTANCE: ${{ inputs.crank_assistance_nm }}
           BENCHMARK_Q_SLACK: ${{ inputs.terminal_wheel_q_slack }}
           COCOFEST_BENCHMARK_COMMIT: ${{ github.sha }}
           BIOPTIM_BENCHMARK_COMMIT: ${{ env.BIOPTIM_PRODUCTION_COMMIT }}
           BIOPTIM_INTEGRATION_BRANCH: codex/fatrop-cocofest-benchmark
         run: |
-          if ! [[ "$ACADOS_SMOKE_RHOS" =~ ^[1-9][0-9]*$ ]]; then
-            echo "ACADOS_SMOKE_RHOS must be a strictly positive integer." >&2
-            exit 1
-          fi
+          for count in "$ACADOS_SMOKE_RHOS" "$ACADOS_OPTION_RHOS"; do
+            if ! [[ "$count" =~ ^[1-9][0-9]*$ ]]; then
+              echo "ACADOS RHO counts must be strictly positive integers." >&2
+              exit 1
+            fi
+          done
           mkdir -p acados-smoke-results
-          mechanics_options=()
-          if [[ "$ACADOS_MECHANICS" == "reduced" ]]; then
-            mechanics_options+=(
-              --mechanical-formulation reduced
-              --experimental-reduced-acados
-              --acados-stationarity-tolerance 5e-3
-              --acados-control-homotopy-window-growth 10
-              --acados-control-homotopy-window-max-radius 1e-5
-            )
-          else
-            mechanics_options+=(
-              --acados-stationarity-tolerance 1e-3
-            )
-          fi
-
-          set +e
-          set -o pipefail
-          python examples/fes_multibody/cycling/cycling_fes_solver_comparison.py \
-            --solvers acados \
-            --objective fatigue \
-            --ipopt-profile periodic_collocation \
-            --cycles-per-window 1 \
-            --stimulations-per-cycle 30 \
-            --n-windows "$ACADOS_SMOKE_RHOS" \
-            --n-threads "$BENCHMARK_THREADS" \
-            --crank-assistance "$BENCHMARK_ASSISTANCE" \
-            --primal-feasibility-threshold 1e-5 \
-            --max-consecutive-failing 2 \
-            --standard-warmup-seed .github/benchmark-seeds/legacy-resistive-0p22-warmup.npz \
-            --legacy-standard-warmup-seed-signed-torque 0.22 \
-            --standard-warmup-seed-continuation \
-            --common-initial-solution "benchmark-seed/common-${ACADOS_MECHANICS}.npz" \
-            --warmup-ipopt-linear-solver mumps \
-            --ipopt-linear-solver mumps \
-            --ipopt-disable-historical-initial-guess \
-            --state-scaling full \
-            --first-node-wheel-q-slack 0 \
-            --terminal-wheel-q-slack "$BENCHMARK_Q_SLACK" \
-            --acados-dir "$CONDA_PREFIX" \
-            --acados-max-iter 100 \
-            --acados-nlp-solver-type SQP \
-            --acados-integrator-type IRK \
-            --acados-collocation-type GAUSS_LEGENDRE \
-            --acados-sim-stages 4 \
-            --acados-sim-steps 5 \
-            --acados-newton-iter 5 \
-            --acados-diagnostics \
-            --codegen-tag "ci-${ACADOS_MECHANICS}" \
-            --compact-rho-output \
-            --print-traces \
-            --output-json "$GITHUB_WORKSPACE/acados-smoke-results/acados-${ACADOS_MECHANICS}.json" \
-            "${mechanics_options[@]}" \
-            2>&1 | tee "acados-smoke-results/acados-${ACADOS_MECHANICS}.log"
-          solver_exit="${PIPESTATUS[0]}"
-          set -e
-          echo "ACADOS comparison process exit: $solver_exit"
-
-          result="$GITHUB_WORKSPACE/acados-smoke-results/acados-${ACADOS_MECHANICS}.json"
-          jq -e '
-            .configurations.acados |
-            (
-              .acados_nlp_solver_type == "SQP" and
-              .acados_hessian_approx == "GAUSS_NEWTON" and
-              .acados_integrator_type == "IRK" and
-              .terminal_wheel_q_reference_mode == "absolute_initial" and
-              (
-                .mechanical_formulation != "reduced" or
-                (
-                  .acados_control_homotopy_keep_final_radius == true and
-                  .acados_control_homotopy_window_growth == 10 and
-                  .acados_control_homotopy_window_max_radius == 1e-5
-                )
+          run_case() {
+            local variant="$1"
+            local mechanics="$2"
+            local rhos="$3"
+            local nlp_solver="$4"
+            local integrator="$5"
+            local sim_steps="$6"
+            local newton_iter="$7"
+            local collocation_type=GAUSS_LEGENDRE
+            local case_dir="$GITHUB_WORKSPACE/acados-smoke-results/${variant}-${mechanics}"
+            local mechanics_options=()
+            local stationarity=1e-3
+            mkdir -p "$case_dir"
+            if [[ "$integrator" == "ERK" ]]; then
+              collocation_type=EXPLICIT_RUNGE_KUTTA
+            fi
+            if [[ "$mechanics" == "reduced" ]]; then
+              stationarity=5e-3
+              mechanics_options+=(
+                --mechanical-formulation reduced
+                --experimental-reduced-acados
+                --acados-control-homotopy-window-growth 10
+                --acados-control-homotopy-window-max-radius 1e-5
               )
-            )
-          ' "$result"
+            fi
 
-      - name: Add the ACADOS result to the job summary
+            set +e
+            set -o pipefail
+            python examples/fes_multibody/cycling/cycling_fes_solver_comparison.py \
+              --solvers acados \
+              --objective fatigue \
+              --ipopt-profile periodic_collocation \
+              --cycles-per-window 1 \
+              --stimulations-per-cycle 30 \
+              --n-windows "$rhos" \
+              --n-threads "$BENCHMARK_THREADS" \
+              --crank-assistance "$BENCHMARK_ASSISTANCE" \
+              --primal-feasibility-threshold 1e-5 \
+              --max-consecutive-failing 2 \
+              --standard-warmup-seed .github/benchmark-seeds/legacy-resistive-0p22-warmup.npz \
+              --legacy-standard-warmup-seed-signed-torque 0.22 \
+              --standard-warmup-seed-continuation \
+              --common-initial-solution "benchmark-seed/common-${mechanics}.npz" \
+              --warmup-ipopt-linear-solver mumps \
+              --ipopt-linear-solver mumps \
+              --ipopt-disable-historical-initial-guess \
+              --state-scaling full \
+              --first-node-wheel-q-slack 0 \
+              --terminal-wheel-q-slack "$BENCHMARK_Q_SLACK" \
+              --acados-dir "$CONDA_PREFIX" \
+              --acados-max-iter 100 \
+              --acados-nlp-solver-type "$nlp_solver" \
+              --acados-integrator-type "$integrator" \
+              --acados-collocation-type "$collocation_type" \
+              --acados-sim-stages 4 \
+              --acados-sim-steps "$sim_steps" \
+              --acados-newton-iter "$newton_iter" \
+              --acados-stationarity-tolerance "$stationarity" \
+              --acados-diagnostics \
+              --codegen-tag "ci-${variant}-${mechanics}" \
+              --compact-rho-output \
+              --print-traces \
+              --output-json "$case_dir/result.json" \
+              "${mechanics_options[@]}" \
+              2>&1 | tee "$case_dir/solver.log"
+            local solver_exit="${PIPESTATUS[0]}"
+            set -e
+            echo "$solver_exit" > "$case_dir/process-exit-code.txt"
+          }
+
+          for mechanics in full reduced; do
+            run_case sqp-irk-reference "$mechanics" "$ACADOS_SMOKE_RHOS" SQP IRK 5 5
+            run_case sqp-rti-irk "$mechanics" "$ACADOS_OPTION_RHOS" SQP_RTI IRK 5 5
+            run_case sqp-erk "$mechanics" "$ACADOS_OPTION_RHOS" SQP ERK 5 5
+            run_case sqp-irk-light "$mechanics" "$ACADOS_OPTION_RHOS" SQP IRK 2 3
+          done
+
+      - name: Add every ACADOS result to the job summary
         if: always()
-        env:
-          ACADOS_MECHANICS: ${{ matrix.mechanics }}
         run: |
-          result="acados-smoke-results/acados-${ACADOS_MECHANICS}.json"
-          if [[ ! -f "$result" ]]; then
-            echo "### ACADOS / ${ACADOS_MECHANICS}: no JSON result" \
-              >> "$GITHUB_STEP_SUMMARY"
-            exit 0
-          fi
-          {
-            echo "### ACADOS SQP / ${ACADOS_MECHANICS}"
-            echo
-            echo "| Field | Value |"
-            echo "|---|---:|"
-            jq -r '
-              .results[0] |
-              "| Success | \(.success) |",
-              "| Validated cycles | \(.validated_cycles) |",
-              "| Attempted RHO | \(.attempted_windows) |",
-              "| End-to-end wall (s) | \(.end_to_end_wall_time_s) |",
-              "| Setup + initial guess (s) | \(.initial_guess_preparation_time_s) |",
-              "| Sum attempted RHO wall (s) | \(.attempted_rho_wall_time_sum_s) |",
-              "| Hot RHO wall median (s) | \(.hot_wall_time_median_s) |",
-              "| Hot RHO wall P90 (s) | \(.hot_wall_time_p90_s) |",
-              "| First failed RHO | \(.first_failed_rho) |",
-              "| Stop | \(.stop.label) |"
-            ' "$result"
-          } >> "$GITHUB_STEP_SUMMARY"
+          while IFS= read -r result; do
+            case_name="$(basename "$(dirname "$result")")"
+            {
+              echo "### ACADOS / ${case_name}"
+              echo
+              echo "| Field | Value |"
+              echo "|---|---:|"
+              jq -r '
+                .results[0] |
+                "| Success | \(.success) |",
+                "| Validated cycles | \(.validated_cycles) |",
+                "| Attempted RHO | \(.attempted_windows) |",
+                "| Preparation (s) | \(.initial_guess_preparation_time_s) |",
+                "| Hot RHO median (s) | \(.hot_wall_time_median_s) |",
+                "| Hot RHO P90 (s) | \(.hot_wall_time_p90_s) |",
+                "| First failed RHO | \(.first_failed_rho) |",
+                "| Stop | \(.stop.label) |"
+              ' "$result"
+            } >> "$GITHUB_STEP_SUMMARY"
+          done < <(find acados-smoke-results -name result.json -type f | sort)
 
-      - name: Upload ACADOS JSON and log
+      - name: Build the ACADOS option-screen table
+        if: always()
+        run: |
+          output="acados-smoke-results/acados-option-screen.csv"
+          echo "case,nlp_solver,integrator,sim_steps,newton_iter,validated_cycles,attempted_rho,hot_median_s,hot_p90_s,executed_fatigue_objective,minimum_capacity_ratio,first_failed_rho" > "$output"
+          while IFS= read -r result; do
+            case_name="$(basename "$(dirname "$result")")"
+            jq -r --arg case "$case_name" '
+              .configurations.acados as $config |
+              .results[0] |
+              [
+                $case,
+                $config.acados_nlp_solver_type,
+                $config.acados_integrator_type,
+                $config.acados_sim_steps,
+                $config.acados_newton_iter,
+                .validated_cycles,
+                .attempted_windows,
+                .hot_wall_time_median_s,
+                .hot_wall_time_p90_s,
+                .executed_fatigue_objective,
+                .min_A_capacity_ratio,
+                .first_failed_rho
+              ] | @csv
+            ' "$result" >> "$output"
+          done < <(find acados-smoke-results -name result.json -type f | sort)
+
+      - name: Upload separated ACADOS case directories
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: cycling-acados-smoke-${{ matrix.mechanics }}-${{ github.run_id }}
+          name: cycling-acados-smoke-${{ github.run_id }}
           path: acados-smoke-results/
           if-no-files-found: warn
           retention-days: 30
 
-      - name: Require an attempted ACADOS RHO without infrastructure errors
+      - name: Require every ACADOS case without infrastructure errors
         if: always()
-        env:
-          ACADOS_MECHANICS: ${{ matrix.mechanics }}
         run: |
-          result="acados-smoke-results/acados-${ACADOS_MECHANICS}.json"
-          if [[ ! -f "$result" ]]; then
-            echo "ACADOS / ${ACADOS_MECHANICS}: smoke-test JSON is missing." >&2
+          mapfile -t results < <(find acados-smoke-results -name result.json -type f | sort)
+          if [[ "${#results[@]}" -ne 8 ]]; then
+            echo "ACADOS: expected 8 JSON files, found ${#results[@]}." >&2
             exit 1
           fi
-          jq -e '
-            .results[0] |
-            (.attempted_windows > 0 and .error == null)
-          ' "$result"
+          for result in "${results[@]}"; do
+            jq -e '
+              .results[0] |
+              (.attempted_windows > 0 and .error == null)
+            ' "$result"
+          done
 
   screen-options:
     name: Option screen — ${{ matrix.solver }}
@@ -951,7 +974,7 @@ jobs:
           retention-days: 30
 
   benchmark:
-    name: ${{ matrix.case_slug }} / ${{ matrix.mechanics }} — ${{ matrix.benchmark_rhos }} RHO
+    name: ${{ matrix.case_slug }} — sequential full/reduced
     if: ${{ inputs.cycles != 'screen' && inputs.cycles != 'acados' }}
     needs: [prepare-seed, prepare-madnlp-stack]
     runs-on: ${{ inputs.runner_label }}
@@ -961,19 +984,9 @@ jobs:
       max-parallel: 3
       matrix:
         include:
-          - solver: ipopt
+          - solver: official
             backend: mumps
-            case_slug: ipopt
-            mechanics: full
-            benchmark_rhos: ${{ inputs.cycles }}
-            cycles_per_window: ${{ inputs.cycles_per_window }}
-            bioptim_commit: 3523f1745e315f07761159d7e06bd2d876026704
-            integration_branch: codex/fatrop-cocofest-benchmark
-            casadi_cxx_abi: 0
-          - solver: fatrop
-            backend: structured
-            case_slug: fatrop
-            mechanics: full
+            case_slug: ipopt-fatrop
             benchmark_rhos: ${{ inputs.cycles }}
             cycles_per_window: ${{ inputs.cycles_per_window }}
             bioptim_commit: 3523f1745e315f07761159d7e06bd2d876026704
@@ -981,44 +994,7 @@ jobs:
             casadi_cxx_abi: 0
           - solver: madnlp
             backend: pardiso_mkl
-            case_slug: madnlp-pardiso
-            mechanics: full
-            benchmark_rhos: ${{ inputs.cycles }}
-            cycles_per_window: ${{ inputs.cycles_per_window }}
-            bioptim_commit: 3523f1745e315f07761159d7e06bd2d876026704
-            integration_branch: codex/fatrop-cocofest-benchmark
-            casadi_cxx_abi: 1
-          - solver: ipopt
-            backend: mumps
-            case_slug: ipopt
-            mechanics: reduced
-            benchmark_rhos: ${{ inputs.cycles }}
-            cycles_per_window: ${{ inputs.cycles_per_window }}
-            bioptim_commit: 3523f1745e315f07761159d7e06bd2d876026704
-            integration_branch: codex/fatrop-cocofest-benchmark
-            casadi_cxx_abi: 0
-          - solver: madnlp
-            backend: pardiso_mkl
-            case_slug: madnlp-pardiso
-            mechanics: reduced
-            benchmark_rhos: ${{ inputs.cycles }}
-            cycles_per_window: ${{ inputs.cycles_per_window }}
-            bioptim_commit: 3523f1745e315f07761159d7e06bd2d876026704
-            integration_branch: codex/fatrop-cocofest-benchmark
-            casadi_cxx_abi: 1
-          - solver: madnlp
-            backend: mumps
-            case_slug: madnlp-mumps
-            mechanics: full
-            benchmark_rhos: ${{ inputs.cycles }}
-            cycles_per_window: ${{ inputs.cycles_per_window }}
-            bioptim_commit: 3523f1745e315f07761159d7e06bd2d876026704
-            integration_branch: codex/fatrop-cocofest-benchmark
-            casadi_cxx_abi: 1
-          - solver: madnlp
-            backend: mumps
-            case_slug: madnlp-mumps
-            mechanics: reduced
+            case_slug: madnlp
             benchmark_rhos: ${{ inputs.cycles }}
             cycles_per_window: ${{ inputs.cycles_per_window }}
             bioptim_commit: 3523f1745e315f07761159d7e06bd2d876026704
@@ -1191,20 +1167,22 @@ jobs:
           compiler_flags = cas.CasadiMeta.compiler_flags()
           print(f"CasADi compiler flags: {compiler_flags}")
           assert "-DCASADI_WITH_THREAD" in compiler_flags
-          for solver in ("ipopt", target):
+          solvers = ("ipopt", "fatrop") if target == "official" else ("ipopt", target)
+          for solver in solvers:
               available = cas.has_nlpsol(solver)
               print(f"{solver}: {available}")
               assert available, solver
           if target == "madnlp":
               assert hasattr(bioptim.Solver, "MADNLP")
-          elif target == "fatrop":
+          elif target in {"fatrop", "official"}:
               assert hasattr(bioptim.Solver, "FATROP")
 
           x = cas.MX.sym("x")
+          smoke_target = "fatrop" if target == "official" else target
           plugin_options = {"print_time": False}
-          if target == "ipopt":
+          if smoke_target == "ipopt":
               plugin_options["ipopt"] = {"print_level": 0, "max_iter": 50}
-          elif target == "fatrop":
+          elif smoke_target == "fatrop":
               plugin_options["structure_detection"] = "auto"
               plugin_options["equality"] = [True]
               plugin_options["fatrop"] = {
@@ -1214,7 +1192,7 @@ jobs:
                   "constr_viol_tol": 1e-8,
                   "acceptable_tol": 1e-8,
               }
-          elif target == "madnlp":
+          elif smoke_target == "madnlp":
               from cocofest.optimization.solver_backends import (
                   MADNLP_QUIET_PRINT_LEVEL,
                   configure_nlp_solver,
@@ -1242,8 +1220,8 @@ jobs:
               )
               assert plugin_options["madnlp"]["linear_solver"] == expected_linear_solver
           smoke = cas.nlpsol(
-              f"{target}_smoke",
-              target,
+              f"{smoke_target}_smoke",
+              smoke_target,
               {"x": x, "f": (x - 1) ** 2, "g": x},
               plugin_options,
           )
@@ -1257,7 +1235,7 @@ jobs:
           )
           assert math.isfinite(smoke_x)
           assert smoke_error < smoke_tolerance
-          print(f"{target} minimal solve: {smoke.stats()}")
+          print(f"{smoke_target} minimal solve: {smoke.stats()}")
           PY
           python -m pytest -q \
             tests/shard1/test_solver_backends.py \
@@ -1270,11 +1248,10 @@ jobs:
             tests/shard1/test_periodic_pulse_width.py::test_common_primal_threshold_is_independent_of_nlp_solver_tolerance \
             tests/shard1/test_periodic_pulse_width.py::test_github_benchmark_compares_physical_threshold_not_solver_tolerance
 
-      - name: Run the ${{ matrix.solver }} assisted benchmark
+      - name: Run all ${{ matrix.solver }} formulations sequentially
         env:
           PYTHONPATH: ${{ github.workspace }}
           BENCHMARK_RHOS: ${{ matrix.benchmark_rhos }}
-          BENCHMARK_MECHANICS: ${{ matrix.mechanics }}
           BENCHMARK_CYCLES_PER_WINDOW: ${{ matrix.cycles_per_window }}
           BENCHMARK_ASSISTANCE: ${{ inputs.crank_assistance_nm }}
           BENCHMARK_Q_SLACK: ${{ inputs.terminal_wheel_q_slack }}
@@ -1292,155 +1269,161 @@ jobs:
             exit 1
           fi
           BENCHMARK_CYCLES=$((BENCHMARK_RHOS + BENCHMARK_CYCLES_PER_WINDOW - 1))
-          solver_options=()
-          solver_tolerance=1e-6
-          if [[ "$BENCHMARK_SOLVER" == "ipopt" ]]; then
-            solver_options+=(
-              --ipopt-max-iter "$BENCHMARK_MAX_ITER"
-              --ipopt-dual-warm-start-mode bounds
-            )
-          elif [[ "$BENCHMARK_SOLVER" == "fatrop" ]]; then
-            # Fatrop exploits a direct-shooting, time-major OCP. RK4 avoids
-            # exposing collocation variables as an unstructured control block,
-            # which made the two-cycle CasADi structure detector assert.
-            # Keep MX graphs, as in the last successful Fatrop CI. This avoids
-            # eagerly expanding the full RK4 graph in SX; unbuffered output
-            # will distinguish construction time from solve time next run.
-            # CasADi 3.7.2 bounds Fatrop's native max_iter option to 1000.
-            solver_options+=(
-              --ipopt-ode-solver rk4
-              --ipopt-rk-steps 5
-              --fatrop-max-iter 1000
-              --fatrop-structure-detection auto
-              --fatrop-bound-tightening-factor 1e-8
-              --fatrop-state-scaling none
-              --fatrop-dual-warm-start-mode off
-            )
-          elif [[ "$BENCHMARK_SOLVER" == "madnlp" ]]; then
-            solver_tolerance=1e-8
-            # The pinned libMad runtime rejects max_wall_time, mu_init and
-            # dual_initialized. Cocofest still supplies the shifted/projected
-            # primal trajectory; the job timeout is the outer safety limit.
-            solver_options+=(
-              --madnlp-max-iter "$BENCHMARK_MAX_ITER"
-              --madnlp-linear-solver "$BENCHMARK_BACKEND"
-              --madnlp-dual-warm-start-mode off
-            )
-          fi
-          if [[ "$BENCHMARK_MECHANICS" == "reduced" ]]; then
-            solver_options+=(
-              --mechanical-formulation reduced
-            )
-          fi
-          # Each mechanical formulation uses one immutable target solution,
-          # produced once by IPOPT and reused as the same physical nodal
-          # trajectory by every backend. Reapply the exact continuation warm-up
-          # used by the producer so that the seed and first-node bounds describe
-          # the same absolute fatigue cycle. The common target solution then
-          # makes a solver-specific IPOPT refinement redundant.
+          run_case() {
+            local case_slug="$1"
+            local solver="$2"
+            local mechanics="$3"
+            local backend="$4"
+            local ode_solver="$5"
+            local case_dir="$GITHUB_WORKSPACE/benchmark-results/${case_slug}-${mechanics}"
+            local result="$case_dir/result.json"
+            local solver_options=()
+            local solver_tolerance=1e-6
+            mkdir -p "$case_dir"
 
-          set -o pipefail
-          python examples/fes_multibody/cycling/cycling_fes_solver_comparison.py \
-            --solvers "$BENCHMARK_SOLVER" \
-            --objective fatigue \
-            --ipopt-profile periodic_collocation \
-            --cycles-per-window "$BENCHMARK_CYCLES_PER_WINDOW" \
-            --stimulations-per-cycle 30 \
-            --n-windows "$BENCHMARK_CYCLES" \
-            --n-threads "$BENCHMARK_THREADS" \
-            --crank-assistance "$BENCHMARK_ASSISTANCE" \
-            --nlp-tolerance "$solver_tolerance" \
-            --primal-feasibility-threshold 1e-5 \
-            --max-consecutive-failing 2 \
-            --standard-warmup-seed .github/benchmark-seeds/legacy-resistive-0p22-warmup.npz \
-            --legacy-standard-warmup-seed-signed-torque 0.22 \
-            --standard-warmup-seed-continuation \
-            --common-initial-solution "benchmark-seed/common-${BENCHMARK_MECHANICS}.npz" \
-            --no-optional-nlp-periodic-ipopt-hot-start \
-            --warmup-ipopt-linear-solver mumps \
-            --ipopt-linear-solver mumps \
-            --ipopt-disable-historical-initial-guess \
-            --state-scaling full \
-            --first-node-wheel-q-slack 0 \
-            --terminal-wheel-q-slack "$BENCHMARK_Q_SLACK" \
-            --compact-rho-output \
-            --print-traces \
-            --output-json "$GITHUB_WORKSPACE/benchmark-results/${BENCHMARK_CASE_SLUG}-${BENCHMARK_MECHANICS}.json" \
-            "${solver_options[@]}" \
-            2>&1 | tee "benchmark-results/${BENCHMARK_CASE_SLUG}-${BENCHMARK_MECHANICS}.log"
-          result="$GITHUB_WORKSPACE/benchmark-results/${BENCHMARK_CASE_SLUG}-${BENCHMARK_MECHANICS}.json"
-          jq -e --arg solver "$BENCHMARK_SOLVER" '
-            .configurations[$solver].nlp_ordering_strategy == "time_major"
-          ' "$result"
-          if [[ "$BENCHMARK_SOLVER" == "fatrop" ]]; then
-            jq -e '.configurations.fatrop.ode_solver == "rk4"' "$result"
-          elif [[ "$BENCHMARK_SOLVER" == "madnlp" ]]; then
-            jq -e --arg backend "$BENCHMARK_BACKEND" '
-              .configurations.madnlp.madnlp_linear_solver == $backend
-            ' "$result"
+            if [[ "$solver" == "ipopt" ]]; then
+              solver_options+=(
+                --ipopt-max-iter "$BENCHMARK_MAX_ITER"
+                --ipopt-dual-warm-start-mode bounds
+              )
+            elif [[ "$solver" == "fatrop" ]]; then
+              # Compilation time is intentionally included only in preparation:
+              # the user-facing comparison emphasizes hot RHO solve times.
+              solver_options+=(
+                --fatrop-c-compile
+                --fatrop-max-iter 1000
+                --fatrop-structure-detection auto
+                --fatrop-bound-tightening-factor 1e-8
+                --fatrop-state-scaling none
+                --fatrop-dual-warm-start-mode off
+              )
+              if [[ "$ode_solver" == "rk4" ]]; then
+                solver_options+=(--ipopt-ode-solver rk4 --ipopt-rk-steps 5)
+              else
+                solver_options+=(
+                  --ipopt-ode-solver collocation
+                  --ipopt-collocation-degree 3
+                  --ipopt-collocation-method radau
+                )
+              fi
+            elif [[ "$solver" == "madnlp" ]]; then
+              solver_tolerance=1e-8
+              solver_options+=(
+                --madnlp-max-iter "$BENCHMARK_MAX_ITER"
+                --madnlp-linear-solver "$backend"
+                --madnlp-dual-warm-start-mode off
+              )
+            fi
+            if [[ "$mechanics" == "reduced" ]]; then
+              solver_options+=(--mechanical-formulation reduced)
+            fi
+
+            set +e
+            set -o pipefail
+            python examples/fes_multibody/cycling/cycling_fes_solver_comparison.py \
+              --solvers "$solver" \
+              --objective fatigue \
+              --ipopt-profile periodic_collocation \
+              --cycles-per-window "$BENCHMARK_CYCLES_PER_WINDOW" \
+              --stimulations-per-cycle 30 \
+              --n-windows "$BENCHMARK_CYCLES" \
+              --n-threads "$BENCHMARK_THREADS" \
+              --crank-assistance "$BENCHMARK_ASSISTANCE" \
+              --nlp-tolerance "$solver_tolerance" \
+              --primal-feasibility-threshold 1e-5 \
+              --max-consecutive-failing 2 \
+              --standard-warmup-seed .github/benchmark-seeds/legacy-resistive-0p22-warmup.npz \
+              --legacy-standard-warmup-seed-signed-torque 0.22 \
+              --standard-warmup-seed-continuation \
+              --common-initial-solution "benchmark-seed/common-${mechanics}.npz" \
+              --no-optional-nlp-periodic-ipopt-hot-start \
+              --warmup-ipopt-linear-solver mumps \
+              --ipopt-linear-solver mumps \
+              --ipopt-disable-historical-initial-guess \
+              --state-scaling full \
+              --first-node-wheel-q-slack 0 \
+              --terminal-wheel-q-slack "$BENCHMARK_Q_SLACK" \
+              --compact-rho-output \
+              --print-traces \
+              --output-json "$result" \
+              "${solver_options[@]}" \
+              2>&1 | tee "$case_dir/solver.log"
+            local solver_exit="${PIPESTATUS[0]}"
+            set -e
+            echo "$solver_exit" > "$case_dir/process-exit-code.txt"
+          }
+
+          if [[ "$BENCHMARK_SOLVER" == "official" ]]; then
+            run_case ipopt ipopt full mumps collocation
+            run_case ipopt ipopt reduced mumps collocation
+            run_case fatrop-rk4-compiled fatrop full structured rk4
+            run_case fatrop-rk4-compiled fatrop reduced structured rk4
+            run_case fatrop-collocation-compiled fatrop full structured collocation
+            run_case fatrop-collocation-compiled fatrop reduced structured collocation
+          else
+            run_case madnlp-pardiso madnlp full pardiso_mkl collocation
+            run_case madnlp-pardiso madnlp reduced pardiso_mkl collocation
+            run_case madnlp-mumps madnlp full mumps collocation
+            run_case madnlp-mumps madnlp reduced mumps collocation
           fi
 
-      - name: Add the result to the job summary
+      - name: Add every sequential result to the job summary
         if: always()
         shell: bash
-        env:
-          BENCHMARK_SOLVER: ${{ matrix.solver }}
-          BENCHMARK_CASE_SLUG: ${{ matrix.case_slug }}
-          BENCHMARK_MECHANICS: ${{ matrix.mechanics }}
         run: |
-          result="benchmark-results/${BENCHMARK_CASE_SLUG}-${BENCHMARK_MECHANICS}.json"
-          if [[ ! -f "$result" ]]; then
-            echo "### ${BENCHMARK_SOLVER}: no JSON result" >> "$GITHUB_STEP_SUMMARY"
-            exit 0
-          fi
-          {
-            echo "### ${BENCHMARK_CASE_SLUG} / ${BENCHMARK_MECHANICS}"
-            echo
-            echo "| Field | Value |"
-            echo "|---|---:|"
-            jq -r '
-              .results[0] |
-              "| Success | \(.success) |",
-              "| Validated cycles | \(.validated_cycles) |",
-              "| Attempted RHO | \(.attempted_windows) |",
-              "| End-to-end wall (s) | \(.end_to_end_wall_time_s) |",
-              "| Setup + initial guess (s) | \(.initial_guess_preparation_time_s) |",
-              "| Sum attempted RHO wall (s) | \(.attempted_rho_wall_time_sum_s) |",
-              "| Unattributed pipeline wall (s) | \(.unattributed_wall_time_s) |",
-              "| Hot RHO wall median (s) | \(.hot_wall_time_median_s) |",
-              "| Hot RHO wall P90 (s) | \(.hot_wall_time_p90_s) |",
-              "| First failed RHO | \(.first_failed_rho) |",
-              "| Minimum A/A_scale | \(.min_A_capacity_ratio) |",
-              "| Stop | \(.stop.label) |"
-            ' "$result"
-          } >> "$GITHUB_STEP_SUMMARY"
+          while IFS= read -r result; do
+            case_name="$(basename "$(dirname "$result")")"
+            {
+              echo "### ${case_name}"
+              echo
+              echo "| Field | Value |"
+              echo "|---|---:|"
+              jq -r '
+                .results[0] |
+                "| Success | \(.success) |",
+                "| Validated cycles | \(.validated_cycles) |",
+                "| Attempted RHO | \(.attempted_windows) |",
+                "| End-to-end wall (s) | \(.end_to_end_wall_time_s) |",
+                "| Preparation (s) | \(.initial_guess_preparation_time_s) |",
+                "| Hot RHO median (s) | \(.hot_wall_time_median_s) |",
+                "| Hot RHO P90 (s) | \(.hot_wall_time_p90_s) |",
+                "| First failed RHO | \(.first_failed_rho) |",
+                "| Minimum A/A_scale | \(.min_A_capacity_ratio) |",
+                "| Stop | \(.stop.label) |"
+              ' "$result"
+            } >> "$GITHUB_STEP_SUMMARY"
+          done < <(find benchmark-results -name result.json -type f | sort)
 
-      - name: Upload benchmark JSON and log
+      - name: Upload separated benchmark case directories
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: cycling-fatigue-linux-${{ matrix.case_slug }}-${{ matrix.mechanics }}-${{ github.run_id }}
+          name: cycling-fatigue-linux-${{ matrix.case_slug }}-${{ github.run_id }}
           path: benchmark-results/
           if-no-files-found: warn
           retention-days: 30
 
-      - name: Require an attempted RHO without infrastructure errors
+      - name: Require every expected case without infrastructure errors
         if: always()
         shell: bash
         env:
           BENCHMARK_SOLVER: ${{ matrix.solver }}
-          BENCHMARK_CASE_SLUG: ${{ matrix.case_slug }}
-          BENCHMARK_MECHANICS: ${{ matrix.mechanics }}
         run: |
-          result="benchmark-results/${BENCHMARK_CASE_SLUG}-${BENCHMARK_MECHANICS}.json"
-          if [[ ! -f "$result" ]]; then
-            echo "${BENCHMARK_SOLVER}: benchmark JSON is missing." >&2
+          expected=6
+          if [[ "$BENCHMARK_SOLVER" == "madnlp" ]]; then
+            expected=4
+          fi
+          mapfile -t results < <(find benchmark-results -name result.json -type f | sort)
+          if [[ "${#results[@]}" -ne "$expected" ]]; then
+            echo "${BENCHMARK_SOLVER}: expected $expected JSON files, found ${#results[@]}." >&2
             exit 1
           fi
-          jq -e '
-            .results[0] |
-            (.attempted_windows > 0 and .error == null)
-          ' "$result"
+          for result in "${results[@]}"; do
+            jq -e '
+              .results[0] |
+              (.attempted_windows > 0 and .error == null)
+            ' "$result"
+          done
 
   screen-report:
     name: Aggregate solver option screen
@@ -1496,7 +1479,7 @@ jobs:
   report:
     name: Aggregate Kevin benchmark
     if: ${{ always() && inputs.cycles != 'screen' && inputs.cycles != 'acados' }}
-    needs: benchmark
+    needs: [benchmark, acados-smoke]
     runs-on: ubuntu-24.04
     permissions:
       actions: read
@@ -1514,10 +1497,23 @@ jobs:
           path: benchmark-results-all
           merge-multiple: true
 
+      - name: Download the ACADOS baseline and option artifacts
+        uses: actions/download-artifact@v8
+        continue-on-error: true
+        with:
+          pattern: cycling-acados-smoke-${{ github.run_id }}
+          path: benchmark-acados-all
+          merge-multiple: true
+
       - name: Build the comparison report
         run: |
           mkdir -p benchmark-results-all benchmark-report
-          mapfile -t result_files < <(find benchmark-results-all -name '*.json' -type f | sort)
+          mapfile -t result_files < <(
+            {
+              find benchmark-results-all -name '*.json' -type f
+              find benchmark-acados-all -path '*/sqp-irk-reference-*/result.json' -type f
+            } | sort
+          )
           if [[ "${#result_files[@]}" -eq 0 ]]; then
             message="No solver JSON was produced; inspect the prerequisite or matrix jobs."
             echo "$message" >> "$GITHUB_STEP_SUMMARY"
@@ -1526,7 +1522,7 @@ jobs:
           fi
           python .github/scripts/summarize_cycling_benchmark.py \
             --output-dir benchmark-report \
-            --expected-cases ipopt/full,fatrop/full,madnlp-pardiso/full,madnlp-mumps/full,ipopt/reduced,madnlp-pardiso/reduced,madnlp-mumps/reduced \
+            --expected-cases ipopt/full,fatrop-rk4-compiled/full,fatrop-collocation-compiled/full,madnlp-pardiso/full,madnlp-mumps/full,acados/full,ipopt/reduced,fatrop-rk4-compiled/reduced,fatrop-collocation-compiled/reduced,madnlp-pardiso/reduced,madnlp-mumps/reduced,acados/reduced \
             "${result_files[@]}"
           cat benchmark-report/benchmark-comparison.md >> "$GITHUB_STEP_SUMMARY"
 
@@ -1538,5 +1534,6 @@ jobs:
           path: |
             benchmark-report/
             benchmark-results-all/
+            benchmark-acados-all/
           if-no-files-found: warn
           retention-days: 30
