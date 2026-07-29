@@ -4086,11 +4086,22 @@ def run_acados_control_homotopy(
     stage_iterations: int | None = 54,
     echo: bool = True,
     solve_stage=None,
+    stationarity_tolerance: float | None = None,
 ) -> list[dict]:
     """Build an IRK-feasible seed before progressively releasing pulse widths."""
 
     stage_solver = deepcopy(solver)
     stage_solver.set_convergence_tolerance(convergence_tolerance)
+    effective_stationarity_tolerance = (
+        convergence_tolerance
+        if stationarity_tolerance is None
+        else stationarity_tolerance
+    )
+    set_stationarity_tolerance = getattr(
+        stage_solver, "set_nlp_solver_tol_stat", None
+    )
+    if set_stationarity_tolerance is not None:
+        set_stationarity_tolerance(effective_stationarity_tolerance)
     acados_interface = getattr(periodic_nmpc, "ocp_solver", None)
     if getattr(acados_interface, "ocp_solver", None) is not None:
         # The generated solver already owns this immutable maximum. The initial
@@ -4131,7 +4142,7 @@ def run_acados_control_homotopy(
                 ) or acados_diagnostics_meet_tolerances(
                     diagnostics,
                     convergence_tolerance=convergence_tolerance,
-                    stationarity_tolerance=convergence_tolerance,
+                    stationarity_tolerance=effective_stationarity_tolerance,
                 )
                 restartable = (
                     not accepted
@@ -4150,6 +4161,8 @@ def run_acados_control_homotopy(
                     "status": solution.status,
                     "accepted": accepted,
                     "restartable": restartable,
+                    "feasibility_tolerance": convergence_tolerance,
+                    "stationarity_tolerance": effective_stationarity_tolerance,
                     "residuals": (
                         None
                         if residuals is None
@@ -12493,6 +12506,7 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
                 max_restarts=args.acados_control_homotopy_max_restarts,
                 stage_iterations=args.acados_control_homotopy_stage_iterations,
                 echo=echo,
+                stationarity_tolerance=args.acados_stationarity_tolerance,
             )
             for item in window_homotopy:
                 item["window"] = cycle_idx
@@ -12717,6 +12731,7 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
                 max_restarts=args.acados_control_homotopy_max_restarts,
                 stage_iterations=args.acados_control_homotopy_stage_iterations,
                 echo=echo,
+                stationarity_tolerance=args.acados_stationarity_tolerance,
             )
             if not any(
                 summary["accepted"] and summary["radius"] is not None
@@ -12800,6 +12815,7 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
             max_restarts=args.acados_control_homotopy_max_restarts,
             stage_iterations=args.acados_control_homotopy_stage_iterations,
             echo=echo,
+            stationarity_tolerance=args.acados_stationarity_tolerance,
         )
         set_acados_runtime_max_iterations(nmpc, args.max_acados_iterations)
         solver.set_only_first_options_has_changed(False)

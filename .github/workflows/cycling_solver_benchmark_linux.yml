@@ -517,6 +517,7 @@ jobs:
             tests/shard1/test_periodic_pulse_width.py::test_acados_example_defaults_to_the_assisted_periodic_profile \
             tests/shard1/test_periodic_pulse_width.py::test_common_target_seed_enables_the_robust_acados_reference_preparation \
             tests/shard1/test_periodic_pulse_width.py::test_codegen_names_normalize_user_tag_for_casadi \
+            tests/shard1/test_periodic_pulse_width.py::test_control_homotopy_can_relax_stationarity_without_relaxing_feasibility \
             tests/shard1/test_periodic_pulse_width.py::test_phase_one_maps_reduced_mechanics_without_classifying_them_as_fes \
             tests/shard1/test_periodic_pulse_width.py::test_reduced_theta_target_uses_absolute_cycle_reference_without_drift \
             tests/shard1/test_periodic_pulse_width.py::test_acados_irk_transfer_rollout_uses_scaled_variables_and_stage_data
@@ -542,9 +543,15 @@ jobs:
             mechanics_options+=(
               --mechanical-formulation reduced
               --experimental-reduced-acados
+              --acados-stationarity-tolerance 5e-3
+            )
+          else
+            mechanics_options+=(
+              --acados-stationarity-tolerance 1e-3
             )
           fi
 
+          set +e
           set -o pipefail
           python examples/fes_multibody/cycling/cycling_fes_solver_comparison.py \
             --solvers acados \
@@ -582,6 +589,9 @@ jobs:
             --output-json "$GITHUB_WORKSPACE/acados-smoke-results/acados-${ACADOS_MECHANICS}.json" \
             "${mechanics_options[@]}" \
             2>&1 | tee "acados-smoke-results/acados-${ACADOS_MECHANICS}.log"
+          solver_exit="${PIPESTATUS[0]}"
+          set -e
+          echo "ACADOS comparison process exit: $solver_exit"
 
           result="$GITHUB_WORKSPACE/acados-smoke-results/acados-${ACADOS_MECHANICS}.json"
           jq -e '

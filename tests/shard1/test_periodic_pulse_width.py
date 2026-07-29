@@ -1237,6 +1237,55 @@ def test_control_homotopy_restarts_a_nearly_feasible_stage(monkeypatch):
     assert applied_statuses == [2, 0, 0]
 
 
+def test_control_homotopy_can_relax_stationarity_without_relaxing_feasibility(
+    monkeypatch,
+):
+    configured_tolerances = []
+
+    class FakeSolver:
+        def set_convergence_tolerance(self, value):
+            configured_tolerances.append(("all", value))
+
+        def set_nlp_solver_tol_stat(self, value):
+            configured_tolerances.append(("stationarity", value))
+
+    nmpc = SimpleNamespace(nlp=[SimpleNamespace(u_init={}, u_bounds={})])
+    solution = SimpleNamespace(
+        status=2,
+        residuals=np.array([3.4e-3, 8e-9, 3e-11, 2e-5]),
+        solver_time_to_optimize=1.0,
+        real_time_to_optimize=1.1,
+    )
+    monkeypatch.setattr(
+        periodic_example,
+        "snapshot_acados_diagnostics",
+        lambda result: {"residuals": result.residuals},
+    )
+    monkeypatch.setattr(
+        periodic_example,
+        "apply_solution_directly_to_periodic_nmpc_initial_guess",
+        lambda *_args: None,
+    )
+
+    summaries = periodic_example.run_acados_control_homotopy(
+        nmpc,
+        FakeSolver(),
+        radii=(),
+        convergence_tolerance=5e-4,
+        stationarity_tolerance=5e-3,
+        fixed_control_tolerance=1e-8,
+        max_restarts=0,
+        stage_iterations=None,
+        echo=False,
+        solve_stage=lambda: solution,
+    )
+
+    assert configured_tolerances == [("all", 5e-4), ("stationarity", 5e-3)]
+    assert summaries[0]["accepted"] is True
+    assert summaries[0]["feasibility_tolerance"] == 5e-4
+    assert summaries[0]["stationarity_tolerance"] == 5e-3
+
+
 def test_proximal_control_continuation_reduces_weight_without_changing_bounds(
     monkeypatch,
 ):
@@ -3161,6 +3210,8 @@ def test_github_acados_smoke_uses_the_robust_reference_profile():
     assert "--acados-nlp-solver-type SQP" in workflow
     assert "--acados-integrator-type IRK" in workflow
     assert "--acados-collocation-type GAUSS_LEGENDRE" in workflow
+    assert "--acados-stationarity-tolerance 1e-3" in workflow
+    assert "--acados-stationarity-tolerance 5e-3" in workflow
     assert "--max-consecutive-failing 2" in workflow
     assert ".terminal_wheel_q_reference_mode == \"absolute_initial\"" in workflow
 
