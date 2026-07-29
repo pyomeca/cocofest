@@ -284,6 +284,29 @@ def test_madnlp_cases_include_the_linear_solver_backend():
     assert summary._entry_case(entry("mumps")) == "madnlp-mumps/full"
 
 
+def test_ipopt_and_madnlp_cases_include_compilation_mode():
+    ipopt = {
+        "configuration": {
+            "mechanical_formulation": "full",
+            "ipopt_c_compile": True,
+        },
+        "result": {"solver": "ipopt"},
+    }
+    madnlp = {
+        "configuration": {
+            "mechanical_formulation": "reduced",
+            "madnlp_linear_solver": "mumps",
+            "madnlp_c_compile": True,
+        },
+        "result": {"solver": "madnlp"},
+    }
+
+    assert summary._entry_case(ipopt) == "ipopt-compiled/full"
+    assert summary._entry_case(madnlp) == "madnlp-mumps-compiled/reduced"
+    assert summary._entry_base_case(ipopt) == "ipopt/full"
+    assert summary._entry_base_case(madnlp) == "madnlp-mumps/reduced"
+
+
 def test_fatrop_cases_include_transcription_and_compilation():
     entry = {
         "configuration": {

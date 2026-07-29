@@ -735,6 +735,14 @@ Hessian. They do not compile IPOPT, MadNLP, or MA57 themselves. Each benchmark
 uses a temporary build directory because Bioptim currently generates the fixed
 filename `nlp.c`.
 
+Within one benchmark process, the generated library is persistent across the
+complete RHO sequence. The shifted primal seed is passed as `x0`; the previous
+state, absolute terminal crank target and moving state/control bounds are
+updated in `lbx/ubx`; moving nonlinear-constraint bounds are updated in
+`lbg/ubg`. None of these numerical changes alters the compiled symbolic graph.
+The `compiled_nlp_reuse` JSON audit records every observed solve and fails the
+interpretation if more than one compiled solver object is seen.
+
 The JSON reports three distinct costs:
 
 - `end_to_end_wall_time_s` includes OCP setup and C generation/compilation;

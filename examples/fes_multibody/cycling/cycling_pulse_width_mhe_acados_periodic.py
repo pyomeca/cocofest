@@ -5690,6 +5690,158 @@ def snapshot_nlp_solver_stats(nmpc) -> dict:
     }
 
 
+class CompiledNlpReuseTracker:
+    """Audit that moving RHO data reuse one CasADi compiled solver.
+
+    CasADi's ``nlpsol`` accepts ``x0``, ``lbx``, ``ubx``, ``lbg`` and ``ubg``
+    at every call.  The previous state, absolute terminal crank target and
+    moving state/control bounds therefore belong in these numerical vectors;
+    they must not be embedded as Python floats in a regenerated symbolic
+    objective or constraint.  This tracker records both sides of that
+    contract: numerical bounds are allowed to change, while the compiled
+    ``shaked_ocp_solver`` object must remain identical.
+    """
+
+    runtime_inputs = (
+        "previous_state_via_initial_state_bounds",
+        "absolute_terminal_angle_via_terminal_state_bounds",
+        "moving_state_bounds_via_lbx_ubx",
+        "moving_control_bounds_via_lbx_ubx",
+        "moving_constraint_bounds_via_lbg_ubg",
+        "shifted_primal_initial_guess_via_x0",
+    )
+
+    def __init__(self, enabled: bool):
+        self.enabled = bool(enabled)
+        self._solver_objects = []
+        self._bound_fingerprints = []
+        self._observations = []
+
+    @staticmethod
+    def _bounds_fingerprint(nmpc) -> str:
+        digest = hashlib.sha256()
+        for variable_kind in ("x_bounds", "u_bounds"):
+            container = getattr(nmpc.nlp[0], variable_kind, {})
+            for key in sorted(container.keys()):
+                bounds = container[key]
+                digest.update(variable_kind.encode())
+                digest.update(str(key).encode())
+                for side in ("min", "max"):
+                    values = np.ascontiguousarray(
+                        np.asarray(getattr(bounds, side), dtype=np.float64)
+                    )
+                    digest.update(side.encode())
+                    digest.update(str(values.shape).encode())
+                    digest.update(values.tobytes())
+        for penalty_index, penalty in enumerate(getattr(nmpc.nlp[0], "g", [])):
+            if not penalty:
+                continue
+            bounds = getattr(penalty, "bounds", None)
+            if bounds is None:
+                continue
+            digest.update(f"g:{penalty_index}".encode())
+            for side in ("min", "max"):
+                values = np.ascontiguousarray(
+                    np.asarray(getattr(bounds, side), dtype=np.float64)
+                )
+                digest.update(side.encode())
+                digest.update(str(values.shape).encode())
+                digest.update(values.tobytes())
+        return digest.hexdigest()
+
+    def record(self, nmpc, window: int) -> None:
+        if not self.enabled:
+            return
+        interface = getattr(nmpc, "ocp_solver", None)
+        compiled_solver = getattr(interface, "shaked_ocp_solver", None)
+        if compiled_solver is None:
+            return
+        build_index = next(
+            (
+                index
+                for index, known_solver in enumerate(self._solver_objects)
+                if compiled_solver is known_solver
+            ),
+            None,
+        )
+        if build_index is None:
+            self._solver_objects.append(compiled_solver)
+            build_index = len(self._solver_objects) - 1
+        fingerprint = self._bounds_fingerprint(nmpc)
+        self._bound_fingerprints.append(fingerprint)
+        self._observations.append(
+            {
+                "window": int(window),
+                "compiled_library_index": int(build_index),
+                "bounds_fingerprint": fingerprint,
+            }
+        )
+
+    def summary(self) -> dict:
+        build_count = len(self._solver_objects)
+        observation_count = len(self._observations)
+        unique_bound_vectors = len(set(self._bound_fingerprints))
+        return {
+            "enabled": self.enabled,
+            "runtime_inputs": list(self.runtime_inputs),
+            "observed_solves": observation_count,
+            "compiled_library_build_count": build_count,
+            "compiled_library_reused": bool(
+                self.enabled and observation_count > 1 and build_count == 1
+            ),
+            "graph_rebuild_detected": bool(build_count > 1),
+            "unique_runtime_bound_vectors": unique_bound_vectors,
+            "runtime_bounds_changed": bool(unique_bound_vectors > 1),
+            "observations": list(self._observations),
+        }
+
+
+def nlp_c_compile_enabled(args: argparse.Namespace) -> bool:
+    """Return whether the selected NLP backend requested CasADi C codegen."""
+
+    return bool(
+        (args.solver == "ipopt" and args.ipopt_c_compile)
+        or (args.solver == "madnlp" and args.madnlp_c_compile)
+        or (args.solver == "fatrop" and args.fatrop_c_compile)
+    )
+
+
+def patch_bioptim_compiled_nlp_solver_names(interface_classes=None) -> None:
+    """Use CasADi's case-sensitive plugin names when loading generated C.
+
+    The pinned Bioptim integration generates dependencies with the lower-case
+    plugin name, then reloads them with ``SolverType.value`` (``Ipopt`` or
+    ``Madnlp``). CasADi plugin registration is case-sensitive. Keep the patch
+    local to interfaces whose solver options request C compilation.
+    """
+
+    if interface_classes is None:
+        from bioptim.interfaces.ipopt_interface import IpoptInterface
+        from bioptim.interfaces.madnlp_interface import MadnlpInterface
+
+        interface_classes = (IpoptInterface, MadnlpInterface)
+
+    for interface_class in interface_classes:
+        if getattr(
+            interface_class, "_cocofest_compiled_solver_name_patch", False
+        ):
+            continue
+        original_solve = interface_class.solve
+
+        def patched_solve(
+            interface,
+            *solve_args,
+            _original_solve=original_solve,
+            **solve_kwargs,
+        ):
+            if bool(getattr(interface.opts, "c_compile", False)):
+                interface.solver_name = interface.solver_name.lower()
+            return _original_solve(interface, *solve_args, **solve_kwargs)
+
+        interface_class.solve = patched_solve
+        interface_class._cocofest_compiled_solver_name_patch = True
+
+
 def summarize_windows(
     sol,
     requested_windows: int,
@@ -10416,6 +10568,8 @@ def get_one_cycle_acados_continuation_source(
 
 
 def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
+    if nlp_c_compile_enabled(args):
+        patch_bioptim_compiled_nlp_solver_names()
     preparation_start = perf_counter()
     apply_assisted_hot_start_defaults(args)
     args.terminal_wheel_q_reference_mode = "absolute_initial"
@@ -12018,6 +12172,9 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
     acados_window_diagnostics = []
     nlp_dual_warm_start_summaries = []
     nlp_solver_stats = []
+    compiled_nlp_tracker = CompiledNlpReuseTracker(
+        nlp_c_compile_enabled(args)
+    )
     transfer_rollout_summaries = []
     transfer_control_scaling_summaries = []
     transfer_qdot_projection_summaries = []
@@ -12114,6 +12271,7 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
         # Every stored RHO solution references the same mutable OCP. Snapshot
         # feasibility while its lbx/ubx still describe this window; otherwise
         # post-processing compares old decisions with the final window bounds.
+        compiled_nlp_tracker.record(_nmpc, _nmpc.total_optimization_run)
         feasibility = _solution_feasibility_summary(
             solution, window_feasibility_tolerance
         )
@@ -13102,6 +13260,8 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
             stats_snapshot = snapshot_nlp_solver_stats(nmpc)
             if stats_snapshot:
                 summary["nlp_solver_stats"] = [{"window": 0, **stats_snapshot}]
+            compiled_nlp_tracker.record(nmpc, 0)
+            summary["compiled_nlp_reuse"] = compiled_nlp_tracker.summary()
         if initial_guess_state_traces is not None:
             summary["initial_guess_state_traces"] = initial_guess_state_traces
             summary["initial_guess_control_traces"] = initial_guess_control_traces
@@ -13122,6 +13282,7 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
             absolute_wheel_q_start_cycle_index
         )
         summary["native_solver_status"] = _native_solver_status(nmpc)
+        summary["compiled_nlp_reuse"] = compiled_nlp_tracker.summary()
         if control_homotopy_summaries:
             summary["control_homotopy_summaries"] = control_homotopy_summaries
         if cycle_boundary_homotopy_summary is not None:
@@ -13165,6 +13326,7 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
         summary["fatigue_capacity_scales"] = fatigue_capacity_scales
         summary["native_solver_status"] = _native_solver_status(nmpc)
         summary["pulse_width_active_set_summary"] = pulse_width_active_set_summary(nmpc)
+        summary["compiled_nlp_reuse"] = compiled_nlp_tracker.summary()
         if cycle_boundary_homotopy_summary is not None:
             summary["cycle_boundary_homotopy_summary"] = cycle_boundary_homotopy_summary
         return summary
@@ -13209,6 +13371,8 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
             summary["ipopt_dual_warm_start_summaries"] = nlp_dual_warm_start_summaries
     if nlp_solver_stats:
         summary["nlp_solver_stats"] = nlp_solver_stats
+    if args.solver in NLP_SOLVER_NAMES:
+        summary["compiled_nlp_reuse"] = compiled_nlp_tracker.summary()
     if transfer_rollout_summaries:
         summary["transfer_rollout_summaries"] = transfer_rollout_summaries
     if transfer_control_scaling_summaries:

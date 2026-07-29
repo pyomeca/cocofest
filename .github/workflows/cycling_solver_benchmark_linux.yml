@@ -34,6 +34,11 @@ on:
         required: true
         default: "2000"
         type: string
+      compile_nlp_evaluators:
+        description: Compile IPOPT/MadNLP CasADi evaluators once and reuse them across all RHO
+        required: true
+        default: true
+        type: boolean
       seed_validation_max_iterations:
         description: Maximum IPOPT iterations used to validate the shared continuation seed
         required: true
@@ -1348,7 +1353,7 @@ jobs:
 
       - name: Run IPOPT full
         if: matrix.solver == 'ipopt'
-        run: bash .github/scripts/run_cycling_benchmark_case.sh ipopt ipopt full mumps collocation
+        run: bash .github/scripts/run_cycling_benchmark_case.sh ipopt ipopt full mumps collocation benchmark-results "$BENCHMARK_CYCLES" "${{ inputs.compile_nlp_evaluators }}"
       - name: Checkpoint IPOPT full
         if: ${{ always() && matrix.solver == 'ipopt' }}
         continue-on-error: true
@@ -1361,7 +1366,7 @@ jobs:
 
       - name: Run IPOPT reduced
         if: matrix.solver == 'ipopt'
-        run: bash .github/scripts/run_cycling_benchmark_case.sh ipopt ipopt reduced mumps collocation
+        run: bash .github/scripts/run_cycling_benchmark_case.sh ipopt ipopt reduced mumps collocation benchmark-results "$BENCHMARK_CYCLES" "${{ inputs.compile_nlp_evaluators }}"
       - name: Checkpoint IPOPT reduced
         if: ${{ always() && matrix.solver == 'ipopt' }}
         continue-on-error: true
@@ -1534,7 +1539,7 @@ jobs:
 
       - name: Run MadNLP PARDISO full
         if: matrix.solver == 'madnlp'
-        run: bash .github/scripts/run_cycling_benchmark_case.sh madnlp-pardiso madnlp full pardiso_mkl collocation
+        run: bash .github/scripts/run_cycling_benchmark_case.sh madnlp-pardiso madnlp full pardiso_mkl collocation benchmark-results "$BENCHMARK_CYCLES" "${{ inputs.compile_nlp_evaluators }}"
       - name: Checkpoint MadNLP PARDISO full
         if: ${{ always() && matrix.solver == 'madnlp' }}
         continue-on-error: true
@@ -1547,7 +1552,7 @@ jobs:
 
       - name: Run MadNLP PARDISO reduced
         if: matrix.solver == 'madnlp'
-        run: bash .github/scripts/run_cycling_benchmark_case.sh madnlp-pardiso madnlp reduced pardiso_mkl collocation
+        run: bash .github/scripts/run_cycling_benchmark_case.sh madnlp-pardiso madnlp reduced pardiso_mkl collocation benchmark-results "$BENCHMARK_CYCLES" "${{ inputs.compile_nlp_evaluators }}"
       - name: Checkpoint MadNLP PARDISO reduced
         if: ${{ always() && matrix.solver == 'madnlp' }}
         continue-on-error: true
@@ -1560,7 +1565,7 @@ jobs:
 
       - name: Run MadNLP MUMPS full
         if: matrix.solver == 'madnlp'
-        run: bash .github/scripts/run_cycling_benchmark_case.sh madnlp-mumps madnlp full mumps collocation
+        run: bash .github/scripts/run_cycling_benchmark_case.sh madnlp-mumps madnlp full mumps collocation benchmark-results "$BENCHMARK_CYCLES" "${{ inputs.compile_nlp_evaluators }}"
       - name: Checkpoint MadNLP MUMPS full
         if: ${{ always() && matrix.solver == 'madnlp' }}
         continue-on-error: true
@@ -1573,7 +1578,7 @@ jobs:
 
       - name: Run MadNLP MUMPS reduced
         if: matrix.solver == 'madnlp'
-        run: bash .github/scripts/run_cycling_benchmark_case.sh madnlp-mumps madnlp reduced mumps collocation
+        run: bash .github/scripts/run_cycling_benchmark_case.sh madnlp-mumps madnlp reduced mumps collocation benchmark-results "$BENCHMARK_CYCLES" "${{ inputs.compile_nlp_evaluators }}"
       - name: Checkpoint MadNLP MUMPS reduced
         if: ${{ always() && matrix.solver == 'madnlp' }}
         continue-on-error: true
@@ -1642,6 +1647,7 @@ jobs:
         shell: bash
         env:
           BENCHMARK_SOLVER: ${{ matrix.solver }}
+          COMPILE_NLP_EVALUATORS: ${{ inputs.compile_nlp_evaluators }}
         run: |
           case "$BENCHMARK_SOLVER" in
             ipopt) expected=2 ;;
@@ -1658,6 +1664,19 @@ jobs:
               .results[0] |
               (.attempted_windows > 0 and .error == null)
             ' "$result"
+            if [[ "$COMPILE_NLP_EVALUATORS" == "true" && \
+                  ( "$BENCHMARK_SOLVER" == "ipopt" || "$BENCHMARK_SOLVER" == "madnlp" ) ]]; then
+              jq -e '
+                .results[0] |
+                (.compiled_nlp_reuse.enabled == true) and
+                (.compiled_nlp_reuse.compiled_library_build_count == 1) and
+                (.compiled_nlp_reuse.graph_rebuild_detected == false) and
+                (
+                  (.attempted_windows <= 1) or
+                  (.compiled_nlp_reuse.compiled_library_reused == true)
+                )
+              ' "$result"
+            fi
           done
           if [[ "$BENCHMARK_SOLVER" == "fatrop" ]]; then
             mapfile -t probes < <(

@@ -352,15 +352,18 @@ For IPOPT and MadNLP, CasADi/Bioptim already expose:
 --madnlp-c-compile
 ```
 
-The useful target is a persistent compiled SX library containing the
-objective, constraints, dynamics, Jacobian and Hessian functions for each of
-the full and reduced formulations. The library should be built once and reused
-for all RHO. To make that possible, the absolute crank target, previous state,
-fatigue state and changing bounds must be numerical parameters rather than
-constants embedded in a newly generated graph. Compiling a graph that is
-rebuilt at every RHO usually increases end-to-end time. Compilation must
-therefore be evaluated with separate graph construction, first-solve and hot
-RHO timings.
+The RHO now keeps one compiled SX library containing the objective,
+constraints, dynamics, Jacobian and Hessian functions for each full or reduced
+formulation. The previous state, absolute terminal crank target, state/control
+bounds and intermediate seam bounds are supplied numerically at each solve
+through CasADi's `x0`, `lbx/ubx` and `lbg/ubg` arguments. They can therefore
+move over 100 RHO without changing the symbolic graph.
+
+Every result exports `compiled_nlp_reuse`. A valid endurance run must report
+`compiled_library_build_count: 1`, `compiled_library_reused: true`,
+`graph_rebuild_detected: false` and normally
+`runtime_bounds_changed: true`. This distinguishes an actual persistent
+library from a mode that silently recompiles at every RHO.
 
 Launch the current 100-RHO Linux benchmark with:
 
@@ -373,6 +376,7 @@ gh workflow run cycling_solver_benchmark_linux.yml \
   -f cycles_per_window=1 \
   -f crank_assistance_nm=0.00 \
   -f terminal_wheel_q_slack=0.002 \
+  -f compile_nlp_evaluators=true \
   -f solver_max_iterations=2000 \
   -f seed_validation_max_iterations=2000 \
   -f acados_smoke_rhos=100 \

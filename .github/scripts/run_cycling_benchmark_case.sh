@@ -42,6 +42,9 @@ if [[ "$solver" == "ipopt" ]]; then
     --ipopt-max-iter "$BENCHMARK_MAX_ITER"
     --ipopt-dual-warm-start-mode bounds
   )
+  if [[ "$compile_mode" == "true" ]]; then
+    solver_options+=(--ipopt-c-compile)
+  fi
 elif [[ "$solver" == "fatrop" ]]; then
   solver_options+=(
     --fatrop-max-iter 1000
@@ -69,6 +72,9 @@ elif [[ "$solver" == "madnlp" ]]; then
     --madnlp-linear-solver "$backend"
     --madnlp-dual-warm-start-mode off
   )
+  if [[ "$compile_mode" == "true" ]]; then
+    solver_options+=(--madnlp-c-compile)
+  fi
 fi
 if [[ "$mechanics" == "reduced" ]]; then
   solver_options+=(--mechanical-formulation reduced)

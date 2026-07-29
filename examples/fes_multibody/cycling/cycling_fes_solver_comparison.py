@@ -1735,6 +1735,26 @@ def _run_benchmark_case(
         )
         if uses_c_codegen:
             previous_cwd = Path.cwd()
+            # CasADi emits the fixed filenames nlp.c/nlp.so in the current
+            # directory. Keep generated files isolated without changing the
+            # meaning of user-provided relative inputs or outputs.
+            for path_attribute in (
+                "standard_warmup_seed",
+                "common_initial_solution",
+                "common_initial_solution_output",
+                "reduced_cycling_profile",
+            ):
+                path_value = getattr(args, path_attribute, None)
+                if path_value is None:
+                    continue
+                if not isinstance(path_value, (str, os.PathLike)):
+                    raise TypeError(
+                        f"{path_attribute} must be a filesystem path, got "
+                        f"{type(path_value).__name__}."
+                    )
+                path_value = Path(path_value).expanduser()
+                if not path_value.is_absolute():
+                    setattr(args, path_attribute, previous_cwd / path_value)
             with TemporaryDirectory(
                 prefix=f"cocofest_{solver_name}_codegen_"
             ) as codegen_dir:
@@ -2242,6 +2262,7 @@ def solver_overview_rows(results: dict[str, dict]) -> list[dict]:
                     result, performance["validated_cycles"]
                 ),
                 "nlp_solver_stats": result.get("nlp_solver_stats") or [],
+                "compiled_nlp_reuse": result.get("compiled_nlp_reuse"),
                 "warm_start": {
                     "initial_guess_audits": result.get("initial_guess_audits") or [],
                     "dual_summaries": result.get("nlp_dual_warm_start_summaries") or [],
@@ -2586,6 +2607,25 @@ def main(
     max_consecutive_failing: int = 1,
     output_json: str | Path | None = None,
 ):
+    invocation_cwd = Path.cwd()
+
+    def resolve_invocation_path(value):
+        if value is None:
+            return None
+        path = Path(value).expanduser()
+        return path if path.is_absolute() else invocation_cwd / path
+
+    # ``main`` historically changes into the example directory so model paths
+    # remain stable. Resolve every user-facing path first so both interpreted
+    # and C-compiled runs retain CLI-relative path semantics.
+    standard_warmup_seed = resolve_invocation_path(standard_warmup_seed)
+    common_initial_solution = resolve_invocation_path(common_initial_solution)
+    common_initial_solution_output = resolve_invocation_path(
+        common_initial_solution_output
+    )
+    reduced_cycling_profile = resolve_invocation_path(reduced_cycling_profile)
+    ipopt_hsl_library = resolve_invocation_path(ipopt_hsl_library)
+    output_json = resolve_invocation_path(output_json)
     os.chdir(EXAMPLE_DIR)
     if n_threads is None:
         n_threads = os.cpu_count() or 1

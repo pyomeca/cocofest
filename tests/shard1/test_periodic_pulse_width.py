@@ -3006,6 +3006,12 @@ def test_benchmark_json_summary_contains_comparable_fatigue_metrics(tmp_path):
                 "t_wall_nlp_hess_l": 0.75,
             }
         ],
+        compiled_nlp_reuse={
+            "enabled": True,
+            "compiled_library_build_count": 1,
+            "compiled_library_reused": True,
+            "graph_rebuild_detected": False,
+        },
     )
     result["args"].objective = "fatigue"
     result["args"].objective_shape = "quadratic"
@@ -3058,6 +3064,7 @@ def test_benchmark_json_summary_contains_comparable_fatigue_metrics(tmp_path):
     assert [window["rho"] for window in row["windows"]] == [1, 2]
     assert row["windows"][0]["native_status"] == "Solve_Succeeded"
     assert row["nlp_solver_stats"][0]["t_wall_nlp_hess_l"] == 0.75
+    assert row["compiled_nlp_reuse"]["compiled_library_build_count"] == 1
 
 
 def test_independent_bound_violation_accepts_infinite_bounds():
@@ -3384,6 +3391,13 @@ def test_github_acados_runner_uses_reference_and_option_profiles_sequentially():
         workflow,
     )
     assert "acados_option_rhos:" in workflow
+    assert "compile_nlp_evaluators:" in workflow
+    assert (
+        '"$BENCHMARK_CYCLES" "${{ inputs.compile_nlp_evaluators }}"'
+        in workflow
+    )
+    assert ".compiled_nlp_reuse.compiled_library_build_count == 1" in workflow
+    assert ".compiled_nlp_reuse.graph_rebuild_detected == false" in workflow
     assert "inputs.cycles != 'screen' && inputs.cycles != 'acados'" in workflow
     assert "prepare-acados-stack:" in workflow
     assert "ACADOS_COMMIT: 48e223e85f0408ebfd1d8c6d6fb0589e9c41b3aa" in workflow
@@ -3430,6 +3444,14 @@ def test_github_acados_runner_uses_reference_and_option_profiles_sequentially():
         "benchmark-probes 1 true"
     ) in workflow
     assert "cycling-fatrop-compile-probe-full-${{ github.run_id }}" in workflow
+    benchmark_runner = (
+        Path(__file__).resolve().parents[2]
+        / ".github"
+        / "scripts"
+        / "run_cycling_benchmark_case.sh"
+    ).read_text(encoding="utf-8")
+    assert 'solver_options+=(--ipopt-c-compile)' in benchmark_runner
+    assert 'solver_options+=(--madnlp-c-compile)' in benchmark_runner
     assert "Checkpoint IPOPT full" in workflow
     assert "Checkpoint Fatrop RK4 reduced" in workflow
     assert "max-parallel: 3" in workflow
@@ -4927,6 +4949,128 @@ def test_window_cache_callback_runs_before_window_is_advanced():
     MyCyclicNMPC.advance_window_bounds_states(nmpc, solution)
 
     assert events == ["before_window_advance", "decision_states"]
+
+
+def test_compiled_nlp_tracker_accepts_runtime_bound_changes_without_graph_rebuild():
+    state_bounds = SimpleNamespace(
+        min=np.array([[0.0, -10.0, -2.0 * np.pi]]),
+        max=np.array([[0.0, 10.0, -2.0 * np.pi]]),
+    )
+    control_bounds = SimpleNamespace(
+        min=np.array([[131.405e-6, 131.405e-6]]),
+        max=np.array([[600e-6, 600e-6]]),
+    )
+    constraint_bounds = SimpleNamespace(
+        min=np.array([[-0.002]]),
+        max=np.array([[0.002]]),
+    )
+    compiled_solver = object()
+    nmpc = SimpleNamespace(
+        ocp_solver=SimpleNamespace(shaked_ocp_solver=compiled_solver),
+        nlp=[
+            SimpleNamespace(
+                x_bounds={"theta": state_bounds},
+                u_bounds={"last_pulse_width": control_bounds},
+                g=[SimpleNamespace(bounds=constraint_bounds)],
+            )
+        ],
+    )
+    tracker = periodic_example.CompiledNlpReuseTracker(enabled=True)
+
+    tracker.record(nmpc, 0)
+    state_bounds.min[0, 0] = -2.0 * np.pi
+    state_bounds.max[0, 0] = -2.0 * np.pi
+    state_bounds.min[0, 2] = -4.0 * np.pi - 0.002
+    state_bounds.max[0, 2] = -4.0 * np.pi + 0.002
+    constraint_bounds.min[0, 0] = -2.0 * np.pi - 0.002
+    constraint_bounds.max[0, 0] = -2.0 * np.pi + 0.002
+    tracker.record(nmpc, 1)
+
+    summary = tracker.summary()
+    assert summary["compiled_library_build_count"] == 1
+    assert summary["compiled_library_reused"] is True
+    assert summary["graph_rebuild_detected"] is False
+    assert summary["unique_runtime_bound_vectors"] == 2
+    assert summary["runtime_bounds_changed"] is True
+    assert "absolute_terminal_angle_via_terminal_state_bounds" in summary[
+        "runtime_inputs"
+    ]
+
+
+def test_compiled_nlp_tracker_detects_a_second_generated_solver():
+    bounds = SimpleNamespace(min=np.zeros((1, 3)), max=np.ones((1, 3)))
+    nmpc = SimpleNamespace(
+        ocp_solver=SimpleNamespace(shaked_ocp_solver=object()),
+        nlp=[SimpleNamespace(x_bounds={"theta": bounds}, u_bounds={}, g=[])],
+    )
+    tracker = periodic_example.CompiledNlpReuseTracker(enabled=True)
+
+    tracker.record(nmpc, 0)
+    nmpc.ocp_solver.shaked_ocp_solver = object()
+    tracker.record(nmpc, 1)
+
+    summary = tracker.summary()
+    assert summary["compiled_library_build_count"] == 2
+    assert summary["compiled_library_reused"] is False
+    assert summary["graph_rebuild_detected"] is True
+
+
+def test_compiled_nlp_plugin_name_patch_only_changes_compiled_interfaces():
+    calls = []
+
+    class FakeInterface:
+        _cocofest_compiled_solver_name_patch = False
+
+        def solve(self, marker):
+            calls.append((self.solver_name, marker))
+            return marker
+
+    periodic_example.patch_bioptim_compiled_nlp_solver_names((FakeInterface,))
+
+    interpreted = FakeInterface()
+    interpreted.opts = SimpleNamespace(c_compile=False)
+    interpreted.solver_name = "Ipopt"
+    compiled = FakeInterface()
+    compiled.opts = SimpleNamespace(c_compile=True)
+    compiled.solver_name = "Madnlp"
+
+    assert interpreted.solve("interpreted") == "interpreted"
+    assert compiled.solve("compiled") == "compiled"
+    assert calls == [("Ipopt", "interpreted"), ("madnlp", "compiled")]
+
+
+def test_c_codegen_resolves_relative_runtime_inputs_before_changing_directory(
+    monkeypatch, tmp_path
+):
+    observed = {}
+    args = SimpleNamespace(
+        ipopt_c_compile=True,
+        fatrop_c_compile=False,
+        madnlp_c_compile=False,
+        standard_warmup_seed=Path("seeds/warmup.npz"),
+        common_initial_solution="seeds/common.npz",
+        common_initial_solution_output=Path("results/common.npz"),
+        reduced_cycling_profile=None,
+        periodic_ipopt_refinement_window_cache=None,
+    )
+
+    def fake_solve_case(current_args, echo):
+        observed["cwd"] = Path.cwd()
+        observed["seed"] = current_args.standard_warmup_seed
+        observed["common"] = current_args.common_initial_solution
+        observed["output"] = current_args.common_initial_solution_output
+        return {"success": True}
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(comparison_example, "solve_case", fake_solve_case)
+
+    result = comparison_example._run_benchmark_case("ipopt", args, echo=False)
+
+    assert observed["cwd"] != tmp_path
+    assert observed["seed"] == tmp_path / "seeds/warmup.npz"
+    assert observed["common"] == tmp_path / "seeds/common.npz"
+    assert observed["output"] == tmp_path / "results/common.npz"
+    assert result["success"] is True
 
 
 def test_terminal_wheel_target_is_anchored_to_new_window_start():

@@ -72,25 +72,41 @@ def _entry_case(entry: dict) -> str:
     return f"{_solver_variant(entry)}/{_mechanical_formulation(entry)}"
 
 
+def _entry_base_case(entry: dict) -> str:
+    """Return the physical solver case independently of evaluator codegen."""
+
+    return _entry_case(entry).replace("-compiled/", "/")
+
+
 def _solver_variant(entry: dict) -> str:
     solver = entry["result"].get("solver", "unknown").lower()
+    configuration = entry.get("configuration", {})
     if solver == "fatrop":
-        configuration = entry.get("configuration", {})
         transcription = str(configuration.get("ode_solver") or "unknown").lower()
         compilation = (
             "-compiled" if configuration.get("fatrop_c_compile") is True else ""
         )
         return f"fatrop-{transcription}{compilation}"
+    if solver == "ipopt":
+        return (
+            "ipopt-compiled"
+            if configuration.get("ipopt_c_compile") is True
+            else "ipopt"
+        )
     if solver != "madnlp":
         return solver
     linear_solver = str(
         entry.get("configuration", {}).get("madnlp_linear_solver") or ""
     ).lower()
     if linear_solver in {"pardiso_mkl", "pardisomklsolver"}:
-        return "madnlp-pardiso"
-    if linear_solver in {"mumps", "mumpssolver"}:
-        return "madnlp-mumps"
-    return solver
+        variant = "madnlp-pardiso"
+    elif linear_solver in {"mumps", "mumpssolver"}:
+        variant = "madnlp-mumps"
+    else:
+        variant = solver
+    if configuration.get("madnlp_c_compile") is True:
+        variant += "-compiled"
+    return variant
 
 
 def _entry_label(entry: dict) -> str:
@@ -957,7 +973,7 @@ def main() -> None:
         if args.expected_cases is not None
         else ()
     )
-    present_cases = {_entry_case(entry) for entry in entries}
+    present_cases = {_entry_base_case(entry) for entry in entries}
     missing_cases = (
         tuple(case for case in expected_cases if case not in present_cases)
         if expected_cases
