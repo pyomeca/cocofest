@@ -3230,10 +3230,10 @@ def test_github_acados_smoke_uses_the_robust_reference_profile():
     assert "--acados-stationarity-tolerance 1e-3" in workflow
     assert "--acados-stationarity-tolerance 5e-3" in workflow
     assert "--acados-control-homotopy-window-growth 10" in workflow
-    assert "--acados-control-homotopy-window-max-radius 1e-4" in workflow
+    assert "--acados-control-homotopy-window-max-radius 1e-5" in workflow
     assert ".acados_control_homotopy_keep_final_radius == true" in workflow
     assert ".acados_control_homotopy_window_growth == 10" in workflow
-    assert ".acados_control_homotopy_window_max_radius == 1e-4" in workflow
+    assert ".acados_control_homotopy_window_max_radius == 1e-5" in workflow
     assert "--max-consecutive-failing 2" in workflow
     assert ".terminal_wheel_q_reference_mode == \"absolute_initial\"" in workflow
 
