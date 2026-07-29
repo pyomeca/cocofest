@@ -14,7 +14,7 @@ ode_solver="$5"
 case_root="${6:-benchmark-results}"
 case_windows="${7:-${BENCHMARK_CYCLES:?BENCHMARK_CYCLES is required}}"
 compile_mode="${8:-false}"
-graph_mode="${9:-mx}"
+graph_mode="${9:-}"
 case_dir="${GITHUB_WORKSPACE:?GITHUB_WORKSPACE is required}/${case_root}/${case_slug}-${mechanics}"
 result="$case_dir/result.json"
 solver_options=()
@@ -22,6 +22,15 @@ solver_tolerance=1e-6
 
 mkdir -p "$case_dir"
 
+if [[ -z "$graph_mode" ]]; then
+  # The Linux 30-RHO screen shows a ~60% hot-solve reduction for IPOPT and
+  # MadNLP with SX. Fatrop remains MX until its independent screen completes.
+  if [[ "$solver" == "fatrop" ]]; then
+    graph_mode=mx
+  else
+    graph_mode=sx
+  fi
+fi
 case "$graph_mode" in
   sx) solver_options+=(--ipopt-use-sx) ;;
   mx) solver_options+=(--ipopt-no-use-sx) ;;

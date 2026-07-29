@@ -1372,29 +1372,29 @@ jobs:
           if-no-files-found: warn
           retention-days: 30
 
-      - name: Screen IPOPT SX full over 30 RHO
+      - name: Screen IPOPT MX full over 30 RHO
         if: matrix.solver == 'ipopt'
-        run: bash .github/scripts/run_cycling_benchmark_case.sh ipopt-sx ipopt full mumps collocation benchmark-graph-screen 30 false sx
-      - name: Checkpoint IPOPT SX full
+        run: bash .github/scripts/run_cycling_benchmark_case.sh ipopt-mx ipopt full mumps collocation benchmark-graph-screen 30 false mx
+      - name: Checkpoint IPOPT MX full
         if: ${{ always() && matrix.solver == 'ipopt' }}
         continue-on-error: true
         uses: actions/upload-artifact@v7
         with:
-          name: cycling-graph-screen-ipopt-sx-full-${{ github.run_id }}
-          path: benchmark-graph-screen/ipopt-sx-full/
+          name: cycling-graph-screen-ipopt-mx-full-${{ github.run_id }}
+          path: benchmark-graph-screen/ipopt-mx-full/
           if-no-files-found: warn
           retention-days: 30
 
-      - name: Screen IPOPT SX reduced over 30 RHO
+      - name: Screen IPOPT MX reduced over 30 RHO
         if: matrix.solver == 'ipopt'
-        run: bash .github/scripts/run_cycling_benchmark_case.sh ipopt-sx ipopt reduced mumps collocation benchmark-graph-screen 30 false sx
-      - name: Checkpoint IPOPT SX reduced
+        run: bash .github/scripts/run_cycling_benchmark_case.sh ipopt-mx ipopt reduced mumps collocation benchmark-graph-screen 30 false mx
+      - name: Checkpoint IPOPT MX reduced
         if: ${{ always() && matrix.solver == 'ipopt' }}
         continue-on-error: true
         uses: actions/upload-artifact@v7
         with:
-          name: cycling-graph-screen-ipopt-sx-reduced-${{ github.run_id }}
-          path: benchmark-graph-screen/ipopt-sx-reduced/
+          name: cycling-graph-screen-ipopt-mx-reduced-${{ github.run_id }}
+          path: benchmark-graph-screen/ipopt-mx-reduced/
           if-no-files-found: warn
           retention-days: 30
 
@@ -1580,29 +1580,29 @@ jobs:
           if-no-files-found: warn
           retention-days: 30
 
-      - name: Screen MadNLP MUMPS SX full over 30 RHO
+      - name: Screen MadNLP MUMPS MX full over 30 RHO
         if: matrix.solver == 'madnlp'
-        run: bash .github/scripts/run_cycling_benchmark_case.sh madnlp-mumps-sx madnlp full mumps collocation benchmark-graph-screen 30 false sx
-      - name: Checkpoint MadNLP MUMPS SX full
+        run: bash .github/scripts/run_cycling_benchmark_case.sh madnlp-mumps-mx madnlp full mumps collocation benchmark-graph-screen 30 false mx
+      - name: Checkpoint MadNLP MUMPS MX full
         if: ${{ always() && matrix.solver == 'madnlp' }}
         continue-on-error: true
         uses: actions/upload-artifact@v7
         with:
-          name: cycling-graph-screen-madnlp-mumps-sx-full-${{ github.run_id }}
-          path: benchmark-graph-screen/madnlp-mumps-sx-full/
+          name: cycling-graph-screen-madnlp-mumps-mx-full-${{ github.run_id }}
+          path: benchmark-graph-screen/madnlp-mumps-mx-full/
           if-no-files-found: warn
           retention-days: 30
 
-      - name: Screen MadNLP MUMPS SX reduced over 30 RHO
+      - name: Screen MadNLP MUMPS MX reduced over 30 RHO
         if: matrix.solver == 'madnlp'
-        run: bash .github/scripts/run_cycling_benchmark_case.sh madnlp-mumps-sx madnlp reduced mumps collocation benchmark-graph-screen 30 false sx
-      - name: Checkpoint MadNLP MUMPS SX reduced
+        run: bash .github/scripts/run_cycling_benchmark_case.sh madnlp-mumps-mx madnlp reduced mumps collocation benchmark-graph-screen 30 false mx
+      - name: Checkpoint MadNLP MUMPS MX reduced
         if: ${{ always() && matrix.solver == 'madnlp' }}
         continue-on-error: true
         uses: actions/upload-artifact@v7
         with:
-          name: cycling-graph-screen-madnlp-mumps-sx-reduced-${{ github.run_id }}
-          path: benchmark-graph-screen/madnlp-mumps-sx-reduced/
+          name: cycling-graph-screen-madnlp-mumps-mx-reduced-${{ github.run_id }}
+          path: benchmark-graph-screen/madnlp-mumps-mx-reduced/
           if-no-files-found: warn
           retention-days: 30
 
