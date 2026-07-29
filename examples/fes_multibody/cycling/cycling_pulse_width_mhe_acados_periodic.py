@@ -5530,7 +5530,17 @@ def augment_feasibility_with_acados_residuals(
         if value is not None
     )
     threshold = augmented.get("feasibility_threshold")
-    passes_acados = threshold is None or acados_primal_residual <= threshold
+    passes_acados = threshold is None or combined_effective <= threshold
+    inf_pr_is_usable = (
+        not augmented.get("inf_pr_available", False)
+        or augmented.get("final_inf_pr") is not None
+    )
+    passes_combined_audit = (
+        augmented.get("trajectories_finite", True)
+        and augmented.get("constraints_finite", True)
+        and inf_pr_is_usable
+        and passes_acados
+    )
     augmented.update(
         {
             "acados_primal_residual": acados_primal_residual,
@@ -5545,8 +5555,13 @@ def augment_feasibility_with_acados_residuals(
                 )
                 if value is not None
             ),
-            "passes_tolerance": bool(
-                augmented.get("passes_tolerance", False) and passes_acados
+            # ACADOS residuals supply the constraint-feasibility information
+            # that is absent from Bioptim's exported Solution. Recompute the
+            # combined verdict instead of preserving the earlier
+            # ``constraint_feasibility_unavailable`` failure.
+            "passes_tolerance": bool(passes_combined_audit),
+            "failure_reason": None if passes_combined_audit else augmented.get(
+                "failure_reason"
             ),
         }
     )
@@ -5580,7 +5595,7 @@ def _wheel_cycle_diagnostic_tolerances(
         else args.nlp_tolerance
     )
     scaled_feasibility_threshold = getattr(args, "primal_feasibility_threshold", None)
-    if args.solver == "acados" or scaled_feasibility_threshold is None:
+    if scaled_feasibility_threshold is None:
         scaled_feasibility_threshold = 10.0 * solver_tolerance
     # The independent feasibility audit operates on the scaled decision
     # vector. Convert its accepted q violation back to physical radians.

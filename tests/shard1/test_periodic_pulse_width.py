@@ -2407,6 +2407,22 @@ def test_wheel_cycle_diagnostic_tolerances_keep_larger_first_node_slack():
     assert absolute == pytest.approx(0.00301)
 
 
+def test_acados_wheel_audit_uses_the_public_absolute_feasibility_threshold():
+    args = SimpleNamespace(
+        solver="acados",
+        acados_tolerance=1e-3,
+        nlp_tolerance=1e-6,
+        primal_feasibility_threshold=1e-5,
+        acados_terminal_wheel_q_slack=0.002,
+        acados_wheel_q_slack=0.0,
+    )
+
+    progress, absolute = periodic_example._wheel_cycle_diagnostic_tolerances(args)
+
+    assert progress == pytest.approx(0.00402)
+    assert absolute == pytest.approx(0.00201)
+
+
 def test_wheel_q_state_scaling_reads_crank_coordinate():
     nmpc = SimpleNamespace(
         nlp=[
@@ -3185,6 +3201,31 @@ def test_acados_shooting_residuals_are_part_of_the_physical_feasibility_audit():
     np.testing.assert_allclose(accepted["acados_primal_residual"], 2e-7)
 
 
+def test_acados_residuals_replace_missing_exported_constraint_feasibility():
+    base = {
+        "passes_tolerance": False,
+        "failure_reason": "constraint_feasibility_unavailable",
+        "feasibility_threshold": 1e-5,
+        "trajectories_finite": True,
+        "constraints_finite": True,
+        "inf_pr_available": False,
+        "final_inf_pr": None,
+        "constraint_infeasibility": None,
+        "effective_primal_infeasibility": None,
+        "maximum_bound_violation": None,
+    }
+
+    audited = periodic_example.augment_feasibility_with_acados_residuals(
+        base,
+        {"residuals": np.array([3e-3, 2e-9, 1e-12, 1e-8])},
+    )
+
+    assert audited["passes_tolerance"] is True
+    assert audited["failure_reason"] is None
+    assert audited["constraint_feasibility_available"] is True
+    np.testing.assert_allclose(audited["effective_primal_infeasibility"], 2e-9)
+
+
 def test_acados_uses_the_same_absolute_primal_feasibility_threshold_as_nlps():
     args = periodic_example.build_argument_parser().parse_args(
         [
@@ -3355,7 +3396,7 @@ def test_github_acados_runner_uses_reference_and_option_profiles_sequentially():
     assert "run_case sqp-erk" in workflow
     assert "--acados-stationarity-tolerance \"$stationarity\"" in workflow
     assert "--acados-control-homotopy-window-growth 10" in workflow
-    assert "--acados-control-homotopy-window-max-radius 1e-5" in workflow
+    assert "--acados-control-homotopy-window-max-radius 5e-5" in workflow
     assert "--max-consecutive-failing 2" in workflow
     assert "cycling-acados-smoke-${{ github.run_id }}" in workflow
     assert "run_case fatrop-rk4 fatrop full structured rk4" in workflow
