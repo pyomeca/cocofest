@@ -3142,6 +3142,28 @@ def test_github_benchmark_compares_physical_threshold_not_solver_tolerance():
     assert [item["field"] for item in mismatches] == ["primal_feasibility_threshold"]
 
 
+def test_github_acados_smoke_uses_the_robust_reference_profile():
+    workflow = (
+        Path(__file__).resolve().parents[2]
+        / ".github"
+        / "workflows"
+        / "cycling_solver_benchmark_linux.yml"
+    ).read_text(encoding="utf-8")
+
+    assert "acados_smoke_rhos:" in workflow
+    assert "inputs.cycles != 'screen' && inputs.cycles != 'acados'" in workflow
+    assert "prepare-acados-stack:" in workflow
+    assert "ACADOS_COMMIT: 48e223e85f0408ebfd1d8c6d6fb0589e9c41b3aa" in workflow
+    assert "mechanics: [full, reduced]" in workflow
+    assert "--experimental-reduced-acados" in workflow
+    assert "--common-initial-solution" in workflow
+    assert "--acados-nlp-solver-type SQP" in workflow
+    assert "--acados-integrator-type IRK" in workflow
+    assert "--acados-collocation-type GAUSS_LEGENDRE" in workflow
+    assert "--max-consecutive-failing 2" in workflow
+    assert ".terminal_wheel_q_reference_mode == \"absolute_initial\"" in workflow
+
+
 def test_single_shot_requires_solver_and_feasibility_success():
     class FakeSolution:
         status = 1

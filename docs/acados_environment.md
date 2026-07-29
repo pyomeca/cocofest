@@ -38,3 +38,12 @@ remains part of its initialization pipeline: it constructs an assisted
 standard collocation warmup and certifies a one-cycle periodic seed before the
 timed ACADOS windows. Build, code-generation, and warm-start preparation times
 are reported separately from the ACADOS window solve times.
+
+The Linux benchmark workflow performs the equivalent installation from the
+ACADOS submodule pinned by Bioptim, installs it into `$CONDA_PREFIX`, and
+caches the complete native/Python stack. Its separate `acados-smoke` matrix
+tests five full-mechanics and five experimental reduced-mechanics RHO by
+default. Increase the workflow input `acados_smoke_rhos` to 30 only after the
+short SQP jobs are stable; RTI is deliberately excluded from this first
+validation. Set `cycles=acados` to run only seed preparation, the cached
+ACADOS stack preparation, and these two smoke jobs.

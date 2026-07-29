@@ -159,8 +159,10 @@ python examples/fes_multibody/cycling/cycling_fes_solver_comparison.py \
   --n-windows 30 \
   --stimulations-per-cycle 30 \
   --objective fatigue \
+  --standard-warmup-seed .github/benchmark-seeds/legacy-resistive-0p22-warmup.npz \
+  --legacy-standard-warmup-seed-signed-torque 0.22 \
+  --standard-warmup-seed-continuation \
   --common-initial-solution result/common-full.npz \
-  --ipopt-disable-standard-warmup \
   --ipopt-disable-historical-initial-guess \
   --compact-rho-output \
   --output-json result/full-mechanics-30-rho.json
@@ -177,8 +179,10 @@ python examples/fes_multibody/cycling/cycling_fes_solver_comparison.py \
   --n-windows 30 \
   --stimulations-per-cycle 30 \
   --objective fatigue \
+  --standard-warmup-seed .github/benchmark-seeds/legacy-resistive-0p22-warmup.npz \
+  --legacy-standard-warmup-seed-signed-torque 0.22 \
+  --standard-warmup-seed-continuation \
   --common-initial-solution result/common-reduced.npz \
-  --ipopt-disable-standard-warmup \
   --ipopt-disable-historical-initial-guess \
   --compact-rho-output \
   --output-json result/reduced-mechanics-30-rho.json
@@ -191,14 +195,24 @@ All sparse NLP cases use time-major ordering. The aggregate report separates
 solver/formulation/backend pairs and compares pulse patterns at cycles 10 and
 30, including a full-versus-reduced comparison for each supported solver.
 
-ACADOS remains the next stage. Its convergence path starts from the common
-one-cycle reduced solution, maps variables by name, projects the five Ding
-states per muscle, performs a complete-dynamics phase I, and advances shifted
-windows with the generated ACADOS IRK map. The phase-I mechanical blocks map
-to `q/qdot` in the full model and `theta/omega` in the reduced model. The
-absolute terminal angle is retained. Full SQP with zeroed duals is the
-reference; RTI and faster integrator/QP variants are tested only after repeated
-full-SQP convergence.
+ACADOS is now evaluated by two separate CI smoke jobs, one for each mechanical
+formulation. They default to five RHO so that a failure of the experimental
+reduced transcription does not hide the production NLP benchmark. The RHO
+count is controlled by `acados_smoke_rhos` and can be raised to 30 after the
+short jobs are repeatable. They run only for the one-cycle benchmark; a
+two-cycle dispatch skips ACADOS because its common seeds have a different
+horizon. Both jobs start from the corresponding common
+one-cycle solution, map variables by name, project the five Ding states per
+muscle, perform a complete-dynamics phase I, and advance shifted windows with
+the generated ACADOS IRK map. The phase-I mechanical blocks map to `q/qdot`
+in the full model and `theta/omega` in the reduced model. The absolute
+terminal angle is retained.
+
+The reference remains full SQP with zeroed duals, Gauss--Newton, IRK
+Gauss--Legendre (four stages, five integration steps) and the robust HPIPM
+profile. RTI and faster integrator/QP variants are tested only after repeated
+full-SQP convergence. ACADOS results are uploaded separately and are not yet
+included in the Kevin aggregate table.
 
 The reduced formulation is experimental until muscle force, fatigue,
 stimulation patterns and terminal progress have been compared over the same

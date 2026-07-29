@@ -346,7 +346,10 @@ The manually triggered
 now runs IPOPT-MUMPS, Fatrop-RK4, MadNLP-PARDISO and MadNLP-MUMPS in parallel
 on separate Linux runners. IPOPT and both MadNLP backends are evaluated on the
 full and reduced mechanical formulations; Fatrop currently covers the full
-formulation.
+formulation. Two isolated ACADOS SQP smoke jobs additionally exercise the full
+and experimental reduced formulations. They default to five RHO through
+`acados_smoke_rhos`; their artifacts remain separate from the production
+comparison until both paths are repeatable.
 Alpaqa was removed from the endurance matrix after the option screen and the
 30-RHO confirmation: it validated no RHO, consumed two 600-second limits, and
 its second shifted window reached `4.57e-2` infeasibility. Its integration,
@@ -379,14 +382,17 @@ source-built CasADi-compatible biorbd dependency.
 Machine preparation follows the coordinated-cache pattern used by Bioptim's
 GitHub Actions. The seed job publishes an official CasADi/biorbd Conda stack,
 while a second preparation job builds and publishes the libMad-compatible
-CasADi/biorbd stack in parallel. The solver matrix starts only after both
-producers complete and restores the exact stack selected by its ABI. Cache
-keys include the runner label and architecture, the relevant CasADi/libMad
-revisions, the environment specification, and the installer scripts. A cache
-miss therefore performs each expensive source build once per workflow instead
-of once per formulation/backend; a later run normally restores both stacks.
-Bioptim remains an editable one-second installation outside the cache so each
-job is tied explicitly to its pinned integration commit.
+CasADi/biorbd stack in parallel. A third producer extends the official stack
+with ACADOS after seed validation. It recursively checks out ACADOS commit
+`48e223e85f0408ebfd1d8c6d6fb0589e9c41b3aa`, installs the native libraries
+and matching `acados_template` into the Conda prefix, validates their
+presence, then caches the complete environment. Cache keys include the runner
+label and architecture, the relevant CasADi/libMad/ACADOS revisions, the
+environment specification, and the installer scripts. A cache miss therefore
+performs each expensive source build once per workflow instead of once per
+formulation/backend; a later run normally restores all three stacks. Bioptim
+remains an editable one-second installation outside the cache so each job is
+tied explicitly to its pinned integration commit.
 
 The default GitHub-hosted runner can be replaced at dispatch time by the label
 of a larger Linux or self-hosted runner. For example:
@@ -400,7 +406,32 @@ gh workflow run cycling_solver_benchmark_linux.yml \
   -f cycles_per_window=1 \
   -f crank_assistance_nm=0.20 \
   -f terminal_wheel_q_slack=0.002 \
-  -f solver_max_iterations=2000
+  -f solver_max_iterations=2000 \
+  -f acados_smoke_rhos=5
+```
+
+The ACADOS smoke is enabled only when `cycles_per_window=1`, so its horizon
+matches the immutable formulation-specific seed. A two-cycle dispatch skips
+both the ACADOS stack build and its smoke matrix. The job runs IRK
+Gauss--Legendre with full SQP, Gauss--Newton, the robust HPIPM defaults, two
+allowed consecutive failures and the same absolute terminal target as the
+NLPs. The available CPU count is used for both OCP construction and the
+OpenMP-enabled ACADOS runtime. Setup/initialization and RHO solve times are
+reported separately.
+
+Use the dedicated mode to validate ACADOS without scheduling the MadNLP stack
+or the seven production benchmark cases:
+
+```bash
+gh workflow run cycling_solver_benchmark_linux.yml \
+  --repo mickaelbegon/cocofest \
+  --ref codex/acados-pr-refresh \
+  -f runner_label=ubuntu-24.04 \
+  -f cycles=acados \
+  -f cycles_per_window=1 \
+  -f crank_assistance_nm=0.20 \
+  -f terminal_wheel_q_slack=0.002 \
+  -f acados_smoke_rhos=5
 ```
 
 The production action pins the combined Fatrop/MadNLP Bioptim integration

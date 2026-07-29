@@ -10,7 +10,7 @@ on:
         default: ubuntu-24.04
         type: string
       cycles:
-        description: Number of RHO solves, or "screen" for the option matrix
+        description: Number of RHO solves, "screen" for options, or "acados" for ACADOS-only smoke tests
         required: true
         default: "30"
         type: string
@@ -39,6 +39,11 @@ on:
         required: true
         default: "2000"
         type: string
+      acados_smoke_rhos:
+        description: ACADOS SQP smoke-test RHO count (full and experimental reduced mechanics)
+        required: true
+        default: "5"
+        type: string
 
 permissions:
   actions: read
@@ -58,6 +63,8 @@ env:
   BIOPTIM_REPOSITORY: mickaelbegon/BiorbdOptim
   BIOPTIM_PRODUCTION_COMMIT: 3523f1745e315f07761159d7e06bd2d876026704
   BIOPTIM_ALPAQA_COMMIT: d84e7e43534360fc048e0be26a3bd69a2abc2d77
+  ACADOS_COMMIT: 48e223e85f0408ebfd1d8c6d6fb0589e9c41b3aa
+  ACADOS_INSTALL_SCRIPT_BLOB: a30489718f4c8a103b602d320fabe0f921c64b9d
   LIBMAD_REPOSITORY: mickaelbegon/libMad
   LIBMAD_PARDISO_COMMIT: 5529f23a6bff33c566ad954da38d352f1f172356
   JULIAC_COMMIT: 73be8587a80bbb65dab7acd71d406f72867a3571
@@ -205,6 +212,7 @@ jobs:
 
   prepare-madnlp-stack:
     name: Prepare the cached MadNLP numerical stack
+    if: inputs.cycles != 'acados'
     runs-on: ${{ inputs.runner_label }}
     timeout-minutes: 90
     env:
@@ -310,6 +318,335 @@ jobs:
         with:
           path: ${{ env.CONDA }}/envs/${{ env.CONDA_ENV_NAME }}
           key: numerical-stack-${{ env.NUMERICAL_STACK_CACHE_VERSION }}-${{ inputs.runner_label }}-${{ runner.arch }}-madnlp-${{ env.CASADI_MADNLP_COMMIT }}-${{ env.LIBMAD_PARDISO_COMMIT }}-${{ hashFiles('.github/cycling-benchmark-linux-environment.yml', '.github/scripts/install_biorbd_casadi_linux.sh', '.github/scripts/install_casadi_madnlp_linux.sh') }}
+
+  prepare-acados-stack:
+    name: Prepare the cached ACADOS numerical stack
+    if: ${{ inputs.cycles != 'screen' && inputs.cycles_per_window == '1' }}
+    needs: prepare-seed
+    runs-on: ${{ inputs.runner_label }}
+    timeout-minutes: 120
+    defaults:
+      run:
+        shell: bash -el {0}
+
+    steps:
+      - name: Checkout Cocofest
+        uses: actions/checkout@v6
+
+      - name: Set up the Linux benchmark environment
+        uses: conda-incubator/setup-miniconda@v4
+        with:
+          miniforge-version: latest
+          activate-environment: ${{ env.CONDA_ENV_NAME }}
+          conda-remove-defaults: true
+
+      - name: Restore the ACADOS numerical stack
+        id: acados-stack-cache
+        uses: actions/cache/restore@v6
+        with:
+          path: ${{ env.CONDA }}/envs/${{ env.CONDA_ENV_NAME }}
+          key: numerical-stack-${{ env.NUMERICAL_STACK_CACHE_VERSION }}-${{ inputs.runner_label }}-${{ runner.arch }}-acados-${{ env.ACADOS_COMMIT }}-${{ env.ACADOS_INSTALL_SCRIPT_BLOB }}-casadi-${{ env.CASADI_VERSION }}-${{ hashFiles('.github/cycling-benchmark-linux-environment.yml', '.github/scripts/install_biorbd_casadi_linux.sh') }}
+
+      - name: Restore the official numerical stack
+        if: steps.acados-stack-cache.outputs.cache-hit != 'true'
+        id: acados-official-stack-cache
+        uses: actions/cache/restore@v6
+        with:
+          path: ${{ env.CONDA }}/envs/${{ env.CONDA_ENV_NAME }}
+          key: numerical-stack-${{ env.NUMERICAL_STACK_CACHE_VERSION }}-${{ inputs.runner_label }}-${{ runner.arch }}-official-casadi-${{ env.CASADI_VERSION }}-${{ hashFiles('.github/cycling-benchmark-linux-environment.yml', '.github/scripts/install_biorbd_casadi_linux.sh') }}
+
+      - name: Checkout the pinned ACADOS source through Bioptim
+        if: steps.acados-stack-cache.outputs.cache-hit != 'true'
+        uses: actions/checkout@v6
+        with:
+          repository: ${{ env.BIOPTIM_REPOSITORY }}
+          ref: ${{ env.BIOPTIM_PRODUCTION_COMMIT }}
+          path: .benchmark-deps/bioptim-acados
+          submodules: recursive
+
+      - name: Install the benchmark dependencies
+        if: |
+          steps.acados-stack-cache.outputs.cache-hit != 'true' &&
+          steps.acados-official-stack-cache.outputs.cache-hit != 'true'
+        run: |
+          conda env update \
+            --name "$CONDA_ENV_NAME" \
+            --file .github/cycling-benchmark-linux-environment.yml \
+            --prune
+
+      - name: Detect the CPU allocation
+        run: |
+          available_cores="$(env -u OMP_NUM_THREADS -u OMP_THREAD_LIMIT nproc)"
+          if [[ "$available_cores" -lt 1 ]]; then
+            echo "No CPU was reported by nproc." >&2
+            exit 1
+          fi
+          echo "BENCHMARK_THREADS=$available_cores" >> "$GITHUB_ENV"
+          echo "CMAKE_BUILD_PARALLEL_LEVEL=$available_cores" >> "$GITHUB_ENV"
+          lscpu
+
+      - name: Install the reference numerical stack
+        if: |
+          steps.acados-stack-cache.outputs.cache-hit != 'true' &&
+          steps.acados-official-stack-cache.outputs.cache-hit != 'true'
+        run: |
+          python -m pip install --no-deps "casadi==$CASADI_VERSION"
+          bash .github/scripts/install_biorbd_casadi_linux.sh
+
+      - name: Verify the pinned ACADOS source
+        if: steps.acados-stack-cache.outputs.cache-hit != 'true'
+        run: |
+          observed_commit="$(
+            git -C .benchmark-deps/bioptim-acados/external/acados rev-parse HEAD
+          )"
+          echo "ACADOS source commit: $observed_commit"
+          test "$observed_commit" = "$ACADOS_COMMIT"
+
+      - name: Build and install ACADOS
+        if: steps.acados-stack-cache.outputs.cache-hit != 'true'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends librhash-dev
+          bash .benchmark-deps/bioptim-acados/external/acados_install_linux.sh \
+            "$BENCHMARK_THREADS" \
+            "$CONDA_PREFIX"
+
+      - name: Validate the ACADOS numerical stack
+        run: |
+          test -f "$CONDA_PREFIX/lib/libacados.so"
+          test -f "$CONDA_PREFIX/lib/libhpipm.so"
+          python - <<'PY'
+          import acados_template
+          import biorbd_casadi
+          import casadi as cas
+
+          assert cas.has_nlpsol("ipopt")
+          print(f"CasADi {cas.__version__}; biorbd {biorbd_casadi.__version__}")
+          print(f"acados_template: {acados_template.__file__}")
+          PY
+
+      - name: Save the ACADOS numerical stack
+        if: steps.acados-stack-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v6
+        with:
+          path: ${{ env.CONDA }}/envs/${{ env.CONDA_ENV_NAME }}
+          key: numerical-stack-${{ env.NUMERICAL_STACK_CACHE_VERSION }}-${{ inputs.runner_label }}-${{ runner.arch }}-acados-${{ env.ACADOS_COMMIT }}-${{ env.ACADOS_INSTALL_SCRIPT_BLOB }}-casadi-${{ env.CASADI_VERSION }}-${{ hashFiles('.github/cycling-benchmark-linux-environment.yml', '.github/scripts/install_biorbd_casadi_linux.sh') }}
+
+  acados-smoke:
+    name: ACADOS SQP / ${{ matrix.mechanics }} — ${{ inputs.acados_smoke_rhos }} RHO
+    if: ${{ inputs.cycles != 'screen' && inputs.cycles_per_window == '1' }}
+    needs: [prepare-seed, prepare-acados-stack]
+    runs-on: ${{ inputs.runner_label }}
+    timeout-minutes: 240
+    strategy:
+      fail-fast: false
+      max-parallel: 2
+      matrix:
+        mechanics: [full, reduced]
+    defaults:
+      run:
+        shell: bash -el {0}
+
+    steps:
+      - name: Checkout Cocofest
+        uses: actions/checkout@v6
+
+      - name: Checkout the pinned Bioptim integration
+        uses: actions/checkout@v6
+        with:
+          repository: ${{ env.BIOPTIM_REPOSITORY }}
+          ref: ${{ env.BIOPTIM_PRODUCTION_COMMIT }}
+          path: .benchmark-deps/bioptim
+
+      - name: Set up the Linux benchmark environment
+        uses: conda-incubator/setup-miniconda@v4
+        with:
+          miniforge-version: latest
+          activate-environment: ${{ env.CONDA_ENV_NAME }}
+          conda-remove-defaults: true
+
+      - name: Restore the ACADOS numerical stack
+        id: smoke-acados-stack-cache
+        uses: actions/cache/restore@v6
+        with:
+          path: ${{ env.CONDA }}/envs/${{ env.CONDA_ENV_NAME }}
+          key: numerical-stack-${{ env.NUMERICAL_STACK_CACHE_VERSION }}-${{ inputs.runner_label }}-${{ runner.arch }}-acados-${{ env.ACADOS_COMMIT }}-${{ env.ACADOS_INSTALL_SCRIPT_BLOB }}-casadi-${{ env.CASADI_VERSION }}-${{ hashFiles('.github/cycling-benchmark-linux-environment.yml', '.github/scripts/install_biorbd_casadi_linux.sh') }}
+          fail-on-cache-miss: true
+
+      - name: Detect the CPU allocation
+        run: |
+          available_cores="$(env -u OMP_NUM_THREADS -u OMP_THREAD_LIMIT nproc)"
+          if [[ "$available_cores" -lt 1 ]]; then
+            echo "No CPU was reported by nproc." >&2
+            exit 1
+          fi
+          echo "BENCHMARK_THREADS=$available_cores" >> "$GITHUB_ENV"
+          echo "OMP_NUM_THREADS=$available_cores" >> "$GITHUB_ENV"
+          echo "OMP_THREAD_LIMIT=$available_cores" >> "$GITHUB_ENV"
+          lscpu
+          grep '^Cpus_allowed_list' /proc/self/status || true
+
+      - name: Install the pinned Bioptim integration
+        run: python -m pip install --no-deps -e .benchmark-deps/bioptim
+
+      - name: Download the validated common continuation seed
+        uses: actions/download-artifact@v8
+        with:
+          name: cycling-assisted-common-seed-${{ github.run_id }}
+          path: benchmark-seed
+
+      - name: Verify the ACADOS solver environment
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+        run: |
+          test -f "$CONDA_PREFIX/lib/libacados.so"
+          python - <<'PY'
+          import acados_template
+          import bioptim
+          import biorbd_casadi
+          import casadi as cas
+
+          assert cas.has_nlpsol("ipopt")
+          print(f"CasADi {cas.__version__}")
+          print(f"Bioptim {bioptim.__version__}")
+          print(f"biorbd {biorbd_casadi.__version__}")
+          print(f"acados_template: {acados_template.__file__}")
+          PY
+          python -m pytest -q \
+            tests/shard1/test_reduced_cycling.py \
+            tests/shard1/test_periodic_pulse_width.py::test_acados_example_defaults_to_the_assisted_periodic_profile \
+            tests/shard1/test_periodic_pulse_width.py::test_common_target_seed_enables_the_robust_acados_reference_preparation \
+            tests/shard1/test_periodic_pulse_width.py::test_phase_one_maps_reduced_mechanics_without_classifying_them_as_fes \
+            tests/shard1/test_periodic_pulse_width.py::test_reduced_theta_target_uses_absolute_cycle_reference_without_drift \
+            tests/shard1/test_periodic_pulse_width.py::test_acados_irk_transfer_rollout_uses_scaled_variables_and_stage_data
+
+      - name: Run the ACADOS assisted SQP smoke test
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+          ACADOS_SMOKE_RHOS: ${{ inputs.acados_smoke_rhos }}
+          ACADOS_MECHANICS: ${{ matrix.mechanics }}
+          BENCHMARK_ASSISTANCE: ${{ inputs.crank_assistance_nm }}
+          BENCHMARK_Q_SLACK: ${{ inputs.terminal_wheel_q_slack }}
+          COCOFEST_BENCHMARK_COMMIT: ${{ github.sha }}
+          BIOPTIM_BENCHMARK_COMMIT: ${{ env.BIOPTIM_PRODUCTION_COMMIT }}
+          BIOPTIM_INTEGRATION_BRANCH: codex/fatrop-cocofest-benchmark
+        run: |
+          if ! [[ "$ACADOS_SMOKE_RHOS" =~ ^[1-9][0-9]*$ ]]; then
+            echo "ACADOS_SMOKE_RHOS must be a strictly positive integer." >&2
+            exit 1
+          fi
+          mkdir -p acados-smoke-results
+          mechanics_options=()
+          if [[ "$ACADOS_MECHANICS" == "reduced" ]]; then
+            mechanics_options+=(
+              --mechanical-formulation reduced
+              --experimental-reduced-acados
+            )
+          fi
+
+          set -o pipefail
+          python examples/fes_multibody/cycling/cycling_fes_solver_comparison.py \
+            --solvers acados \
+            --objective fatigue \
+            --ipopt-profile periodic_collocation \
+            --cycles-per-window 1 \
+            --stimulations-per-cycle 30 \
+            --n-windows "$ACADOS_SMOKE_RHOS" \
+            --n-threads "$BENCHMARK_THREADS" \
+            --crank-assistance "$BENCHMARK_ASSISTANCE" \
+            --primal-feasibility-threshold 1e-5 \
+            --max-consecutive-failing 2 \
+            --standard-warmup-seed .github/benchmark-seeds/legacy-resistive-0p22-warmup.npz \
+            --legacy-standard-warmup-seed-signed-torque 0.22 \
+            --standard-warmup-seed-continuation \
+            --common-initial-solution "benchmark-seed/common-${ACADOS_MECHANICS}.npz" \
+            --warmup-ipopt-linear-solver mumps \
+            --ipopt-linear-solver mumps \
+            --ipopt-disable-historical-initial-guess \
+            --state-scaling full \
+            --first-node-wheel-q-slack 0 \
+            --terminal-wheel-q-slack "$BENCHMARK_Q_SLACK" \
+            --acados-dir "$CONDA_PREFIX" \
+            --acados-max-iter 100 \
+            --acados-nlp-solver-type SQP \
+            --acados-integrator-type IRK \
+            --acados-collocation-type GAUSS_LEGENDRE \
+            --acados-sim-stages 4 \
+            --acados-sim-steps 5 \
+            --acados-newton-iter 5 \
+            --acados-diagnostics \
+            --codegen-tag "ci-${ACADOS_MECHANICS}" \
+            --compact-rho-output \
+            --print-traces \
+            --output-json "$GITHUB_WORKSPACE/acados-smoke-results/acados-${ACADOS_MECHANICS}.json" \
+            "${mechanics_options[@]}" \
+            2>&1 | tee "acados-smoke-results/acados-${ACADOS_MECHANICS}.log"
+
+          result="$GITHUB_WORKSPACE/acados-smoke-results/acados-${ACADOS_MECHANICS}.json"
+          jq -e '
+            .configurations.acados |
+            (
+              .acados_nlp_solver_type == "SQP" and
+              .acados_hessian_approx == "GAUSS_NEWTON" and
+              .acados_integrator_type == "IRK" and
+              .terminal_wheel_q_reference_mode == "absolute_initial"
+            )
+          ' "$result"
+
+      - name: Add the ACADOS result to the job summary
+        if: always()
+        env:
+          ACADOS_MECHANICS: ${{ matrix.mechanics }}
+        run: |
+          result="acados-smoke-results/acados-${ACADOS_MECHANICS}.json"
+          if [[ ! -f "$result" ]]; then
+            echo "### ACADOS / ${ACADOS_MECHANICS}: no JSON result" \
+              >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          {
+            echo "### ACADOS SQP / ${ACADOS_MECHANICS}"
+            echo
+            echo "| Field | Value |"
+            echo "|---|---:|"
+            jq -r '
+              .results[0] |
+              "| Success | \(.success) |",
+              "| Validated cycles | \(.validated_cycles) |",
+              "| Attempted RHO | \(.attempted_windows) |",
+              "| End-to-end wall (s) | \(.end_to_end_wall_time_s) |",
+              "| Setup + initial guess (s) | \(.initial_guess_preparation_time_s) |",
+              "| Sum attempted RHO wall (s) | \(.attempted_rho_wall_time_sum_s) |",
+              "| Hot RHO wall median (s) | \(.hot_wall_time_median_s) |",
+              "| Hot RHO wall P90 (s) | \(.hot_wall_time_p90_s) |",
+              "| First failed RHO | \(.first_failed_rho) |",
+              "| Stop | \(.stop.label) |"
+            ' "$result"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload ACADOS JSON and log
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: cycling-acados-smoke-${{ matrix.mechanics }}-${{ github.run_id }}
+          path: acados-smoke-results/
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Require an attempted ACADOS RHO without infrastructure errors
+        if: always()
+        env:
+          ACADOS_MECHANICS: ${{ matrix.mechanics }}
+        run: |
+          result="acados-smoke-results/acados-${ACADOS_MECHANICS}.json"
+          if [[ ! -f "$result" ]]; then
+            echo "ACADOS / ${ACADOS_MECHANICS}: smoke-test JSON is missing." >&2
+            exit 1
+          fi
+          jq -e '
+            .results[0] |
+            (.attempted_windows > 0 and .error == null)
+          ' "$result"
 
   screen-options:
     name: Option screen — ${{ matrix.solver }}
@@ -594,7 +931,7 @@ jobs:
 
   benchmark:
     name: ${{ matrix.case_slug }} / ${{ matrix.mechanics }} — ${{ matrix.benchmark_rhos }} RHO
-    if: inputs.cycles != 'screen'
+    if: ${{ inputs.cycles != 'screen' && inputs.cycles != 'acados' }}
     needs: [prepare-seed, prepare-madnlp-stack]
     runs-on: ${{ inputs.runner_label }}
     timeout-minutes: 350
@@ -1137,7 +1474,7 @@ jobs:
 
   report:
     name: Aggregate Kevin benchmark
-    if: ${{ always() && inputs.cycles != 'screen' }}
+    if: ${{ always() && inputs.cycles != 'screen' && inputs.cycles != 'acados' }}
     needs: benchmark
     runs-on: ubuntu-24.04
     permissions:
