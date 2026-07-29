@@ -3212,6 +3212,8 @@ def test_github_acados_smoke_uses_the_robust_reference_profile():
     assert "--acados-collocation-type GAUSS_LEGENDRE" in workflow
     assert "--acados-stationarity-tolerance 1e-3" in workflow
     assert "--acados-stationarity-tolerance 5e-3" in workflow
+    assert "--acados-control-homotopy-release-final-radius" in workflow
+    assert ".acados_control_homotopy_keep_final_radius == false" in workflow
     assert "--max-consecutive-failing 2" in workflow
     assert ".terminal_wheel_q_reference_mode == \"absolute_initial\"" in workflow
 

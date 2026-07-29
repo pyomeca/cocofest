@@ -544,6 +544,7 @@ jobs:
               --mechanical-formulation reduced
               --experimental-reduced-acados
               --acados-stationarity-tolerance 5e-3
+              --acados-control-homotopy-release-final-radius
             )
           else
             mechanics_options+=(
@@ -600,7 +601,11 @@ jobs:
               .acados_nlp_solver_type == "SQP" and
               .acados_hessian_approx == "GAUSS_NEWTON" and
               .acados_integrator_type == "IRK" and
-              .terminal_wheel_q_reference_mode == "absolute_initial"
+              .terminal_wheel_q_reference_mode == "absolute_initial" and
+              (
+                .mechanical_formulation != "reduced" or
+                .acados_control_homotopy_keep_final_radius == false
+              )
             )
           ' "$result"
 
