@@ -565,9 +565,17 @@ jobs:
                 --acados-control-homotopy-window-growth 10
                 --acados-control-homotopy-window-max-radius 1e-5
               )
+            else
+              # The full model needs the homotopy to construct a nearby
+              # feasible point, but retaining the final ±1 us radius prevents
+              # the SQP from following the physically required PW branch.
+              mechanics_options+=(
+                --acados-control-homotopy-release-final-radius
+              )
             fi
             if [[ "$nlp_solver" == "SQP_RTI" ]]; then
               solver_options+=(
+                --acados-globalization FIXED_STEP
                 --acados-nlp-qp-tol-strategy FIXED_QP_TOL
                 --acados-qpscaling-scale-objective NO_OBJECTIVE_SCALING
                 --acados-qpscaling-scale-constraints NO_CONSTRAINT_SCALING
@@ -706,7 +714,11 @@ jobs:
             result="acados-smoke-results/sqp-irk-reference-${mechanics}/result.json"
             jq -e '
               .results[0] |
-              (.attempted_windows > 0 and .error == null)
+              (
+                .attempted_windows > 0
+                and .error == null
+                and .success == true
+              )
             ' "$result"
           done
 

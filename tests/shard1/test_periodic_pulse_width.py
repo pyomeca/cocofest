@@ -3297,6 +3297,8 @@ def test_github_acados_runner_uses_reference_and_option_profiles_sequentially():
     assert "--acados-control-homotopy-tolerance 2e-2" in workflow
     assert "--acados-qpscaling-scale-objective NO_OBJECTIVE_SCALING" in workflow
     assert "--acados-qpscaling-scale-constraints NO_CONSTRAINT_SCALING" in workflow
+    assert "--acados-globalization FIXED_STEP" in workflow
+    assert "--acados-control-homotopy-release-final-radius" in workflow
     assert "run_case sqp-erk" in workflow
     assert "--acados-stationarity-tolerance \"$stationarity\"" in workflow
     assert "--acados-control-homotopy-window-growth 10" in workflow
