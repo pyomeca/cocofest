@@ -347,6 +347,28 @@ def test_control_homotopy_radii_are_parsed_as_an_increasing_sequence():
     assert args.acados_control_homotopy_stage_iterations == 40
 
 
+def test_comparison_cli_forwards_acados_hot_start_homotopy_options():
+    args = comparison_example.build_cli().parse_args(
+        [
+            "--disable-acados-assisted-hot-start",
+            "--acados-control-homotopy-radii",
+            "1e-6,1e-5",
+            "--acados-control-homotopy-tolerance",
+            "2e-2",
+            "--acados-control-homotopy-stage-iterations",
+            "30",
+            "--acados-control-homotopy-max-restarts",
+            "2",
+        ]
+    )
+
+    assert args.acados_assisted_hot_start is False
+    assert args.acados_control_homotopy_radii == (1e-6, 1e-5)
+    assert args.acados_control_homotopy_tolerance == 2e-2
+    assert args.acados_control_homotopy_stage_iterations == 30
+    assert args.acados_control_homotopy_max_restarts == 2
+
+
 def test_control_homotopy_window_radius_growth_respects_its_physical_cap():
     radius = 1e-7
     observed = []
@@ -3271,12 +3293,23 @@ def test_github_acados_runner_uses_reference_and_option_profiles_sequentially():
     assert "run_case sqp-irk-reference" in workflow
     assert "run_case sqp-rti-irk" in workflow
     assert "SQP_RTI IRK" in workflow
+    assert "--acados-control-homotopy-radii 1e-6,1e-5" in workflow
+    assert "--acados-control-homotopy-tolerance 2e-2" in workflow
+    assert "--acados-qpscaling-scale-objective NO_OBJECTIVE_SCALING" in workflow
+    assert "--acados-qpscaling-scale-constraints NO_CONSTRAINT_SCALING" in workflow
     assert "run_case sqp-erk" in workflow
     assert "--acados-stationarity-tolerance \"$stationarity\"" in workflow
     assert "--acados-control-homotopy-window-growth 10" in workflow
     assert "--acados-control-homotopy-window-max-radius 1e-5" in workflow
     assert "--max-consecutive-failing 2" in workflow
     assert "cycling-acados-smoke-${{ github.run_id }}" in workflow
+    assert "run_case fatrop-rk4 fatrop full structured rk4" in workflow
+    assert "run_case fatrop-rk4 fatrop reduced structured rk4" in workflow
+    assert (
+        "run_case fatrop-rk4-compiled-probe fatrop full structured rk4 "
+        "benchmark-probes 1 true"
+    ) in workflow
+    assert "cycling-fatrop-compile-probes-${{ github.run_id }}" in workflow
 
 
 def test_single_shot_requires_solver_and_feasibility_success():

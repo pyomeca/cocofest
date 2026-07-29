@@ -551,6 +551,7 @@ jobs:
             local collocation_type=GAUSS_LEGENDRE
             local case_dir="$GITHUB_WORKSPACE/acados-smoke-results/${variant}-${mechanics}"
             local mechanics_options=()
+            local solver_options=()
             local stationarity=1e-3
             mkdir -p "$case_dir"
             if [[ "$integrator" == "ERK" ]]; then
@@ -563,6 +564,13 @@ jobs:
                 --experimental-reduced-acados
                 --acados-control-homotopy-window-growth 10
                 --acados-control-homotopy-window-max-radius 1e-5
+              )
+            fi
+            if [[ "$nlp_solver" == "SQP_RTI" ]]; then
+              solver_options+=(
+                --acados-nlp-qp-tol-strategy FIXED_QP_TOL
+                --acados-qpscaling-scale-objective NO_OBJECTIVE_SCALING
+                --acados-qpscaling-scale-constraints NO_CONSTRAINT_SCALING
               )
             fi
 
@@ -591,6 +599,8 @@ jobs:
               --terminal-wheel-q-slack "$BENCHMARK_Q_SLACK" \
               --acados-dir "$CONDA_PREFIX" \
               --acados-max-iter 100 \
+              --acados-control-homotopy-radii 1e-6,1e-5 \
+              --acados-control-homotopy-tolerance 2e-2 \
               --acados-nlp-solver-type "$nlp_solver" \
               --acados-integrator-type "$integrator" \
               --acados-collocation-type "$collocation_type" \
@@ -604,6 +614,7 @@ jobs:
               --print-traces \
               --output-json "$case_dir/result.json" \
               "${mechanics_options[@]}" \
+              "${solver_options[@]}" \
               2>&1 | tee "$case_dir/solver.log"
             local solver_exit="${PIPESTATUS[0]}"
             set -e
@@ -613,7 +624,7 @@ jobs:
           for mechanics in full reduced; do
             run_case sqp-irk-reference "$mechanics" "$ACADOS_SMOKE_RHOS" SQP IRK 5 5
             run_case sqp-rti-irk "$mechanics" "$ACADOS_OPTION_RHOS" SQP_RTI IRK 5 5
-            run_case sqp-erk "$mechanics" "$ACADOS_OPTION_RHOS" SQP ERK 5 5
+            run_case sqp-erk "$mechanics" "$ACADOS_OPTION_RHOS" SQP ERK 20 5
             run_case sqp-irk-light "$mechanics" "$ACADOS_OPTION_RHOS" SQP IRK 2 3
           done
 
@@ -686,6 +697,13 @@ jobs:
             exit 1
           fi
           for result in "${results[@]}"; do
+            jq -e '
+              .results[0] |
+              (.solver != null)
+            ' "$result"
+          done
+          for mechanics in full reduced; do
+            result="acados-smoke-results/sqp-irk-reference-${mechanics}/result.json"
             jq -e '
               .results[0] |
               (.attempted_windows > 0 and .error == null)
@@ -1019,6 +1037,12 @@ jobs:
           ref: ${{ matrix.bioptim_commit }}
           path: .benchmark-deps/bioptim
 
+      - name: Apply the Fatrop C-compile plugin-name fix
+        if: matrix.solver == 'official'
+        run: |
+          git -C .benchmark-deps/bioptim apply \
+            "$GITHUB_WORKSPACE/.github/patches/bioptim-fatrop-c-compile-plugin-case.patch"
+
       - name: Checkout the pinned libMad PARDISO runtime
         if: matrix.solver == 'madnlp'
         uses: actions/checkout@v6
@@ -1263,7 +1287,7 @@ jobs:
           BIOPTIM_BENCHMARK_COMMIT: ${{ matrix.bioptim_commit }}
           BIOPTIM_INTEGRATION_BRANCH: ${{ matrix.integration_branch }}
         run: |
-          mkdir -p benchmark-results
+          mkdir -p benchmark-results benchmark-probes
           if ! [[ "$BENCHMARK_RHOS" =~ ^[1-9][0-9]*$ ]]; then
             echo "BENCHMARK_RHOS must be a strictly positive integer." >&2
             exit 1
@@ -1275,7 +1299,10 @@ jobs:
             local mechanics="$3"
             local backend="$4"
             local ode_solver="$5"
-            local case_dir="$GITHUB_WORKSPACE/benchmark-results/${case_slug}-${mechanics}"
+            local case_root="${6:-benchmark-results}"
+            local case_windows="${7:-$BENCHMARK_CYCLES}"
+            local compile_mode="${8:-false}"
+            local case_dir="$GITHUB_WORKSPACE/${case_root}/${case_slug}-${mechanics}"
             local result="$case_dir/result.json"
             local solver_options=()
             local solver_tolerance=1e-6
@@ -1287,16 +1314,16 @@ jobs:
                 --ipopt-dual-warm-start-mode bounds
               )
             elif [[ "$solver" == "fatrop" ]]; then
-              # Compilation time is intentionally included only in preparation:
-              # the user-facing comparison emphasizes hot RHO solve times.
               solver_options+=(
-                --fatrop-c-compile
                 --fatrop-max-iter 1000
                 --fatrop-structure-detection auto
                 --fatrop-bound-tightening-factor 1e-8
                 --fatrop-state-scaling none
                 --fatrop-dual-warm-start-mode off
               )
+              if [[ "$compile_mode" == "true" ]]; then
+                solver_options+=(--fatrop-c-compile)
+              fi
               if [[ "$ode_solver" == "rk4" ]]; then
                 solver_options+=(--ipopt-ode-solver rk4 --ipopt-rk-steps 5)
               else
@@ -1326,7 +1353,7 @@ jobs:
               --ipopt-profile periodic_collocation \
               --cycles-per-window "$BENCHMARK_CYCLES_PER_WINDOW" \
               --stimulations-per-cycle 30 \
-              --n-windows "$BENCHMARK_CYCLES" \
+              --n-windows "$case_windows" \
               --n-threads "$BENCHMARK_THREADS" \
               --crank-assistance "$BENCHMARK_ASSISTANCE" \
               --nlp-tolerance "$solver_tolerance" \
@@ -1356,10 +1383,16 @@ jobs:
           if [[ "$BENCHMARK_SOLVER" == "official" ]]; then
             run_case ipopt ipopt full mumps collocation
             run_case ipopt ipopt reduced mumps collocation
-            run_case fatrop-rk4-compiled fatrop full structured rk4
-            run_case fatrop-rk4-compiled fatrop reduced structured rk4
-            run_case fatrop-collocation-compiled fatrop full structured collocation
-            run_case fatrop-collocation-compiled fatrop reduced structured collocation
+            run_case fatrop-rk4 fatrop full structured rk4
+            run_case fatrop-rk4 fatrop reduced structured rk4
+            run_case fatrop-collocation fatrop full structured collocation
+            run_case fatrop-collocation fatrop reduced structured collocation
+            # Bioptim currently rebuilds the symbolic NLP when the moving
+            # horizon changes absolute bounds. C compilation is therefore
+            # measured on one isolated RHO per formulation, not repeated over
+            # the 100-RHO hot benchmark.
+            run_case fatrop-rk4-compiled-probe fatrop full structured rk4 benchmark-probes 1 true
+            run_case fatrop-rk4-compiled-probe fatrop reduced structured rk4 benchmark-probes 1 true
           else
             run_case madnlp-pardiso madnlp full pardiso_mkl collocation
             run_case madnlp-pardiso madnlp reduced pardiso_mkl collocation
@@ -1403,6 +1436,15 @@ jobs:
           if-no-files-found: warn
           retention-days: 30
 
+      - name: Upload the isolated Fatrop C-compilation probes
+        if: ${{ always() && matrix.solver == 'official' }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: cycling-fatrop-compile-probes-${{ github.run_id }}
+          path: benchmark-probes/
+          if-no-files-found: warn
+          retention-days: 30
+
       - name: Require every expected case without infrastructure errors
         if: always()
         shell: bash
@@ -1424,6 +1466,21 @@ jobs:
               (.attempted_windows > 0 and .error == null)
             ' "$result"
           done
+          if [[ "$BENCHMARK_SOLVER" == "official" ]]; then
+            mapfile -t probes < <(
+              find benchmark-probes -name result.json -type f | sort
+            )
+            if [[ "${#probes[@]}" -ne 2 ]]; then
+              echo "Fatrop: expected 2 compiled probe JSON files, found ${#probes[@]}." >&2
+              exit 1
+            fi
+            for result in "${probes[@]}"; do
+              jq -e '
+                .results[0] |
+                (.attempted_windows > 0 and .error == null)
+              ' "$result"
+            done
+          fi
 
   screen-report:
     name: Aggregate solver option screen
@@ -1522,7 +1579,7 @@ jobs:
           fi
           python .github/scripts/summarize_cycling_benchmark.py \
             --output-dir benchmark-report \
-            --expected-cases ipopt/full,fatrop-rk4-compiled/full,fatrop-collocation-compiled/full,madnlp-pardiso/full,madnlp-mumps/full,acados/full,ipopt/reduced,fatrop-rk4-compiled/reduced,fatrop-collocation-compiled/reduced,madnlp-pardiso/reduced,madnlp-mumps/reduced,acados/reduced \
+            --expected-cases ipopt/full,fatrop-rk4/full,fatrop-collocation/full,madnlp-pardiso/full,madnlp-mumps/full,acados/full,ipopt/reduced,fatrop-rk4/reduced,fatrop-collocation/reduced,madnlp-pardiso/reduced,madnlp-mumps/reduced,acados/reduced \
             "${result_files[@]}"
           cat benchmark-report/benchmark-comparison.md >> "$GITHUB_STEP_SUMMARY"
 

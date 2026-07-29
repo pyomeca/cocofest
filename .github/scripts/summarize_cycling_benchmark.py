@@ -36,14 +36,14 @@ COMPARABILITY_FIELDS = (
 DEFAULT_EXPECTED_SOLVERS = ("ipopt", "fatrop", "madnlp")
 DEFAULT_EXPECTED_CASES = (
     "ipopt/full",
-    "fatrop-rk4-compiled/full",
-    "fatrop-collocation-compiled/full",
+    "fatrop-rk4/full",
+    "fatrop-collocation/full",
     "madnlp-pardiso/full",
     "madnlp-mumps/full",
     "acados/full",
     "ipopt/reduced",
-    "fatrop-rk4-compiled/reduced",
-    "fatrop-collocation-compiled/reduced",
+    "fatrop-rk4/reduced",
+    "fatrop-collocation/reduced",
     "madnlp-pardiso/reduced",
     "madnlp-mumps/reduced",
     "acados/reduced",

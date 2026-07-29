@@ -1,0 +1,13 @@
+diff --git a/bioptim/interfaces/interface_utils.py b/bioptim/interfaces/interface_utils.py
+index 2d4c643..11c10ef 100644
+--- a/bioptim/interfaces/interface_utils.py
++++ b/bioptim/interfaces/interface_utils.py
+@@ -162,5 +162,7 @@ def generic_solve(interface: SolverInterface, expand_during_shake_tree: Bool = F
+         if interface.c_compile:
+             nlpsol("nlpsol", interface.solver_name.lower(), interface.nlp, options).generate_dependencies("nlp.c")
+-            interface.shaked_ocp_solver = nlpsol("nlpsol", interface.solver_name, Importer("nlp.c", "shell"), options)
++            interface.shaked_ocp_solver = nlpsol(
++                "nlpsol", interface.solver_name.lower(), Importer("nlp.c", "shell"), options
++            )
+         else:
+             interface.shaked_ocp_solver = nlpsol("solver", interface.solver_name.lower(), interface.nlp, options)

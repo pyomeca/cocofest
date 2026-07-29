@@ -28,6 +28,7 @@ try:
         ACADOS_STATUS_NAMES,
         DEFAULT_CRANK_TORQUE_NM,
         build_argument_parser,
+        parse_control_homotopy_radii,
         parse_crank_assistance,
         parse_proximal_control_weights,
         parse_terminal_wheel_q_slacks,
@@ -38,6 +39,7 @@ except ImportError:
         ACADOS_STATUS_NAMES,
         DEFAULT_CRANK_TORQUE_NM,
         build_argument_parser,
+        parse_control_homotopy_radii,
         parse_crank_assistance,
         parse_proximal_control_weights,
         parse_terminal_wheel_q_slacks,
@@ -77,9 +79,11 @@ BENCHMARK_CONFIGURATION_FIELDS = (
     "acados_newton_iter",
     "acados_hessian_approx",
     "acados_nlp_solver_type",
+    "acados_assisted_hot_start",
     "acados_control_homotopy_radii",
     "acados_control_homotopy_tolerance",
     "acados_control_homotopy_stage_iterations",
+    "acados_control_homotopy_max_restarts",
     "acados_control_homotopy_keep_final_radius",
     "acados_control_homotopy_window_growth",
     "acados_control_homotopy_window_max_radius",
@@ -1070,6 +1074,11 @@ def _solver_config(
     ipopt_linear_solver: str,
     ipopt_dual_warm_start_mode: str,
     acados_max_iter: int,
+    acados_assisted_hot_start: bool,
+    acados_control_homotopy_radii: tuple[float, ...] | None,
+    acados_control_homotopy_tolerance: float,
+    acados_control_homotopy_stage_iterations: int,
+    acados_control_homotopy_max_restarts: int,
     control_regularization_weight: float,
     control_regularization_target: float | None,
     control_regularization_target_source: str,
@@ -1280,6 +1289,15 @@ def _solver_config(
             objective_shape=objective_shape,
             constant_crank_torque=resistive_torque,
             max_acados_iterations=acados_max_iter,
+            acados_assisted_hot_start=acados_assisted_hot_start,
+            acados_control_homotopy_radii=acados_control_homotopy_radii,
+            acados_control_homotopy_tolerance=acados_control_homotopy_tolerance,
+            acados_control_homotopy_stage_iterations=(
+                acados_control_homotopy_stage_iterations
+            ),
+            acados_control_homotopy_max_restarts=(
+                acados_control_homotopy_max_restarts
+            ),
             ipopt_linear_solver=ipopt_linear_solver,
             ipopt_dual_warm_start_mode=ipopt_dual_warm_start_mode,
             n_windows=n_windows,
@@ -2340,6 +2358,11 @@ def main(
     alpaqa_max_no_progress: int | None = None,
     optional_nlp_periodic_ipopt_hot_start: bool = True,
     acados_max_iter: int = 100,
+    acados_assisted_hot_start: bool = True,
+    acados_control_homotopy_radii: tuple[float, ...] | None = None,
+    acados_control_homotopy_tolerance: float = 5e-4,
+    acados_control_homotopy_stage_iterations: int = 50,
+    acados_control_homotopy_max_restarts: int = 1,
     acados_control_homotopy_keep_final_radius: bool | None = None,
     acados_control_homotopy_window_growth: float = 1.0,
     acados_control_homotopy_window_max_radius: float | None = None,
@@ -2498,6 +2521,15 @@ def main(
         ipopt_linear_solver=ipopt_linear_solver,
         ipopt_dual_warm_start_mode=ipopt_dual_warm_start_mode,
         acados_max_iter=acados_max_iter,
+        acados_assisted_hot_start=acados_assisted_hot_start,
+        acados_control_homotopy_radii=acados_control_homotopy_radii,
+        acados_control_homotopy_tolerance=acados_control_homotopy_tolerance,
+        acados_control_homotopy_stage_iterations=(
+            acados_control_homotopy_stage_iterations
+        ),
+        acados_control_homotopy_max_restarts=(
+            acados_control_homotopy_max_restarts
+        ),
         control_regularization_weight=control_regularization_weight,
         control_regularization_target=control_regularization_target,
         control_regularization_target_source=control_regularization_target_source,
@@ -2593,6 +2625,15 @@ def main(
         ipopt_linear_solver=ipopt_linear_solver,
         ipopt_dual_warm_start_mode=ipopt_dual_warm_start_mode,
         acados_max_iter=acados_max_iter,
+        acados_assisted_hot_start=acados_assisted_hot_start,
+        acados_control_homotopy_radii=acados_control_homotopy_radii,
+        acados_control_homotopy_tolerance=acados_control_homotopy_tolerance,
+        acados_control_homotopy_stage_iterations=(
+            acados_control_homotopy_stage_iterations
+        ),
+        acados_control_homotopy_max_restarts=(
+            acados_control_homotopy_max_restarts
+        ),
         control_regularization_weight=(
             acados_control_regularization_weight
             if acados_control_regularization_weight is not None
@@ -2907,14 +2948,14 @@ def main(
     if mechanical_formulation not in ("full", "reduced"):
         raise ValueError("mechanical_formulation must be 'full' or 'reduced'.")
     if mechanical_formulation == "reduced":
-        supported = {"ipopt", "madnlp"}
+        supported = {"ipopt", "fatrop", "madnlp"}
         if experimental_reduced_acados:
             supported.add("acados")
         unsupported = set(solvers) - supported
         if unsupported:
             raise ValueError(
-                "Reduced mechanics are currently certified only for IPOPT and "
-                f"MadNLP; remove {', '.join(sorted(unsupported))}."
+                "Reduced mechanics are currently certified only for IPOPT, "
+                f"Fatrop and MadNLP; remove {', '.join(sorted(unsupported))}."
             )
         for solver_name in supported:
             solver_args[solver_name].mechanical_formulation = "reduced"
@@ -3508,6 +3549,38 @@ def build_cli() -> argparse.ArgumentParser:
         help="Do not load the historical initial guess file for the direct IPOPT-side solve.",
     )
     parser.add_argument("--acados-max-iter", type=int, default=100)
+    assisted_hot_start_group = parser.add_mutually_exclusive_group()
+    assisted_hot_start_group.add_argument(
+        "--acados-assisted-hot-start",
+        dest="acados_assisted_hot_start",
+        action="store_true",
+        default=True,
+    )
+    assisted_hot_start_group.add_argument(
+        "--disable-acados-assisted-hot-start",
+        dest="acados_assisted_hot_start",
+        action="store_false",
+    )
+    parser.add_argument(
+        "--acados-control-homotopy-radii",
+        type=parse_control_homotopy_radii,
+        default=None,
+    )
+    parser.add_argument(
+        "--acados-control-homotopy-tolerance",
+        type=float,
+        default=5e-4,
+    )
+    parser.add_argument(
+        "--acados-control-homotopy-stage-iterations",
+        type=int,
+        default=50,
+    )
+    parser.add_argument(
+        "--acados-control-homotopy-max-restarts",
+        type=int,
+        default=1,
+    )
     retained_radius_group = parser.add_mutually_exclusive_group()
     retained_radius_group.add_argument(
         "--acados-control-homotopy-keep-final-radius",
@@ -3926,6 +3999,17 @@ if __name__ == "__main__":
             args.optional_nlp_periodic_ipopt_hot_start
         ),
         acados_max_iter=args.acados_max_iter,
+        acados_assisted_hot_start=args.acados_assisted_hot_start,
+        acados_control_homotopy_radii=args.acados_control_homotopy_radii,
+        acados_control_homotopy_tolerance=(
+            args.acados_control_homotopy_tolerance
+        ),
+        acados_control_homotopy_stage_iterations=(
+            args.acados_control_homotopy_stage_iterations
+        ),
+        acados_control_homotopy_max_restarts=(
+            args.acados_control_homotopy_max_restarts
+        ),
         acados_control_homotopy_keep_final_radius=(
             args.acados_control_homotopy_keep_final_radius
         ),
