@@ -924,12 +924,10 @@ Le temps de compilation est compté dans le mur-à-mur, mais pas dans la médian
 chaude. Sur Apple Silicon, le coût initial peut dépasser le gain pour un petit
 nombre de RHO. L’intérêt doit être évalué sur 100 RHO sous Linux.
 
-La CI exécute, sur le même runner, une ablation IPOPT
-interprété/compilé de cinq RHO. Les campagnes principales full/reduced IPOPT
-utilisent aussi la compilation persistante quand
-`compile_nlp_evaluators=true`. La CI exige le même nombre de cycles validés,
-la même faisabilité physique et des métriques de fatigue compatibles.
-Pour les runs compilés multi-RHO, elle exige aussi :
+Les campagnes principales full/reduced IPOPT utilisent la compilation
+persistante quand `compile_nlp_evaluators=true`. Ce sont elles qui certifient
+la compilation sur le problème d’endurance réellement mesuré. Pour chaque run
+compilé multi-RHO, la CI exige :
 
 ```text
 observed_solves == attempted_windows
@@ -941,6 +939,16 @@ le graphe. Le tracker conserve également taille, `mtime` et SHA-256 de `nlp.c`;
 la CI multi-RHO exige une seule version observée et sa réutilisation. Cette
 preuve complète le contrôle d’identité du solveur CasADi sans inclure le coût
 du hash à chaque RHO : le contenu n’est relu que si taille ou `mtime` changent.
+
+L’ancienne ablation intégrée « interprété puis compilé sur cinq RHO » est
+archivée. Elle reconstruisait deux OCP full supplémentaires après les cas full
+et reduced, et le runner GitHub a été arrêté avec le signal `143` pendant
+cette duplication dans le run `30515417589`. Elle ne vérifiait pas mieux la
+réutilisation que les compteurs, le hash de `nlp.c` et les bornes paramétriques
+déjà contrôlés dans les cas principaux. Pour remesurer le gain de compilation,
+il faut lancer deux workflows identiques avec
+`compile_nlp_evaluators=true/false`; cela évite aussi de biaiser les temps par
+la mémoire résiduelle d’un autre OCP.
 
 `--madnlp-c-compile` reste accepté par les CLI pour ne pas bloquer une future
 intégration, mais le Bioptim épinglé lève explicitement
@@ -1401,8 +1409,7 @@ Le rapport combiné contient :
 - `muscle-fatigue.csv` : coût, AUC et capacité par muscle;
 - `pulse-width-cycle-variation.csv` : variation des PW entre cycles;
 - chaque `result.json` individuel;
-- chaque `solver.log`;
-- l’ablation de compilation IPOPT.
+- chaque `solver.log`.
 
 Les patrons sont comparés aux cycles 10 et 30. Ils sont aussi interpolés selon
 la phase réelle du pédalier afin de séparer une stratégie de stimulation
@@ -1469,8 +1476,8 @@ Ordre recommandé :
 7. évaluer `FEASIBILITY_QP -> SQP`, puis seulement si nécessaire construire
    les deux OCP de restauration/optimalité;
 8. tester RTI après convergence répétée du SQP complet;
-9. exploiter l’ablation CI compilation activée/désactivée et confirmer le
-   hash persistant du source généré;
+9. comparer deux workflows dédiés, compilation activée puis désactivée, et
+   confirmer dans le cas compilé le hash persistant du source généré;
 10. profiler séparément dérivées et factorisation MUMPS avant d’augmenter le
     nombre de threads.
 

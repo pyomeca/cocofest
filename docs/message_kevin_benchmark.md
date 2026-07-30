@@ -59,8 +59,17 @@ dans cette campagne concerne donc IPOPT.
 
 La validation doit être graduelle : 5 RHO, puis 30, puis 100 uniquement si le
 palier précédent produit tous les artefacts attendus, sans erreur
-d’infrastructure, sans graphe non-SX et sans option libMad ignorée. Une
-non-convergence numérique reste bien sûr un résultat à analyser.
+d’infrastructure, sans graphe non-SX et sans option libMad ignorée.
+
+La compilation IPOPT est validée directement dans les cas full et reduced :
+la bibliothèque doit être construite une seule fois, le source `nlp.c` doit
+garder le même hash et les bornes mobiles doivent changer sans reconstruction
+du graphe. L’ancienne ablation intégrée qui reconstruisait deux OCP full
+supplémentaires a été retirée après un arrêt `143` du runner. Si tu veux
+remesurer compilé contre interprété, il faut lancer deux workflows identiques
+en changeant seulement `compile_nlp_evaluators`; les artefacts principaux
+restent alors directement comparables.
+Une non-convergence numérique reste bien sûr un résultat à analyser.
 
 Commande type, avec `N=5`, puis `30`, puis `100` :
 

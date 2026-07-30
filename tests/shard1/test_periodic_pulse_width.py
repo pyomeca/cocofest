@@ -3685,7 +3685,8 @@ def test_github_acados_runner_uses_reference_and_option_profiles_sequentially():
     assert ".configurations[$solver].use_sx == true" in benchmark_runner
     assert "--ipopt-enforce-start-constraints" in benchmark_runner
     assert "--reduced-cycling-profile benchmark-seed/" in benchmark_runner
-    assert "Compare IPOPT interpreted and compiled evaluators over 5 RHO" in workflow
+    assert "Compare IPOPT interpreted and compiled evaluators over 5 RHO" not in workflow
+    assert "cycling-compile-ablation-" not in workflow
     assert "Compare MadNLP MUMPS interpreted and compiled evaluators" not in workflow
     assert "Compile IPOPT CasADi evaluators once" in workflow
     assert "Checkpoint IPOPT full" in workflow

@@ -1395,21 +1395,6 @@ jobs:
           if-no-files-found: warn
           retention-days: 30
 
-      - name: Compare IPOPT interpreted and compiled evaluators over 5 RHO
-        if: matrix.solver == 'ipopt' && inputs.compile_nlp_evaluators
-        run: |
-          bash .github/scripts/run_cycling_benchmark_case.sh ipopt-interpreted ipopt full mumps collocation benchmark-compile-ablation 5 false sx
-          bash .github/scripts/run_cycling_benchmark_case.sh ipopt-compiled ipopt full mumps collocation benchmark-compile-ablation 5 true sx
-      - name: Checkpoint IPOPT compilation ablation
-        if: ${{ always() && matrix.solver == 'ipopt' && inputs.compile_nlp_evaluators }}
-        continue-on-error: true
-        uses: actions/upload-artifact@v7
-        with:
-          name: cycling-compile-ablation-ipopt-${{ github.run_id }}
-          path: benchmark-compile-ablation/
-          if-no-files-found: warn
-          retention-days: 30
-
       - name: Run MadNLP MUMPS full
         if: matrix.solver == 'madnlp'
         run: bash .github/scripts/run_cycling_benchmark_case.sh madnlp-mumps madnlp full mumps collocation benchmark-results "$BENCHMARK_CYCLES" false
@@ -1512,48 +1497,6 @@ jobs:
               ' "$result"
             fi
           done
-          if [[ "$COMPILE_NLP_EVALUATORS" == "true" ]]; then
-            mapfile -t ablation_results < <(
-              find benchmark-compile-ablation -name result.json -type f | sort
-            )
-            if [[ "${#ablation_results[@]}" -ne 2 ]]; then
-              echo "${BENCHMARK_SOLVER}: expected 2 compilation-ablation JSON files, found ${#ablation_results[@]}." >&2
-              exit 1
-            fi
-            python - "${ablation_results[@]}" <<'PY'
-          import json
-          import math
-          import sys
-
-          rows = {}
-          for path in sys.argv[1:]:
-              with open(path) as stream:
-                  row = json.load(stream)["results"][0]
-              mode = "compiled" if row["compiled_nlp_reuse"]["enabled"] else "interpreted"
-              rows[mode] = row
-          if set(rows) != {"compiled", "interpreted"}:
-              raise SystemExit(f"Missing compilation mode: {sorted(rows)}")
-          compiled = rows["compiled"]
-          interpreted = rows["interpreted"]
-          for field in ("validated_cycles", "attempted_windows", "physical_success"):
-              if compiled[field] != interpreted[field]:
-                  raise SystemExit(
-                      f"Compiled/interpreted mismatch for {field}: "
-                      f"{compiled[field]} != {interpreted[field]}"
-                  )
-          for field in ("executed_fatigue_objective", "min_A_capacity_ratio"):
-              left = compiled[field]
-              right = interpreted[field]
-              if left is None or right is None:
-                  continue
-              scale = max(1.0, abs(left), abs(right))
-              if not math.isclose(left, right, rel_tol=1e-5, abs_tol=1e-8 * scale):
-                  raise SystemExit(
-                      f"Compiled/interpreted mismatch for {field}: {left} != {right}"
-                  )
-          PY
-          fi
-
   screen-report:
     name: Aggregate solver option screen
     if: ${{ always() && inputs.cycles == 'screen' }}
@@ -1633,13 +1576,6 @@ jobs:
           path: benchmark-acados-all
           merge-multiple: true
 
-      - name: Download the compilation ablations
-        uses: actions/download-artifact@v8
-        continue-on-error: true
-        with:
-          pattern: cycling-compile-ablation-*-${{ github.run_id }}
-          path: benchmark-compile-ablation-all
-
       - name: Build the comparison report
         run: |
           mkdir -p benchmark-results-all benchmark-report
@@ -1670,6 +1606,5 @@ jobs:
             benchmark-report/
             benchmark-results-all/
             benchmark-acados-all/
-            benchmark-compile-ablation-all/
           if-no-files-found: warn
           retention-days: 30
