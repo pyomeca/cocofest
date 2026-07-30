@@ -5905,7 +5905,9 @@ class CompiledNlpReuseTracker:
             ),
             "unique_compiled_source_versions": len(unique_compiled_sources),
             "compiled_source_reused": bool(
-                observation_count > 1 and len(unique_compiled_sources) == 1
+                observation_count > 1
+                and len(self._compiled_source_signatures) == observation_count
+                and len(unique_compiled_sources) == 1
             ),
             "observations": list(self._observations),
         }

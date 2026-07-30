@@ -16,12 +16,17 @@ case_windows="${7:-${BENCHMARK_CYCLES:?BENCHMARK_CYCLES is required}}"
 compile_mode="${8:-false}"
 graph_mode="${9:-sx}"
 fatrop_state_scaling="${10:-none}"
-case_dir="${GITHUB_WORKSPACE:?GITHUB_WORKSPACE is required}/${case_root}/${case_slug}-${mechanics}"
+workspace="${GITHUB_WORKSPACE:?GITHUB_WORKSPACE is required}"
+case_dir="${workspace}/${case_root}/${case_slug}-${mechanics}"
 result="$case_dir/result.json"
 solver_options=()
 solver_tolerance=1e-6
 
 mkdir -p "$case_dir"
+# CasADi emits fixed filenames such as nlp.c/nlp.so in the current directory.
+# Give every solver/mechanics process a fresh directory so a full result cannot
+# certify a reduced run (or vice versa) through stale generated files.
+codegen_dir="$(mktemp -d "$case_dir/codegen.XXXXXX")"
 
 case "$graph_mode" in
   sx) solver_options+=(--ipopt-use-sx) ;;
@@ -83,7 +88,8 @@ fi
 # consumed warmup cycle and rejects consumers configured with zero.
 set +e
 set -o pipefail
-python examples/fes_multibody/cycling/cycling_fes_solver_comparison.py \
+pushd "$codegen_dir" >/dev/null
+python "$workspace/examples/fes_multibody/cycling/cycling_fes_solver_comparison.py" \
   --solvers "$solver" \
   --objective fatigue \
   --ipopt-profile periodic_collocation \
@@ -96,15 +102,15 @@ python examples/fes_multibody/cycling/cycling_fes_solver_comparison.py \
   --nlp-tolerance "$solver_tolerance" \
   --primal-feasibility-threshold 1e-5 \
   --max-consecutive-failing 2 \
-  --standard-warmup-seed .github/benchmark-seeds/legacy-resistive-0p22-warmup.npz \
+  --standard-warmup-seed "$workspace/.github/benchmark-seeds/legacy-resistive-0p22-warmup.npz" \
   --legacy-standard-warmup-seed-signed-torque 0.22 \
   --standard-warmup-seed-continuation \
-  --common-initial-solution "benchmark-seed/common-${mechanics}.npz" \
+  --common-initial-solution "$workspace/benchmark-seed/common-${mechanics}.npz" \
   --no-optional-nlp-periodic-ipopt-hot-start \
   --warmup-ipopt-linear-solver mumps \
   --ipopt-linear-solver mumps \
   --ipopt-disable-historical-initial-guess \
-  --reduced-cycling-profile benchmark-seed/reduced-cycling-fourier12.npz \
+  --reduced-cycling-profile "$workspace/benchmark-seed/reduced-cycling-fourier12.npz" \
   --state-scaling full \
   --first-node-wheel-q-slack 0 \
   --terminal-wheel-q-slack "$BENCHMARK_Q_SLACK" \
@@ -115,6 +121,7 @@ python examples/fes_multibody/cycling/cycling_fes_solver_comparison.py \
   2>&1 | tee "$case_dir/solver.log"
 solver_exit="${PIPESTATUS[0]}"
 set -e
+popd >/dev/null
 echo "$solver_exit" > "$case_dir/process-exit-code.txt"
 
 # A libMad type warning means that the requested backend was not applied even

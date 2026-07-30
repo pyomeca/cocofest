@@ -932,6 +932,7 @@ compilé multi-RHO, la CI exige :
 ```text
 observed_solves == attempted_windows
 runtime_bounds_changed == true
+compiled_source_observation_count == attempted_windows
 ```
 
 Cela vérifie que les bornes mobiles sont effectivement modifiées sans reconstruire
@@ -939,6 +940,9 @@ le graphe. Le tracker conserve également taille, `mtime` et SHA-256 de `nlp.c`;
 la CI multi-RHO exige une seule version observée et sa réutilisation. Cette
 preuve complète le contrôle d’identité du solveur CasADi sans inclure le coût
 du hash à chaque RHO : le contenu n’est relu que si taille ou `mtime` changent.
+Chaque processus full/reduced s’exécute en outre dans son propre répertoire
+temporaire de codegen. Les noms fixes `nlp.c`/`nlp.so` produits par CasADi ne
+peuvent donc pas fuir d’une formulation vers l’autre.
 
 L’ancienne ablation intégrée « interprété puis compilé sur cinq RHO » est
 archivée. Elle reconstruisait deux OCP full supplémentaires après les cas full

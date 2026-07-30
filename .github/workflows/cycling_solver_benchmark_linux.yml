@@ -766,12 +766,32 @@ jobs:
       - name: Require every ACADOS case without infrastructure errors
         if: always()
         run: |
+          variants=(
+            sqp-irk-reference
+            sqp-irk-two-stage
+            sqp-feasible-qp-irk
+            sqp-feasibility-qp-irk
+            sqp-rti-irk
+            sqp-erk
+            sqp-irk-light
+          )
+          expected_cases=()
+          for mechanics in full reduced; do
+            for variant in "${variants[@]}"; do
+              expected_cases+=("${variant}-${mechanics}")
+            done
+          done
           mapfile -t results < <(find acados-smoke-results -name result.json -type f | sort)
-          if [[ "${#results[@]}" -ne 12 ]]; then
-            echo "ACADOS: expected 12 JSON files, found ${#results[@]}." >&2
+          if [[ "${#results[@]}" -ne "${#expected_cases[@]}" ]]; then
+            echo "ACADOS: expected ${#expected_cases[@]} JSON files, found ${#results[@]}." >&2
             exit 1
           fi
-          for result in "${results[@]}"; do
+          for case_name in "${expected_cases[@]}"; do
+            result="acados-smoke-results/${case_name}/result.json"
+            if [[ ! -f "$result" ]]; then
+              echo "ACADOS: missing expected case ${case_name}." >&2
+              exit 1
+            fi
             jq -e '
               (.configurations.acados.use_sx == true) and
               (
@@ -1490,6 +1510,7 @@ jobs:
                     (.compiled_nlp_reuse.compiled_library_reused == true) and
                     (.compiled_nlp_reuse.runtime_bounds_changed == true) and
                     (.compiled_nlp_reuse.compiled_source_observed == true) and
+                    (.compiled_nlp_reuse.compiled_source_observation_count == .attempted_windows) and
                     (.compiled_nlp_reuse.compiled_source_reused == true) and
                     (.compiled_nlp_reuse.unique_compiled_source_versions == 1)
                   )

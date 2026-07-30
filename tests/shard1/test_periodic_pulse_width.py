@@ -3625,6 +3625,10 @@ def test_github_acados_runner_uses_reference_and_option_profiles_sequentially():
     assert ".compiled_nlp_reuse.graph_rebuild_detected == false" in workflow
     assert ".compiled_nlp_reuse.runtime_bounds_changed == true" in workflow
     assert ".compiled_nlp_reuse.observed_solves == .attempted_windows" in workflow
+    assert (
+        ".compiled_nlp_reuse.compiled_source_observation_count == .attempted_windows"
+        in workflow
+    )
     assert "inputs.cycles != 'screen' && inputs.cycles != 'acados'" in workflow
     assert "prepare-acados-stack:" in workflow
     assert "ACADOS_COMMIT: 48e223e85f0408ebfd1d8c6d6fb0589e9c41b3aa" in workflow
@@ -3664,6 +3668,9 @@ def test_github_acados_runner_uses_reference_and_option_profiles_sequentially():
     assert "--acados-control-homotopy-window-max-radius 1e-5" in workflow
     assert "--max-consecutive-failing 2" in workflow
     assert "cycling-acados-smoke-${{ github.run_id }}" in workflow
+    assert "expected_cases+=(\"${variant}-${mechanics}\")" in workflow
+    assert 'expected ${#expected_cases[@]} JSON files' in workflow
+    assert "expected 12 JSON files" not in workflow
     assert "case_slug: fatrop" not in workflow
     assert "madnlp-pardiso" not in workflow
     assert "fatrop-rk4" not in workflow
@@ -3683,8 +3690,10 @@ def test_github_acados_runner_uses_reference_and_option_profiles_sequentially():
         benchmark_runner
     )
     assert ".configurations[$solver].use_sx == true" in benchmark_runner
+    assert 'mktemp -d "$case_dir/codegen.XXXXXX"' in benchmark_runner
+    assert 'pushd "$codegen_dir"' in benchmark_runner
     assert "--ipopt-enforce-start-constraints" in benchmark_runner
-    assert "--reduced-cycling-profile benchmark-seed/" in benchmark_runner
+    assert '--reduced-cycling-profile "$workspace/benchmark-seed/' in benchmark_runner
     assert "Compare IPOPT interpreted and compiled evaluators over 5 RHO" not in workflow
     assert "cycling-compile-ablation-" not in workflow
     assert "Compare MadNLP MUMPS interpreted and compiled evaluators" not in workflow
@@ -5344,6 +5353,28 @@ def test_compiled_nlp_tracker_detects_a_second_generated_solver():
     assert summary["compiled_library_build_count"] == 2
     assert summary["compiled_library_reused"] is False
     assert summary["graph_rebuild_detected"] is True
+
+
+def test_compiled_nlp_tracker_requires_source_at_every_solve(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    source = tmp_path / "nlp.c"
+    source.write_text("/* generated */", encoding="utf-8")
+    bounds = SimpleNamespace(min=np.zeros((1, 3)), max=np.ones((1, 3)))
+    nmpc = SimpleNamespace(
+        ocp_solver=SimpleNamespace(shaked_ocp_solver=object()),
+        nlp=[SimpleNamespace(x_bounds={"theta": bounds}, u_bounds={}, g=[])],
+    )
+    tracker = periodic_example.CompiledNlpReuseTracker(enabled=True)
+
+    tracker.record(nmpc, 0)
+    source.unlink()
+    tracker.record(nmpc, 1)
+
+    summary = tracker.summary()
+    assert summary["observed_solves"] == 2
+    assert summary["compiled_source_observation_count"] == 1
+    assert summary["unique_compiled_source_versions"] == 1
+    assert summary["compiled_source_reused"] is False
 
 
 def test_compiled_nlp_plugin_name_patch_only_changes_compiled_interfaces():
