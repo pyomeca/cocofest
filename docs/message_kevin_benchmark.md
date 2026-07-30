@@ -2,84 +2,117 @@
 
 Salut Kevin,
 
-Le benchmark du RHO de pédalage est documenté ici :
+Nous avons repris le benchmark du RHO de pédalage en corrigeant plusieurs
+incohérences qui rendaient l’ancienne comparaison full/reduced difficile à
+interpréter. Le rapport détaillé est ici :
 
 [Benchmark des solveurs du RHO de pédalage FES](cycling_solver_benchmark/README.md)
 
-Le problème minimise uniquement la fatigue, sans couple externe. Chaque OCP
-contient un cycle de pédalage et 30 stimulations par muscle; une campagne de
-100 RHO enchaîne donc 100 OCP d’un cycle. Les PW sont bornées dans
-`[pd0, 600 µs]`, avec `pd0 ≈ 131.405 µs`, et la cible terminale d’angle est
-absolue avec un slack de `0.002 rad`.
-La référence absolue est recalée après le chargement du seed, y compris quand
-le seed et le solveur utilisent tous deux la formulation full ou tous deux la
-formulation reduced. Ce point corrige un décalage initial full de `3.94 mrad`
-observé avec cinq statuts IPOPT pourtant égaux à zéro; le slack n’a pas été
-relâché pour masquer cette incohérence.
+Le problème minimise uniquement la fatigue, avec un couple externe nul. Chaque
+OCP contient un cycle de pédalage et 30 stimulations par muscle. Les PW sont
+bornées dans `[pd0, 600 µs]`, avec `pd0 ≈ 131.405 µs`; les anciens seeds sont
+validés et tronqués dans cette plage au chargement. La cible terminale d’angle
+est absolue, avec un slack de `0.002 rad`, afin d’éviter toute dérive cumulative
+du pédalier.
 
-La nouvelle campagne active compare :
+Les changements importants sont :
 
-- IPOPT/MUMPS full et reduced;
-- MadNLP/MUMPS full et reduced;
-- ACADOS full et reduced, avec ses variantes de restauration et RTI.
+- continuité exacte entre deux RHO de la cadence et des 20 états Ding;
+- seed reduced commun, relevé sur la variété de contact pour initialiser le
+  full au même instant physiologique;
+- même loi de force passive en full et reduced;
+- bornes de cadence exprimées dans les coordonnées physiques
+  `theta/omega`, et non directement sur `qdot[2]`;
+- audit indépendant de la variété de contact, de la vitesse tangentielle et de
+  la progression angulaire;
+- séparation entre RHO convergés isolément et préfixe strict réellement
+  exécutable;
+- graphes SX seulement, car ils sont nettement plus rapides que MX sur ce
+  problème.
 
-Tous les graphes de la campagne sont maintenant SX, y compris le warm-up
-IPOPT. ACADOS consomme directement ce seed IPOPT/collocation SX certifié :
-son raffinement IPOPT auxiliaire n’est plus répété dans chaque variante,
-car deux runners ont été arrêtés après environ 150 s pendant sa construction
-full redondante. Ce choix SX est mesuré, pas
-seulement supposé : sur 30 RHO, SX a réduit la médiane chaude de 57.5 à
-60.5 % par rapport à MX, soit une accélération de 2.35× à 2.53×. Les quatre
-comparaisons IPOPT/MadNLP full/reduced ont convergé 30/30, avec un écart
-maximal d’objectif compris entre `8.6e-12` et `5.01e-11`. Le runner refuse
-désormais MX et le rapport vérifie `use_sx=true`.
+La branche Bioptim dédiée est
+`codex/cocofest-acados-v055-exploration`, au SHA
+`a3499cab16d7605b8efa7255cf89f1af6a7c59c9`. Elle utilise ACADOS 0.5.5 au
+SHA `59d93e17d2985fdd73fc58b8a83ed8f83a024171` et contient les correctifs
+Bioptim pour les contraintes `Node.START`, le scaling ACADOS et le scaling
+FATROP. La branche Cocofest est `codex/acados-pr-refresh`.
 
-MadNLP utilise uniquement MUMPS. Nous avons corrigé un point subtil de
-libMad : l’API Cocofest accepte `mumps`, mais libMad attend le type exact
-`MumpsSolver`. Avant la correction, le warning
-`option linear_solver is of unknown type mumps, ignoring` signifiait que
-l’option était ignorée; le calcul utilisait malgré tout le MUMPS par défaut.
-Le smoke runtime et les logs font maintenant échouer la CI si ce warning
-réapparaît.
+Le benchmark actif compare :
 
-PARDISO est volontairement laissé de côté. Il n’a pas apporté de gain :
-dans le run `30511306081`, MUMPS était environ 30 % plus rapide en full et
-6 % en reduced, avec aussi un meilleur temps mur-à-mur. Le commit libMad
-épinglé contient encore le support PARDISO, mais le workflow ne le sélectionne
-ni ne le certifie. Son smoke d’installation utilise `no_hsl_example`, qui
-exerce MUMPS sans instancier PARDISO.
+- IPOPT/MUMPS, full interprété et reduced compilé;
+- MadNLP/MUMPS, full et reduced interprétés;
+- FATROP/collocation compilé, full et reduced;
+- ACADOS 0.5.5, SQP/IRK, RTI et variantes de restauration.
 
-Fatrop est également sorti de la campagne active SX-only. Les anciens
-résultats MX restent documentés, mais Fatrop full échoue encore en SX lors de
-la détection de structure des gaps; reduced SX n’a validé qu’un smoke d’un
-RHO. Il serait trompeur de le comparer en MX aux autres solveurs SX. Alpaqa
-reste hors campagne parce que l’intégration actuelle ne valide pas le RHO.
+MadNLP utilise explicitement `MumpsSolver`. PARDISO a été laissé de côté, car
+il n’a pas apporté de gain reproductible. Alpaqa est également hors campagne :
+l’intégration actuelle ne valide pas le RHO.
 
-La version Bioptim commune aux seeds, IPOPT, MadNLP et ACADOS est le SHA
-`3523f1745e315f07761159d7e06bd2d876026704` du fork
-`mickaelbegon/BiorbdOptim`. Chaque artefact exporte ce SHA et le SHA Cocofest.
-MadNLP reste interprété : `--madnlp-c-compile` est reconnu par la CLI mais
-Bioptim lève encore `NotImplementedError`. La compilation persistante testée
-dans cette campagne concerne donc IPOPT.
+Les trois paliers stricts 5, 30 et 100 RHO sont verts :
 
-La validation doit être graduelle : 5 RHO, puis 30, puis 100 uniquement si le
-palier précédent produit tous les artefacts attendus, sans erreur
-d’infrastructure, sans graphe non-SX et sans option libMad ignorée.
+- [5 RHO — run 30565853248](https://github.com/mickaelbegon/cocofest/actions/runs/30565853248);
+- [30 RHO — run 30570144903](https://github.com/mickaelbegon/cocofest/actions/runs/30570144903);
+- [100 RHO — run 30573284484](https://github.com/mickaelbegon/cocofest/actions/runs/30573284484).
 
-La compilation IPOPT est validée directement dans les cas full et reduced :
-la bibliothèque doit être construite une seule fois, le source `nlp.c` doit
-garder le même hash et les bornes mobiles doivent changer sans reconstruction
-du graphe. Chaque cas possède un répertoire de codegen isolé et la CI exige
-une observation de ce source à chaque RHO, ce qui empêche un `nlp.c` full
-résiduel de certifier artificiellement le reduced. L’ancienne ablation
-intégrée qui reconstruisait deux OCP full
-supplémentaires a été retirée après un arrêt `143` du runner. Si tu veux
-remesurer compilé contre interprété, il faut lancer deux workflows identiques
-en changeant seulement `compile_nlp_evaluators`; les artefacts principaux
-restent alors directement comparables.
-Une non-convergence numérique reste bien sûr un résultat à analyser.
+Sur 30 RHO, les résultats réduits sont très cohérents :
 
-Commande type, avec `N=5`, puis `30`, puis `100` :
+| Solveur reduced | Préfixe strict | Médiane chaude | Mur-à-mur | Coût fatigue |
+|---|---:|---:|---:|---:|
+| IPOPT compilé | 30/30 | 0.726 s | 154.5 s | 256.519 |
+| MadNLP/MUMPS | 30/30 | 0.847 s | 68.0 s | 256.415 |
+| FATROP compilé | 30/30 | 1.420 s | 197.8 s | 256.488 |
+
+L’écart de coût entre les trois solveurs reduced est seulement `0.041 %`.
+Les patrons de stimulation sont également presque identiques aux cycles 10 et
+30 : les RMSE par muscle restent sous `0.163 µs` au cycle 10 et `0.103 µs`
+au cycle 30 par rapport à IPOPT. Cela valide bien la reproductibilité
+numérique de la formulation reduced.
+
+Sur 100 RHO, cette concordance est conservée :
+
+| Solveur reduced | Préfixe strict | Médiane chaude | Mur-à-mur | Coût fatigue | AUC | Capacité minimale |
+|---|---:|---:|---:|---:|---:|---:|
+| IPOPT compilé | 100/100 | **0.761 s** | 229.1 s | 4343.502 | 9.301 | 0.900366 |
+| MadNLP/MUMPS | 100/100 | 0.889 s | **200.4 s** | 4343.271 | 9.297 | 0.900351 |
+| FATROP compilé | 100/100 | 1.284 s | 247.5 s | 4343.535 | 9.299 | 0.900361 |
+
+L’étendue du coût n’est plus que `0.0061 %`. IPOPT a le meilleur temps chaud,
+tandis que MadNLP a le meilleur temps mur-à-mur sur cette machine. La fatigue
+est principalement portée par le Biceps, dont la capacité finale vaut environ
+`0.9004`; le coût instantané continue à augmenter, mais aucun des trois
+solveurs reduced n’échoue par fatigue avant le cycle 100.
+
+Il faut toutefois être très prudent avec le full. IPOPT résout 28 fenêtres sur
+30 et MadNLP 26 sur 30 lorsqu’elles sont regardées isolément, mais tous deux
+échouent au RHO 2. Leur préfixe strict reste donc limité à un cycle. ACADOS
+full retourne un statut NLP valide au premier RHO, mais l’audit détecte un
+résidu de vitesse tangentielle de `0.804 rad/s`; son préfixe physique est nul.
+FATROP full ne commence aucun solve : l’interface CasADi/FATROP refuse la
+structure de collocation, qui contient des dépendances hors bande.
+
+À 100 RHO, IPOPT et MadNLP résolvent respectivement 98 et 94 fenêtres
+isolées, mais leur préfixe strict reste toujours d’un seul cycle. Les solutions
+obtenues après le premier échec ne forment donc ni une trajectoire d’endurance
+continue, ni une comparaison full/reduced certifiée.
+
+La faible fatigue reduced par rapport aux anciens résultats full ne doit donc
+pas être interprétée comme un gain physiologique démontré. Sur le seul premier
+RHO comparable, l’objectif reduced est environ `0.936 %` plus faible que le
+full avec IPOPT comme avec MadNLP. C’est un petit écart, mais nous n’avons pas
+encore un préfixe full assez long pour comparer la fatigue cumulée.
+
+ACADOS reduced est très rapide, environ `0.1 s` pour le premier RHO, mais
+échoue au transfert vers le RHO 2 avec `ACADOS_MINSTEP`. `FIXED_STEP`,
+Anderson, RTI, IRK léger et la phase I donnent actuellement le même préfixe
+d’un cycle. Une piste importante est la gestion du warm start des PW : le
+changement maximal entre les cycles 1 et 2 atteint environ `469 µs` au Biceps
+et `80 µs` au Triceps, alors que le trust region ACADOS courant ne permet que
+`10 µs`. Comme les P95 restent sous `0.3 µs`, il faut probablement relâcher
+seulement les rares nœuds qui changent de branche active, pas élargir toutes
+les bornes.
+
+Pour reproduire un palier sur le calculateur, avec `N=5`, puis `30`, puis
+`100` :
 
 ```bash
 gh workflow run cycling_solver_benchmark_linux.yml \
@@ -97,52 +130,11 @@ gh workflow run cycling_solver_benchmark_linux.yml \
   -f acados_option_rhos=N
 ```
 
-Les artefacts donnent la convergence, le temps mur-à-mur, les temps chauds
-par RHO, le coût de fatigue, la fatigue cumulée et la capacité finale des
-quatre muscles, les patrons de stimulation aux cycles 10 et 30, ainsi que les
-variations de PW entre cycles.
-
-La campagne graduelle est terminée :
-
-- [5 RHO, run 30519570984](https://github.com/mickaelbegon/cocofest/actions/runs/30519570984);
-- [30 RHO, run 30520968417](https://github.com/mickaelbegon/cocofest/actions/runs/30520968417);
-- [100 RHO, run 30522170340](https://github.com/mickaelbegon/cocofest/actions/runs/30522170340).
-
-Le run final utilise Cocofest
-`aac9ff5c2ccec2f16adb6fb1f46932d44e15b7f7` et le Bioptim commun
-`3523f1745e315f07761159d7e06bd2d876026704`.
-
-Sur 100 RHO, IPOPT et MadNLP convergent 100/100 en full et reduced. Les
-médianes chaudes sont `1.444/1.122 s` pour IPOPT full/reduced et
-`2.600/1.180 s` pour MadNLP. En revanche, MadNLP gagne le mur-à-mur :
-`350.1/178.4 s` contre `612.4/255.6 s`. Pour IPOPT, le temps résiduel non
-attribué aux solves ni à la préparation vaut environ `443 s` en full et
-`123 s` en reduced sur une machine neuve. Ce n’est pas un chronométrage
-instrumenté de la compilation; ce résidu est vraisemblablement dominé par la
-génération/compilation, avec possiblement d’autres frais Python et système.
-Une extrapolation des médianes chaudes place le rattrapage d’IPOPT compilé
-face à MadNLP vers 330 RHO en full et 1580 RHO en reduced. Cela ne mesure pas
-l’amortissement par rapport à IPOPT interprété, qui demanderait un cas témoin
-strictement identique avec `compile=false`.
-
-Les résultats de fatigue sont très proches entre solveurs à mécanique fixée.
-En full, IPOPT/MadNLP donnent un coût `11406.6/11344.7`, une AUC
-`16.489/16.460` et une capacité minimale `0.86736/0.86795`. En reduced, ces
-valeurs sont `668.1/653.0`, `4.849/4.812` et `0.97649/0.97707`. Le grand écart
-full/reduced vient principalement du Biceps et du deltoïde postérieur; la
-réduction n’est donc pas encore physiologiquement interchangeable avec le
-modèle full.
-
-Les patrons IPOPT/MadNLP full sont presque identiques aux cycles 10 et 30.
-En reduced, ils sont identiques au cycle 10 mais divergent localement au
-cycle 30 sur le Biceps malgré des coûts proches : maximum `422.6 µs` avec
-IPOPT contre `249.9 µs` avec MadNLP. ACADOS reduced atteint environ
-`0.102 s/RHO`, mais son préfixe strict s’arrête à 13 cycles; il ne fournit
-donc pas de patron valide au cycle 30. Toutes ses variantes full échouent
-avant le premier cycle.
-
-Les points qui restent sensibles sont la comparabilité physiologique de la
-mécanique reduced, la robustesse ACADOS après plusieurs RHO et la
-compatibilité structurelle Fatrop full/SX. Il ne faut donc pas interpréter un
-gain de temps reduced comme un gain scientifique avant d’avoir comparé les
-trajectoires mécaniques, les forces et les états Ding.
+Les artefacts contiennent les temps mur-à-mur et par RHO, la convergence NLP,
+le préfixe physique, les coutures d’état, le coût et la fatigue des quatre
+muscles, les patrons aux cycles 10 et 30 et les variations de PW. Le point
+principal à vérifier sur le calculateur est la robustesse full au RHO 2. Pour
+ACADOS reduced, il faut ensuite tester un warm start de PW sensible aux
+changements de branche active, puis une restauration de faisabilité suivie
+d’un OCP d’optimalité, tous deux précompilés. Enfin, il faut remesurer le gain
+mur-à-mur des solveurs reduced après amortissement des compilations et caches.
