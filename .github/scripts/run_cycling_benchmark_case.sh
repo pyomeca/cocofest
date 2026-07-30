@@ -88,7 +88,7 @@ else
   # shape, which can create a large full-dynamics defect. Repair that primal
   # guess before every RHO without modifying the OCP itself.
   solver_options+=(
-    --transfer-phase-one
+    --shared-transfer-phase-one
     --acados-transfer-phase-one-mode all
   )
 fi

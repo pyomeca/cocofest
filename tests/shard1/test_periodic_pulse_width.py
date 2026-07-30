@@ -3966,6 +3966,8 @@ def test_github_acados_runner_uses_reference_and_option_profiles_sequentially():
     assert 'mktemp -d "$case_dir/codegen.XXXXXX"' in benchmark_runner
     assert 'pushd "$codegen_dir"' in benchmark_runner
     assert "--ipopt-enforce-start-constraints" in benchmark_runner
+    assert "--shared-transfer-phase-one" in benchmark_runner
+    assert "\n    --transfer-phase-one\n" not in benchmark_runner
     assert '--reduced-cycling-profile "$workspace/benchmark-seed/' in benchmark_runner
     assert "Compare IPOPT interpreted and compiled evaluators over 5 RHO" not in workflow
     assert "cycling-compile-ablation-" not in workflow
