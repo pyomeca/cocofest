@@ -59,11 +59,11 @@ provenance humaine.
 
 | Composant | Version Bioptim réellement utilisée |
 |---|---|
-| Construction et certification des seeds | `a3499cab16d7605b8efa7255cf89f1af6a7c59c9` |
-| IPOPT full/reduced | `a3499cab16d7605b8efa7255cf89f1af6a7c59c9` |
-| MadNLP/MUMPS full/reduced | `a3499cab16d7605b8efa7255cf89f1af6a7c59c9` |
-| FATROP/collocation full/reduced | `a3499cab16d7605b8efa7255cf89f1af6a7c59c9` |
-| ACADOS full/reduced et variantes | `a3499cab16d7605b8efa7255cf89f1af6a7c59c9` |
+| Construction et certification des seeds | `036b9155b7c32c0b94d90a98bbdd4231b9203457` |
+| IPOPT full/reduced | `036b9155b7c32c0b94d90a98bbdd4231b9203457` |
+| MadNLP/MUMPS full/reduced | `036b9155b7c32c0b94d90a98bbdd4231b9203457` |
+| FATROP/collocation full/reduced | `036b9155b7c32c0b94d90a98bbdd4231b9203457` |
+| ACADOS full/reduced et variantes | `036b9155b7c32c0b94d90a98bbdd4231b9203457` |
 
 Ce commit appartient à la branche dédiée
 `codex/cocofest-acados-v055-exploration`. Il part exactement de
@@ -79,6 +79,8 @@ et rassemble les adaptations communes aux différents solveurs :
 - la sauvegarde de l’état primal-dual, qui n’est volontairement pas utilisée
   pour écraser le rollout/projection primal de Cocofest;
 - les bornes de contrôle ordonnées et exprimées dans les coordonnées scalées;
+- le scaling du guess terminal ACADOS, vérifié explicitement aux stages 0 et
+  N par le test ajouté dans `036b9155`;
 - un JSON ACADOS isolé dans chaque dossier de code généré;
 - une représentation canonique des paramètres runtime permettant de
   réutiliser la même bibliothèque avec de nouvelles données nodales;
@@ -1211,6 +1213,24 @@ La restauration locale actuelle `q/qdot + offsets PW` est explicitement
 refusée avec la mécanique réduite `theta/omega`; elle n’est pas un OCP et ne
 doit pas être interprétée comme une restauration reduced valide.
 
+Le nouvel écran `sqp-irk-active-set-guard-reduced` traite séparément une autre
+source de `MINSTEP`. La région de confiance PW reste à `±10 µs` sur les nœuds
+dont le statut de recrutement ne change pas. Autour d’une transition
+circulaire recruté/non-recruté, le nœud de transition et ses voisins immédiats
+peuvent s’ouvrir jusqu’à `500 µs`, toujours tronqués aux bornes physiques
+`[pd0, 600 µs]`. Cela évite qu’un changement légitime de branche soit bloqué
+par la continuation, sans supprimer la stabilisation sur tout le cycle. Les
+logs et le JSON publient, muscle par muscle, les transitions détectées et les
+nœuds réellement ouverts. Cette variante reste distincte de la référence :
+elle corrige une restriction artificielle des contrôles, mais ne peut pas
+réparer à elle seule une trajectoire d’états dynamiquement infaisable.
+
+Enfin, le guess terminal ACADOS est bien envoyé en coordonnées scalées,
+$x_N^{ACADOS}=x_N^{physique}/s_x$, comme les stages précédents. Le commit
+Bioptim `036b9155b7c32c0b94d90a98bbdd4231b9203457` ajoute un test qui
+espionne explicitement les appels `set(0, "x", ...)` et `set(N, "x", ...)`;
+le workflow Linux exécute ce test avant les variantes ACADOS.
+
 ### 7.5 Alpaqa
 
 Alpaqa combine une méthode de Lagrangien augmenté externe et PANOC à
@@ -1547,6 +1567,105 @@ dès le RHO 2, bien avant une fatigue importante. IPOPT full ne compte que deux
 n’appartiennent plus à un préfixe optimal certifié. Au RHO 100, leurs objectifs
 isolés diffèrent fortement (`≈111` pour IPOPT, `≈594` pour MadNLP), ce qui
 interdit de les utiliser comme substitut à une comparaison d’endurance full.
+
+L’index du résidu dominant permet maintenant de localiser ce premier échec.
+Le full possède 26 états : trois positions, trois vitesses et vingt états
+Ding. Avec 30 intervalles et une collocation Radau de degré 3, les défauts de
+collocation occupent les 3120 premières composantes,
+
+$$
+30\ \text{intervalles}\times 26\ \text{états}\times(3+1)=3120.
+$$
+
+Les deux composantes de vitesse du centre de pédalier viennent ensuite, puis
+les deux composantes de position. L’index `3122`, qui domine les échecs IPOPT
+aux RHO 2 et 14 ainsi que quatre des six échecs MadNLP, est donc la première
+contrainte de position du centre au début du nouveau RHO. Le terminal du RHO
+précédent fournit le nouveau warm-start; la coordonnée et la vitesse du
+pédalier ainsi que les 20 états Ding sont raccordées exactement, tandis que
+les deux autres coordonnées et vitesses mécaniques restent libres. Le modèle
+full historique ne fermait toutefois le contact qu’au début de chaque OCP. Un
+léger drift terminal donne donc au RHO suivant un point initial hors variété,
+que le solveur doit corriger tout en satisfaisant les états strictement
+raccordés. Il ne s’agit pas d’une incompatibilité mathématique certaine,
+puisque les coordonnées redondantes restent libres, mais d’un mauvais
+warm-start très mal conditionné. Cela explique pourquoi la défaillance
+survient immédiatement et presque au même endroit avec deux solveurs de point
+intérieur différents. Le reduced ne rencontre pas cette couture : sa
+paramétrisation $q=\Phi(\theta)$ appartient algébriquement à la variété de
+contact à tous les nœuds.
+
+Imposer position et vitesse du centre à tous les nœuds n’est pas une bonne
+stabilisation de ce modèle : sur le test local apparié de deux RHO, IPOPT a
+atteint 1000 itérations aux deux fenêtres, avec des résidus primaux de
+`6.41e-2` puis `7.24e-3` et environ `286 s` mur-à-mur. Cette variante ajoute
+des contraintes redondantes à une dynamique qui n’est pas formulée comme une
+dynamique contrainte et détériore fortement le rang et le conditionnement du
+KKT. Fermer seulement le terminal ne suffit pas non plus. Avec position et
+vitesse terminales, le premier RHO atteint 1000 itérations et `1.03e-4` de
+résidu, même si le second converge ensuite. Avec la position terminale seule,
+les deux RHO atteignent 1000 itérations; leurs résidus valent `3.20e-4` et
+`1.0e-6`, mais aucun ne reçoit un statut de convergence. Ces deux variantes
+dures ne sont donc pas retenues.
+
+La piste suivante agit uniquement sur le warm-start : après le transfert, les
+coordonnées mécaniques libres du premier nœud sont projetées sur la variété
+réduite, tout en conservant exactement la coordonnée et la vitesse du pédalier
+déjà fixées. Elle ne change ni l’OCP, ni les bornes physiques, ni les états
+Ding; elle remplace seulement un guess full hors contact par son équivalent
+cinématique cohérent. Le JSON rapporte l’amplitude de cette correction à
+chaque couture afin qu’une projection anormalement grande soit visible.
+
+L’ablation décisive consiste finalement à expliciter une tolérance spatiale de
+`20 µm` sur la seule position du centre au début du full. Elle représente
+`0.02 %` du rayon de pédalier de `0.1 m`, soit au pire environ
+`2e-4 rad` (`0.011°`) en équivalent angulaire; elle reste donc dix fois plus
+serrée que la tolérance terminale angulaire de `0.002 rad`. La vitesse du
+centre, l’angle du pédalier, la cadence et les vingt états Ding conservent
+leurs contraintes exactes.
+
+Sur le test local apparié de deux RHO, cette bande donne deux statuts 0 avec
+IPOPT en 88 puis 85 itérations et deux statuts 0 avec MadNLP/MUMPS en 93 puis
+69 itérations. Les deux solveurs retrouvent la même somme d’objectifs,
+`7.651371`, et les mêmes objectifs par fenêtre à la précision numérique. Au
+premier RHO, l’objectif IPOPT passe seulement de `3.754595` avec l’égalité
+historique à `3.754515`, soit `-0.0021 %`. Cela confirme que la bande corrige
+un seuil numérique de couture et ne crée pas un nouveau mécanisme de
+réduction de fatigue.
+
+Le palier local de cinq RHO passe ensuite `5/5` avec les deux solveurs. IPOPT
+obtient une somme des objectifs de `20.102977`, une fatigue exécutée de
+`19.466525` et un minimum de capacité de `0.984753`; MadNLP/MUMPS obtient
+respectivement `20.102820`, `19.466372` et `0.984753`. L’écart relatif de
+`0.00078 %` sur la somme des objectifs confirme que les deux méthodes
+retrouvent le même régime. Les temps locaux ont été mesurés avec les deux
+processus en concurrence et ne doivent donc pas servir de comparaison de
+performance. La CI Linux graduelle 5, 30 puis 100 RHO reste la condition de
+certification avant d’interpréter de nouveau le full sur 100 cycles.
+
+Pour documenter ce que donnent malgré tout les fenêtres isolées au RHO 100,
+le tableau suivant reporte l’état au début du RHO 100, donc après 99
+transferts. Il ne constitue pas une comparaison d’endurance certifiée pour les
+deux lignes full.
+
+| Solveur | Mécanique | Objectif isolé RHO 100 | Biceps | Delt_ant | Delt_post | Triceps |
+|---|---|---:|---:|---:|---:|---:|
+| IPOPT | full | 111.497 | 0.90684 | 0.97020 | 0.97570 | 0.97813 |
+| IPOPT | reduced | 111.653 | 0.90117 | 0.98432 | 0.99192 | 0.97606 |
+| MadNLP | full | 594.246 | 0.87438 | 0.84052 | 0.87531 | 0.97448 |
+| MadNLP | reduced | 111.649 | 0.90115 | 0.98440 | 0.99200 | 0.97606 |
+
+Les quatre dernières colonnes sont les rapports
+$A/A_\mathrm{scale}$. Sur la trajectoire diagnostique IPOPT, le coût isolé du
+RHO 100 reste très proche entre full et reduced (`-0.14 %`), mais la
+répartition de fatigue diffère : le full conserve environ `0.57` point de
+capacité supplémentaire au Biceps, tout en perdant environ `1.41` et `1.62`
+points aux deltoïdes antérieur et postérieur. Ces écarts sont utiles pour
+orienter l’audit mécanique, mais ils ne deviennent interprétables
+physiologiquement qu’après 100 coutures full convergées. La ligne MadNLP full
+a déjà bifurqué après six fenêtres non convergées; son coût `5.32` fois plus
+élevé que le reduced montre précisément pourquoi une suite de solutions
+isolées ne doit pas être présentée comme une endurance.
 
 La compilation reduced est bien persistante : IPOPT et FATROP construisent
 chacun une bibliothèque, observent le même source aux 100 solves et changent

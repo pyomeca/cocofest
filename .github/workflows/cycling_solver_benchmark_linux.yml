@@ -73,7 +73,7 @@ env:
   BIOPTIM_REPOSITORY: mickaelbegon/BiorbdOptim
   # Dedicated multi-solver integration branch:
   # codex/cocofest-acados-v055-exploration
-  BIOPTIM_PRODUCTION_COMMIT: a3499cab16d7605b8efa7255cf89f1af6a7c59c9
+  BIOPTIM_PRODUCTION_COMMIT: 036b9155b7c32c0b94d90a98bbdd4231b9203457
   BIOPTIM_ALPAQA_COMMIT: d84e7e43534360fc048e0be26a3bd69a2abc2d77
   ACADOS_COMMIT: 59d93e17d2985fdd73fc58b8a83ed8f83a024171
   ACADOS_INSTALL_SCRIPT_BLOB: 5ac8064ab613251e62560b5de8cbbb9550f5c5d0
@@ -537,6 +537,7 @@ jobs:
           print(f"acados_template: {acados_template.__file__}")
           PY
           python -m pytest -q \
+            .benchmark-deps/bioptim/tests/shard1/test_acados_interface.py::test_acados_update_solver_sets_terminal_guess_in_scaled_units \
             tests/shard1/test_reduced_cycling.py \
             tests/shard1/test_periodic_pulse_width.py::test_acados_example_defaults_to_the_assisted_periodic_profile \
             tests/shard1/test_periodic_pulse_width.py::test_common_target_seed_enables_the_robust_acados_reference_preparation \
@@ -544,7 +545,10 @@ jobs:
             tests/shard1/test_periodic_pulse_width.py::test_control_homotopy_can_relax_stationarity_without_relaxing_feasibility \
             tests/shard1/test_periodic_pulse_width.py::test_phase_one_maps_reduced_mechanics_without_classifying_them_as_fes \
             tests/shard1/test_periodic_pulse_width.py::test_reduced_theta_target_uses_absolute_cycle_reference_without_drift \
-            tests/shard1/test_periodic_pulse_width.py::test_acados_irk_transfer_rollout_uses_scaled_variables_and_stage_data
+            tests/shard1/test_periodic_pulse_width.py::test_acados_irk_transfer_rollout_uses_scaled_variables_and_stage_data \
+            tests/shard1/test_periodic_pulse_width.py::test_phase_aligned_active_set_guard_only_releases_transition_neighborhoods \
+            tests/shard1/test_periodic_pulse_width.py::test_phase_aligned_active_set_guard_wraps_circular_margin \
+            tests/shard1/test_periodic_pulse_width.py::test_full_transfer_contact_projection_preserves_bound_crank_states
 
       - name: Run ACADOS full/reduced and solver options sequentially
         env:
@@ -608,6 +612,7 @@ jobs:
               # the SQP from following the physically required PW branch.
               mechanics_options+=(
                 --acados-control-homotopy-release-final-radius
+                --full-contact-position-tolerance 2e-5
               )
             fi
             if [[ "$nlp_solver" == "SQP_RTI" ]]; then
@@ -689,6 +694,20 @@ jobs:
                 --acados-transfer-bound-homotopy-iterations 20
                 --acados-transfer-bound-homotopy-tolerance 1e-4
                 --acados-transfer-bound-homotopy-solver-tolerance 1e-4
+              )
+            fi
+            if [[ "$variant" == "sqp-irk-active-set-guard" ]]; then
+              if [[ "$mechanics" != "reduced" ]]; then
+                echo "The phase-aligned PW guard is screened on reduced mechanics." >&2
+                return 2
+              fi
+              # Preserve the stable ±10 us trust region except around circular
+              # recruitment transitions. Those rare nodes may need nearly the
+              # full physical PW range when the fatigue active set changes.
+              solver_options+=(
+                --acados-transfer-active-set-guard-radius 5e-4
+                --acados-transfer-active-set-guard-margin 1
+                --acados-transfer-active-set-threshold 1e-6
               )
             fi
             if [[ "$variant" == *"-phase-one" ]]; then
@@ -773,6 +792,7 @@ jobs:
               run_case sqp-irk-phase-one "$mechanics" "$ACADOS_SMOKE_RHOS" SQP IRK 5 5
               run_case sqp-rti-irk-phase-one "$mechanics" "$ACADOS_OPTION_RHOS" SQP_RTI IRK 5 5
             done
+            run_case sqp-irk-active-set-guard reduced "$ACADOS_SMOKE_RHOS" SQP IRK 5 5
             run_case sqp-irk-contact full "$ACADOS_OPTION_RHOS" SQP IRK 5 5
             run_case sqp-rti-irk-contact full "$ACADOS_OPTION_RHOS" SQP_RTI IRK 5 5
             run_case sqp-irk-contact-position full "$ACADOS_OPTION_RHOS" SQP IRK 5 5
@@ -792,6 +812,7 @@ jobs:
             run_case sqp-irk-anderson reduced "$ACADOS_OPTION_RHOS" SQP IRK 5 5
             run_case sqp-rti-irk reduced "$ACADOS_OPTION_RHOS" SQP_RTI IRK 5 5
             run_case sqp-irk-light reduced "$ACADOS_OPTION_RHOS" SQP IRK 2 3
+            run_case sqp-irk-active-set-guard reduced "$ACADOS_SMOKE_RHOS" SQP IRK 5 5
             run_case sqp-irk-contact-position full "$ACADOS_OPTION_RHOS" SQP IRK 5 5
             run_case sqp-rti-irk-contact-position full "$ACADOS_OPTION_RHOS" SQP_RTI IRK 5 5
           fi
@@ -1501,6 +1522,7 @@ jobs:
             tests/shard1/test_reduced_cycling.py \
             tests/shard1/test_periodic_pulse_width.py::test_stimulation_snapshots_use_one_based_cycles_and_real_crank_phase \
             tests/shard1/test_periodic_pulse_width.py::test_common_primal_threshold_is_independent_of_nlp_solver_tolerance \
+            tests/shard1/test_periodic_pulse_width.py::test_full_contact_stabilization_is_opt_in_on_both_clis \
             tests/shard1/test_periodic_pulse_width.py::test_github_benchmark_compares_physical_threshold_not_solver_tolerance
 
       - name: Prepare sequential case directories

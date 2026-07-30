@@ -74,6 +74,57 @@ def test_full_contact_stabilization_constrains_every_shooting_node(monkeypatch):
     assert captured[1][1]["second_marker"] == "global_wheel_center"
 
 
+def test_full_contact_terminal_stabilization_closes_only_rho_seam(monkeypatch):
+    captured = []
+
+    class FakeConstraintList:
+        def add(self, constraint, **kwargs):
+            captured.append((constraint, kwargs))
+
+    monkeypatch.setattr(mhe_example, "ConstraintList", FakeConstraintList)
+    model = SimpleNamespace(marker_index=lambda name: 7)
+
+    mhe_example.set_constraints(
+        model,
+        enforce_start_constraints=True,
+        enforce_contact_constraints_terminal=True,
+    )
+
+    assert [kwargs["node"] for _, kwargs in captured] == [
+        Node.START,
+        Node.START,
+        Node.END,
+        Node.END,
+    ]
+    assert captured[2][1]["marker_index"] == 7
+    assert captured[3][1]["first_marker"] == "wheel_center"
+    assert captured[3][1]["second_marker"] == "global_wheel_center"
+
+
+def test_full_contact_terminal_position_avoids_velocity_redundancy(monkeypatch):
+    captured = []
+
+    class FakeConstraintList:
+        def add(self, constraint, **kwargs):
+            captured.append((constraint, kwargs))
+
+    monkeypatch.setattr(mhe_example, "ConstraintList", FakeConstraintList)
+    model = SimpleNamespace(marker_index=lambda name: 7)
+
+    mhe_example.set_constraints(
+        model,
+        enforce_start_constraints=True,
+        enforce_contact_position_terminal=True,
+    )
+
+    assert [kwargs["node"] for _, kwargs in captured] == [
+        Node.START,
+        Node.START,
+        Node.END,
+    ]
+    assert captured[-1][1]["first_marker"] == "wheel_center"
+
+
 def test_full_contact_position_stabilization_avoids_velocity_redundancy(monkeypatch):
     captured = []
 
@@ -88,10 +139,64 @@ def test_full_contact_position_stabilization_avoids_velocity_redundancy(monkeypa
         model,
         enforce_start_constraints=False,
         enforce_contact_position_all_nodes=True,
+        contact_position_tolerance_m=2e-5,
     )
 
     assert len(captured) == 1
     assert captured[0][1]["node"] == Node.ALL
+    assert captured[0][1]["min_bound"] == -2e-5
+    assert captured[0][1]["max_bound"] == 2e-5
+
+
+def test_full_transfer_contact_projection_preserves_bound_crank_states():
+    class Kinematics:
+        @staticmethod
+        def q(theta):
+            return np.array([2.0 * theta, 3.0 * theta, theta])
+
+        @staticmethod
+        def tangent(_theta):
+            return np.array([2.0, 3.0, 1.0])
+
+        @staticmethod
+        def project_generalized_trajectory(q, qdot):
+            del qdot
+            return np.array([[q[2, 0]]]), None, {}
+
+    q = np.array([[0.0, 1.0], [0.0, 1.0], [4.0, 5.0]])
+    qdot = np.array([[0.0, 1.0], [0.0, 1.0], [-6.0, -7.0]])
+    nmpc = SimpleNamespace(
+        nlp=[SimpleNamespace(x_init={"q": SimpleNamespace(init=q), "qdot": SimpleNamespace(init=qdot)})],
+        wheel_state_index=2,
+        _cocofest_mechanical_equivalence_dynamics=SimpleNamespace(
+            kinematics=Kinematics()
+        ),
+    )
+
+    summary = mhe_example.project_full_first_node_initial_guess_to_contact(
+        nmpc, project_velocity=True
+    )
+
+    assert summary["applied"] is True
+    np.testing.assert_allclose(nmpc.nlp[0].x_init["q"].init[:, 0], [8.0, 12.0, 4.0])
+    np.testing.assert_allclose(
+        nmpc.nlp[0].x_init["qdot"].init[:, 0], [-12.0, -18.0, -6.0]
+    )
+    # Only the first node is projected; the shifted tail remains untouched.
+    np.testing.assert_allclose(nmpc.nlp[0].x_init["q"].init[:, 1], [1.0, 1.0, 5.0])
+    np.testing.assert_allclose(nmpc.nlp[0].x_init["qdot"].init[:, 1], [1.0, 1.0, -7.0])
+
+    nmpc.nlp[0].x_init["q"].init[:, :] = np.array(
+        [[0.0, 1.0], [0.0, 1.0], [4.0, 5.0]]
+    )
+    nmpc.nlp[0].x_init["qdot"].init[:, :] = np.array(
+        [[0.0, 1.0], [0.0, 1.0], [-6.0, -7.0]]
+    )
+    summary = mhe_example.project_full_first_node_initial_guess_to_contact(nmpc)
+    assert summary["mode"] == "position"
+    np.testing.assert_allclose(
+        nmpc.nlp[0].x_init["qdot"].init[:, 0], [0.0, 0.0, -6.0]
+    )
 
 
 def test_updating_full_model_preserves_every_force_relationship(monkeypatch):
@@ -464,6 +569,109 @@ def test_pulse_width_trust_region_keeps_nodewise_centers():
     np.testing.assert_allclose(upper, np.array([[0.31, 0.51, 0.56]]))
 
 
+def test_phase_aligned_active_set_guard_only_releases_transition_neighborhoods():
+    center = np.array([[0.1, 0.1, 0.4, 0.4, 0.4, 0.1, 0.1, 0.1]])
+    bounds = SimpleNamespace(
+        min=np.full(center.shape, 0.1),
+        max=np.full(center.shape, 0.6),
+    )
+    nmpc = SimpleNamespace(
+        nlp=[
+            SimpleNamespace(
+                u_init={
+                    "last_pulse_width_Biceps": SimpleNamespace(init=center.copy())
+                },
+                u_bounds={"last_pulse_width_Biceps": bounds},
+            )
+        ]
+    )
+
+    periodic_example.apply_pulse_width_control_trust_region(nmpc, radius=0.01)
+    summary = periodic_example.apply_phase_aligned_pulse_width_transition_guard(
+        nmpc,
+        radius=0.2,
+        margin=1,
+        activation_threshold=0.01,
+    )
+    lower, upper = nmpc._cocofest_nodewise_control_bounds[
+        "last_pulse_width_Biceps"
+    ]
+
+    assert summary["last_pulse_width_Biceps"]["transition_nodes"] == [2, 5]
+    assert summary["last_pulse_width_Biceps"]["released_nodes"] == [1, 2, 3, 4, 5, 6]
+    np.testing.assert_allclose(lower[:, [0, 7]], [[0.1, 0.1]])
+    np.testing.assert_allclose(upper[:, [0, 7]], [[0.11, 0.11]])
+    np.testing.assert_allclose(upper[:, [1, 5, 6]], [[0.3, 0.3, 0.3]])
+    np.testing.assert_allclose(lower[:, [2, 3, 4]], [[0.2, 0.2, 0.2]])
+    np.testing.assert_allclose(upper[:, [2, 3, 4]], [[0.6, 0.6, 0.6]])
+
+
+def test_phase_aligned_active_set_guard_does_not_widen_uniform_recruitment():
+    center = np.full((1, 4), 0.1)
+    bounds = SimpleNamespace(
+        min=np.full(center.shape, 0.1),
+        max=np.full(center.shape, 0.6),
+    )
+    nmpc = SimpleNamespace(
+        nlp=[
+            SimpleNamespace(
+                u_init={
+                    "last_pulse_width_Biceps": SimpleNamespace(init=center.copy())
+                },
+                u_bounds={"last_pulse_width_Biceps": bounds},
+            )
+        ]
+    )
+
+    periodic_example.apply_pulse_width_control_trust_region(nmpc, radius=0.01)
+    summary = periodic_example.apply_phase_aligned_pulse_width_transition_guard(
+        nmpc, radius=0.2
+    )
+    lower, upper = nmpc._cocofest_nodewise_control_bounds[
+        "last_pulse_width_Biceps"
+    ]
+
+    assert summary["last_pulse_width_Biceps"]["released_count"] == 0
+    assert summary["last_pulse_width_Biceps"]["reason"] == "no_active_set_transition"
+    np.testing.assert_allclose(lower, 0.1)
+    np.testing.assert_allclose(upper, 0.11)
+
+
+def test_phase_aligned_active_set_guard_wraps_circular_margin():
+    center = np.array([[0.4, 0.4, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1]])
+    bounds = SimpleNamespace(
+        min=np.full(center.shape, 0.1),
+        max=np.full(center.shape, 0.6),
+    )
+    nmpc = SimpleNamespace(
+        nlp=[
+            SimpleNamespace(
+                u_init={
+                    "last_pulse_width_Biceps": SimpleNamespace(init=center.copy())
+                },
+                u_bounds={"last_pulse_width_Biceps": bounds},
+            )
+        ]
+    )
+
+    periodic_example.apply_pulse_width_control_trust_region(nmpc, radius=0.01)
+    summary = periodic_example.apply_phase_aligned_pulse_width_transition_guard(
+        nmpc,
+        radius=0.2,
+        margin=1,
+        activation_threshold=0.01,
+    )["last_pulse_width_Biceps"]
+
+    assert summary["transition_nodes"] == [0, 2]
+    assert summary["released_nodes"] == [0, 1, 2, 3, 7]
+    lower, upper = nmpc._cocofest_nodewise_control_bounds[
+        "last_pulse_width_Biceps"
+    ]
+    np.testing.assert_allclose(lower[:, [4, 5, 6]], 0.1)
+    np.testing.assert_allclose(upper[:, [4, 5, 6]], 0.11)
+    np.testing.assert_allclose(upper[:, 7], 0.3)
+
+
 def test_control_homotopy_radii_are_parsed_as_an_increasing_sequence():
     parser = periodic_example.build_argument_parser()
     args = parser.parse_args(
@@ -504,6 +712,12 @@ def test_comparison_cli_forwards_acados_hot_start_homotopy_options():
             "30",
             "--acados-control-homotopy-max-restarts",
             "2",
+            "--acados-transfer-active-set-guard-radius",
+            "5e-4",
+            "--acados-transfer-active-set-guard-margin",
+            "2",
+            "--acados-transfer-active-set-threshold",
+            "2e-6",
         ]
     )
 
@@ -512,6 +726,9 @@ def test_comparison_cli_forwards_acados_hot_start_homotopy_options():
     assert args.acados_control_homotopy_tolerance == 2e-2
     assert args.acados_control_homotopy_stage_iterations == 30
     assert args.acados_control_homotopy_max_restarts == 2
+    assert args.acados_transfer_active_set_guard_radius == 5e-4
+    assert args.acados_transfer_active_set_guard_margin == 2
+    assert args.acados_transfer_active_set_threshold == 2e-6
 
 
 def test_control_homotopy_window_radius_growth_respects_its_physical_cap():
@@ -2520,6 +2737,54 @@ def test_stimulation_snapshot_rejects_nlp_cycle_without_mechanical_certificate()
     assert snapshot["reason"] == "only_0_cycles_belong_to_the_converged_prefix"
 
 
+def test_isolated_checkpoint_preserves_terminal_fatigue_after_prefix_failure():
+    class WindowSolution:
+        def __init__(self, status, capacity, pulse_width):
+            self.status = status
+            self._capacity = capacity
+            self._pulse_width = pulse_width
+
+        def decision_states(self, to_merge):
+            assert to_merge == SolutionMerge.NODES
+            return {"A_Biceps": np.asarray([self._capacity], dtype=float)}
+
+        def decision_controls(self, to_merge):
+            assert to_merge == SolutionMerge.NODES
+            return {
+                "last_pulse_width_Biceps": np.asarray(
+                    [self._pulse_width], dtype=float
+                )
+            }
+
+    result = _benchmark_result([0, 1, 0], solver_success=False, success=False)
+    result["window_solutions"] = [
+        WindowSolution(0, [100.0, 99.0], [200e-6, 210e-6]),
+        WindowSolution(1, [99.0, 97.0], [220e-6, 230e-6]),
+        WindowSolution(0, [97.0, 96.0], [240e-6, 250e-6]),
+    ]
+    result["window_objectives"] = [1.0, 2.0, 3.0]
+    result["window_feasibility"] = [
+        {"passes_tolerance": True},
+        {"passes_tolerance": False},
+        {"passes_tolerance": True},
+    ]
+    result["fatigue_capacity_scales"] = {"A_Biceps": 100.0}
+
+    checkpoint = comparison_example.isolated_window_checkpoint_snapshots(
+        result, cycles=(3,)
+    )["cycle_3"]
+
+    assert checkpoint["available"] is True
+    assert checkpoint["diagnostic_only"] is True
+    assert checkpoint["belongs_to_strict_prefix"] is False
+    assert checkpoint["objective"] == 3.0
+    assert checkpoint["primal_feasible"] is True
+    assert checkpoint["capacity_states"]["A_Biceps"]["terminal_ratio"] == 0.96
+    np.testing.assert_allclose(
+        checkpoint["pulse_width_us"]["Biceps"], [240.0, 250.0]
+    )
+
+
 def test_pulse_width_cycle_variation_reports_aligned_transition_percentiles():
     result = _benchmark_result([0, 0, 0], solver_success=True, success=True)
 
@@ -3339,6 +3604,22 @@ def test_full_contact_stabilization_is_opt_in_on_both_clis():
 
     assert not periodic_parser.parse_args([]).full_contact_constraints_all_nodes
     assert not comparison_parser.parse_args([]).full_contact_constraints_all_nodes
+    assert not periodic_parser.parse_args([]).full_contact_constraints_terminal
+    assert not comparison_parser.parse_args([]).full_contact_constraints_terminal
+    assert periodic_parser.parse_args(
+        ["--full-contact-constraints-terminal"]
+    ).full_contact_constraints_terminal
+    assert comparison_parser.parse_args(
+        ["--full-contact-constraints-terminal"]
+    ).full_contact_constraints_terminal
+    assert not periodic_parser.parse_args([]).full_contact_position_terminal
+    assert not comparison_parser.parse_args([]).full_contact_position_terminal
+    assert periodic_parser.parse_args(
+        ["--full-contact-position-terminal"]
+    ).full_contact_position_terminal
+    assert comparison_parser.parse_args(
+        ["--full-contact-position-terminal"]
+    ).full_contact_position_terminal
     assert periodic_parser.parse_args(
         ["--full-contact-constraints-all-nodes"]
     ).full_contact_constraints_all_nodes
@@ -3353,6 +3634,24 @@ def test_full_contact_stabilization_is_opt_in_on_both_clis():
     assert comparison_parser.parse_args(
         ["--full-contact-position-all-nodes"]
     ).full_contact_position_all_nodes
+    assert periodic_parser.parse_args(
+        ["--full-contact-position-tolerance", "2e-5"]
+    ).full_contact_position_tolerance == 2e-5
+    assert comparison_parser.parse_args(
+        ["--full-contact-position-tolerance", "2e-5"]
+    ).full_contact_position_tolerance == 2e-5
+    assert periodic_parser.parse_args(
+        ["--transfer-contact-manifold-projection"]
+    ).transfer_contact_manifold_projection
+    assert comparison_parser.parse_args(
+        ["--shared-transfer-contact-projection"]
+    ).shared_transfer_contact_projection
+    assert (
+        comparison_parser.parse_args(
+            ["--shared-transfer-contact-projection"]
+        ).shared_transfer_contact_projection_mode
+        == "position"
+    )
 
 
 def test_common_primal_threshold_is_independent_of_nlp_solver_tolerance():
@@ -3538,6 +3837,11 @@ def test_benchmark_json_summary_contains_comparable_fatigue_metrics(tmp_path):
         == row["executed_fatigue_objective"]
     )
     assert row["pulse_width_cycle_variation"]["available"] is True
+    assert "cycle_100" in row["isolated_window_checkpoints"]
+    assert (
+        row["isolated_window_checkpoints"]["cycle_100"]["diagnostic_only"]
+        is True
+    )
     assert row["external_crank_power"]["role"] == "unavailable"
     assert row["cycle_boundary_wheel_angle"]["maximum_absolute_error_rad"] is not None
     assert row["stop"]["label"] == "completed_requested_horizon"
@@ -3937,7 +4241,10 @@ def test_github_acados_runner_uses_reference_and_option_profiles_sequentially():
     )
     assert "inputs.cycles != 'screen' && inputs.cycles != 'acados'" in workflow
     assert "prepare-acados-stack:" in workflow
-    assert "BIOPTIM_PRODUCTION_COMMIT: a3499cab16d7605b8efa7255cf89f1af6a7c59c9" in workflow
+    assert (
+        "BIOPTIM_PRODUCTION_COMMIT: "
+        "036b9155b7c32c0b94d90a98bbdd4231b9203457"
+    ) in workflow
     assert "ACADOS_COMMIT: 59d93e17d2985fdd73fc58b8a83ed8f83a024171" in workflow
     assert "ACADOS_INSTALL_SCRIPT_BLOB: 5ac8064ab613251e62560b5de8cbbb9550f5c5d0" in workflow
     assert "for mechanics in full reduced" in workflow
@@ -3986,6 +4293,10 @@ def test_github_acados_runner_uses_reference_and_option_profiles_sequentially():
     assert "--acados-stationarity-tolerance \"$stationarity\"" in workflow
     assert "--acados-control-homotopy-window-growth 10" in workflow
     assert "--acados-control-homotopy-window-max-radius 1e-5" in workflow
+    assert "run_case sqp-irk-active-set-guard reduced" in workflow
+    assert "--acados-transfer-active-set-guard-radius 5e-4" in workflow
+    assert "--acados-transfer-active-set-guard-margin 1" in workflow
+    assert "--acados-transfer-active-set-threshold 1e-6" in workflow
     assert "--max-consecutive-failing 2" in workflow
     assert "cycling-acados-smoke-${{ github.run_id }}" in workflow
     assert 'echo "${variant}-${mechanics}" >> acados-smoke-results/expected-cases.txt' in workflow
@@ -4025,7 +4336,13 @@ def test_github_acados_runner_uses_reference_and_option_profiles_sequentially():
     assert 'mktemp -d "$case_dir/codegen.XXXXXX"' in benchmark_runner
     assert 'pushd "$codegen_dir"' in benchmark_runner
     assert "--ipopt-enforce-start-constraints" in benchmark_runner
-    assert 'elif [[ "$ode_solver" != "collocation" ]]' in benchmark_runner
+    assert 'solver_options+=(--full-contact-position-tolerance 2e-5)' in (
+        benchmark_runner
+    )
+    assert (
+        'if [[ "$mechanics" != "reduced" && "$ode_solver" != "collocation" ]]'
+        in benchmark_runner
+    )
     assert "--shared-transfer-phase-one" in benchmark_runner
     assert "\n    --transfer-phase-one\n" not in benchmark_runner
     assert '--reduced-cycling-profile "$workspace/benchmark-seed/' in benchmark_runner

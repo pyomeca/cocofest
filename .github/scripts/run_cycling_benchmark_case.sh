@@ -82,7 +82,14 @@ elif [[ "$solver" == "madnlp" ]]; then
 fi
 if [[ "$mechanics" == "reduced" ]]; then
   solver_options+=(--mechanical-formulation reduced)
-elif [[ "$ode_solver" != "collocation" ]]; then
+else
+  # The exact full contact equality stalls both interior-point solvers on the
+  # same 10-20 µm seam residual. This explicit 20 µm band is still only
+  # 0.02 % of the 0.1 m crank radius and is tighter than the angular endpoint
+  # tolerance used by the benchmark.
+  solver_options+=(--full-contact-position-tolerance 2e-5)
+fi
+if [[ "$mechanics" != "reduced" && "$ode_solver" != "collocation" ]]; then
   # A one-cycle horizon has no future tail to shift. The exact terminal state
   # therefore replaces node 0 while nodes 1..N retain the previous cycle's
   # shape, which can create a large full-dynamics defect. The current phase-I

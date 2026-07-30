@@ -53,6 +53,88 @@ from cocofest import (
 )
 
 
+def project_full_first_node_initial_guess_to_contact(
+    periodic_nmpc, *, project_velocity: bool = False
+) -> dict:
+    """Project free full coordinates while preserving the bound crank states."""
+
+    summary = {
+        "applied": False,
+        "reason": None,
+        "q_max_change": 0.0,
+        "qdot_max_change": 0.0,
+        "theta": None,
+        "omega": None,
+    }
+    try:
+        q_guess = periodic_nmpc.nlp[0].x_init["q"]
+        qdot_guess = periodic_nmpc.nlp[0].x_init["qdot"]
+    except (KeyError, TypeError):
+        summary["reason"] = "full_mechanical_states_unavailable"
+        return summary
+    reduced_dynamics = getattr(
+        periodic_nmpc, "_cocofest_mechanical_equivalence_dynamics", None
+    )
+    if reduced_dynamics is None:
+        summary["reason"] = "reduced_contact_manifold_unavailable"
+        return summary
+
+    q_init = np.asarray(q_guess.init, dtype=float)
+    qdot_init = np.asarray(qdot_guess.init, dtype=float)
+    wheel_index = int(getattr(periodic_nmpc, "wheel_state_index", 2))
+    q_before = q_init[:, 0].copy()
+    qdot_before = qdot_init[:, 0].copy()
+    target_q = float(q_before[wheel_index])
+    target_qdot = float(qdot_before[wheel_index])
+    kinematics = reduced_dynamics.kinematics
+    projected_theta, _, _ = kinematics.project_generalized_trajectory(
+        q_before[:, np.newaxis],
+        qdot_before[:, np.newaxis],
+    )
+    theta = float(projected_theta[0, 0])
+    for _ in range(20):
+        lifted_q = np.asarray(kinematics.q(theta), dtype=float)
+        tangent = np.asarray(kinematics.tangent(theta), dtype=float)
+        derivative = float(tangent[wheel_index])
+        if np.isclose(derivative, 0.0):
+            raise RuntimeError(
+                "Cannot preserve the crank coordinate while projecting contact."
+            )
+        step = float((lifted_q[wheel_index] - target_q) / derivative)
+        theta -= step
+        if abs(step) <= 1e-13:
+            break
+
+    lifted_q = np.asarray(kinematics.q(theta), dtype=float)
+    tangent = np.asarray(kinematics.tangent(theta), dtype=float)
+    omega = float(target_qdot / tangent[wheel_index])
+    lifted_qdot = tangent * omega
+    # Preserve the two states that advance_window_bounds_states fixes exactly;
+    # only the redundant coordinates and velocities are numerical projections.
+    lifted_q[wheel_index] = target_q
+    lifted_qdot[wheel_index] = target_qdot
+    q_init[:, 0] = lifted_q
+    if project_velocity:
+        qdot_init[:, 0] = lifted_qdot
+    q_guess.init[:, :] = q_init
+    qdot_guess.init[:, :] = qdot_init
+    summary.update(
+        applied=True,
+        mode=("position_velocity" if project_velocity else "position"),
+        q_max_change=float(np.max(np.abs(lifted_q - q_before))),
+        qdot_max_change=(
+            float(np.max(np.abs(lifted_qdot - qdot_before)))
+            if project_velocity
+            else 0.0
+        ),
+        theta=theta,
+        omega=omega,
+        preserved_wheel_q=target_q,
+        preserved_wheel_qdot=target_qdot,
+    )
+    return summary
+
+
 class MyCyclicNMPC(FesNmpcMsk):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -96,6 +178,9 @@ class MyCyclicNMPC(FesNmpcMsk):
         self.continuous_state_initial_guess_mode = "continuous"
         self.transfer_initial_guess_mode = "historical"
         self.repeat_cyclical_state_initial_guess = False
+        self.project_full_transfer_contact = False
+        self.project_full_transfer_contact_velocity = False
+        self.last_transfer_contact_projection = None
         self.before_window_advance = None
 
     def _set_cyclic_bound(self, sol: Solution | None = None) -> None:
@@ -485,6 +570,13 @@ class MyCyclicNMPC(FesNmpcMsk):
         self._correct_init_guess_to_fit_bounds(
             corrected_input="states"
         )  # This function is called to move init guess within the bounds if not in bounds
+        if self.project_full_transfer_contact:
+            self.last_transfer_contact_projection = (
+                project_full_first_node_initial_guess_to_contact(
+                    self,
+                    project_velocity=self.project_full_transfer_contact_velocity,
+                )
+            )
 
         # --- Print bounds and initial guesses for debugg purpose --- #
         if self.debugg_bounds:
@@ -862,6 +954,14 @@ def prepare_nmpc(
     external_force = cycling_info.get("resistive_torque")
     constant_crank_torque = cycling_info.get("constant_crank_torque")
     enforce_start_constraints = cycling_info.get("enforce_start_constraints", True)
+    enforce_contact_constraints_terminal = cycling_info.get(
+        "enforce_contact_constraints_terminal",
+        False,
+    )
+    enforce_contact_position_terminal = cycling_info.get(
+        "enforce_contact_position_terminal",
+        False,
+    )
     enforce_contact_constraints_all_nodes = cycling_info.get(
         "enforce_contact_constraints_all_nodes",
         False,
@@ -869,6 +969,9 @@ def prepare_nmpc(
     enforce_contact_position_all_nodes = cycling_info.get(
         "enforce_contact_position_all_nodes",
         False,
+    )
+    contact_position_tolerance_m = float(
+        cycling_info.get("contact_position_tolerance_m", 0.0)
     )
     enforce_physical_crank_velocity_bounds = cycling_info.get(
         "enforce_physical_crank_velocity_bounds",
@@ -1077,10 +1180,15 @@ def prepare_nmpc(
     constraints = set_constraints(
         model,
         enforce_start_constraints=enforce_start_constraints,
+        enforce_contact_constraints_terminal=(
+            enforce_contact_constraints_terminal
+        ),
+        enforce_contact_position_terminal=enforce_contact_position_terminal,
         enforce_contact_constraints_all_nodes=(
             enforce_contact_constraints_all_nodes
         ),
         enforce_contact_position_all_nodes=enforce_contact_position_all_nodes,
+        contact_position_tolerance_m=contact_position_tolerance_m,
         x_init=x_init,
         cycle_len=cycle_len,
         n_cycles_simultaneous=n_cycles_simultaneous,
@@ -1900,8 +2008,11 @@ def set_constraints(
     bio_model,
     enforce_start_constraints: bool = True,
     *,
+    enforce_contact_constraints_terminal: bool = False,
+    enforce_contact_position_terminal: bool = False,
     enforce_contact_constraints_all_nodes: bool = False,
     enforce_contact_position_all_nodes: bool = False,
+    contact_position_tolerance_m: float = 0.0,
     x_init: InitialGuessList | None = None,
     cycle_len: int | None = None,
     n_cycles_simultaneous: int = 1,
@@ -1914,13 +2025,19 @@ def set_constraints(
     physical_crank_terminal_angle: float | None = None,
 ):
     constraints = ConstraintList()
+    if not np.isfinite(contact_position_tolerance_m) or contact_position_tolerance_m < 0.0:
+        raise ValueError(
+            "contact_position_tolerance_m must be finite and non-negative."
+        )
     is_reduced = isinstance(bio_model, ReducedFesCyclingModel)
     if (
-        enforce_contact_constraints_all_nodes
+        enforce_contact_constraints_terminal
+        or enforce_contact_position_terminal
+        or enforce_contact_constraints_all_nodes
         or enforce_contact_position_all_nodes
     ) and is_reduced:
         raise ValueError(
-            "All-node marker contact constraints apply only to the full "
+            "Marker contact stabilization applies only to the full "
             "mechanical formulation."
         )
     if (
@@ -1955,6 +2072,36 @@ def set_constraints(
             second_marker="global_wheel_center",
             node=position_node,
             axes=[Axis.X, Axis.Y],
+            min_bound=-float(contact_position_tolerance_m),
+            max_bound=float(contact_position_tolerance_m),
+        )
+    if (
+        (
+            enforce_contact_constraints_terminal
+            or enforce_contact_position_terminal
+        )
+        and not enforce_contact_constraints_all_nodes
+        and not is_reduced
+    ):
+        # The next RHO fixes its first state to this terminal state and applies
+        # the historical contact constraints at START. Closing the same
+        # holonomic position/tangent conditions at END therefore removes a
+        # seam inconsistency without duplicating them at every shooting node.
+        if enforce_contact_constraints_terminal:
+            constraints.add(
+                ConstraintFcn.TRACK_MARKERS_VELOCITY,
+                node=Node.END,
+                marker_index=bio_model.marker_index("wheel_center"),
+                axes=[Axis.X, Axis.Y],
+            )
+        constraints.add(
+            ConstraintFcn.SUPERIMPOSE_MARKERS,
+            first_marker="wheel_center",
+            second_marker="global_wheel_center",
+            node=Node.END,
+            axes=[Axis.X, Axis.Y],
+            min_bound=-float(contact_position_tolerance_m),
+            max_bound=float(contact_position_tolerance_m),
         )
     if enforce_physical_crank_velocity_bounds:
         if isinstance(bio_model, ReducedFesCyclingModel):

@@ -18,6 +18,7 @@ from time import perf_counter
 import traceback
 
 import numpy as np
+from bioptim import SolutionMerge
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 if str(REPO_ROOT) not in sys.path:
@@ -58,8 +59,13 @@ BENCHMARK_CONFIGURATION_FIELDS = (
     "model_formulation",
     "mechanical_formulation",
     "mechanical_equivalence_audit",
+    "full_contact_constraints_terminal",
+    "full_contact_position_terminal",
+    "full_contact_position_tolerance",
     "full_contact_constraints_all_nodes",
     "full_contact_position_all_nodes",
+    "transfer_contact_manifold_projection",
+    "transfer_contact_manifold_projection_mode",
     "torque_application",
     "ode_solver",
     "collocation_degree",
@@ -117,6 +123,9 @@ BENCHMARK_CONFIGURATION_FIELDS = (
     "acados_transfer_bound_homotopy_solver_tolerance",
     "acados_transfer_mechanical_restoration",
     "acados_transfer_sqp_restarts",
+    "acados_transfer_active_set_guard_radius",
+    "acados_transfer_active_set_guard_margin",
+    "acados_transfer_active_set_threshold",
     "acados_cyclical_transfer_mode",
     "terminal_wheel_q_reference_mode",
     "cycles_per_window",
@@ -2069,6 +2078,101 @@ def stimulation_pattern_snapshots(
     }
 
 
+def isolated_window_checkpoint_snapshots(
+    result: dict,
+    cycles: tuple[int, ...] = BENCHMARK_STIMULATION_PATTERN_CYCLES,
+) -> dict[str, dict]:
+    """Preserve selected RHO decisions even after the strict prefix stops.
+
+    These checkpoints are deliberately separate from ``stimulation_patterns``:
+    they are numerical diagnostics, not an executed endurance trajectory.
+    Keeping their terminal A states and PW vectors makes the 100th isolated
+    full solve auditable without accidentally certifying all preceding seams.
+    """
+
+    cycles_per_window = int(getattr(result["args"], "cycles_per_window", 1))
+    windows = result.get("window_solutions") or []
+    objectives = result.get("window_objectives") or []
+    feasibility = result.get("window_feasibility") or []
+    strict_prefix = _physically_validated_cycle_count(result)
+    capacity_scales = result.get("fatigue_capacity_scales") or {}
+    snapshots = {}
+    for cycle in cycles:
+        snapshot = {
+            "cycle": int(cycle),
+            "rho": int(cycle) if cycles_per_window == 1 else None,
+            "available": False,
+            "diagnostic_only": True,
+            "belongs_to_strict_prefix": bool(cycle <= strict_prefix),
+            "reason": None,
+            "status": None,
+            "objective": None,
+            "primal_feasible": None,
+            "capacity_states": {},
+            "pulse_width_us": {},
+        }
+        snapshots[f"cycle_{cycle}"] = snapshot
+        if cycles_per_window != 1:
+            snapshot["reason"] = "requires_one_cycle_per_window"
+            continue
+        if cycle < 1:
+            snapshot["reason"] = "cycle_must_be_positive"
+            continue
+        if cycle > len(windows):
+            snapshot["reason"] = f"only_{len(windows)}_windows_were_attempted"
+            continue
+
+        window_index = cycle - 1
+        solution = windows[window_index]
+        snapshot["status"] = getattr(solution, "status", None)
+        if window_index < len(objectives):
+            snapshot["objective"] = _finite_float(objectives[window_index])
+        if window_index < len(feasibility):
+            snapshot["primal_feasible"] = bool(
+                feasibility[window_index].get("passes_tolerance", False)
+            )
+        try:
+            states = solution.decision_states(to_merge=SolutionMerge.NODES)
+            controls = solution.decision_controls(to_merge=SolutionMerge.NODES)
+        except (AttributeError, KeyError, RuntimeError, ValueError) as error:
+            snapshot["reason"] = f"decision_extraction_failed:{type(error).__name__}"
+            continue
+
+        for key, values in sorted(states.items()):
+            if not key.startswith("A_"):
+                continue
+            trace = np.asarray(values, dtype=float).reshape(-1)
+            if trace.size == 0 or not np.all(np.isfinite(trace)):
+                continue
+            scale = _finite_float(capacity_scales.get(key))
+            snapshot["capacity_states"][key] = {
+                "initial": float(trace[0]),
+                "terminal": float(trace[-1]),
+                "scale": scale,
+                "initial_ratio": (
+                    None if scale in (None, 0.0) else float(trace[0] / scale)
+                ),
+                "terminal_ratio": (
+                    None if scale in (None, 0.0) else float(trace[-1] / scale)
+                ),
+            }
+        for key, values in sorted(controls.items()):
+            if not key.startswith("last_pulse_width_"):
+                continue
+            trace = np.asarray(values, dtype=float).reshape(-1)
+            if trace.size == 0 or not np.all(np.isfinite(trace)):
+                continue
+            snapshot["pulse_width_us"][key.removeprefix("last_pulse_width_")] = (
+                1e6 * trace
+            ).tolist()
+        snapshot["available"] = bool(
+            snapshot["capacity_states"] or snapshot["pulse_width_us"]
+        )
+        if not snapshot["available"]:
+            snapshot["reason"] = "no_capacity_or_pulse_width_decisions"
+    return snapshots
+
+
 def pulse_width_cycle_variation(result: dict, cycle_count: int) -> dict:
     """Measure aligned pulse-width changes between consecutive executed cycles.
 
@@ -2363,6 +2467,9 @@ def solver_overview_rows(results: dict[str, dict]) -> list[dict]:
                 "native_solver_status": result.get("native_solver_status"),
                 "windows": window_rows,
                 "stimulation_patterns": stimulation_pattern_snapshots(result),
+                "isolated_window_checkpoints": (
+                    isolated_window_checkpoint_snapshots(result)
+                ),
                 "pulse_width_cycle_variation": pulse_width_cycle_variation(
                     result, performance["validated_cycles"]
                 ),
@@ -2519,6 +2626,9 @@ def main(
     mechanical_formulation: str = "full",
     reduced_cycling_profile: str | Path | None = None,
     experimental_reduced_acados: bool = False,
+    full_contact_constraints_terminal: bool = False,
+    full_contact_position_terminal: bool = False,
+    full_contact_position_tolerance: float = 0.0,
     full_contact_constraints_all_nodes: bool = False,
     full_contact_position_all_nodes: bool = False,
     n_threads: int | None = None,
@@ -2623,6 +2733,9 @@ def main(
     acados_transfer_sqp_restarts: int = 0,
     acados_transfer_sqp_restart_iterations: int = 1,
     acados_transfer_sqp_restart_feasibility_tolerance: float = 1e-2,
+    acados_transfer_active_set_guard_radius: float | None = None,
+    acados_transfer_active_set_guard_margin: int = 1,
+    acados_transfer_active_set_threshold: float = 1e-6,
     acados_fes_state_trust_radius: float | None = None,
     acados_fatigue_warmstart_mode: str = "continuous",
     acados_tolerance: float | None = None,
@@ -2652,6 +2765,8 @@ def main(
     acados_byrd_omojokon_slack_relaxation_factor: float = 1.00001,
     acados_project_qdot_from_q: bool = False,
     shared_transfer_full_dynamics_rollout: bool = False,
+    shared_transfer_contact_projection: bool = False,
+    shared_transfer_contact_projection_mode: str = "position",
     shared_transfer_phase_one: bool = False,
     acados_transfer_phase_one: bool = False,
     acados_transfer_phase_one_mode: str = "all",
@@ -3099,6 +3214,15 @@ def main(
     acados_args.acados_transfer_sqp_restart_feasibility_tolerance = (
         acados_transfer_sqp_restart_feasibility_tolerance
     )
+    acados_args.acados_transfer_active_set_guard_radius = (
+        acados_transfer_active_set_guard_radius
+    )
+    acados_args.acados_transfer_active_set_guard_margin = (
+        acados_transfer_active_set_guard_margin
+    )
+    acados_args.acados_transfer_active_set_threshold = (
+        acados_transfer_active_set_threshold
+    )
     acados_args.acados_terminal_wheel_q_homotopy_slacks = (
         acados_terminal_wheel_q_homotopy_slacks
     )
@@ -3108,6 +3232,12 @@ def main(
     for solver_args in (ipopt_args, acados_args):
         solver_args.acados_transfer_full_dynamics_rollout = (
             shared_transfer_full_dynamics_rollout
+        )
+        solver_args.transfer_contact_manifold_projection = (
+            shared_transfer_contact_projection
+        )
+        solver_args.transfer_contact_manifold_projection_mode = (
+            shared_transfer_contact_projection_mode
         )
         solver_args.acados_transfer_phase_one = shared_transfer_phase_one
         solver_args.full_dynamics_phase_one = shared_initial_phase_one
@@ -3251,6 +3381,15 @@ def main(
     # are computed.
     for solver_configuration in solver_args.values():
         solver_configuration.mechanical_equivalence_audit = True
+        solver_configuration.full_contact_constraints_terminal = bool(
+            full_contact_constraints_terminal
+        )
+        solver_configuration.full_contact_position_terminal = bool(
+            full_contact_position_terminal
+        )
+        solver_configuration.full_contact_position_tolerance = float(
+            full_contact_position_tolerance
+        )
         solver_configuration.full_contact_constraints_all_nodes = bool(
             full_contact_constraints_all_nodes
         )
@@ -3369,6 +3508,32 @@ def build_cli() -> argparse.ArgumentParser:
         help=(
             "Enable the uncertified reduced ACADOS SQP path for one-cycle "
             "rollout/projection diagnostics."
+        ),
+    )
+    parser.add_argument(
+        "--full-contact-constraints-terminal",
+        action="store_true",
+        help=(
+            "For full mechanics, close wheel-centre position and velocity at "
+            "the terminal node to make the RHO seam mechanically feasible."
+        ),
+    )
+    parser.add_argument(
+        "--full-contact-position-terminal",
+        action="store_true",
+        help=(
+            "For full mechanics, close only wheel-centre position at the "
+            "terminal node to target the observed RHO seam."
+        ),
+    )
+    parser.add_argument(
+        "--full-contact-position-tolerance",
+        type=float,
+        default=0.0,
+        metavar="M",
+        help=(
+            "Symmetric tolerance on the full wheel-centre position "
+            "constraints; zero preserves the historical equality."
         ),
     )
     parser.add_argument(
@@ -3682,6 +3847,19 @@ def build_cli() -> argparse.ArgumentParser:
             "Apply the same complete-dynamics RK4 rollout to the appended cycle "
             "for IPOPT and ACADOS."
         ),
+    )
+    parser.add_argument(
+        "--shared-transfer-contact-projection",
+        action="store_true",
+        help=(
+            "Project free full q/qdot components onto the contact manifold "
+            "between RHO solves for every selected solver."
+        ),
+    )
+    parser.add_argument(
+        "--shared-transfer-contact-projection-mode",
+        choices=("position", "position_velocity"),
+        default="position",
     )
     parser.add_argument(
         "--shared-transfer-phase-one",
@@ -4126,6 +4304,25 @@ def build_cli() -> argparse.ArgumentParser:
         default=1e-2,
     )
     parser.add_argument(
+        "--acados-transfer-active-set-guard-radius",
+        type=float,
+        default=None,
+        help=(
+            "Locally enlarge the ACADOS PW trust region at phase-aligned "
+            "recruitment transitions."
+        ),
+    )
+    parser.add_argument(
+        "--acados-transfer-active-set-guard-margin",
+        type=int,
+        default=1,
+    )
+    parser.add_argument(
+        "--acados-transfer-active-set-threshold",
+        type=float,
+        default=1e-6,
+    )
+    parser.add_argument(
         "--acados-terminal-wheel-q-homotopy-slacks",
         type=parse_terminal_wheel_q_slacks,
         default=None,
@@ -4339,6 +4536,13 @@ if __name__ == "__main__":
         mechanical_formulation=args.mechanical_formulation,
         reduced_cycling_profile=args.reduced_cycling_profile,
         experimental_reduced_acados=args.experimental_reduced_acados,
+        full_contact_constraints_terminal=(
+            args.full_contact_constraints_terminal
+        ),
+        full_contact_position_terminal=args.full_contact_position_terminal,
+        full_contact_position_tolerance=(
+            args.full_contact_position_tolerance
+        ),
         full_contact_constraints_all_nodes=(
             args.full_contact_constraints_all_nodes
         ),
@@ -4491,6 +4695,15 @@ if __name__ == "__main__":
         acados_transfer_sqp_restart_feasibility_tolerance=(
             args.acados_transfer_sqp_restart_feasibility_tolerance
         ),
+        acados_transfer_active_set_guard_radius=(
+            args.acados_transfer_active_set_guard_radius
+        ),
+        acados_transfer_active_set_guard_margin=(
+            args.acados_transfer_active_set_guard_margin
+        ),
+        acados_transfer_active_set_threshold=(
+            args.acados_transfer_active_set_threshold
+        ),
         acados_fes_state_trust_radius=args.acados_fes_state_trust_radius,
         acados_fatigue_warmstart_mode=args.acados_fatigue_warmstart_mode,
         acados_tolerance=args.acados_tolerance,
@@ -4529,6 +4742,12 @@ if __name__ == "__main__":
         acados_project_qdot_from_q=args.acados_project_qdot_from_q,
         shared_transfer_full_dynamics_rollout=(
             args.shared_transfer_full_dynamics_rollout
+        ),
+        shared_transfer_contact_projection=(
+            args.shared_transfer_contact_projection
+        ),
+        shared_transfer_contact_projection_mode=(
+            args.shared_transfer_contact_projection_mode
         ),
         shared_transfer_phase_one=args.shared_transfer_phase_one,
         acados_transfer_phase_one=args.acados_transfer_phase_one,

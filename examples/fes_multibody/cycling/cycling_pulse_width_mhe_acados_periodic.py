@@ -1072,6 +1072,34 @@ def build_argument_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--acados-transfer-active-set-guard-radius",
+        type=float,
+        default=None,
+        help=(
+            "Optional larger pulse-width radius, in seconds, applied only near "
+            "circular active/inactive phase transitions after an MHE transfer. "
+            "The ordinary transfer trust radius is retained at every other node."
+        ),
+    )
+    parser.add_argument(
+        "--acados-transfer-active-set-guard-margin",
+        type=int,
+        default=1,
+        help=(
+            "Circular number of neighboring stimulation nodes released on each "
+            "side of an active/inactive pulse-width transition."
+        ),
+    )
+    parser.add_argument(
+        "--acados-transfer-active-set-threshold",
+        type=float,
+        default=1e-6,
+        help=(
+            "Pulse width above the model pd0, in seconds, used to classify the "
+            "phase-aligned transferred control as recruited."
+        ),
+    )
+    parser.add_argument(
         "--acados-fes-state-trust-radius",
         type=float,
         default=None,
@@ -1572,6 +1600,24 @@ def build_argument_parser() -> argparse.ArgumentParser:
             "Reintegrate the appended cycle with the complete dynamics after each "
             "window transfer. This solver-independent rollout is available to IPOPT "
             "and ACADOS."
+        ),
+    )
+    parser.add_argument(
+        "--transfer-contact-manifold-projection",
+        action="store_true",
+        help=(
+            "For full mechanics, project the free first-node q/qdot components "
+            "onto the reduced contact manifold after each RHO transfer while "
+            "preserving the exactly bound crank coordinate and velocity."
+        ),
+    )
+    parser.add_argument(
+        "--transfer-contact-manifold-projection-mode",
+        choices=("position", "position_velocity"),
+        default="position",
+        help=(
+            "Project only the dominant position seam by default, or also "
+            "project the free generalized velocities."
         ),
     )
     parser.add_argument(
@@ -2455,6 +2501,33 @@ def build_argument_parser() -> argparse.ArgumentParser:
         help="Disable the start-of-window posture constraints.",
     )
     parser.add_argument(
+        "--full-contact-constraints-terminal",
+        action="store_true",
+        help=(
+            "For full mechanics, close wheel-centre position and velocity at "
+            "the terminal node so the next RHO starts on the contact manifold."
+        ),
+    )
+    parser.add_argument(
+        "--full-contact-position-terminal",
+        action="store_true",
+        help=(
+            "For full mechanics, close only wheel-centre position at the "
+            "terminal node; this targets the observed RHO seam without adding "
+            "a terminal velocity constraint."
+        ),
+    )
+    parser.add_argument(
+        "--full-contact-position-tolerance",
+        type=float,
+        default=0.0,
+        metavar="M",
+        help=(
+            "Symmetric spatial tolerance on full wheel-centre position "
+            "constraints. The default 0 keeps the historical equality."
+        ),
+    )
+    parser.add_argument(
         "--full-contact-constraints-all-nodes",
         action="store_true",
         help=(
@@ -3084,6 +3157,15 @@ def _common_initial_solution_metadata(args: argparse.Namespace) -> dict:
         "constant_crank_torque": float(args.constant_crank_torque),
         "torque_application": args.torque_application,
         "enforce_start_constraints": bool(args.enforce_start_constraints),
+        "full_contact_constraints_terminal": bool(
+            getattr(args, "full_contact_constraints_terminal", False)
+        ),
+        "full_contact_position_terminal": bool(
+            getattr(args, "full_contact_position_terminal", False)
+        ),
+        "full_contact_position_tolerance": float(
+            getattr(args, "full_contact_position_tolerance", 0.0)
+        ),
         "first_node_wheel_q_slack": float(args.acados_wheel_q_slack),
         "terminal_wheel_q_slack": float(args.acados_terminal_wheel_q_slack),
         "terminal_wheel_q_reference_mode": args.terminal_wheel_q_reference_mode,
@@ -3274,6 +3356,11 @@ def _horizon_seed_cache_signature(args: argparse.Namespace) -> str:
         "ode_solver": args.ode_solver,
         "rk_steps": args.rk_steps,
         "enforce_start_constraints": args.enforce_start_constraints,
+        "full_contact_constraints_terminal": (
+            args.full_contact_constraints_terminal
+        ),
+        "full_contact_position_terminal": args.full_contact_position_terminal,
+        "full_contact_position_tolerance": args.full_contact_position_tolerance,
         "state_scaling": args.state_scaling,
         "pulse_width_scaling": args.pulse_width_scaling,
         "control_regularization_weight": args.control_regularization_weight,
@@ -3347,6 +3434,11 @@ def _codegen_signature(args: argparse.Namespace) -> str:
         "constant_crank_torque": args.constant_crank_torque,
         "use_sx": args.use_sx,
         "enforce_start_constraints": args.enforce_start_constraints,
+        "full_contact_constraints_terminal": (
+            args.full_contact_constraints_terminal
+        ),
+        "full_contact_position_terminal": args.full_contact_position_terminal,
+        "full_contact_position_tolerance": args.full_contact_position_tolerance,
         "control_regularization_weight": args.control_regularization_weight,
         "control_regularization_target": args.control_regularization_target,
         "control_regularization_target_source": args.control_regularization_target_source,
@@ -10854,6 +10946,7 @@ def apply_pulse_width_control_trust_region(
 
     summary = {}
     nodewise_bounds = {}
+    trust_centers = {}
     for key in periodic_nmpc.nlp[0].u_init.keys():
         if not key.startswith("last_pulse_width_"):
             continue
@@ -10878,6 +10971,7 @@ def apply_pulse_width_control_trust_region(
             np.maximum(center, lower), upper
         )
         nodewise_bounds[key] = (lower, upper)
+        trust_centers[key] = center.copy()
         summary[key] = {
             "center_min": center_min,
             "center_max": center_max,
@@ -10886,7 +10980,118 @@ def apply_pulse_width_control_trust_region(
         }
 
     periodic_nmpc._cocofest_nodewise_control_bounds = nodewise_bounds
+    periodic_nmpc._cocofest_control_trust_centers = trust_centers
     return summary
+
+
+def apply_phase_aligned_pulse_width_transition_guard(
+    periodic_nmpc,
+    radius: float,
+    margin: int = 1,
+    activation_threshold: float = 1e-6,
+) -> dict[str, dict]:
+    """
+    Locally release a pulse-width trust region at recruitment transitions.
+
+    The previous solution has already been shifted to the same crank phase.
+    Large cycle-to-cycle PW changes are rare and occur mainly when a phase node
+    enters or leaves a recruited block. Widening every node removes the useful
+    stabilization of the transfer trust region, so only circular neighborhoods
+    around active/inactive transitions are released.
+    """
+
+    if not np.isfinite(radius) or radius < 0.0:
+        raise ValueError(
+            "--acados-transfer-active-set-guard-radius must be finite and "
+            "non-negative."
+        )
+    if margin < 0:
+        raise ValueError(
+            "--acados-transfer-active-set-guard-margin must be non-negative."
+        )
+    if not np.isfinite(activation_threshold) or activation_threshold < 0.0:
+        raise ValueError(
+            "--acados-transfer-active-set-threshold must be finite and "
+            "non-negative."
+        )
+
+    nodewise_bounds = getattr(
+        periodic_nmpc, "_cocofest_nodewise_control_bounds", {}
+    )
+    trust_centers = getattr(
+        periodic_nmpc, "_cocofest_control_trust_centers", {}
+    )
+    original_bounds = getattr(
+        periodic_nmpc, "_cocofest_original_control_bounds", {}
+    )
+    if not nodewise_bounds:
+        raise RuntimeError(
+            "The active-set guard requires an existing pulse-width trust region."
+        )
+
+    summaries = {}
+    for key, (current_lower, current_upper) in nodewise_bounds.items():
+        center = np.asarray(
+            trust_centers.get(key, periodic_nmpc.nlp[0].u_init[key].init),
+            dtype=float,
+        )
+        if center.ndim != 2 or center.shape[0] != 1:
+            raise ValueError(
+                f"The active-set guard expects one pulse-width row for {key}, "
+                f"got {center.shape}."
+            )
+        node_count = center.shape[1]
+        if node_count < 2:
+            summaries[key] = {
+                "transition_nodes": [],
+                "released_nodes": [],
+                "released_count": 0,
+                "reason": "fewer_than_two_nodes",
+            }
+            continue
+
+        original_min, original_max = original_bounds[key]
+        physical_lower = float(np.min(np.asarray(original_min, dtype=float)))
+        physical_upper = float(np.max(np.asarray(original_max, dtype=float)))
+        active = center[0] > physical_lower + activation_threshold
+        transition_nodes = np.flatnonzero(active != np.roll(active, 1))
+        released_nodes = sorted(
+            {
+                int((node + offset) % node_count)
+                for node in transition_nodes
+                for offset in range(-margin, margin + 1)
+            }
+        )
+
+        lower = np.asarray(current_lower, dtype=float).copy()
+        upper = np.asarray(current_upper, dtype=float).copy()
+        if released_nodes:
+            indexes = np.asarray(released_nodes, dtype=int)
+            lower[:, indexes] = np.minimum(
+                lower[:, indexes],
+                np.maximum(physical_lower, center[:, indexes] - radius),
+            )
+            upper[:, indexes] = np.maximum(
+                upper[:, indexes],
+                np.minimum(physical_upper, center[:, indexes] + radius),
+            )
+        if np.any(lower > upper):
+            raise RuntimeError(f"Active-set guard is empty for {key}.")
+        nodewise_bounds[key] = (lower, upper)
+        summaries[key] = {
+            "transition_nodes": transition_nodes.astype(int).tolist(),
+            "released_nodes": released_nodes,
+            "released_count": len(released_nodes),
+            "active_count": int(np.count_nonzero(active)),
+            "node_count": node_count,
+            "radius": float(radius),
+            "lower": float(np.min(lower)),
+            "upper": float(np.max(upper)),
+            "reason": None if released_nodes else "no_active_set_transition",
+        }
+
+    periodic_nmpc._cocofest_nodewise_control_bounds = nodewise_bounds
+    return summaries
 
 
 def build_failed_solve_summary(
@@ -10952,6 +11157,7 @@ def restore_pulse_width_control_bounds(periodic_nmpc) -> None:
         bounds.min[:, :] = lower
         bounds.max[:, :] = upper
     periodic_nmpc._cocofest_nodewise_control_bounds = {}
+    periodic_nmpc._cocofest_control_trust_centers = {}
 
 
 def apply_fes_state_trust_region(
@@ -11264,6 +11470,52 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
         raise ValueError("--cycles-per-window must be >= 1")
     if args.stimulations_per_cycle < 1:
         raise ValueError("--stimulations-per-cycle must be >= 1")
+    if (
+        not np.isfinite(args.full_contact_position_tolerance)
+        or args.full_contact_position_tolerance < 0.0
+    ):
+        raise ValueError(
+            "--full-contact-position-tolerance must be finite and non-negative."
+        )
+    if (
+        args.transfer_contact_manifold_projection
+        and args.mechanical_formulation != "full"
+    ):
+        raise ValueError(
+            "--transfer-contact-manifold-projection applies only to full mechanics."
+        )
+    if (
+        args.acados_transfer_active_set_guard_radius is not None
+        and (
+            not np.isfinite(args.acados_transfer_active_set_guard_radius)
+            or args.acados_transfer_active_set_guard_radius < 0
+        )
+    ):
+        raise ValueError(
+            "--acados-transfer-active-set-guard-radius must be finite and "
+            "non-negative."
+        )
+    if (
+        args.acados_transfer_active_set_guard_radius is not None
+        and args.acados_pulse_width_trust_radius is None
+        and args.acados_control_homotopy_radii is None
+    ):
+        raise ValueError(
+            "--acados-transfer-active-set-guard-radius requires either "
+            "--acados-pulse-width-trust-radius or an ACADOS control homotopy."
+        )
+    if args.acados_transfer_active_set_guard_margin < 0:
+        raise ValueError(
+            "--acados-transfer-active-set-guard-margin must be non-negative."
+        )
+    if (
+        not np.isfinite(args.acados_transfer_active_set_threshold)
+        or args.acados_transfer_active_set_threshold < 0
+    ):
+        raise ValueError(
+            "--acados-transfer-active-set-threshold must be finite and "
+            "non-negative."
+        )
     if (
         args.full_dynamics_phase_one_max_state_change is not None
         and args.full_dynamics_phase_one_max_state_change <= 0
@@ -11766,6 +12018,15 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
         "turn_number": args.cycles_per_window,
         "pedal_config": {"x_center": 0.35, "y_center": 0.0, "radius": 0.1},
         "enforce_start_constraints": args.enforce_start_constraints,
+        "enforce_contact_constraints_terminal": bool(
+            args.full_contact_constraints_terminal
+        ),
+        "enforce_contact_position_terminal": bool(
+            args.full_contact_position_terminal
+        ),
+        "contact_position_tolerance_m": float(
+            args.full_contact_position_tolerance
+        ),
         "enforce_contact_constraints_all_nodes": bool(
             args.full_contact_constraints_all_nodes
         ),
@@ -12002,6 +12263,18 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
         print(f"use_sx: {args.use_sx}")
         print(f"nlp_ordering_strategy: {args.nlp_ordering_strategy}")
         print(f"enforce_start_constraints: {args.enforce_start_constraints}")
+        print(
+            "full_contact_constraints_terminal: "
+            f"{args.full_contact_constraints_terminal}"
+        )
+        print(
+            "full_contact_position_terminal: "
+            f"{args.full_contact_position_terminal}"
+        )
+        print(
+            "full_contact_position_tolerance_m: "
+            f"{args.full_contact_position_tolerance}"
+        )
         print(f"control_regularization_weight: {args.control_regularization_weight}")
         print(f"control_regularization_target: {args.control_regularization_target}")
         print(
@@ -12928,6 +13201,8 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
     transfer_ding_force_compensation_summaries = []
     transfer_bound_homotopy_summaries = []
     transfer_sqp_restart_summaries = []
+    transfer_active_set_guard_summaries = []
+    transfer_contact_projection_summaries = []
     transfer_bound_projection_summaries = []
     inter_window_refinement_summaries = []
     cycle_boundary_homotopy_summary = None
@@ -13037,6 +13312,22 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
     def update_functions(_nmpc, cycle_idx, _sol):
         nonlocal transfer_failure_window, consecutive_physical_failures
         print(f"window {cycle_idx}")
+        contact_projection = getattr(
+            _nmpc, "last_transfer_contact_projection", None
+        )
+        if contact_projection is not None:
+            contact_projection = {"window": cycle_idx, **contact_projection}
+            transfer_contact_projection_summaries.append(contact_projection)
+            _nmpc.last_transfer_contact_projection = None
+            if echo:
+                print(
+                    "transfer_contact_manifold_projection: "
+                    f"window={cycle_idx} "
+                    f"applied={contact_projection['applied']} "
+                    f"q_max_change={contact_projection['q_max_change']:.6g} "
+                    f"qdot_max_change={contact_projection['qdot_max_change']:.6g} "
+                    f"reason={contact_projection['reason']}"
+                )
         if args.solver in NLP_SOLVER_NAMES and _sol is not None:
             nlp_solver_stats.append(
                 {
@@ -13696,6 +13987,36 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
                     f"window={cycle_idx} radius={transfer_radius:.9g} "
                     f"max_center={max_center:.9g}"
                 )
+            if args.acados_transfer_active_set_guard_radius is not None:
+                guard_summary = apply_phase_aligned_pulse_width_transition_guard(
+                    _nmpc,
+                    radius=args.acados_transfer_active_set_guard_radius,
+                    margin=args.acados_transfer_active_set_guard_margin,
+                    activation_threshold=args.acados_transfer_active_set_threshold,
+                )
+                transfer_active_set_guard_summaries.append(
+                    {"window": cycle_idx, "controls": guard_summary}
+                )
+                if echo:
+                    released = sum(
+                        item["released_count"] for item in guard_summary.values()
+                    )
+                    print(
+                        "acados_transfer_active_set_guard: "
+                        f"window={cycle_idx} "
+                        f"radius={args.acados_transfer_active_set_guard_radius:.9g} "
+                        f"margin={args.acados_transfer_active_set_guard_margin} "
+                        f"released_nodes={released}"
+                    )
+                    for key, item in guard_summary.items():
+                        print(
+                            "acados_transfer_active_set_guard_control: "
+                            f"window={cycle_idx} control={key} "
+                            f"transitions={item['transition_nodes']} "
+                            f"released={item['released_nodes']} "
+                            f"active={item.get('active_count')}/"
+                            f"{item.get('node_count')}"
+                        )
         if continue_solving and _sol is not None:
             next_audit = audit_initial_guess(_nmpc)
             next_audit.pop("snapshot")
@@ -14071,6 +14392,13 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
             )
         return summary
 
+    nmpc.project_full_transfer_contact = bool(
+        args.transfer_contact_manifold_projection
+    )
+    nmpc.project_full_transfer_contact_velocity = (
+        args.transfer_contact_manifold_projection_mode == "position_velocity"
+    )
+    nmpc.last_transfer_contact_projection = None
     try:
         sol = nmpc.solve_fes_nmpc(
             update_functions,
@@ -14175,6 +14503,14 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
         summary["transfer_bound_homotopy_summaries"] = transfer_bound_homotopy_summaries
     if transfer_sqp_restart_summaries:
         summary["transfer_sqp_restart_summaries"] = transfer_sqp_restart_summaries
+    if transfer_active_set_guard_summaries:
+        summary["transfer_active_set_guard_summaries"] = (
+            transfer_active_set_guard_summaries
+        )
+    if transfer_contact_projection_summaries:
+        summary["transfer_contact_projection_summaries"] = (
+            transfer_contact_projection_summaries
+        )
     if transfer_bound_projection_summaries:
         summary["transfer_bound_projection_summaries"] = (
             transfer_bound_projection_summaries
