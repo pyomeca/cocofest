@@ -57,15 +57,15 @@ provenance humaine.
 
 | Composant | Version Bioptim réellement utilisée |
 |---|---|
-| Construction et certification des seeds | `9ae08f35a95f8ca167b4f05dfdf69b8e643f667e` |
-| IPOPT full/reduced | `9ae08f35a95f8ca167b4f05dfdf69b8e643f667e` |
-| MadNLP/MUMPS full/reduced | `9ae08f35a95f8ca167b4f05dfdf69b8e643f667e` |
-| ACADOS full/reduced et variantes | `9ae08f35a95f8ca167b4f05dfdf69b8e643f667e` |
+| Construction et certification des seeds | `a3499cab16d7605b8efa7255cf89f1af6a7c59c9` |
+| IPOPT full/reduced | `a3499cab16d7605b8efa7255cf89f1af6a7c59c9` |
+| MadNLP/MUMPS full/reduced | `a3499cab16d7605b8efa7255cf89f1af6a7c59c9` |
+| ACADOS full/reduced et variantes | `a3499cab16d7605b8efa7255cf89f1af6a7c59c9` |
 
 Ce commit appartient à la branche dédiée
 `codex/cocofest-acados-v055-exploration`. Il part exactement de
 `3523f1745e315f07761159d7e06bd2d876026704`, utilisé par la campagne publiée,
-et ajoute sans modifier les interfaces MadNLP/Fatrop :
+et rassemble les adaptations communes aux différents solveurs :
 
 - ACADOS `v0.5.5`, sous-module
   `59d93e17d2985fdd73fc58b8a83ed8f83a024171`, contre `v0.5.1` auparavant;
@@ -81,12 +81,21 @@ et ajoute sans modifier les interfaces MadNLP/Fatrop :
   réutiliser la même bibliothèque avec de nouvelles données nodales;
 - l’export des contraintes non linéaires avec les variables décisionnelles
   scalées attendues par les fonctions de pénalité Bioptim. L’ancienne voie
-  appliquait le scaling une seconde fois et créait des résidus artificiels.
+  appliquait le scaling une seconde fois et créait des résidus artificiels;
+- les contraintes non linéaires ACADOS au `Node.START`, nécessaires pour
+  ancrer le contact full sans répéter des égalités redondantes à tous les
+  nœuds;
+- le scaling du guess terminal ACADOS, qui était auparavant injecté en unités
+  physiques alors que les nœuds `0..N-1` étaient correctement scalés;
+- la normalisation des contraintes de continuité FATROP en coordonnées
+  scalées, tout en conservant le resserrement des bornes physiques et
+  l’organisation temporelle des variables.
 
-La branche Bioptim a passé 17 tests ciblés et un test réel ACADOS `v0.5.5` :
-la seconde OCP a réutilisé la bibliothèque compilée tout en recevant de
-nouvelles valeurs aux six nœuds. Le workflow effectue toujours un checkout par
-SHA complet; le nom de branche documente seulement la provenance.
+Les tests FATROP ciblés passent localement (`7/7`). Les tests ACADOS ajoutés
+requièrent l’environnement Linux qui installe `acados_template`; ils sont donc
+validés par le palier CI 5 RHO avant toute promotion à 30 RHO. Le workflow
+effectue toujours un checkout par SHA complet; le nom de branche documente
+seulement la provenance.
 
 Les résultats 100 RHO de la section 11 ont été produits avec l’ancien SHA
 `3523f1745e315f07761159d7e06bd2d876026704`. Ils restent historiques jusqu’à
@@ -177,6 +186,14 @@ A_m^\mathrm{eff}(PW_m)
 \left(f_{\ell,m} f_{v,m}+f_{\mathrm{passif},m}\right),
 $$
 
+Dans cette implémentation, le terme dit « passif » multiplie donc la dynamique
+de force; il ne correspond pas à une tension passive positive simplement
+ajoutée au couple. Sur le profil mécanique courant, son coefficient est
+négatif pendant tout le tour pour le Biceps et les deux deltoïdes, et positif
+seulement pour le Triceps. La même loi est maintenant utilisée en full et en
+reduced, mais une ablation ON/OFF reste nécessaire avant d’interpréter son
+effet comme physiologique.
+
 où l’effet de la largeur d’impulsion est
 
 $$
@@ -215,7 +232,26 @@ $\alpha_{\tau_1}>0$ et $\alpha_{K_m}>0$.
 La force élevée et répétée fait diminuer la capacité normalisée
 $A_m/A_{\mathrm{scale},m}$.
 
-### 1.2 Largeurs d’impulsion
+### 1.2 Dynamique calcique périodique
+
+La campagne multi-solveurs utilise `periodic_node` pour les formulations full
+et reduced. Le calcium est évalué à chaque nœud à partir d’un historique
+stationnaire tronqué aux six stimulations précédentes; la largeur d’impulsion
+agit sur le recrutement de force, pas sur la somme calcique. À `30 Hz`, avec
+`tauc = 0.011 s`, le facteur de décroissance entre deux stimulations vaut
+environ `0.0483`. La queue omise après six impulsions est donc de l’ordre de
+`3e-7` relativement au régime infini.
+
+Cette estimation indique que `periodic_node` devrait être presque équivalent
+au modèle `standard` en régime stationnaire si celui-ci reçoit le même état
+initial et cinq stimulations préfenêtre. Elle ne remplace toutefois pas un
+benchmark : aucune ablation OCP `standard` contre `periodic_node` appariée
+n’est encore publiée. Comme tous les solveurs emploient actuellement la même
+formulation calcique, elle ne peut pas expliquer à elle seule un écart
+full/reduced, mais la préparation du seed et la continuité inter-RHO peuvent
+encore le faire.
+
+### 1.3 Largeurs d’impulsion
 
 Chaque muscle possède 30 commandes de largeur d’impulsion par cycle :
 
@@ -244,7 +280,7 @@ $$
 chargés sont validés et tronqués explicitement dans cet intervalle; chaque
 correction produit un warning.
 
-### 1.3 Objectif de fatigue
+### 1.4 Objectif de fatigue
 
 L’objectif continu quadratique est
 
@@ -364,7 +400,13 @@ $$
 
 où $\mathcal S$ décale la trajectoire d’un cycle et
 $\Pi_{\mathcal B_{r+1}}$ la projette dans les nouvelles bornes. Les états de
-fatigue sont continus; ils ne sont pas remis à leur valeur reposée.
+fatigue ne sont pas remis à leur valeur reposée. Dans la campagne historique,
+ils sont toutefois seulement bornés autour du terminal précédent avec des
+slacks allant jusqu’à `5e-3` pour certains états, et la vitesse du pédalier
+n’est pas raccordée. Il s’agit donc d’une continuité relâchée, pas d’une
+continuité exacte. Le prochain palier doit publier les sauts gauche/droit à
+chaque couture et imposer une continuité stricte avant toute comparaison
+physiologique de longue durée.
 
 Le benchmark autorise deux échecs consécutifs afin de distinguer un échec
 isolé d’une perte persistante de robustesse. Le `validated_cycles` utilisé
@@ -999,17 +1041,20 @@ $c(q_k)=0$ et $J(q_k)\dot q_k=0$ à tous les nœuds est trop redondant avec la
 dynamique contrainte au niveau accélération et dégrade vraisemblablement le
 rang du QP.
 
-L’interface Bioptim–ACADOS n’exporte pas les contraintes personnalisées
-`Node.START`. L’écran suivant teste donc la stabilisation minimale compatible :
+La branche Bioptim dédiée exporte maintenant les contraintes non linéaires
+`Node.START`. Le full ACADOS reprend donc l’ancrage minimal de la référence de
+Kevin :
 
 $$
-c(q_k)=0\quad\text{à tous les nœuds}.
+c(q_0)=0,
+\qquad
+J_c(q_0)\dot q_0=0.
 $$
 
-La vitesse tangentielle initiale provient du seed relevé et reste auditée
-strictement; elle n’est pas dupliquée comme égalité dans le QP. Cette variante
-sépare position et vitesse avant d’envisager une pénalisation de Baumgarte, une
-contrainte adoucie ou un second OCP de faisabilité.
+La dynamique contrainte impose ensuite l’accélération de contact nulle sans
+dupliquer position et vitesse comme égalités à tous les nœuds. Cette
+formulation doit encore passer le palier Linux 5 RHO; les variantes all-node
+restent des diagnostics négatifs de redondance.
 
 L’analyse de ces deux écrans a finalement localisé une erreur en amont dans
 l’interface Bioptim–ACADOS : les fonctions de pénalité sont construites avec
@@ -1018,7 +1063,7 @@ fournissait les expressions non scalées. La fonction de pénalité appliquait
 alors une seconde fois les facteurs de scaling. Cela explique simultanément le
 résidu de contact artificiel proche de `0.5` malgré un seed projeté et le
 résidu de cadence proche de `38`. Le commit Bioptim
-`9ae08f35a95f8ca167b4f05dfdf69b8e643f667e` corrige les entrées `x`, `u` et
+`a3499cab16d7605b8efa7255cf89f1af6a7c59c9` corrige les entrées `x`, `u` et
 les états algébriques, et ajoute un test avec scaling non unitaire. La borne
 non linéaire de cadence physique est donc réactivée pour ACADOS dans le nouvel
 écran 5 RHO; les variantes full ne seront admises à 30 RHO que si l’audit
@@ -1259,7 +1304,10 @@ dérivées, pas d’une meilleure convergence itérative.
 ### 11.1 Campagne SX-only finale, 100 RHO
 
 Le run [`30522170340`](https://github.com/mickaelbegon/cocofest/actions/runs/30522170340)
-est la référence courante. Il a été lancé après deux paliers verts à 5 et
+est la référence historique courante. Ses coûts et fatigues full/reduced ne
+doivent pas être interprétés physiologiquement : les seeds n’étaient pas
+appariés, la vitesse n’était pas raccordée entre RHO et les états Ding
+utilisaient des slacks de couture. Il a été lancé après deux paliers verts à 5 et
 30 RHO, avec :
 
 - Cocofest `aac9ff5c2ccec2f16adb6fb1f46932d44e15b7f7`;
@@ -1373,7 +1421,9 @@ robuste jusqu’à 30 ou 100 RHO.
 ### 11.2 Résultats Linux historiques de référence
 
 Configuration du run `30487321536`, antérieur à la règle SX-only et conservé
-pour la comparaison historique :
+pour la comparaison historique uniquement. Pour les mêmes raisons de seed,
+contact et continuité inter-RHO, les écarts de fatigue full/reduced du tableau
+ne quantifient pas l’effet causal de la réduction mécanique :
 
 - 100 RHO;
 - un cycle par OCP;
@@ -1835,13 +1885,18 @@ restauration ACADOS sont moins risquées qu’un surrogate appris.
 - MadNLP utilise explicitement `MumpsSolver`; toute option ignorée devient une
   erreur de CI.
 - PARDISO/MKL n’apporte pas de gain et est archivé.
-- Fatrop et RK4 sont archivés; Fatrop full doit d’abord devenir compatible SX
-  avant une réintégration.
+- RK4 FATROP reste archivé. Le correctif de scaling FATROP SX/collocation est
+  intégré à la branche Bioptim dédiée et passe ses tests unitaires, mais doit
+  encore être recertifié sur le palier multi-solveurs avant réintégration aux
+  résultats d’endurance.
 - SX réduit de 57.5 à 60.5 % la médiane chaude face à MX, à objectifs
   identiques à environ `5e-11` près; la campagne active est donc SX-only.
 - ACADOS reduced atteint environ `0.102 s/RHO`, mais son préfixe strict
   s’arrête à 13 cycles; ACADOS full ne valide aucun RHO. Sa faisabilité
   inter-RHO doit être restaurée avant toute revendication temps réel.
+- Les anciennes métriques full/reduced restent non appariées : la prochaine
+  campagne doit imposer et mesurer la continuité de la cadence et des 20 états
+  Ding à chaque couture avant de comparer la fatigue cumulée.
 - L’ancrage absolu post-seed supprime le faux décalage full de `3.94 mrad`;
   IPOPT et MadNLP restent vers `1.47 mrad` après 100 cycles, avec moins de
   `20 µrad` de dérive après le premier cycle.

@@ -2314,6 +2314,30 @@ def test_benchmark_compares_only_the_successful_prefix():
     assert limited["control_traces"]["last_pulse_width_Biceps"].shape == (1, 4)
 
 
+def test_benchmark_excludes_nlp_cycles_after_external_physical_failure():
+    result = _benchmark_result([0, 0, 0], solver_success=True, success=False)
+    result["physical_success"] = False
+    result["window_solutions"] = [
+        SimpleNamespace(
+            status=0,
+            solver_time_to_optimize=0.1,
+            real_time_to_optimize=0.2,
+        )
+        for _ in range(3)
+    ]
+    result["window_feasibility"] = [
+        {"passes_tolerance": True},
+        {"passes_tolerance": True},
+        {"passes_tolerance": True},
+    ]
+
+    performance = comparison_example._window_performance(result)
+
+    assert performance["nlp_validated_cycles"] == 3
+    assert performance["physically_validated_cycles"] == 0
+    assert performance["validated_cycles"] == 0
+
+
 def test_benchmark_reports_hot_window_timing_separately():
     result = _benchmark_result([0, 0, 0], solver_success=True, success=True)
     result["window_solutions"] = [
@@ -3813,7 +3837,7 @@ def test_github_acados_runner_uses_reference_and_option_profiles_sequentially():
     )
     assert "inputs.cycles != 'screen' && inputs.cycles != 'acados'" in workflow
     assert "prepare-acados-stack:" in workflow
-    assert "BIOPTIM_PRODUCTION_COMMIT: 9ae08f35a95f8ca167b4f05dfdf69b8e643f667e" in workflow
+    assert "BIOPTIM_PRODUCTION_COMMIT: a3499cab16d7605b8efa7255cf89f1af6a7c59c9" in workflow
     assert "ACADOS_COMMIT: 59d93e17d2985fdd73fc58b8a83ed8f83a024171" in workflow
     assert "ACADOS_INSTALL_SCRIPT_BLOB: 5ac8064ab613251e62560b5de8cbbb9550f5c5d0" in workflow
     assert "for mechanics in full reduced" in workflow

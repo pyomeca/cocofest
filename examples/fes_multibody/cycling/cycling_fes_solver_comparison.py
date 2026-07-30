@@ -333,6 +333,15 @@ def _validated_cycle_count(result: dict) -> int:
     return prefix
 
 
+def _physically_validated_cycle_count(result: dict) -> int:
+    """Return only cycles that retain the final external physical certificate."""
+
+    nlp_validated_cycles = _validated_cycle_count(result)
+    if result.get("physical_success") is False:
+        return 0
+    return nlp_validated_cycles
+
+
 def _configured_state_node_stride(result: dict) -> int:
     args = result["args"]
     ode_solver = str(getattr(args, "ode_solver", "")).lower()
@@ -447,7 +456,8 @@ def _window_performance(result: dict) -> dict:
     def total(key: str) -> float:
         return float(sum(float(row[key] or 0.0) for row in successful_rows))
 
-    validated_cycles = _validated_cycle_count(result)
+    nlp_validated_cycles = _validated_cycle_count(result)
+    validated_cycles = _physically_validated_cycle_count(result)
     successful_solver_time = total("solver_time_s")
     successful_wall_time = total("wall_time_s")
     hot_rows = successful_rows[1:]
@@ -466,6 +476,8 @@ def _window_performance(result: dict) -> dict:
     return {
         "rows": rows,
         "successful_prefix_windows": prefix,
+        "nlp_validated_cycles": nlp_validated_cycles,
+        "physically_validated_cycles": validated_cycles,
         "validated_cycles": validated_cycles,
         "successful_solver_time_s": successful_solver_time,
         "successful_wall_time_s": successful_wall_time,
@@ -2170,6 +2182,8 @@ def solver_overview_rows(results: dict[str, dict]) -> list[dict]:
             (window["rho"] for window in window_rows if not window["validated"]),
             None,
         )
+        if result.get("physical_success") is False and window_rows:
+            first_failed_rho = 1
         fatigue = _fatigue_metrics(result, performance["validated_cycles"])
         muscle_fatigue = _executed_fatigue_objective_by_muscle(
             result, performance["validated_cycles"]
@@ -2230,6 +2244,10 @@ def solver_overview_rows(results: dict[str, dict]) -> list[dict]:
                 "physical_success": bool(result.get("physical_success")),
                 "status": None if status is None else int(status),
                 "validated_windows": performance["successful_prefix_windows"],
+                "nlp_validated_cycles": performance["nlp_validated_cycles"],
+                "physically_validated_cycles": performance[
+                    "physically_validated_cycles"
+                ],
                 "validated_cycles": performance["validated_cycles"],
                 "attempted_windows": result.get("attempted_windows"),
                 "successful_windows": result.get("successful_windows"),
@@ -3227,6 +3245,13 @@ def main(
     else:
         for solver_configuration in solver_args.values():
             solver_configuration.mechanical_formulation = "full"
+        # The constrained full dynamics keep the wheel centre fixed at the
+        # acceleration level, but still require a position/velocity anchor at
+        # the first node. ACADOS v0.5.5 support for Node.START nonlinear
+        # constraints is provided by the pinned Bioptim integration branch.
+        # Repeating the same holonomic equalities at every node is redundant
+        # and was observed to make the QP substantially less robust.
+        solver_args["acados"].enforce_start_constraints = True
     print(f"NLP reference profile: {ipopt_label}")
     results = {}
     for solver_name in solvers:

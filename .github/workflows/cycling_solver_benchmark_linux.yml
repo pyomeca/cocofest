@@ -73,7 +73,7 @@ env:
   BIOPTIM_REPOSITORY: mickaelbegon/BiorbdOptim
   # Dedicated multi-solver integration branch:
   # codex/cocofest-acados-v055-exploration
-  BIOPTIM_PRODUCTION_COMMIT: 9ae08f35a95f8ca167b4f05dfdf69b8e643f667e
+  BIOPTIM_PRODUCTION_COMMIT: a3499cab16d7605b8efa7255cf89f1af6a7c59c9
   BIOPTIM_ALPAQA_COMMIT: d84e7e43534360fc048e0be26a3bd69a2abc2d77
   ACADOS_COMMIT: 59d93e17d2985fdd73fc58b8a83ed8f83a024171
   ACADOS_INSTALL_SCRIPT_BLOB: 5ac8064ab613251e62560b5de8cbbb9550f5c5d0
@@ -786,6 +786,8 @@ jobs:
               jq -r '
                 .results[0] |
                 "| Success | \(.success) |",
+                "| NLP-validated cycles | \(.nlp_validated_cycles) |",
+                "| Physically validated cycles | \(.physically_validated_cycles) |",
                 "| Validated cycles | \(.validated_cycles) |",
                 "| Attempted RHO | \(.attempted_windows) |",
                 "| Preparation (s) | \(.initial_guess_preparation_time_s) |",
@@ -801,7 +803,7 @@ jobs:
         if: always()
         run: |
           output="acados-smoke-results/acados-option-screen.csv"
-          echo "case,nlp_solver,search_direction,integrator,sim_steps,newton_iter,reset_solver,qp_warm_start,anderson,anderson_threshold,byrd_slack_factor,transfer_bound_homotopy,all_node_contact,all_node_contact_position,solver_success,physical_success,success,mechanical_audit_passed,validated_cycles,attempted_rho,solve_hot_median_s,effective_hot_median_s,effective_hot_p90_s,restoration_total_s,executed_fatigue_objective,minimum_capacity_ratio,first_failed_rho" > "$output"
+          echo "case,nlp_solver,search_direction,integrator,sim_steps,newton_iter,reset_solver,qp_warm_start,anderson,anderson_threshold,byrd_slack_factor,transfer_bound_homotopy,all_node_contact,all_node_contact_position,solver_success,physical_success,success,mechanical_audit_passed,nlp_validated_cycles,physically_validated_cycles,validated_cycles,attempted_rho,solve_hot_median_s,effective_hot_median_s,effective_hot_p90_s,restoration_total_s,executed_fatigue_objective,minimum_capacity_ratio,first_failed_rho" > "$output"
           while IFS= read -r result; do
             case_name="$(basename "$(dirname "$result")")"
             jq -r --arg case "$case_name" '
@@ -826,6 +828,8 @@ jobs:
                 .physical_success,
                 .success,
                 .mechanical_equivalence_audit.passes_tolerance,
+                .nlp_validated_cycles,
+                .physically_validated_cycles,
                 .validated_cycles,
                 .attempted_windows,
                 .hot_wall_time_median_s,
@@ -1209,7 +1213,7 @@ jobs:
             timeout_minutes: 300
             benchmark_rhos: ${{ inputs.cycles }}
             cycles_per_window: ${{ inputs.cycles_per_window }}
-            bioptim_commit: 9ae08f35a95f8ca167b4f05dfdf69b8e643f667e
+            bioptim_commit: a3499cab16d7605b8efa7255cf89f1af6a7c59c9
             integration_branch: codex/cocofest-acados-v055-exploration
             casadi_cxx_abi: 0
           - solver: madnlp
@@ -1219,7 +1223,7 @@ jobs:
             timeout_minutes: 420
             benchmark_rhos: ${{ inputs.cycles }}
             cycles_per_window: ${{ inputs.cycles_per_window }}
-            bioptim_commit: 9ae08f35a95f8ca167b4f05dfdf69b8e643f667e
+            bioptim_commit: a3499cab16d7605b8efa7255cf89f1af6a7c59c9
             integration_branch: codex/cocofest-acados-v055-exploration
             casadi_cxx_abi: 1
     env:
@@ -1545,6 +1549,8 @@ jobs:
               jq -r '
                 .results[0] |
                 "| Success | \(.success) |",
+                "| NLP-validated cycles | \(.nlp_validated_cycles) |",
+                "| Physically validated cycles | \(.physically_validated_cycles) |",
                 "| Validated cycles | \(.validated_cycles) |",
                 "| Attempted RHO | \(.attempted_windows) |",
                 "| End-to-end wall (s) | \(.end_to_end_wall_time_s) |",
