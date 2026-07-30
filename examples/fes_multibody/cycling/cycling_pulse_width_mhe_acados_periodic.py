@@ -3068,6 +3068,15 @@ def _validate_common_initial_solution_metadata(
         "warmup_cycles_consumed",
     ):
         if metadata.get(field) != expected[field]:
+            if (
+                field == "enforce_start_constraints"
+                and metadata.get(field) is True
+                and expected[field] is False
+            ):
+                # A seed built with start constraints belongs to a stricter
+                # feasible subset of the same OCP.  It is therefore safe (and
+                # useful) for a consumer that releases these constraints.
+                continue
             if field == "mechanical_formulation":
                 seed_states = seed.decision_states(to_merge=SolutionMerge.NODES)
                 bridge_is_supported = (
@@ -5341,15 +5350,57 @@ def _decision_vector_block(solution, index: int | None) -> str | None:
     return None
 
 
-def _independent_solution_bound_violations(solution) -> dict[str, float | None]:
+def _solution_constraint_values(solution) -> tuple[np.ndarray | None, str]:
+    """Return ``g(x)`` even when a compiled CasADi solve omits ``Solution.constraints``."""
+
+    constraints = getattr(solution, "constraints", None)
+    if constraints is not None:
+        return np.asarray(constraints, dtype=float).reshape(-1), "solution"
+
+    interface = getattr(getattr(solution, "ocp", None), "ocp_solver", None)
+    nlp = getattr(interface, "nlp", None)
+    if not isinstance(nlp, dict) or "x" not in nlp or "g" not in nlp:
+        return None, "unavailable"
+    decision_vector = getattr(solution, "vector", None)
+    if decision_vector is None:
+        return None, "unavailable"
+
+    evaluator = getattr(interface, "_cocofest_constraint_audit_function", None)
+    if evaluator is None:
+        from casadi import Function
+
+        evaluator = Function(
+            "cocofest_constraint_audit",
+            [nlp["x"]],
+            [nlp["g"]],
+            ["x"],
+            ["g"],
+        )
+        interface._cocofest_constraint_audit_function = evaluator
+    try:
+        values = evaluator(x=decision_vector)["g"]
+    except (RuntimeError, TypeError, ValueError):
+        return None, "unavailable"
+    return np.asarray(values, dtype=float).reshape(-1), "recomputed_nlp"
+
+
+def _independent_solution_bound_violations(
+    solution,
+    constraint_values: np.ndarray | None = None,
+    constraint_values_source: str | None = None,
+) -> dict[str, object]:
     """Recompute primal violations from the NLP vectors and solver bounds."""
 
     interface = getattr(getattr(solution, "ocp", None), "ocp_solver", None)
     limits = getattr(interface, "limits", None)
     if not isinstance(limits, dict):
         limits = {}
+    if constraint_values_source is None:
+        constraint_values, constraint_values_source = _solution_constraint_values(
+            solution
+        )
     constraint_details = _maximum_bound_violation_details(
-        getattr(solution, "constraints", None),
+        constraint_values,
         limits.get("lbg"),
         limits.get("ubg"),
     )
@@ -5366,6 +5417,7 @@ def _independent_solution_bound_violations(solution) -> dict[str, float | None]:
         if value is not None
     ]
     return {
+        "constraint_values_source": constraint_values_source,
         "constraint_bound_violation": constraint_violation,
         "constraint_bound_violation_index": constraint_details["index"],
         "decision_bound_violation": decision_violation,
@@ -5382,7 +5434,7 @@ def _independent_solution_bound_violations(solution) -> dict[str, float | None]:
 
 def _solution_feasibility_summary(
     solution, tolerance: float | None
-) -> dict[str, float | bool | None]:
+) -> dict[str, object]:
     """Record solver primal infeasibility and global trajectory finiteness."""
 
     cached = getattr(solution, "_cocofest_feasibility_summary", None)
@@ -5397,12 +5449,13 @@ def _solution_feasibility_summary(
         for values in container.values()
     )
 
-    constraints = getattr(solution, "constraints", None)
-    if constraints is None:
+    constraint_values, constraint_values_source = _solution_constraint_values(
+        solution
+    )
+    if constraint_values is None:
         constraints_finite = True
         max_abs_constraint_value = None
     else:
-        constraint_values = np.asarray(constraints, dtype=float).reshape(-1)
         constraints_finite = bool(np.all(np.isfinite(constraint_values)))
         max_abs_constraint_value = (
             float(np.max(np.abs(constraint_values)))
@@ -5410,7 +5463,11 @@ def _solution_feasibility_summary(
             else None
         )
 
-    independent_violations = _independent_solution_bound_violations(solution)
+    independent_violations = _independent_solution_bound_violations(
+        solution,
+        constraint_values=constraint_values,
+        constraint_values_source=constraint_values_source,
+    )
     raw_inf_pr = getattr(solution, "inf_pr", None)
     inf_pr_available = raw_inf_pr is not None
     if inf_pr_available:
@@ -5456,6 +5513,7 @@ def _solution_feasibility_summary(
     return {
         "trajectories_finite": bool(trajectories_finite),
         "constraints_finite": bool(constraints_finite),
+        "constraint_values_source": constraint_values_source,
         "max_abs_constraint_value": max_abs_constraint_value,
         "inf_pr_available": inf_pr_available,
         "final_inf_pr": final_inf_pr,

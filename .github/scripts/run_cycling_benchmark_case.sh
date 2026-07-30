@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-if [[ "$#" -lt 5 || "$#" -gt 9 ]]; then
-  echo "usage: $0 CASE SOLVER MECHANICS BACKEND ODE [ROOT] [WINDOWS] [COMPILE] [GRAPH]" >&2
+if [[ "$#" -lt 5 || "$#" -gt 10 ]]; then
+  echo "usage: $0 CASE SOLVER MECHANICS BACKEND ODE [ROOT] [WINDOWS] [COMPILE] [GRAPH] [FATROP_SCALING]" >&2
   exit 2
 fi
 
@@ -15,6 +15,7 @@ case_root="${6:-benchmark-results}"
 case_windows="${7:-${BENCHMARK_CYCLES:?BENCHMARK_CYCLES is required}}"
 compile_mode="${8:-false}"
 graph_mode="${9:-}"
+fatrop_state_scaling="${10:-none}"
 case_dir="${GITHUB_WORKSPACE:?GITHUB_WORKSPACE is required}/${case_root}/${case_slug}-${mechanics}"
 result="$case_dir/result.json"
 solver_options=()
@@ -46,11 +47,15 @@ if [[ "$solver" == "ipopt" ]]; then
     solver_options+=(--ipopt-c-compile)
   fi
 elif [[ "$solver" == "fatrop" ]]; then
+  case "$fatrop_state_scaling" in
+    none|full) ;;
+    *) echo "FATROP_SCALING must be 'none' or 'full', got '$fatrop_state_scaling'." >&2; exit 2 ;;
+  esac
   solver_options+=(
     --fatrop-max-iter 1000
     --fatrop-structure-detection auto
     --fatrop-bound-tightening-factor 1e-8
-    --fatrop-state-scaling none
+    --fatrop-state-scaling "$fatrop_state_scaling"
     --fatrop-dual-warm-start-mode off
   )
   if [[ "$compile_mode" == "true" ]]; then
@@ -66,15 +71,16 @@ elif [[ "$solver" == "fatrop" ]]; then
     )
   fi
 elif [[ "$solver" == "madnlp" ]]; then
+  if [[ "$compile_mode" == "true" ]]; then
+    echo "MadNLP C compilation is not validated by the pinned Bioptim/CasADi interface; use COMPILE=false." >&2
+    exit 2
+  fi
   solver_tolerance=1e-8
   solver_options+=(
     --madnlp-max-iter "$BENCHMARK_MAX_ITER"
     --madnlp-linear-solver "$backend"
     --madnlp-dual-warm-start-mode off
   )
-  if [[ "$compile_mode" == "true" ]]; then
-    solver_options+=(--madnlp-c-compile)
-  fi
 fi
 if [[ "$mechanics" == "reduced" ]]; then
   solver_options+=(--mechanical-formulation reduced)

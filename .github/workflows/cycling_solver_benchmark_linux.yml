@@ -35,7 +35,7 @@ on:
         default: "2000"
         type: string
       compile_nlp_evaluators:
-        description: Compile IPOPT/MadNLP CasADi evaluators once and reuse them across all RHO
+        description: Compile IPOPT/Fatrop CasADi evaluators once and reuse them across all RHO (MadNLP unsupported)
         required: true
         default: true
         type: boolean
@@ -1134,11 +1134,13 @@ jobs:
           ref: ${{ matrix.bioptim_commit }}
           path: .benchmark-deps/bioptim
 
-      - name: Apply the Fatrop C-compile plugin-name fix
+      - name: Apply the certified Fatrop integration fixes
         if: matrix.solver == 'fatrop'
         run: |
           git -C .benchmark-deps/bioptim apply \
             "$GITHUB_WORKSPACE/.github/patches/bioptim-fatrop-c-compile-plugin-case.patch"
+          git -C .benchmark-deps/bioptim apply \
+            "$GITHUB_WORKSPACE/.github/patches/bioptim-fatrop-scaled-gaps.patch"
 
       - name: Checkout the pinned libMad PARDISO runtime
         if: matrix.solver == 'madnlp'
@@ -1447,7 +1449,7 @@ jobs:
 
       - name: Run Fatrop collocation full
         if: matrix.case_slug == 'fatrop'
-        run: bash .github/scripts/run_cycling_benchmark_case.sh fatrop-collocation fatrop full structured collocation benchmark-results "$BENCHMARK_CYCLES" "${{ inputs.compile_nlp_evaluators }}" mx
+        run: bash .github/scripts/run_cycling_benchmark_case.sh fatrop-collocation fatrop full structured collocation benchmark-results "$BENCHMARK_CYCLES" "${{ inputs.compile_nlp_evaluators }}" mx full
       - name: Checkpoint Fatrop collocation full
         if: ${{ always() && matrix.case_slug == 'fatrop' }}
         continue-on-error: true
@@ -1460,7 +1462,7 @@ jobs:
 
       - name: Run Fatrop collocation reduced
         if: matrix.case_slug == 'fatrop'
-        run: bash .github/scripts/run_cycling_benchmark_case.sh fatrop-collocation fatrop reduced structured collocation benchmark-results "$BENCHMARK_CYCLES" "${{ inputs.compile_nlp_evaluators }}" mx
+        run: bash .github/scripts/run_cycling_benchmark_case.sh fatrop-collocation fatrop reduced structured collocation benchmark-results "$BENCHMARK_CYCLES" "${{ inputs.compile_nlp_evaluators }}" mx full
       - name: Checkpoint Fatrop collocation reduced
         if: ${{ always() && matrix.case_slug == 'fatrop' }}
         continue-on-error: true
@@ -1474,8 +1476,8 @@ jobs:
       - name: Compare Fatrop interpreted and compiled evaluators over 5 RHO
         if: matrix.case_slug == 'fatrop' && inputs.compile_nlp_evaluators
         run: |
-          bash .github/scripts/run_cycling_benchmark_case.sh fatrop-interpreted fatrop full structured collocation benchmark-compile-ablation 5 false mx
-          bash .github/scripts/run_cycling_benchmark_case.sh fatrop-compiled fatrop full structured collocation benchmark-compile-ablation 5 true mx
+          bash .github/scripts/run_cycling_benchmark_case.sh fatrop-interpreted fatrop full structured collocation benchmark-compile-ablation 5 false mx full
+          bash .github/scripts/run_cycling_benchmark_case.sh fatrop-compiled fatrop full structured collocation benchmark-compile-ablation 5 true mx full
       - name: Checkpoint Fatrop compilation ablation
         if: ${{ always() && matrix.case_slug == 'fatrop' && inputs.compile_nlp_evaluators }}
         continue-on-error: true
@@ -1483,6 +1485,23 @@ jobs:
         with:
           name: cycling-compile-ablation-fatrop-${{ github.run_id }}
           path: benchmark-compile-ablation/
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Compare Fatrop state scaling over 5 RHO
+        if: matrix.case_slug == 'fatrop'
+        run: |
+          bash .github/scripts/run_cycling_benchmark_case.sh fatrop-unscaled fatrop full structured collocation benchmark-scaling-ablation 5 false mx none
+          bash .github/scripts/run_cycling_benchmark_case.sh fatrop-scaled fatrop full structured collocation benchmark-scaling-ablation 5 false mx full
+          bash .github/scripts/run_cycling_benchmark_case.sh fatrop-unscaled fatrop reduced structured collocation benchmark-scaling-ablation 5 false mx none
+          bash .github/scripts/run_cycling_benchmark_case.sh fatrop-scaled fatrop reduced structured collocation benchmark-scaling-ablation 5 false mx full
+      - name: Checkpoint Fatrop state-scaling ablation
+        if: ${{ always() && matrix.case_slug == 'fatrop' }}
+        continue-on-error: true
+        uses: actions/upload-artifact@v7
+        with:
+          name: cycling-scaling-ablation-fatrop-${{ github.run_id }}
+          path: benchmark-scaling-ablation/
           if-no-files-found: warn
           retention-days: 30
 
@@ -1516,7 +1535,7 @@ jobs:
 
       - name: Run MadNLP PARDISO full
         if: matrix.solver == 'madnlp'
-        run: bash .github/scripts/run_cycling_benchmark_case.sh madnlp-pardiso madnlp full pardiso_mkl collocation benchmark-results "$BENCHMARK_CYCLES" "${{ inputs.compile_nlp_evaluators }}"
+        run: bash .github/scripts/run_cycling_benchmark_case.sh madnlp-pardiso madnlp full pardiso_mkl collocation benchmark-results "$BENCHMARK_CYCLES" false
       - name: Checkpoint MadNLP PARDISO full
         if: ${{ always() && matrix.solver == 'madnlp' }}
         continue-on-error: true
@@ -1529,7 +1548,7 @@ jobs:
 
       - name: Run MadNLP PARDISO reduced
         if: matrix.solver == 'madnlp'
-        run: bash .github/scripts/run_cycling_benchmark_case.sh madnlp-pardiso madnlp reduced pardiso_mkl collocation benchmark-results "$BENCHMARK_CYCLES" "${{ inputs.compile_nlp_evaluators }}"
+        run: bash .github/scripts/run_cycling_benchmark_case.sh madnlp-pardiso madnlp reduced pardiso_mkl collocation benchmark-results "$BENCHMARK_CYCLES" false
       - name: Checkpoint MadNLP PARDISO reduced
         if: ${{ always() && matrix.solver == 'madnlp' }}
         continue-on-error: true
@@ -1542,7 +1561,7 @@ jobs:
 
       - name: Run MadNLP MUMPS full
         if: matrix.solver == 'madnlp'
-        run: bash .github/scripts/run_cycling_benchmark_case.sh madnlp-mumps madnlp full mumps collocation benchmark-results "$BENCHMARK_CYCLES" "${{ inputs.compile_nlp_evaluators }}"
+        run: bash .github/scripts/run_cycling_benchmark_case.sh madnlp-mumps madnlp full mumps collocation benchmark-results "$BENCHMARK_CYCLES" false
       - name: Checkpoint MadNLP MUMPS full
         if: ${{ always() && matrix.solver == 'madnlp' }}
         continue-on-error: true
@@ -1555,7 +1574,7 @@ jobs:
 
       - name: Run MadNLP MUMPS reduced
         if: matrix.solver == 'madnlp'
-        run: bash .github/scripts/run_cycling_benchmark_case.sh madnlp-mumps madnlp reduced mumps collocation benchmark-results "$BENCHMARK_CYCLES" "${{ inputs.compile_nlp_evaluators }}"
+        run: bash .github/scripts/run_cycling_benchmark_case.sh madnlp-mumps madnlp reduced mumps collocation benchmark-results "$BENCHMARK_CYCLES" false
       - name: Checkpoint MadNLP MUMPS reduced
         if: ${{ always() && matrix.solver == 'madnlp' }}
         continue-on-error: true
@@ -1563,21 +1582,6 @@ jobs:
         with:
           name: cycling-fatigue-linux-madnlp-mumps-reduced-${{ github.run_id }}
           path: benchmark-results/madnlp-mumps-reduced/
-          if-no-files-found: warn
-          retention-days: 30
-
-      - name: Compare MadNLP MUMPS interpreted and compiled evaluators over 5 RHO
-        if: matrix.solver == 'madnlp' && inputs.compile_nlp_evaluators
-        run: |
-          bash .github/scripts/run_cycling_benchmark_case.sh madnlp-mumps-interpreted madnlp full mumps collocation benchmark-compile-ablation 5 false sx
-          bash .github/scripts/run_cycling_benchmark_case.sh madnlp-mumps-compiled madnlp full mumps collocation benchmark-compile-ablation 5 true sx
-      - name: Checkpoint MadNLP compilation ablation
-        if: ${{ always() && matrix.solver == 'madnlp' && inputs.compile_nlp_evaluators }}
-        continue-on-error: true
-        uses: actions/upload-artifact@v7
-        with:
-          name: cycling-compile-ablation-madnlp-mumps-${{ github.run_id }}
-          path: benchmark-compile-ablation/
           if-no-files-found: warn
           retention-days: 30
 
@@ -1642,6 +1646,9 @@ jobs:
           BENCHMARK_MODE: ${{ matrix.benchmark_mode }}
           COMPILE_NLP_EVALUATORS: ${{ inputs.compile_nlp_evaluators }}
         run: |
+          if [[ "$BENCHMARK_SOLVER" == "madnlp" ]]; then
+            COMPILE_NLP_EVALUATORS=false
+          fi
           case "$BENCHMARK_SOLVER" in
             ipopt) expected=2 ;;
             fatrop) expected=2 ;;
@@ -1718,6 +1725,26 @@ jobs:
                       f"Compiled/interpreted mismatch for {field}: {left} != {right}"
                   )
           PY
+          fi
+          if [[ "$BENCHMARK_SOLVER" == "fatrop" ]]; then
+            for case_path in \
+              benchmark-scaling-ablation/fatrop-unscaled-full/result.json \
+              benchmark-scaling-ablation/fatrop-scaled-full/result.json \
+              benchmark-scaling-ablation/fatrop-unscaled-reduced/result.json \
+              benchmark-scaling-ablation/fatrop-scaled-reduced/result.json
+            do
+              test -f "$case_path"
+            done
+            for case_path in \
+              benchmark-scaling-ablation/fatrop-scaled-full/result.json \
+              benchmark-scaling-ablation/fatrop-unscaled-reduced/result.json \
+              benchmark-scaling-ablation/fatrop-scaled-reduced/result.json
+            do
+              jq -e '
+                .results[0] |
+                (.attempted_windows > 0 and .error == null)
+              ' "$case_path"
+            done
           fi
           if [[ "$BENCHMARK_SOLVER" != "fatrop" ]]; then
             mapfile -t graph_screens < <(
@@ -1828,6 +1855,13 @@ jobs:
           pattern: cycling-compile-ablation-*-${{ github.run_id }}
           path: benchmark-compile-ablation-all
 
+      - name: Download the Fatrop scaling ablation
+        uses: actions/download-artifact@v8
+        continue-on-error: true
+        with:
+          pattern: cycling-scaling-ablation-fatrop-${{ github.run_id }}
+          path: benchmark-scaling-ablation-all
+
       - name: Build the comparison report
         run: |
           mkdir -p benchmark-results-all benchmark-report
@@ -1860,5 +1894,6 @@ jobs:
             benchmark-acados-all/
             benchmark-graph-screen-all/
             benchmark-compile-ablation-all/
+            benchmark-scaling-ablation-all/
           if-no-files-found: warn
           retention-days: 30

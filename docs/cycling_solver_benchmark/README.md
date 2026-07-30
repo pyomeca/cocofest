@@ -21,9 +21,11 @@ proviennent principalement du
   le total à 26 états et la mécanique réduite à 22.
 - La référence NLP utilise une collocation Radau de degré 3.
 - IPOPT et MadNLP utilisent actuellement des graphes SX et le scaling complet.
-- Fatrop utilise la collocation, un graphe MX et aucun scaling d’état dans le
-  benchmark d’endurance.
+- Fatrop utilise la collocation, un graphe MX et le scaling complet avec
+  normalisation explicite de ses contraintes de gap.
 - RK4 n’appartient plus au benchmark Fatrop courant.
+- MadNLP reste interprété : la compilation C est refusée par l’interface
+  Bioptim/CasADi épinglée et n’est pas comptée comme une variante valide.
 - La convergence du solveur ne suffit pas : chaque RHO est soumis à un audit
   indépendant de faisabilité physique avec un seuil de `1e-5`.
 - La mécanique réduite est plus rapide, mais le grand écart de fatigue observé
@@ -659,10 +661,9 @@ Cette exploitation requiert :
 - une structure de gap compatible avec la détection automatique.
 
 Le scaling générique des états modifie le coefficient identité du prochain
-état dans les gaps. L’interface actuelle ne préserve alors plus la structure
-attendue par Fatrop. Le benchmark utilise donc `fatrop-state-scaling=none`.
-Cela conserve le problème physique, mais empêche une comparaison pure du seul
-backend avec IPOPT ou MadNLP.
+état dans les gaps. Sans correction, Fatrop refuse la formulation full avec
+le diagnostic « structure of A does not correspond » : le bloc associé à
+\(x_{k+1}\) n’est plus l’identité attendue par le solveur structuré.
 
 Fatrop relâche aussi les bornes de manière relative. Comme certaines capacités
 de fatigue valent plusieurs milliers, un facteur relatif apparemment faible
@@ -670,7 +671,8 @@ peut produire un écart absolu supérieur au seuil physique. L’interface serre
 les bornes transmises à Fatrop tout en conservant les bornes originales pour
 l’audit indépendant.
 
-La correction mathématique prévue consiste à normaliser chaque gap
+Le benchmark porte maintenant sur le commit Bioptim épinglé le correctif
+minimal de la branche `codex/fatrop-scaling-audit`. Chaque gap
 
 \[
 S z_{k+1}-\Phi(Sz_k,u_k)=0
@@ -683,10 +685,17 @@ z_{k+1}-S^{-1}\Phi(Sz_k,u_k)=0,
 \]
 
 de sorte que le Jacobien par rapport à \(z_{k+1}\) reste exactement
-l’identité. Cette modification appartient à l’intégration Bioptim et n’est
-pas encore activée dans Cocofest. En attendant, les sondes prioritaires sont
-collocation + MX + compilation C; les essais SX sont isolés et bornés en
-temps.
+l’identité. La même transformation est appliquée aux helpers de collocation
+et aux transitions de phase séquentielles. Le patch conserve simultanément
+le resserrement physique des bornes présent dans notre commit Bioptim plus
+récent; la branche complète n’est pas utilisée car elle est en retard de
+28 commits sur cette base.
+
+La campagne principale utilise désormais
+`--fatrop-state-scaling full`. Une ablation indépendante de cinq RHO compare
+`none/full`, pour les mécaniques full et reduced, avant d’attribuer un gain au
+scaling. Les 7 tests Bioptim dédiés au patch passent localement; la validation
+sur l’OCP FES full reste à confirmer par le prochain run Linux.
 
 ### 7.4 ACADOS
 
@@ -768,7 +777,6 @@ Les options sont :
 
 ```text
 --ipopt-c-compile
---madnlp-c-compile
 --fatrop-c-compile
 ```
 
@@ -795,11 +803,11 @@ Le temps de compilation est compté dans le mur-à-mur, mais pas dans la médian
 chaude. Sur Apple Silicon, le coût initial peut dépasser le gain pour un petit
 nombre de RHO. L’intérêt doit être évalué sur 100 RHO sous Linux.
 
-La CI exécute maintenant, sur le même runner, une ablation interprété/compilé
-de cinq RHO pour IPOPT, MadNLP/MUMPS et Fatrop. Les campagnes principales
-full/reduced de ces trois solveurs utilisent aussi la compilation persistante
-quand `compile_nlp_evaluators=true`. La CI exige le même nombre de cycles
-validés, la même faisabilité physique et des métriques de fatigue compatibles.
+La CI exécute, sur le même runner, une ablation interprété/compilé de cinq RHO
+pour IPOPT et Fatrop. Les campagnes principales full/reduced de ces deux
+solveurs utilisent aussi la compilation persistante quand
+`compile_nlp_evaluators=true`. La CI exige le même nombre de cycles validés,
+la même faisabilité physique et des métriques de fatigue compatibles.
 Pour les runs compilés multi-RHO, elle exige aussi :
 
 ```text
@@ -812,6 +820,19 @@ le graphe. Le tracker conserve également taille, `mtime` et SHA-256 de `nlp.c`;
 la CI multi-RHO exige une seule version observée et sa réutilisation. Cette
 preuve complète le contrôle d’identité du solveur CasADi sans inclure le coût
 du hash à chaque RHO : le contenu n’est relu que si taille ou `mtime` changent.
+
+`--madnlp-c-compile` reste accepté par les CLI pour ne pas bloquer une future
+intégration, mais le Bioptim épinglé lève explicitement
+`NotImplementedError` avant le premier solve. Le runner refuse donc cette
+combinaison tôt et les campagnes MadNLP sont interprétées. Il ne faut ni
+présenter un cas à zéro RHO comme un échec de MadNLP, ni contourner cette garde
+sans validation des dérivées compilées.
+
+Le mode compilé CasADi peut aussi omettre `Solution.constraints`. L’audit
+Cocofest reconstruit désormais \(g(x)\) depuis le NLP symbolique et le vecteur
+de décision, puis le compare aux bornes originales \(l_g,u_g\). Ainsi, une
+solution compilée n’est plus rejetée seulement parce que `inf_pr` et le champ
+de contraintes ne sont pas exportés.
 
 ## 9. Faisabilité et définition de la convergence
 
@@ -981,6 +1002,44 @@ La comparaison de coût et de fatigue ACADOS avec les NLP après huit cycles
 n’est pas une comparaison d’endurance. Elle doit être reportée séparément
 tant que le même préfixe de 100 RHO n’est pas validé.
 
+### 11.4 Run diagnostique `30509397708`
+
+Ce run a testé les nouveaux chemins compilés, mais ne doit pas remplacer le
+tableau de référence ci-dessus : plusieurs cas ont été arrêtés avant une
+mesure comparable.
+
+| Cas | Observation brute | Interprétation |
+|---|---|---|
+| Fatrop reduced compilé | 100/100, médiane 4.963 s, mur-à-mur 561.2 s | solveur et réutilisation C fonctionnels |
+| Fatrop full | 0 RHO | gap non normalisé incompatible avec la structure Fatrop |
+| IPOPT compilé | 2 solves de statut 0, objectifs et itérations appariés à l’interprété | faux rejet de l’audit, car `constraints` et `inf_pr` absents |
+| MadNLP compilé | 0 RHO | garde `NotImplementedError` Bioptim, pas une non-convergence numérique |
+| MadNLP/MUMPS interprété | 5/5 dans l’ablation, médiane 2.766 s | chemin opérationnel |
+| ACADOS, 12 variantes | 0 JSON | seed produit avec contraintes initiales strictes, consommateur configuré sans elles |
+
+Le screen MadNLP/MUMPS MX full a résolu 30/30 NLP, mais son audit physique
+global est faux : l’erreur de phase absolue reste proche de `3.94e-3 rad`,
+au-dessus de `2.01e-3 rad`. Le cas reduced valide le même audit. Cette
+différence constante n’est pas un drift de cycle en cycle — les incréments
+suivants sont précis à environ `8e-8 rad` — mais révèle encore un décalage
+d’ancrage du premier cycle full. Elle doit rester visible et ne doit pas être
+« corrigée » en relâchant simplement la tolérance terminale.
+
+Les corrections associées sont maintenant :
+
+1. autoriser un seed `enforce_start_constraints=True` pour un consommateur
+   moins strict configuré à `False`, tout en refusant le sens inverse;
+2. réévaluer \(g(x)\) pour l’audit des solutions compilées IPOPT;
+3. exécuter MadNLP interprété tant que Bioptim ne valide pas sa compilation;
+4. normaliser les gaps Fatrop et tester explicitement `none/full`.
+
+Le run a aussi confirmé que la compilation IPOPT coûte cher au premier appel
+(environ 400 s sur ce runner) pour un gain chaud modeste. Elle peut améliorer
+le temps d’un RHO une fois l’OCP construit, mais son seuil d’amortissement est
+nettement supérieur à cinq RHO et possiblement supérieur à 100 RHO selon la
+machine. Les temps de construction/compilation et les temps chauds doivent
+donc toujours rester séparés.
+
 ## 12. Expériences historiques et décisions
 
 ### 12.1 RK4 avec Fatrop
@@ -1135,9 +1194,9 @@ Ses étapes principales sont :
 3. `prepare-acados-stack` : installation et cache ACADOS;
 4. `benchmark` :
    - IPOPT full puis reduced;
-   - Fatrop-collocation full puis reduced, ablation C et sondes SX sur la même
-     machine;
-   - MadNLP/MUMPS et PARDISO, full puis reduced;
+   - Fatrop-collocation full puis reduced, ablations C/scaling et sondes SX
+     sur la même machine;
+   - MadNLP/MUMPS et PARDISO interprétés, full puis reduced;
 5. `acados-smoke` : full/reduced et options séquentiellement;
 6. `report` : agrégation des JSON, CSV, logs et patrons de stimulation.
 
@@ -1162,6 +1221,9 @@ gh workflow run cycling_solver_benchmark_linux.yml \
   -f acados_smoke_rhos=100 \
   -f acados_option_rhos=5
 ```
+
+`compile_nlp_evaluators=true` ne concerne que IPOPT et Fatrop. MadNLP reste
+interprété dans le même run.
 
 Pour mesurer la compilation, relancer sur le même type de runner avec :
 

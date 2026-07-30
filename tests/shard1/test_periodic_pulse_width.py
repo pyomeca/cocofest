@@ -749,6 +749,67 @@ def test_common_initial_solution_metadata_allows_a_transcription_change(tmp_path
     )
 
 
+def test_common_initial_solution_metadata_allows_a_stricter_start_seed(tmp_path):
+    args = SimpleNamespace(
+        model_formulation="periodic_node",
+        mechanical_formulation="reduced",
+        cycles_per_window=1,
+        stimulations_per_cycle=30,
+        objective="fatigue",
+        objective_shape="quadratic",
+        constant_crank_torque=0.0,
+        torque_application="constant",
+        enforce_start_constraints=False,
+        acados_wheel_q_slack=0.0,
+        acados_terminal_wheel_q_slack=0.002,
+        terminal_wheel_q_reference_mode="absolute_initial",
+        pulse_width_scaling=0.0025,
+        pulse_width_active_set="none",
+        ode_solver="collocation",
+        nlp_ordering_strategy="time_major",
+        solver="acados",
+        warmup_cycles_consumed=1,
+    )
+    metadata = periodic_example._common_initial_solution_metadata(args)
+    metadata["enforce_start_constraints"] = True
+    seed = periodic_example._WarmupSolutionAdapter({}, {}, metadata=metadata)
+
+    periodic_example._validate_common_initial_solution_metadata(
+        seed, args, tmp_path / "strict-common.npz"
+    )
+
+
+def test_common_initial_solution_metadata_rejects_a_looser_start_seed(tmp_path):
+    args = SimpleNamespace(
+        model_formulation="periodic_node",
+        mechanical_formulation="reduced",
+        cycles_per_window=1,
+        stimulations_per_cycle=30,
+        objective="fatigue",
+        objective_shape="quadratic",
+        constant_crank_torque=0.0,
+        torque_application="constant",
+        enforce_start_constraints=True,
+        acados_wheel_q_slack=0.0,
+        acados_terminal_wheel_q_slack=0.002,
+        terminal_wheel_q_reference_mode="absolute_initial",
+        pulse_width_scaling=0.0025,
+        pulse_width_active_set="none",
+        ode_solver="collocation",
+        nlp_ordering_strategy="time_major",
+        solver="ipopt",
+        warmup_cycles_consumed=1,
+    )
+    metadata = periodic_example._common_initial_solution_metadata(args)
+    metadata["enforce_start_constraints"] = False
+    seed = periodic_example._WarmupSolutionAdapter({}, {}, metadata=metadata)
+
+    with pytest.raises(ValueError, match="enforce_start_constraints"):
+        periodic_example._validate_common_initial_solution_metadata(
+            seed, args, tmp_path / "loose-common.npz"
+        )
+
+
 def test_common_initial_solution_metadata_allows_exact_reduced_to_full_lift(
     tmp_path,
 ):
@@ -3275,6 +3336,44 @@ def test_feasibility_uses_constraint_and_decision_bounds():
     assert feasibility["passes_tolerance"] is False
 
 
+def test_feasibility_recomputes_constraints_from_compiled_nlp():
+    from casadi import MX
+
+    x = MX.sym("x", 2)
+    interface = SimpleNamespace(
+        nlp={"x": x, "g": x[0] + 2 * x[1]},
+        limits={
+            "lbg": np.array([1.0]),
+            "ubg": np.array([1.0]),
+            "lbx": np.array([0.0, 0.0]),
+            "ubx": np.array([1.0, 1.0]),
+        },
+    )
+
+    class FakeCompiledSolution:
+        constraints = None
+        inf_pr = None
+        vector = np.array([0.5, 0.25])
+        ocp = SimpleNamespace(ocp_solver=interface)
+
+        @staticmethod
+        def decision_states(to_merge=None):
+            return {"q": np.zeros((3, 2))}
+
+        @staticmethod
+        def decision_controls(to_merge=None):
+            return {"u": np.zeros((1, 1))}
+
+    feasibility = periodic_example._solution_feasibility_summary(
+        FakeCompiledSolution(), tolerance=1e-6
+    )
+
+    assert feasibility["constraint_values_source"] == "recomputed_nlp"
+    assert feasibility["constraint_bound_violation"] == 0.0
+    assert feasibility["constraint_feasibility_available"] is True
+    assert feasibility["passes_tolerance"] is True
+
+
 def test_feasibility_snapshot_is_not_recomputed_with_next_window_bounds():
     class FakeSolution:
         constraints = np.array([0.0])
@@ -3568,11 +3667,14 @@ def test_github_acados_runner_uses_reference_and_option_profiles_sequentially():
     assert (
         "run_cycling_benchmark_case.sh fatrop-collocation fatrop full structured "
         'collocation benchmark-results "$BENCHMARK_CYCLES" '
-        '"${{ inputs.compile_nlp_evaluators }}" mx'
+        '"${{ inputs.compile_nlp_evaluators }}" mx full'
     ) in workflow
     assert "fatrop-rk4" not in workflow
     assert "Compare Fatrop interpreted and compiled evaluators over 5 RHO" in workflow
     assert "cycling-compile-ablation-fatrop-${{ github.run_id }}" in workflow
+    assert "bioptim-fatrop-scaled-gaps.patch" in workflow
+    assert "Compare Fatrop state scaling over 5 RHO" in workflow
+    assert "cycling-scaling-ablation-fatrop-${{ github.run_id }}" in workflow
     benchmark_runner = (
         Path(__file__).resolve().parents[2]
         / ".github"
@@ -3580,12 +3682,15 @@ def test_github_acados_runner_uses_reference_and_option_profiles_sequentially():
         / "run_cycling_benchmark_case.sh"
     ).read_text(encoding="utf-8")
     assert 'solver_options+=(--ipopt-c-compile)' in benchmark_runner
-    assert 'solver_options+=(--madnlp-c-compile)' in benchmark_runner
+    assert "MadNLP C compilation is not validated" in benchmark_runner
+    assert 'solver_options+=(--madnlp-c-compile)' not in benchmark_runner
+    assert '--fatrop-state-scaling "$fatrop_state_scaling"' in benchmark_runner
     assert "--ipopt-enforce-start-constraints" in benchmark_runner
     assert "--reduced-cycling-profile benchmark-seed/" in benchmark_runner
     assert "Compare IPOPT interpreted and compiled evaluators over 5 RHO" in workflow
+    assert "Compare MadNLP MUMPS interpreted and compiled evaluators" not in workflow
     assert (
-        "Compare MadNLP MUMPS interpreted and compiled evaluators over 5 RHO"
+        "Compile IPOPT/Fatrop CasADi evaluators once"
         in workflow
     )
     assert "Checkpoint IPOPT full" in workflow

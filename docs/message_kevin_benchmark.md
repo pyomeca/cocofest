@@ -15,8 +15,8 @@ reduced.
 
 Les points importants avant de lancer sur le calculateur sont :
 
-- IPOPT, MadNLP et Fatrop/collocation ont validé 100/100 RHO dans le dernier
-  run Linux;
+- IPOPT, MadNLP et Fatrop/collocation ont validé 100/100 RHO dans le run de
+  référence `30487321536`;
 - IPOPT/MUMPS full reste la référence robuste;
 - MadNLP/MUMPS reduced était le NLP le plus rapide du dernier run, mais ce
   classement doit être remesuré avec le nouvel appariement mécanique;
@@ -47,14 +47,33 @@ Points encore sensibles :
 - la contrainte terminale physique cross/dot a fait avorter l’initialisation
   IPOPT locale; elle est désactivée et remplacée provisoirement par une borne
   `q[2]` resserrée puis un audit absolu de `theta`;
-- ACADOS teste maintenant une restauration native
-  `FEASIBILITY_QP -> SQP nominal`, mais le résultat long n’est pas encore
-  disponible;
-- Fatrop reste sans scaling d’état tant que les gaps normalisés
-  `z[k+1] - S^-1 Phi(S z[k],u[k])` ne sont pas intégrés dans Bioptim;
-- les ablations interprété/compilé IPOPT, MadNLP et Fatrop sont nouvelles et
-  doivent être confirmées par le prochain CI; les campagnes principales
-  full/reduced utilisent également la compilation persistante;
+- le run diagnostique `30509397708` n’est pas un nouveau résultat de
+  performance comparable : ACADOS a été arrêté par une incompatibilité de
+  metadata du seed, IPOPT compilé a été rejeté par un audit incomplet,
+  Fatrop full par la structure de gap, et MadNLP compilé par une garde
+  explicite de Bioptim;
+- la metadata ACADOS accepte maintenant un seed plus strict
+  (`enforce_start_constraints=True`) pour un consommateur qui relâche ces
+  contraintes, mais refuse toujours le sens inverse;
+- l’audit IPOPT compilé réévalue maintenant `g(x)` depuis le NLP quand CasADi
+  n’exporte ni `constraints` ni `inf_pr`;
+- Fatrop utilise maintenant le scaling complet avec les gaps normalisés
+  `z[k+1] - S^-1 Phi(S z[k],u[k])`. Le patch minimal passe les 7 tests
+  Bioptim dédiés, mais le full FES doit encore être confirmé en CI;
+- MadNLP reste interprété. L’option `--madnlp-c-compile` existe dans la CLI,
+  mais le Bioptim épinglé lève `NotImplementedError`; il serait trompeur de
+  compter ces cas à zéro RHO comme une non-convergence du solveur;
+- le screen MadNLP/MUMPS MX full a résolu 30/30 NLP, mais conserve un décalage
+  de phase absolu d’environ `3.94e-3 rad` contre une tolérance de
+  `2.01e-3 rad`. Les incréments suivants sont précis à `~8e-8 rad`: ce n’est
+  pas un drift cumulatif, mais l’ancrage initial full doit encore être
+  corrigé sans relâcher artificiellement la tolérance;
+- les ablations interprété/compilé concernent donc IPOPT et Fatrop. Une
+  ablation séparée Fatrop `scaling=none/full` est ajoutée pour les deux
+  mécaniques;
+- ACADOS reteste SQP, restauration faisable, homotopie et RTI une fois la
+  metadata du seed corrigée. Jusqu’au prochain run, sa robustesse 100 RHO
+  reste non démontrée.
 
 Pour lancer le benchmark :
 
@@ -73,6 +92,9 @@ gh workflow run cycling_solver_benchmark_linux.yml \
   -f acados_smoke_rhos=100 \
   -f acados_option_rhos=5
 ```
+
+Dans cette commande, `compile_nlp_evaluators=true` active uniquement IPOPT et
+Fatrop; les quatre cas MadNLP MUMPS/PARDISO full/reduced restent interprétés.
 
 Les artefacts contiennent le temps mur-à-mur, les temps chauds par RHO, la
 faisabilité, la fatigue des quatre muscles, les patrons aux cycles 10 et 30,
