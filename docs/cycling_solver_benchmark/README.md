@@ -1409,7 +1409,70 @@ dérivées, pas d’une meilleure convergence itérative.
 
 ## 11. Résultats Linux
 
-### 11.1 Campagne SX-only finale, 100 RHO
+### 11.1 Recertification stricte active, 5 puis 30 RHO
+
+Le palier 5 RHO
+[`30565853248`](https://github.com/mickaelbegon/cocofest/actions/runs/30565853248)
+est vert. Le palier 30
+[`30567069442`](https://github.com/mickaelbegon/cocofest/actions/runs/30567069442)
+a produit tous les résultats numériques; son échec final provenait uniquement
+des anciens gates ACADOS décrits en section 14.2. Ces résultats utilisent
+Cocofest `d78e61a`, Bioptim `a3499cab16d7605b8efa7255cf89f1af6a7c59c9`,
+ACADOS `59d93e17d2985fdd73fc58b8a83ed8f83a024171`, des graphes SX, un
+couple externe nul et des coutures exactes pour la cadence et les 20 états
+Ding. Les commits suivants jusqu’à `591aada` ne modifient que le classement
+du préfixe physique et l’orchestration CI.
+
+La distinction entre `RHO résolus` et `préfixe strict` est déterminante :
+un RHO qui converge après le premier échec reste un diagnostic isolé, mais ne
+prolonge pas une trajectoire MHE physiquement exécutable. Le JSON du run
+`30565853248` classait correctement ACADOS full à zéro cycle physique à cause
+d’un résidu de vitesse tangentielle de `0.804 rad/s`; le premier Markdown
+affichait encore le préfixe NLP de un cycle. Le générateur privilégie désormais
+explicitement `physically_validated_cycles`.
+
+| Solveur | Mécanique | RHO résolus/tentés | Préfixe strict | Mur-à-mur | Médiane chaude |
+|---|---|---:|---:|---:|---:|
+| FATROP collocation compilé | full | 0/0 | 0/30 | 31.9 s | — |
+| IPOPT/MUMPS interprété | full | 28/30 | 1/30 | 293.7 s | — |
+| MadNLP/MUMPS interprété | full | 26/30 | 1/30 | 459.8 s | — |
+| ACADOS SQP/IRK | reduced | 1/3 | 1/30 | 16.3 s | — |
+| FATROP collocation compilé | reduced | 30/30 | 30/30 | 200.7 s | 1.447 s |
+| IPOPT/MUMPS compilé | reduced | 30/30 | 30/30 | 150.9 s | **0.718 s** |
+| MadNLP/MUMPS interprété | reduced | 30/30 | 30/30 | **67.9 s** | 0.872 s |
+
+FATROP full est une limitation structurelle connue de l’interface collocation,
+pas une non-convergence du problème : sa structure `A` contient des
+dépendances hors bande que l’interface CasADi/FATROP refuse avant le premier
+solve. IPOPT full atteint au RHO 2 une solution primalement faisable
+(`6.86e-6 < 1e-5`) mais termine avec `SOLVER_RET_UNKNOWN`; MadNLP échoue
+également au deuxième RHO. Le préfixe conservateur vaut donc un cycle pour les
+deux solveurs. Les succès ultérieurs ne doivent pas servir au calcul de fatigue
+cumulée.
+
+Sur les 30 cycles réduits réellement exécutés, les trois NLP donnent :
+
+| Solveur reduced | Coût fatigue | AUC, 4 muscles | Min. $A/A_\mathrm{scale}$ |
+|---|---:|---:|---:|
+| FATROP | 256.488 | 1.521 | 0.964183 |
+| IPOPT | 256.519 | 1.521 | 0.964187 |
+| MadNLP | 256.415 | 1.520 | 0.964179 |
+
+L’étendue de coût entre les trois solveurs vaut seulement `0.041 %`. Aux
+cycles 10 et 30, les patrons FATROP et MadNLP sont aussi presque identiques à
+IPOPT : selon le muscle, les RMSE brutes restent sous `0.163 µs` au cycle 10
+et sous `0.103 µs` au cycle 30, avec des corrélations proches de 1. Ces
+résultats valident fortement la reproductibilité numérique de la formulation
+réduite.
+
+Ils ne valident pas encore son équivalence physiologique à la mécanique full.
+Sur le seul premier RHO comparable, l’objectif natif reduced est `0.936 %`
+plus faible que l’objectif full avec IPOPT comme avec MadNLP. Cet écart court
+est modeste, mais aucun solveur full ne fournit encore un préfixe strict de
+30 cycles permettant de comparer la fatigue cumulée. L’ancien rapport de
+fatigue full/reduced sur 100 RHO reste donc historique.
+
+### 11.2 Campagne SX-only historique, 100 RHO
 
 Le run [`30522170340`](https://github.com/mickaelbegon/cocofest/actions/runs/30522170340)
 est la référence historique courante. Ses coûts et fatigues full/reduced ne
@@ -1526,7 +1589,7 @@ patron reste davantage à `pd0`; sa MAE face aux NLP reduced vaut environ
 seconde est réelle, mais elle n’est pas encore associée à une continuation
 robuste jusqu’à 30 ou 100 RHO.
 
-### 11.2 Résultats Linux historiques de référence
+### 11.3 Résultats Linux historiques de référence
 
 Configuration du run `30487321536`, antérieur à la règle SX-only et conservé
 pour la comparaison historique uniquement. Pour les mêmes raisons de seed,

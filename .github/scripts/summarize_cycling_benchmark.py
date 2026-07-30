@@ -764,15 +764,16 @@ def render_markdown(
     for entry in entries:
         row = entry["result"]
         requested = _requested_rho_count(entry)
-        validated_windows = row.get(
-            "validated_windows",
-            row.get(
-                "validated_cycles",
+        validated_windows = row.get("physically_validated_cycles")
+        if validated_windows is None:
+            validated_windows = row.get("validated_cycles")
+        if validated_windows is None:
+            validated_windows = row.get(
+                "validated_windows",
                 sum(
                     bool(window.get("validated")) for window in row.get("windows") or []
                 ),
-            ),
-        )
+            )
         lines.append(
             "| {case} | {graph} | {solver_tolerance} | {physical_threshold} | {success} | {successful}/{attempted} | {validated}/{requested} | {first_failed_rho} | {e2e} | {prep} | {profile} | {median} | {effective_median} | {effective_p90} | {stop} |".format(
                 case=_entry_label(entry),

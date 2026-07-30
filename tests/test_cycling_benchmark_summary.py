@@ -111,7 +111,9 @@ def test_markdown_distinguishes_successful_windows_from_strict_prefix():
             "success": False,
             "successful_windows": 99,
             "attempted_windows": 100,
+            "validated_windows": 99,
             "validated_cycles": 85,
+            "physically_validated_cycles": 85,
             "first_failed_rho": 86,
             "end_to_end_wall_time_s": 881.48,
             "initial_guess_preparation_time_s": 45.72,
@@ -132,6 +134,31 @@ def test_markdown_distinguishes_successful_windows_from_strict_prefix():
         in markdown
     )
     assert "même si les fenêtres suivantes récupèrent" in markdown
+
+
+def test_markdown_strict_prefix_prefers_the_physical_certificate():
+    entry = {
+        "runtime": {"provenance": {"BIOPTIM_BENCHMARK_COMMIT": "abc"}},
+        "configuration": {
+            "mechanical_formulation": "full",
+            "n_windows": 5,
+            "use_sx": True,
+        },
+        "result": {
+            "solver": "acados",
+            "successful_windows": 1,
+            "attempted_windows": 3,
+            "validated_windows": 1,
+            "validated_cycles": 0,
+            "physically_validated_cycles": 0,
+            "windows": [],
+            "stimulation_patterns": {},
+        },
+    }
+
+    markdown = summary.render_markdown([entry], [])
+
+    assert "| ACADOS/FULL | SX | — | — | non | 1/3 | 0/5 |" in markdown
 
 
 def test_markdown_states_that_internal_solver_tolerances_are_backend_specific():
