@@ -11673,6 +11673,12 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
         "enforce_physical_crank_velocity_bounds": bool(
             build_mechanical_audit_profile
             and args.mechanical_formulation == "full"
+            # The custom physical-cadence constraint still needs a dedicated
+            # scaled-state export for ACADOS. Enabling the NLP expression
+            # directly produces an artificial inequality residual near 38.
+            # ACADOS uses the tangent-derived qdot envelope and the strict
+            # physical trajectory audit until that export is certified.
+            and args.solver != "acados"
         ),
         # The custom terminal phase constraint remains experimental: the
         # current Bioptim/CasADi stack aborts while initializing IPOPT when

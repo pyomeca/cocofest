@@ -686,11 +686,18 @@ recertifiées par la nouvelle CI :
 - les bornes mécaniques du seed full sont recadrées sans tronquer ce
   relèvement;
 - les contraintes de contact initiales et les bornes de cadence physique sont
-  actives pour les NLP et ACADOS full;
+  actives pour les NLP;
 - l’enveloppe des vitesses généralisées full contient tous les relèvements de
   la plage de cadence reduced;
 - les phases, cadences et résidus de variété sont audités dans les coordonnées
   physiques.
+
+La contrainte non linéaire de cadence n’est pas encore injectée dans ACADOS :
+son export direct avec les états scalés produit artificiellement un résidu
+d’inégalité proche de `38.4` et un échec QP dès la première itération.
+ACADOS full utilise provisoirement l’enveloppe `qdot` corrigée et l’audit
+physique strict a posteriori. Ce cas doit rester marqué comme une limitation
+d’interface, pas comme une preuve de non-convergence du problème physique.
 
 Un smoke test local IPOPT/MUMPS à `0 N.m`, un RHO, a donné :
 
