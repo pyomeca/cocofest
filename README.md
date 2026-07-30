@@ -237,6 +237,9 @@ The complete mathematical formulation, numerical methods, warm-start policy,
 CI protocol, reproducibility commands and current results are maintained in
 the dedicated
 [cycling solver benchmark README](docs/cycling_solver_benchmark/README.md).
+This benchmark uses a Bioptim fork pinned by full Git SHA, with
+solver-specific patches where documented; it does not use the general
+`bioptim==3.4.0` installation shown above.
 
 <a id="initial-value-problem"></a>
 ## 🎯 Initial value problem

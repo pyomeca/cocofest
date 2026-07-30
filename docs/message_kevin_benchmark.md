@@ -13,6 +13,15 @@ enchaîne 100 RHO et compare IPOPT/MUMPS, MadNLP/MUMPS,
 MadNLP/PARDISO-MKL, Fatrop/collocation et ACADOS, sur les mécaniques full et
 reduced.
 
+Pour reproduire exactement la campagne principale, tous ces cas utilisent le
+fork `mickaelbegon/BiorbdOptim` au SHA
+`3523f1745e315f07761159d7e06bd2d876026704`. Le job Fatrop applique en plus
+les patchs Cocofest `bioptim-fatrop-c-compile-plugin-case.patch` et
+`bioptim-fatrop-scaled-gaps.patch`. Ce n’est donc pas le paquet général
+`bioptim==3.4.0`. Les screens historiques MadNLP et Alpaqa utilisent encore
+des SHA distincts, listés dans la section « Versions Bioptim et
+reproductibilité » du README.
+
 Les points importants avant de lancer sur le calculateur sont :
 
 - IPOPT, MadNLP et Fatrop/collocation ont validé 100/100 RHO dans le run de

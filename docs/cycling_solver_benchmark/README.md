@@ -32,6 +32,74 @@ proviennent principalement du
   n’est pas encore une réduction physiologique démontrée. Les problèmes full
   et reduced ne sont actuellement pas mécaniquement équivalents.
 
+## 0. Versions Bioptim et reproductibilité
+
+Le benchmark GitHub Actions n’utilise pas le paquet Conda
+`bioptim==3.4.0` mentionné dans les instructions d’installation générales de
+Cocofest. Il clone directement le fork
+[`mickaelbegon/BiorbdOptim`](https://github.com/mickaelbegon/BiorbdOptim)
+et effectue chaque checkout par SHA complet. Le SHA est la référence
+reproductible; les noms de branche servent uniquement à documenter la
+provenance humaine.
+
+### 0.1 Campagne d’endurance principale
+
+| Composant | Version Bioptim réellement utilisée |
+|---|---|
+| Construction et certification des seeds | `3523f1745e315f07761159d7e06bd2d876026704` |
+| IPOPT full/reduced | `3523f1745e315f07761159d7e06bd2d876026704` |
+| MadNLP MUMPS/PARDISO full/reduced | `3523f1745e315f07761159d7e06bd2d876026704` |
+| Fatrop full/reduced | même SHA, puis les deux patchs de la section suivante |
+| ACADOS full/reduced et variantes | `3523f1745e315f07761159d7e06bd2d876026704` |
+
+Ce commit date du 27 juillet 2026 et porte le correctif
+`Fix Fatrop physical bound auditing`. Le workflow lui associe le libellé de
+provenance `codex/fatrop-cocofest-benchmark`, mais ne fait jamais un checkout
+flottant de cette branche.
+
+### 0.2 Patchs Bioptim appliqués à Fatrop
+
+Seul le job Fatrop transforme ce checkout, dans cet ordre :
+
+1. [`bioptim-fatrop-c-compile-plugin-case.patch`](../../.github/patches/bioptim-fatrop-c-compile-plugin-case.patch),
+   qui corrige la casse du nom du plugin lors du chargement des évaluateurs C;
+2. [`bioptim-fatrop-scaled-gaps.patch`](../../.github/patches/bioptim-fatrop-scaled-gaps.patch),
+   qui normalise les gaps, les helpers de collocation et les transitions de
+   phase pour préserver le bloc identité exigé par Fatrop.
+
+Le second patch est un port minimal du commit Bioptim
+`70c384517af48502e5e1bda6c48beb4c515cb8a1`
+(`fix: support scaled constraints with FATROP`, 28 juillet 2026). La branche
+`codex/fatrop-scaling-audit` complète n’est pas utilisée, car elle ne contient
+pas les correctifs plus récents présents dans le SHA de production.
+
+La version effective du cas Fatrop doit donc être identifiée par le triplet :
+
+```text
+Bioptim 3523f1745e315f07761159d7e06bd2d876026704
++ bioptim-fatrop-c-compile-plugin-case.patch
++ bioptim-fatrop-scaled-gaps.patch
+```
+
+### 0.3 Screens historiques séparés
+
+Le mode `cycles=screen` n’appartient pas à la campagne d’endurance et conserve
+deux intégrations historiques :
+
+| Screen | Commit Bioptim | Provenance |
+|---|---|---|
+| MadNLP/PARDISO | `346eb1d445e6ba67010b96c6f16ba830185119e7` | `codex/madnlp-integration-master` |
+| Alpaqa/PANOC | `d84e7e43534360fc048e0be26a3bd69a2abc2d77` | `codex/alpaqa-integration` |
+
+Ces résultats ne doivent pas être mélangés avec ceux de la campagne principale
+sans mentionner ce changement de Bioptim.
+
+Le workflow source de vérité est
+[`cycling_solver_benchmark_linux.yml`](../../.github/workflows/cycling_solver_benchmark_linux.yml).
+Chaque résultat exporte également `BIOPTIM_BENCHMARK_COMMIT` et
+`COCOFEST_BENCHMARK_COMMIT`, afin qu’un artefact reste attribuable même après
+une modification ultérieure du README.
+
 ## 1. Problème de commande optimale
 
 ### 1.1 États musculaires

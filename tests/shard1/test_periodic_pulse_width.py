@@ -3732,6 +3732,37 @@ def test_github_acados_runner_uses_reference_and_option_profiles_sequentially():
     assert "merge-multiple: true" in workflow  # ACADOS remains a single artifact.
 
 
+def test_benchmark_readme_tracks_every_pinned_bioptim_revision_and_patch():
+    repository_root = Path(__file__).resolve().parents[2]
+    workflow = (
+        repository_root
+        / ".github"
+        / "workflows"
+        / "cycling_solver_benchmark_linux.yml"
+    ).read_text(encoding="utf-8")
+    benchmark_readme = (
+        repository_root / "docs" / "cycling_solver_benchmark" / "README.md"
+    ).read_text(encoding="utf-8")
+
+    pinned_revisions = set(
+        re.findall(r"BIOPTIM_[A-Z_]+_COMMIT:\s*([0-9a-f]{40})", workflow)
+    )
+    pinned_revisions.update(
+        re.findall(r"bioptim_commit:\s*([0-9a-f]{40})", workflow)
+    )
+    applied_patches = set(
+        re.findall(r'\.github/patches/(bioptim-[^"\s]+\.patch)', workflow)
+    )
+
+    assert pinned_revisions
+    assert applied_patches
+    assert "mickaelbegon/BiorbdOptim" in benchmark_readme
+    for revision in pinned_revisions:
+        assert revision in benchmark_readme
+    for patch_name in applied_patches:
+        assert patch_name in benchmark_readme
+
+
 def test_acados_transfer_restoration_time_is_attributed_to_the_next_rho():
     timing = comparison_example.acados_transfer_restoration_timing(
         {
