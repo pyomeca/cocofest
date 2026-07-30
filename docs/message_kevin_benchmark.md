@@ -102,6 +102,45 @@ par RHO, le coût de fatigue, la fatigue cumulée et la capacité finale des
 quatre muscles, les patrons de stimulation aux cycles 10 et 30, ainsi que les
 variations de PW entre cycles.
 
+La campagne graduelle est terminée :
+
+- [5 RHO, run 30519570984](https://github.com/mickaelbegon/cocofest/actions/runs/30519570984);
+- [30 RHO, run 30520968417](https://github.com/mickaelbegon/cocofest/actions/runs/30520968417);
+- [100 RHO, run 30522170340](https://github.com/mickaelbegon/cocofest/actions/runs/30522170340).
+
+Le run final utilise Cocofest
+`aac9ff5c2ccec2f16adb6fb1f46932d44e15b7f7` et le Bioptim commun
+`3523f1745e315f07761159d7e06bd2d876026704`.
+
+Sur 100 RHO, IPOPT et MadNLP convergent 100/100 en full et reduced. Les
+médianes chaudes sont `1.444/1.122 s` pour IPOPT full/reduced et
+`2.600/1.180 s` pour MadNLP. En revanche, MadNLP gagne le mur-à-mur :
+`350.1/178.4 s` contre `612.4/255.6 s`. Pour IPOPT, le temps résiduel non
+attribué aux solves ni à la préparation vaut environ `443 s` en full et
+`123 s` en reduced sur une machine neuve. Ce n’est pas un chronométrage
+instrumenté de la compilation; ce résidu est vraisemblablement dominé par la
+génération/compilation, avec possiblement d’autres frais Python et système.
+Une extrapolation des médianes chaudes place le rattrapage d’IPOPT compilé
+face à MadNLP vers 330 RHO en full et 1580 RHO en reduced. Cela ne mesure pas
+l’amortissement par rapport à IPOPT interprété, qui demanderait un cas témoin
+strictement identique avec `compile=false`.
+
+Les résultats de fatigue sont très proches entre solveurs à mécanique fixée.
+En full, IPOPT/MadNLP donnent un coût `11406.6/11344.7`, une AUC
+`16.489/16.460` et une capacité minimale `0.86736/0.86795`. En reduced, ces
+valeurs sont `668.1/653.0`, `4.849/4.812` et `0.97649/0.97707`. Le grand écart
+full/reduced vient principalement du Biceps et du deltoïde postérieur; la
+réduction n’est donc pas encore physiologiquement interchangeable avec le
+modèle full.
+
+Les patrons IPOPT/MadNLP full sont presque identiques aux cycles 10 et 30.
+En reduced, ils sont identiques au cycle 10 mais divergent localement au
+cycle 30 sur le Biceps malgré des coûts proches : maximum `422.6 µs` avec
+IPOPT contre `249.9 µs` avec MadNLP. ACADOS reduced atteint environ
+`0.102 s/RHO`, mais son préfixe strict s’arrête à 13 cycles; il ne fournit
+donc pas de patron valide au cycle 30. Toutes ses variantes full échouent
+avant le premier cycle.
+
 Les points qui restent sensibles sont la comparabilité physiologique de la
 mécanique reduced, la robustesse ACADOS après plusieurs RHO et la
 compatibilité structurelle Fatrop full/SX. Il ne faut donc pas interpréter un

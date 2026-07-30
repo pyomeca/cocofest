@@ -1063,7 +1063,123 @@ La formulation réduite effectue davantage d’itérations, mais chaque itérati
 est environ 2.2 fois moins coûteuse. Le gain vient donc surtout du graphe de
 dérivées, pas d’une meilleure convergence itérative.
 
-## 11. Résultats Linux historiques de référence
+## 11. Résultats Linux
+
+### 11.1 Campagne SX-only finale, 100 RHO
+
+Le run [`30522170340`](https://github.com/mickaelbegon/cocofest/actions/runs/30522170340)
+est la référence courante. Il a été lancé après deux paliers verts à 5 et
+30 RHO, avec :
+
+- Cocofest `aac9ff5c2ccec2f16adb6fb1f46932d44e15b7f7`;
+- Bioptim `3523f1745e315f07761159d7e06bd2d876026704`;
+- libMad `5529f23a6bff33c566ad954da38d352f1f172356`;
+- ACADOS `48e223e85f0408ebfd1d8c6d6fb0589e9c41b3aa`;
+- un cycle et 30 stimulations par OCP;
+- 100 RHO successifs;
+- couple externe nul;
+- objectif de fatigue seul;
+- cible angulaire absolue recalée après chargement du seed, slack
+  `0.002 rad`;
+- graphes SX uniquement;
+- IPOPT compilé une fois par formulation;
+- MadNLP interprété avec `MumpsSolver`;
+- deux échecs consécutifs permis.
+
+| Solveur | Mécanique | Préfixe strict | Convergés et faisables isolément/tentés | Médiane chaude | P90 chaud | Mur-à-mur | Coût fatigue | AUC | Min. \(A/A_\mathrm{scale}\) |
+|---|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| IPOPT compilé/MUMPS | full | 100/100 | 100/100 | **1.444 s** | 1.698 s | 612.4 s | 11406.60 | 16.489 | 0.86736 |
+| MadNLP/MUMPS | full | 100/100 | 100/100 | 2.600 s | 2.899 s | **350.1 s** | 11344.72 | 16.460 | 0.86795 |
+| ACADOS SQP-IRK | full | 0/100 | 0/2 | — | — | 19.7 s | — | — | — |
+| IPOPT compilé/MUMPS | reduced | 100/100 | 100/100 | **1.122 s** | 1.302 s | 255.6 s | 668.10 | 4.849 | 0.97649 |
+| MadNLP/MUMPS | reduced | 100/100 | 100/100 | 1.180 s | 1.425 s | **178.4 s** | 652.99 | 4.812 | 0.97707 |
+| ACADOS SQP-IRK | reduced | 13/100 | 18/22 | **0.102 s** | 0.104 s | 25.6 s | 46.33¹ | 0.400¹ | 0.98509¹ |
+
+¹ Les métriques ACADOS sont calculées sur le préfixe strict, pas sur
+100 cycles. Après le premier échec au RHO 14, les fenêtres 15–18 et 20
+convergent et sont faisables lorsqu'elles sont évaluées isolément. Elles ne
+prolongent toutefois pas une chaîne MHE valide : le préfixe d'endurance reste
+donc limité à 13 cycles. Les échecs consécutifs 21–22 mettent fin à la
+campagne.
+
+Les quatre cas NLP terminent donc 100/100 avec succès solveur et physique.
+L’erreur angulaire absolue maximale vaut environ `1.470 mrad` en full et
+`2.004–2.006 mrad` en reduced; le seuil physique inclut la petite tolérance
+numérique autour du slack de `2 mrad`. Entre la fin du premier cycle et celle
+du centième, l’écart supplémentaire reste inférieur à `20 µrad` dans les
+quatre cas NLP : la dérive résiduelle est négligeable mais pas déclarée
+strictement nulle.
+
+IPOPT est le plus rapide par RHO, mais pas mur-à-mur sur 100 RHO. Ses temps
+résiduels non attribués aux solves ni à la préparation valent `443.5 s` en
+full et `123.1 s` en reduced. Ce résidu n'est pas une mesure instrumentée du
+temps de compilation; il est vraisemblablement dominé par la génération et la
+compilation initiales, mais peut inclure d'autres frais Python et système.
+MadNLP reste interprété et termine respectivement en `350.1 s` et `178.4 s`.
+En extrapolant seulement les médianes chaudes, sans supposer que la fatigue
+change leur profil, IPOPT compilé rattraperait le temps mur-à-mur de MadNLP
+vers environ 330 RHO en full et 1580 RHO en reduced. Ce calcul compare deux
+solveurs différents; il ne mesure pas l'amortissement de la compilation
+IPOPT par rapport à IPOPT interprété. Cette dernière question exige un cas
+IPOPT identique avec `compile=false`.
+
+La preuve de compilation est néanmoins complète : pour chacun des deux cas
+IPOPT, `compiled_library_build_count == 1`,
+`compiled_source_observation_count == 100`, une seule version de `nlp.c` est
+observée et les bornes mobiles changent sans reconstruction du graphe.
+
+#### Fatigue des quatre muscles
+
+| Solveur/mécanique | Muscle | Coût | AUC (cycles) | \(A_\mathrm{final}/A_\mathrm{scale}\) |
+|---|---|---:|---:|---:|
+| IPOPT/full | Biceps | 7161.04 | 7.656 | 0.86736 |
+| IPOPT/full | Delt_ant | 918.74 | 2.792 | 0.95191 |
+| IPOPT/full | Delt_post | 3225.42 | 5.127 | 0.90968 |
+| IPOPT/full | Triceps | 101.41 | 0.914 | 0.98503 |
+| MadNLP/full | Biceps | 7162.09 | 7.658 | 0.86795 |
+| MadNLP/full | Delt_ant | 916.45 | 2.794 | 0.95222 |
+| MadNLP/full | Delt_post | 3164.87 | 5.094 | 0.91067 |
+| MadNLP/full | Triceps | 101.30 | 0.914 | 0.98509 |
+| IPOPT/reduced | Biceps | 256.28 | 1.496 | 0.97649 |
+| IPOPT/reduced | Delt_ant | 186.44 | 1.362 | 0.98805 |
+| IPOPT/reduced | Delt_post | 83.38 | 0.909 | 0.99234 |
+| IPOPT/reduced | Triceps | 142.00 | 1.083 | 0.98236 |
+| MadNLP/reduced | Biceps | 241.96 | 1.460 | 0.97707 |
+| MadNLP/reduced | Delt_ant | 186.04 | 1.360 | 0.98807 |
+| MadNLP/reduced | Delt_post | 83.19 | 0.908 | 0.99237 |
+| MadNLP/reduced | Triceps | 141.80 | 1.083 | 0.98235 |
+
+À formulation fixée, IPOPT et MadNLP produisent des fatigues très proches :
+écart de coût total de `0.55 %` en full et `2.31 %` en reduced. En revanche,
+la mécanique reduced donne une fatigue beaucoup plus faible : l’AUC totale
+est environ 3.4 fois moindre et le coût environ 17 fois moindre qu’en full.
+Cet écart vient surtout du Biceps et du deltoïde postérieur et confirme que la
+réduction mécanique n’est pas encore un substitut physiologiquement équivalent
+à la dynamique full.
+
+#### Patrons de stimulation aux cycles 10 et 30
+
+À mécanique full, IPOPT et MadNLP sélectionnent pratiquement le même patron :
+MAE sur les 120 PW de `0.157 µs` au cycle 10 et `0.258 µs` au cycle 30
+(écarts maximaux `10.2` et `16.7 µs`). Le Biceps et le deltoïde postérieur
+portent des impulsions proches de `600 µs`; le deltoïde antérieur reste
+presque partout à `pd0`.
+
+En reduced, les deux NLP sont encore quasi identiques au cycle 10
+(`0.019 µs` de MAE). Au cycle 30, ils atteignent deux solutions locales
+distinctes compatibles avec des coûts proches. Le recrutement du Biceps
+diffère : maximum `422.6 µs` avec IPOPT contre `249.9 µs` avec MadNLP; le
+Triceps présente aussi un écart maximal de `64.0 µs`. La MAE globale vaut
+`4.61 µs` et l’écart maximal `291.2 µs`. Il faut donc comparer les patrons,
+pas seulement le coût scalaire.
+
+ACADOS reduced atteint le cycle 10 mais pas le cycle 30. Au cycle 10, son
+patron reste davantage à `pd0`; sa MAE face aux NLP reduced vaut environ
+`2.38 µs`, avec un écart maximal proche de `88 µs`. Sa vitesse sous la
+seconde est réelle, mais elle n’est pas encore associée à une continuation
+robuste jusqu’à 30 ou 100 RHO.
+
+### 11.2 Résultats Linux historiques de référence
 
 Configuration du run `30487321536`, antérieur à la règle SX-only et conservé
 pour la comparaison historique :
@@ -1093,7 +1209,7 @@ Les solveurs convergent vers des résultats voisins à formulation fixée. La
 séparation full/reduced est systématique et ne peut pas être attribuée à un
 backend particulier.
 
-### 11.1 Fatigue par muscle avec IPOPT
+### 11.3 Fatigue historique par muscle avec IPOPT
 
 | Mécanique | Muscle | Coût | AUC | \(A_\mathrm{final}/A_\mathrm{scale}\) |
 |---|---|---:|---:|---:|
@@ -1109,7 +1225,7 @@ backend particulier.
 Environ 83 % de l’écart de coût provient du Biceps et 17 % du Triceps. Les
 deltoïdes sont presque inchangés.
 
-### 11.2 Choix MUMPS; PARDISO et MA57 archivés
+### 11.4 Choix MUMPS; PARDISO et MA57 archivés
 
 PARDISO/MKL ne bat pas MUMPS dans les deux campagnes Linux observées. Le run
 `30511306081` donne l’écart le plus net :
@@ -1135,7 +1251,7 @@ L’étude IPOPT/MA57 sur macOS a montré :
 MUMPS reste la référence portable et le seul backend MadNLP actif. MA57 reste
 un résultat IPOPT historique; il n’est pas ajouté à la matrice courante.
 
-### 11.3 ACADOS
+### 11.5 ACADOS
 
 ACADOS est beaucoup plus rapide lorsqu’il converge. Dans le run de référence,
 le SQP-IRK reduced a une médiane proche de `0.080 s`, mais ne valide qu’un
@@ -1146,7 +1262,7 @@ La comparaison de coût et de fatigue ACADOS avec les NLP après huit cycles
 n’est pas une comparaison d’endurance. Elle doit être reportée séparément
 tant que le même préfixe de 100 RHO n’est pas validé.
 
-### 11.4 Run diagnostique `30509397708`
+### 11.6 Run diagnostique `30509397708`
 
 Ce run a testé les nouveaux chemins compilés, mais ne doit pas remplacer le
 tableau de référence ci-dessus : plusieurs cas ont été arrêtés avant une
@@ -1363,7 +1479,7 @@ gh workflow run cycling_solver_benchmark_linux.yml \
   -f solver_max_iterations=2000 \
   -f seed_validation_max_iterations=2000 \
   -f acados_smoke_rhos=100 \
-  -f acados_option_rhos=5
+  -f acados_option_rhos=100
 ```
 
 `compile_nlp_evaluators=true` ne concerne que IPOPT. MadNLP reste interprété
@@ -1389,7 +1505,7 @@ Pour mesurer la compilation, relancer sur le même type de runner avec :
 -f compile_nlp_evaluators=false
 ```
 
-### 14.2 Écrans d’options
+### 14.3 Écrans d’options
 
 ```bash
 gh workflow run cycling_solver_benchmark_linux.yml \
@@ -1398,7 +1514,7 @@ gh workflow run cycling_solver_benchmark_linux.yml \
   -f cycles=screen
 ```
 
-### 14.3 ACADOS uniquement
+### 14.4 ACADOS uniquement
 
 ```bash
 gh workflow run cycling_solver_benchmark_linux.yml \
@@ -1408,7 +1524,7 @@ gh workflow run cycling_solver_benchmark_linux.yml \
   -f cycles_per_window=1 \
   -f crank_assistance_nm=0.00 \
   -f acados_smoke_rhos=100 \
-  -f acados_option_rhos=5
+  -f acados_option_rhos=100
 ```
 
 ## 15. Artefacts
@@ -1511,9 +1627,15 @@ restauration ACADOS sont moins risquées qu’un surrogate appris.
 
 ## 18. Conclusion actuelle
 
-- IPOPT/MUMPS full reste la référence robuste.
-- MadNLP/MUMPS reduced donne le meilleur temps parmi les NLP 100/100, mais la
-  formulation reduced n’est pas encore comparable physiologiquement à full.
+- IPOPT/MUMPS et MadNLP/MUMPS terminent tous les cas full/reduced à 100/100.
+- IPOPT compilé est le plus rapide par RHO (`1.444 s` full, `1.122 s`
+  reduced), mais MadNLP donne le meilleur mur-à-mur sur 100 RHO (`350.1 s`
+  full, `178.4 s` reduced). Le résidu de temps IPOPT est cohérent avec une
+  génération/compilation non amortie, sans constituer une mesure séparée de
+  cette étape.
+- MadNLP/MUMPS reduced donne donc le meilleur compromis NLP sur cette longueur,
+  mais la formulation reduced n’est pas encore comparable physiologiquement à
+  full.
 - MadNLP utilise explicitement `MumpsSolver`; toute option ignorée devient une
   erreur de CI.
 - PARDISO/MKL n’apporte pas de gain et est archivé.
@@ -1521,6 +1643,10 @@ restauration ACADOS sont moins risquées qu’un surrogate appris.
   avant une réintégration.
 - SX réduit de 57.5 à 60.5 % la médiane chaude face à MX, à objectifs
   identiques à environ `5e-11` près; la campagne active est donc SX-only.
-- ACADOS offre le potentiel sous la seconde, mais sa faisabilité inter-RHO
-  doit être restaurée.
+- ACADOS reduced atteint environ `0.102 s/RHO`, mais son préfixe strict
+  s’arrête à 13 cycles; ACADOS full ne valide aucun RHO. Sa faisabilité
+  inter-RHO doit être restaurée avant toute revendication temps réel.
+- L’ancrage absolu post-seed supprime le faux décalage full de `3.94 mrad`;
+  IPOPT et MadNLP restent vers `1.47 mrad` après 100 cycles, avec moins de
+  `20 µrad` de dérive après le premier cycle.
 - Alpaqa ne fonctionne pas sur cette formulation et reste hors production.

@@ -246,7 +246,20 @@ each with full and reduced mechanics. MadNLP passes the exact libMad backend
 type `MumpsSolver`; PARDISO is archived because it showed no speedup. Fatrop
 is also outside the active matrix until its full formulation passes the
 structured-gap checks with SX. Historical MX/Fatrop/PARDISO results remain
-clearly separated in the dedicated report.
+clearly separated in the dedicated report. On the controlled 30-RHO
+comparison, SX reduced the hot median by 57.5–60.5% relative to MX
+(2.35–2.53× faster), with all four NLP cases converging 30/30 and objective
+differences below approximately \(5\times10^{-11}\).
+
+The current SX-only Linux reference is
+[run 30522170340](https://github.com/mickaelbegon/cocofest/actions/runs/30522170340):
+IPOPT/MUMPS and MadNLP/MUMPS both complete 100/100 full and reduced RHO.
+IPOPT has the lowest hot solve medians, while MadNLP has the lower
+end-to-end time. IPOPT's large residual time is consistent with code
+generation and compilation not being amortized over only 100 RHO, although
+that component was not timed separately. ACADOS reduced reaches roughly
+0.10 s/RHO but its strict converged prefix stops after 13 cycles; ACADOS full
+still fails before the first cycle.
 
 <a id="initial-value-problem"></a>
 ## 🎯 Initial value problem
