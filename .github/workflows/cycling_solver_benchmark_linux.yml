@@ -690,6 +690,15 @@ jobs:
                 --acados-transfer-bound-homotopy-solver-tolerance 1e-4
               )
             fi
+            if [[ "$variant" == *"-phase-one" ]]; then
+              # Strict inter-RHO state bounds can make the cyclically shifted
+              # guess discontinuous at node 0, especially for omega. Repair
+              # the primal trajectory without changing the physical OCP.
+              solver_options+=(
+                --acados-transfer-phase-one
+                --acados-transfer-phase-one-mode all
+              )
+            fi
 
             set +e
             set -o pipefail
@@ -756,6 +765,8 @@ jobs:
               run_case sqp-rti-irk "$mechanics" "$ACADOS_OPTION_RHOS" SQP_RTI IRK 5 5
               run_case sqp-erk "$mechanics" "$ACADOS_OPTION_RHOS" SQP ERK 20 5
               run_case sqp-irk-light "$mechanics" "$ACADOS_OPTION_RHOS" SQP IRK 2 3
+              run_case sqp-irk-phase-one "$mechanics" "$ACADOS_SMOKE_RHOS" SQP IRK 5 5
+              run_case sqp-rti-irk-phase-one "$mechanics" "$ACADOS_OPTION_RHOS" SQP_RTI IRK 5 5
             done
             run_case sqp-irk-contact full "$ACADOS_OPTION_RHOS" SQP IRK 5 5
             run_case sqp-rti-irk-contact full "$ACADOS_OPTION_RHOS" SQP_RTI IRK 5 5

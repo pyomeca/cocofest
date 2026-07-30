@@ -3439,6 +3439,19 @@ def test_benchmark_json_summary_contains_comparable_fatigue_metrics(tmp_path):
             "compiled_library_reused": True,
             "graph_rebuild_detected": False,
         },
+        state_boundary_jumps={
+            "available": True,
+            "boundary_count": 1,
+            "by_state": {
+                "omega": {
+                    "terminal_left": [[-6.2]],
+                    "initial_right": [[-6.2]],
+                    "jump": [[0.0]],
+                    "maximum_absolute_jump": 0.0,
+                    "root_mean_square_jump": 0.0,
+                }
+            },
+        },
     )
     result["args"].objective = "fatigue"
     result["args"].objective_shape = "quadratic"
@@ -3492,6 +3505,8 @@ def test_benchmark_json_summary_contains_comparable_fatigue_metrics(tmp_path):
     assert row["windows"][0]["native_status"] == "Solve_Succeeded"
     assert row["nlp_solver_stats"][0]["t_wall_nlp_hess_l"] == 0.75
     assert row["compiled_nlp_reuse"]["compiled_library_build_count"] == 1
+    assert row["state_boundary_jumps"]["boundary_count"] == 1
+    assert row["state_boundary_jumps"]["by_state"]["omega"]["jump"] == [[0.0]]
 
 
 def test_independent_bound_violation_accepts_infinite_bounds():

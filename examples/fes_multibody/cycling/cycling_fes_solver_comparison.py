@@ -1743,6 +1743,11 @@ def _failed_solver_result(
         "covered_cycles": 0,
         "wheel_angle_trace": np.array([], dtype=float),
         "state_traces": {},
+        "state_boundary_jumps": {
+            "available": False,
+            "boundary_count": 0,
+            "by_state": {},
+        },
         "control_traces": {},
         "control_bounds": {},
         "window_statuses": [],
@@ -2313,6 +2318,12 @@ def solver_overview_rows(results: dict[str, dict]) -> list[dict]:
                 "physical_crank_diagnostics": result.get(
                     "physical_crank_diagnostics"
                 ),
+                "state_boundary_jumps": result.get("state_boundary_jumps")
+                or {
+                    "available": False,
+                    "boundary_count": 0,
+                    "by_state": {},
+                },
                 "control_saturation": saturation,
                 "pulse_width_active_set_summary": result.get(
                     "pulse_width_active_set_summary"

@@ -82,6 +82,15 @@ elif [[ "$solver" == "madnlp" ]]; then
 fi
 if [[ "$mechanics" == "reduced" ]]; then
   solver_options+=(--mechanical-formulation reduced)
+else
+  # A one-cycle horizon has no future tail to shift. The exact terminal state
+  # therefore replaces node 0 while nodes 1..N retain the previous cycle's
+  # shape, which can create a large full-dynamics defect. Repair that primal
+  # guess before every RHO without modifying the OCP itself.
+  solver_options+=(
+    --transfer-phase-one
+    --acados-transfer-phase-one-mode all
+  )
 fi
 
 # Keep the standard bridge enabled: the certified common seed records one
@@ -89,6 +98,13 @@ fi
 set +e
 set -o pipefail
 pushd "$codegen_dir" >/dev/null
+heartbeat() {
+  while sleep 45; do
+    echo "benchmark heartbeat: ${case_slug}/${mechanics} is still running"
+  done
+}
+heartbeat &
+heartbeat_pid=$!
 python "$workspace/examples/fes_multibody/cycling/cycling_fes_solver_comparison.py" \
   --solvers "$solver" \
   --objective fatigue \
@@ -120,6 +136,8 @@ python "$workspace/examples/fes_multibody/cycling/cycling_fes_solver_comparison.
   "${solver_options[@]}" \
   2>&1 | tee "$case_dir/solver.log"
 solver_exit="${PIPESTATUS[0]}"
+kill "$heartbeat_pid" 2>/dev/null || true
+wait "$heartbeat_pid" 2>/dev/null || true
 set -e
 popd >/dev/null
 echo "$solver_exit" > "$case_dir/process-exit-code.txt"

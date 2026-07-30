@@ -6,10 +6,11 @@ mathématiques, la discrétisation, les stratégies de warm-start, les critères
 de validation, l’organisation GitHub Actions et l’interprétation des résultats.
 
 La campagne courante est volontairement **SX-only** et compare IPOPT/MUMPS,
-MadNLP/MUMPS et ACADOS, en mécanique full et reduced. PARDISO est archivé :
-il n’a apporté aucun gain à MadNLP. Fatrop est également sorti de l’endurance
-courante, car sa formulation full échoue encore en SX lors de l’identification
-de la structure des gaps. Alpaqa reste documenté comme intégration non
+MadNLP/MUMPS et ACADOS, en mécanique full et reduced. FATROP/collocation est
+réintégré comme sonde graduelle sur une machine séparée, mais n’est pas encore
+certifié pour l’endurance : sa formulation full échouait encore en SX lors de
+l’identification de la structure des gaps. PARDISO est archivé, car il n’a
+apporté aucun gain à MadNLP. Alpaqa reste documenté comme intégration non
 fonctionnelle.
 
 Les résultats historiques d’endurance proviennent principalement du
@@ -33,8 +34,10 @@ Ils servent de référence avant la nouvelle campagne séquentielle 5, 30 puis
   runner refuse explicitement une demande MX.
 - MadNLP utilise exclusivement MUMPS, transmis à libMad sous le nom typé
   exact `MumpsSolver`. La CI échoue si libMad signale une option inconnue.
-- PARDISO, Fatrop et RK4 ne font pas partie de la campagne active. Leurs
-  anciens résultats sont conservés comme diagnostics historiques.
+- PARDISO et RK4 ne font pas partie de la campagne active. FATROP/collocation
+  est exécuté dans les paliers 5, 30 puis 100 RHO, mais ses résultats restent
+  diagnostiques tant que les cas full et reduced ne passent pas les mêmes
+  audits physiques que les autres solveurs.
 - MadNLP reste interprété : la compilation C est refusée par l’interface
   Bioptim/CasADi épinglée et n’est pas comptée comme une variante valide.
 - La convergence du solveur ne suffit pas : chaque RHO est soumis à un audit
@@ -60,6 +63,7 @@ provenance humaine.
 | Construction et certification des seeds | `a3499cab16d7605b8efa7255cf89f1af6a7c59c9` |
 | IPOPT full/reduced | `a3499cab16d7605b8efa7255cf89f1af6a7c59c9` |
 | MadNLP/MUMPS full/reduced | `a3499cab16d7605b8efa7255cf89f1af6a7c59c9` |
+| FATROP/collocation full/reduced | `a3499cab16d7605b8efa7255cf89f1af6a7c59c9` |
 | ACADOS full/reduced et variantes | `a3499cab16d7605b8efa7255cf89f1af6a7c59c9` |
 
 Ce commit appartient à la branche dédiée
@@ -899,7 +903,7 @@ Le benchmark garde le transfert des multiplicateurs désactivé. Les blocs duaux
 ne sont pas encore décalés structurellement avec le RHO; le primal décalé est
 le warm-start fiable.
 
-### 7.3 Fatrop — diagnostic historique, hors campagne SX-only
+### 7.3 FATROP — diagnostic actif, certification endurance en attente
 
 Fatrop exploite la structure d’OCP pour résoudre les systèmes linéaires par
 une factorisation de type Riccati plutôt que comme une matrice KKT générique.
@@ -941,11 +945,13 @@ récent; la branche complète n’est pas utilisée car elle est en retard de
 28 commits sur cette base.
 
 Les 7 tests Bioptim dédiés au patch passent localement, mais cela ne suffit
-pas : Fatrop full échoue encore avec SX lors de la détection de structure,
-alors que reduced SX a seulement passé un smoke 1/1. La campagne active
-n’utilise donc pas Fatrop. Ses métriques MX antérieures restent utiles pour
-localiser le coût des dérivées, mais ne sont pas mélangées aux résultats
-SX-only.
+pas : FATROP full échouait encore avec SX lors de la détection de structure,
+alors que reduced SX avait seulement passé un smoke 1/1. Le workflow actif
+réexécute donc FATROP/collocation full puis reduced dans chaque palier, sur une
+machine dédiée, avec scaling d’état `none` et compilation C. Ses résultats ne
+seront intégrés au bilan d’endurance qu’après validation numérique et physique
+des deux formulations. Les métriques MX antérieures restent seulement des
+diagnostics historiques.
 
 ### 7.4 ACADOS
 
@@ -1067,6 +1073,36 @@ La dynamique contrainte impose ensuite l’accélération de contact nulle sans
 dupliquer position et vitesse comme égalités à tous les nœuds. Cette
 formulation doit encore passer le palier Linux 5 RHO; les variantes all-node
 restent des diagnostics négatifs de redondance.
+
+La continuité stricte de la cadence a ensuite révélé une discontinuité du
+guess cyclique ACADOS. Après le premier RHO reduced du run `30560155975`, la
+vitesse terminale vaut environ `-8.03 rad/s`, tandis que le deuxième nœud
+recopié de l’ancien cycle reste près de `-5.55 rad/s`. Le défaut initial
+atteint `2.29 rad/s` et HPIPM retourne `ACADOS_MINSTEP`. Le rollout IRK brut
+est rejeté car il dépasse les bornes de cadence. L’écran 5 RHO contient donc
+des variantes SQP et RTI `phase-one`, qui réparent le guess complet avant la
+résolution sans changer les équations, les bornes ni l’objectif de l’OCP.
+
+Le même mécanisme est activé pour les cas NLP full. Dans le run strict
+`30560155975`, MadNLP résout les RHO 1, 3 et 5, mais échoue aux RHO 2 et 4;
+son préfixe continu reste donc limité à un cycle. Ce patron alterné est
+compatible avec un guess cyclique défectueux, pas avec une arrivée monotone de
+la fatigue. La phase de faisabilité est comptée dans le mur-à-mur, tandis que
+le temps natif du solveur reste mesuré séparément.
+
+À l’inverse, les deux solveurs reduced qui ne dépendent pas du même algorithme
+convergent sur les cinq RHO stricts :
+
+| Solveur reduced strict | RHO | Médiane chaude | Coût exécuté | Fatigue cumulée |
+|---|---:|---:|---:|---:|
+| MadNLP/MUMPS | 5/5 | `0.938 s` | `19.2349` | `0.16355` |
+| FATROP/collocation compilé | 5/5 | `1.904 s` | `19.2382` | `0.16357` |
+
+L’accord du coût à environ `0.02 %` est rassurant pour la formulation reduced,
+mais ne valide pas encore son équivalence au full : IPOPT n’a pas terminé et
+le full strict n’a pas de préfixe comparable. Le résumé
+`state_boundary_jumps`, calculé mais omis du premier JSON agrégé, est désormais
+propagé avec les deux côtés de chaque couture.
 
 L’analyse de ces deux écrans a finalement localisé une erreur en amont dans
 l’interface Bioptim–ACADOS : les fonctions de pénalité sont construites avec
@@ -1676,6 +1712,7 @@ Le workflow parallélise surtout les expériences :
 
 - une machine IPOPT;
 - une machine MadNLP/MUMPS;
+- une machine FATROP/collocation;
 - une machine ACADOS;
 - full et reduced séquentiels sur une même machine pour réutiliser
   l’environnement.
@@ -1710,12 +1747,20 @@ Ses étapes principales sont :
 4. `benchmark` :
    - IPOPT full puis reduced;
    - MadNLP/MUMPS interprété, full puis reduced;
+   - FATROP/collocation compilé, full puis reduced;
 5. `acados-smoke` : full/reduced et options séquentiellement;
 6. `report` : agrégation des JSON, CSV, logs et patrons de stimulation.
 
 Chaque cas est téléversé immédiatement après sa fin. Une non-convergence
 numérique produit un JSON de benchmark; une erreur d’infrastructure fait
 échouer le job.
+
+La génération C du premier RHO IPOPT peut rester plusieurs minutes sans écrire
+sur la sortie standard. Deux runners du run `30560155975` ont reçu un signal
+d’arrêt pendant ce silence, avant tout retour d’IPOPT ou de MUMPS. Le lanceur
+émet désormais un heartbeat toutes les 45 secondes pendant chaque cas; ce
+message garde le runner actif sans intervenir dans le processus solveur ni
+dans ses mesures de temps.
 
 ### 14.1 Lancer 100 RHO
 
@@ -1897,10 +1942,10 @@ restauration ACADOS sont moins risquées qu’un surrogate appris.
 - MadNLP utilise explicitement `MumpsSolver`; toute option ignorée devient une
   erreur de CI.
 - PARDISO/MKL n’apporte pas de gain et est archivé.
-- RK4 FATROP reste archivé. Le correctif de scaling FATROP SX/collocation est
-  intégré à la branche Bioptim dédiée et passe ses tests unitaires, mais doit
-  encore être recertifié sur le palier multi-solveurs avant réintégration aux
-  résultats d’endurance.
+- RK4 FATROP reste archivé. FATROP SX/collocation est réintégré comme sonde
+  compilée dans la campagne graduelle; son correctif de scaling passe les
+  tests unitaires, mais les résultats restent hors bilan d’endurance jusqu’à
+  la réussite des audits full et reduced.
 - SX réduit de 57.5 à 60.5 % la médiane chaude face à MX, à objectifs
   identiques à environ `5e-11` près; la campagne active est donc SX-only.
 - ACADOS reduced atteint environ `0.102 s/RHO`, mais son préfixe strict
