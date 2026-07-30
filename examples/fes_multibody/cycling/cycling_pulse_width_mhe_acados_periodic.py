@@ -1511,8 +1511,11 @@ def build_argument_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--acados-wheel-qdot-slack",
         type=float,
-        default=0.5,
-        help="First node slack, in rad/s, for the ACADOS wheel/crank velocity transfer bound when enabled.",
+        default=0.0,
+        help=(
+            "First-node slack, in rad/s, for wheel/crank velocity continuity "
+            "between RHO. The endurance default is exact continuity."
+        ),
     )
     parser.add_argument(
         "--acados-wheel-q-path-margin",
@@ -3851,6 +3854,63 @@ def _state_traces_from_exported_cycles(
         )
 
     return state_traces
+
+
+def _state_boundary_jump_summary(exported_cycle_solutions: list) -> dict:
+    """Keep both sides of every RHO seam instead of hiding them in merged traces."""
+
+    if len(exported_cycle_solutions) < 2:
+        return {
+            "available": False,
+            "boundary_count": 0,
+            "by_state": {},
+        }
+
+    cycle_states = [
+        solution.decision_states(to_merge=SolutionMerge.NODES)
+        for solution in exported_cycle_solutions
+    ]
+    common_keys = set(cycle_states[0])
+    for states in cycle_states[1:]:
+        common_keys.intersection_update(states)
+
+    by_state = {}
+    for key in sorted(common_keys):
+        jumps = []
+        left_values = []
+        right_values = []
+        for left_states, right_states in zip(cycle_states[:-1], cycle_states[1:]):
+            left = np.asarray(left_states[key], dtype=float)
+            right = np.asarray(right_states[key], dtype=float)
+            if left.ndim == 1:
+                left = left[np.newaxis, :]
+            if right.ndim == 1:
+                right = right[np.newaxis, :]
+            if left.shape[0] != right.shape[0]:
+                raise ValueError(
+                    f"Cannot compare RHO boundary state '{key}': "
+                    f"{left.shape[0]} rows before and {right.shape[0]} rows after."
+                )
+            left_terminal = left[:, -1]
+            right_initial = right[:, 0]
+            left_values.append(left_terminal)
+            right_values.append(right_initial)
+            jumps.append(right_initial - left_terminal)
+
+        jump_array = np.stack(jumps, axis=0)
+        by_state[key] = {
+            "left_terminal": np.stack(left_values, axis=0),
+            "right_initial": np.stack(right_values, axis=0),
+            "jump": jump_array,
+            "maximum_absolute_jump": float(np.max(np.abs(jump_array))),
+            "rms_jump": float(np.sqrt(np.mean(jump_array**2))),
+        }
+
+    return {
+        "available": True,
+        "boundary_count": len(exported_cycle_solutions) - 1,
+        "by_state": by_state,
+    }
 
 
 def _control_bounds_summary(nmpc) -> dict[str, dict[str, float]]:
@@ -6241,6 +6301,9 @@ def build_window_summary(
     state_traces = _state_traces_from_exported_cycles(
         merged_solution, exported_cycle_solutions
     )
+    state_boundary_jumps = _state_boundary_jump_summary(
+        exported_cycle_solutions
+    )
     window_objectives = _window_objective_values(source_window_solutions)
     finite_objectives = [value for value in window_objectives if value is not None]
     objective = float(sum(finite_objectives)) if finite_objectives else float("nan")
@@ -6298,6 +6361,7 @@ def build_window_summary(
         "final_wheel_angle": float(wheel_trace[-1]),
         "wheel_angle_trace": wheel_trace,
         "state_traces": state_traces,
+        "state_boundary_jumps": state_boundary_jumps,
         "control_traces": control_traces,
         "solution": merged_solution,
         "window_solutions": source_window_solutions,
@@ -11590,6 +11654,7 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
                 reduced_cycling_dynamics = ReducedCyclingDynamics.load(
                     reduced_profile_path
                 )
+                reduced_cycling_dynamics.validate_source_model(model_path)
             except (KeyError, ValueError) as error:
                 warnings.warn(
                     f"Ignoring stale reduced mechanics profile "
@@ -11820,12 +11885,12 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
         nmpc.first_node_state_slack = {
             position_key: position_slack,
             velocity_key: velocity_slack,
-            "Cn_": 5e-3,
-            "Cn_sum_": 5e-3,
-            "F_": 1e-2,
-            "A_": 5e-3,
-            "Tau1_": 5e-3,
-            "Km_": 5e-3,
+            "Cn_": 0.0,
+            "Cn_sum_": 0.0,
+            "F_": 0.0,
+            "A_": 0.0,
+            "Tau1_": 0.0,
+            "Km_": 0.0,
         }
         terminal_position_slack = args.acados_terminal_wheel_q_slack
         if (
@@ -11860,7 +11925,8 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
             args.acados_bind_first_node_fes_states
             or args.model_formulation == "periodic_node"
         )
-        nmpc.bound_first_node_wheel_qdot = False
+        nmpc.bound_first_node_wheel_qdot = True
+        args.rho_state_continuity_mode = "strict"
         nmpc.advance_wheel_q_bounds = True
         nmpc.anchor_terminal_wheel_to_first_node = False
         nmpc.anchor_wheel_q_to_absolute_reference = True

@@ -401,11 +401,17 @@ $$
 où $\mathcal S$ décale la trajectoire d’un cycle et
 $\Pi_{\mathcal B_{r+1}}$ la projette dans les nouvelles bornes. Les états de
 fatigue ne sont pas remis à leur valeur reposée. Dans la campagne historique,
-ils sont toutefois seulement bornés autour du terminal précédent avec des
+ils étaient toutefois seulement bornés autour du terminal précédent avec des
 slacks allant jusqu’à `5e-3` pour certains états, et la vitesse du pédalier
-n’est pas raccordée. Il s’agit donc d’une continuité relâchée, pas d’une
-continuité exacte. Le prochain palier doit publier les sauts gauche/droit à
-chaque couture et imposer une continuité stricte avant toute comparaison
+n’était pas raccordée. Il s’agissait donc d’une continuité relâchée, pas d’une
+continuité exacte.
+
+Le profil actif fixe maintenant au terminal précédent la vitesse du pédalier
+et les 20 états Ding (`Cn`, `F`, `A`, `Tau1`, `Km`) au premier nœud du RHO
+suivant. Les traces fusionnées conservent leur grille habituelle pour le calcul
+des AUC, mais le JSON publie séparément les deux côtés de chaque couture dans
+`state_boundary_jumps`, avec le saut maximal et le RMS par état. Cette
+instrumentation doit être validée au palier 5 avant toute comparaison
 physiologique de longue durée.
 
 Le benchmark autorise deux échecs consécutifs afin de distinguer un échec
@@ -624,15 +630,18 @@ formulation complète peut poursuivre la trajectoire hors variété. Les longueu
 musculaires, vitesses de contraction, bras de levier et forces nécessaires
 sont alors différents.
 
+Le fichier de profil Fourier enregistre maintenant le SHA-256 du `.bioMod`
+source. Tout profil sans hash ou construit depuis un autre modèle est rejeté
+et reconstruit, afin qu’un cache géométrique périmé ne puisse pas contaminer
+la comparaison full/reduced.
+
 Le profil NLP de référence impose maintenant $c(q_0)=0$ et
-$J(q_0)\dot q_0=0$ au début de chaque RHO. Pour ACADOS, la variante de
-référence conserve encore le profil historique sans ces égalités explicites;
-le seed est sur la variété, mais cela ne suffit pas à empêcher le drift après
-linéarisation. Une ablation ajoute donc $c(q_k)=0$ et
-$J(q_k)\dot q_k=0$ à tous les nœuds. Ces égalités sont mathématiquement
-redondantes avec la dynamique contrainte au niveau accélération lorsque
-l’intégration est exacte; elles peuvent aussi dégrader le rang du KKT. Elles
-restent donc expérimentales jusqu’à la comparaison SQP/RTI 5 RHO.
+$J(q_0)\dot q_0=0$ au début de chaque RHO. La branche Bioptim dédiée permet
+désormais à ACADOS d’exporter les mêmes égalités `Node.START`. Les ablations
+qui ajoutent $c(q_k)=0$, avec ou sans $J(q_k)\dot q_k=0$, à tous les nœuds
+restent uniquement diagnostiques : elles sont mathématiquement redondantes
+avec la dynamique contrainte au niveau accélération lorsque l’intégration est
+exacte et ont déjà dégradé le rang du QP.
 
 Dans tous les cas, chaque trajectoire full est projetée a posteriori sur la
 variété réduite. Le rapport contient l’erreur maximale/RMS de configuration,

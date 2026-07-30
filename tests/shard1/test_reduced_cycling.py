@@ -133,6 +133,11 @@ def test_wu_reduced_dynamics_matches_constrained_forward_dynamics(tmp_path):
 
     profile_path = reduced.save(tmp_path / "reduced-cycling.npz")
     loaded = ReducedCyclingDynamics.load(profile_path)
+    loaded.validate_source_model(model_path)
+    modified_model = tmp_path / "modified.bioMod"
+    modified_model.write_bytes(model_path.read_bytes() + b"\n// hash audit\n")
+    with pytest.raises(ValueError, match="different bioMod"):
+        loaded.validate_source_model(modified_model)
     theta = -1.23
     forces = np.array([50.0, 40.0, 150.0, 250.0])
     np.testing.assert_allclose(

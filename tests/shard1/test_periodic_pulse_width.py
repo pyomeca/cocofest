@@ -5,7 +5,7 @@ import re
 from casadi import Function, SX
 from pathlib import Path
 from types import SimpleNamespace
-from bioptim import BoundsList, InitialGuessList, Node, Solver
+from bioptim import BoundsList, InitialGuessList, Node, SolutionMerge, Solver
 
 import examples.fes_multibody.cycling.cycling_pulse_width_mhe_acados_periodic as periodic_example
 import examples.fes_multibody.cycling.cycling_fes_solver_comparison as comparison_example
@@ -2336,6 +2336,40 @@ def test_benchmark_excludes_nlp_cycles_after_external_physical_failure():
     assert performance["nlp_validated_cycles"] == 3
     assert performance["physically_validated_cycles"] == 0
     assert performance["validated_cycles"] == 0
+
+
+def test_rho_boundary_jump_summary_keeps_both_sides_of_every_seam():
+    class CycleSolution:
+        def __init__(self, theta, omega, capacity):
+            self._states = {
+                "theta": np.asarray(theta, dtype=float)[np.newaxis, :],
+                "omega": np.asarray(omega, dtype=float)[np.newaxis, :],
+                "A_Biceps": np.asarray(capacity, dtype=float)[np.newaxis, :],
+            }
+
+        def decision_states(self, to_merge):
+            assert to_merge == SolutionMerge.NODES
+            return self._states
+
+    cycles = [
+        CycleSolution([0.0, -1.0], [-6.0, -6.1], [100.0, 99.0]),
+        CycleSolution([-0.99, -2.0], [-6.0, -6.2], [98.5, 98.0]),
+        CycleSolution([-2.02, -3.0], [-6.3, -6.4], [97.8, 97.0]),
+    ]
+
+    summary = periodic_example._state_boundary_jump_summary(cycles)
+
+    assert summary["available"] is True
+    assert summary["boundary_count"] == 2
+    np.testing.assert_allclose(
+        summary["by_state"]["theta"]["jump"][:, 0],
+        [0.01, -0.02],
+    )
+    np.testing.assert_allclose(
+        summary["by_state"]["omega"]["jump"][:, 0],
+        [0.1, -0.1],
+    )
+    assert summary["by_state"]["A_Biceps"]["maximum_absolute_jump"] == 0.5
 
 
 def test_benchmark_reports_hot_window_timing_separately():

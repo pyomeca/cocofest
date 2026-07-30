@@ -14,6 +14,7 @@ dynamics, and embedded in CasADi/ACADOS through smooth Fourier expressions.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from hashlib import sha256
 from pathlib import Path
 from time import perf_counter
 from typing import Sequence
@@ -633,6 +634,7 @@ class ReducedCyclingDynamics:
     muscle_names: tuple[str, ...]
     crank_torque_dof_index: int
     muscle_geometry: PeriodicFourierSeries | None = None
+    source_model_sha256: str | None = None
 
     @property
     def _inertia_index(self) -> int:
@@ -782,6 +784,7 @@ class ReducedCyclingDynamics:
             muscle_geometry=PeriodicFourierSeries.fit(
                 progress, geometry_samples, order=order
             ),
+            source_model_sha256=sha256(Path(model_path).read_bytes()).hexdigest(),
         )
 
     def coefficient_values(self, theta: float) -> dict:
@@ -951,6 +954,9 @@ class ReducedCyclingDynamics:
             crank_torque_dof_index=np.array(
                 [self.crank_torque_dof_index], dtype=int
             ),
+            source_model_sha256=np.asarray(
+                [self.source_model_sha256 or ""], dtype=str
+            ),
             **(
                 {}
                 if self.muscle_geometry is None
@@ -1011,6 +1017,26 @@ class ReducedCyclingDynamics:
                     if "muscle_geometry_offset" in data
                     else None
                 ),
+                source_model_sha256=(
+                    str(data["source_model_sha256"][0])
+                    if "source_model_sha256" in data.files
+                    and str(data["source_model_sha256"][0])
+                    else None
+                ),
+            )
+
+    def validate_source_model(self, model_path: str | Path) -> None:
+        """Reject a cached Fourier profile generated from another bioMod."""
+
+        observed = sha256(Path(model_path).read_bytes()).hexdigest()
+        if self.source_model_sha256 is None:
+            raise ValueError(
+                "Reduced cycling profile has no source bioMod hash. Rebuild the profile."
+            )
+        if observed != self.source_model_sha256:
+            raise ValueError(
+                "Reduced cycling profile was generated from a different bioMod. "
+                "Rebuild the profile."
             )
 
 
