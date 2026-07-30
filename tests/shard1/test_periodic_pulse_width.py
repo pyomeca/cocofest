@@ -74,7 +74,7 @@ def test_full_contact_stabilization_constrains_every_shooting_node(monkeypatch):
     assert captured[1][1]["second_marker"] == "global_wheel_center"
 
 
-def test_full_contact_position_stabilization_keeps_velocity_at_start(monkeypatch):
+def test_full_contact_position_stabilization_avoids_velocity_redundancy(monkeypatch):
     captured = []
 
     class FakeConstraintList:
@@ -90,9 +90,8 @@ def test_full_contact_position_stabilization_keeps_velocity_at_start(monkeypatch
         enforce_contact_position_all_nodes=True,
     )
 
-    assert len(captured) == 2
-    assert captured[0][1]["node"] == Node.START
-    assert captured[1][1]["node"] == Node.ALL
+    assert len(captured) == 1
+    assert captured[0][1]["node"] == Node.ALL
 
 
 def test_updating_full_model_preserves_every_force_relationship(monkeypatch):

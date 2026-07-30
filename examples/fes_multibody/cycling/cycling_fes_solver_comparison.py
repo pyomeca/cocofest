@@ -3316,7 +3316,7 @@ def build_cli() -> argparse.ArgumentParser:
         action="store_true",
         help=(
             "For full mechanics, constrain wheel-centre position at every "
-            "node and velocity only at the initial node."
+            "node without adding a redundant velocity path constraint."
         ),
     )
     parser.add_argument(

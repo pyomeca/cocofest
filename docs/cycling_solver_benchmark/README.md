@@ -980,15 +980,17 @@ $c(q_k)=0$ et $J(q_k)\dot q_k=0$ à tous les nœuds est trop redondant avec la
 dynamique contrainte au niveau accélération et dégrade vraisemblablement le
 rang du QP.
 
-L’écran suivant teste donc la stabilisation minimale :
+L’interface Bioptim–ACADOS n’exporte pas les contraintes personnalisées
+`Node.START`. L’écran suivant teste donc la stabilisation minimale compatible :
 
 $$
-c(q_k)=0\quad\text{à tous les nœuds},\qquad
-J(q_0)\dot q_0=0\quad\text{au nœud initial seulement}.
+c(q_k)=0\quad\text{à tous les nœuds}.
 $$
 
-Cette variante sépare position et vitesse, avant d’envisager une pénalisation
-de Baumgarte, une contrainte adoucie ou un second OCP de faisabilité.
+La vitesse tangentielle initiale provient du seed relevé et reste auditée
+strictement; elle n’est pas dupliquée comme égalité dans le QP. Cette variante
+sépare position et vitesse avant d’envisager une pénalisation de Baumgarte, une
+contrainte adoucie ou un second OCP de faisabilité.
 
 La première stratégie testée est la voie native
 `SQP_WITH_FEASIBLE_QP` :

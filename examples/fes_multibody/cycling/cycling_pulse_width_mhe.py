@@ -1928,9 +1928,6 @@ def set_constraints(
         or enforce_contact_constraints_all_nodes
         or enforce_contact_position_all_nodes
     ) and not is_reduced:
-        velocity_node = (
-            Node.ALL if enforce_contact_constraints_all_nodes else Node.START
-        )
         position_node = (
             Node.ALL
             if (
@@ -1940,12 +1937,18 @@ def set_constraints(
             else Node.START
         )
         # --- Constraining wheel center position to a fix position --- #
-        constraints.add(
-            ConstraintFcn.TRACK_MARKERS_VELOCITY,
-            node=velocity_node,
-            marker_index=bio_model.marker_index("wheel_center"),
-            axes=[Axis.X, Axis.Y],
-        )
+        if enforce_start_constraints or enforce_contact_constraints_all_nodes:
+            velocity_node = (
+                Node.ALL
+                if enforce_contact_constraints_all_nodes
+                else Node.START
+            )
+            constraints.add(
+                ConstraintFcn.TRACK_MARKERS_VELOCITY,
+                node=velocity_node,
+                marker_index=bio_model.marker_index("wheel_center"),
+                axes=[Axis.X, Axis.Y],
+            )
         constraints.add(
             ConstraintFcn.SUPERIMPOSE_MARKERS,
             first_marker="wheel_center",

@@ -2464,7 +2464,7 @@ def build_argument_parser() -> argparse.ArgumentParser:
         action="store_true",
         help=(
             "For full mechanics, impose wheel-centre position at every "
-            "shooting node but its velocity only at the first node."
+            "shooting node without adding a redundant velocity path constraint."
         ),
     )
     parser.set_defaults(use_sx=True, enforce_start_constraints=False)
