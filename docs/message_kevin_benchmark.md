@@ -11,6 +11,11 @@ contient un cycle de pédalage et 30 stimulations par muscle; une campagne de
 100 RHO enchaîne donc 100 OCP d’un cycle. Les PW sont bornées dans
 `[pd0, 600 µs]`, avec `pd0 ≈ 131.405 µs`, et la cible terminale d’angle est
 absolue avec un slack de `0.002 rad`.
+La référence absolue est recalée après le chargement du seed, y compris quand
+le seed et le solveur utilisent tous deux la formulation full ou tous deux la
+formulation reduced. Ce point corrige un décalage initial full de `3.94 mrad`
+observé avec cinq statuts IPOPT pourtant égaux à zéro; le slack n’a pas été
+relâché pour masquer cette incohérence.
 
 La nouvelle campagne active compare :
 

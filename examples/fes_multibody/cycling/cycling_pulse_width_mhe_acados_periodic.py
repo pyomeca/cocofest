@@ -10556,6 +10556,34 @@ def set_terminal_wheel_q_bound_slack(periodic_nmpc, slack: float) -> None:
     periodic_nmpc._sync_acados_state_bounds()
 
 
+def recenter_absolute_wheel_q_reference_from_initial_guess(periodic_nmpc) -> bool:
+    """Anchor the absolute cycle targets to the initial state actually loaded."""
+
+    if not getattr(periodic_nmpc, "anchor_wheel_q_to_absolute_reference", False):
+        return False
+    position_key = periodic_nmpc.position_state_key
+    wheel_index = periodic_nmpc.wheel_state_index
+    initial_wheel_q = float(
+        np.asarray(
+            periodic_nmpc.nlp[0].x_init[position_key].init,
+            dtype=float,
+        )[wheel_index, 0]
+    )
+    cycle_index = int(getattr(periodic_nmpc, "absolute_wheel_q_cycle_index", 0))
+    cycle_shift = float(
+        getattr(periodic_nmpc, "absolute_wheel_q_cycle_shift", -2.0 * np.pi)
+    )
+    periodic_nmpc.absolute_wheel_q_reference = (
+        initial_wheel_q - cycle_index * cycle_shift
+    )
+    periodic_nmpc._cocofest_terminal_wheel_q_center = initial_wheel_q + cycle_shift
+    set_terminal_wheel_q_bound_slack(
+        periodic_nmpc,
+        periodic_nmpc.terminal_state_slack[position_key][wheel_index],
+    )
+    return True
+
+
 def recenter_terminal_wheel_q_bound_slack(periodic_nmpc, slack: float) -> dict:
     """Recenter a terminal-angle continuation after the MHE bounds shift."""
 
@@ -12228,33 +12256,12 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
             common_seed,
             recenter_kinematic_bounds=mechanical_bridge,
         )
-        if mechanical_bridge and getattr(
-            nmpc, "anchor_wheel_q_to_absolute_reference", False
-        ):
-            position_key = nmpc.position_state_key
-            wheel_index = nmpc.wheel_state_index
-            bridged_start = float(
-                np.asarray(
-                    nmpc.nlp[0].x_init[position_key].init,
-                    dtype=float,
-                )[wheel_index, 0]
-            )
-            cycle_index = int(
-                getattr(nmpc, "absolute_wheel_q_cycle_index", 0)
-            )
-            cycle_shift = float(
-                getattr(nmpc, "absolute_wheel_q_cycle_shift", -2.0 * np.pi)
-            )
-            nmpc.absolute_wheel_q_reference = (
-                bridged_start - cycle_index * cycle_shift
-            )
-            nmpc._cocofest_terminal_wheel_q_center = (
-                bridged_start + cycle_shift
-            )
-            set_terminal_wheel_q_bound_slack(
-                nmpc,
-                nmpc.terminal_state_slack[position_key][wheel_index],
-            )
+        # Loading any seed can change the first crank angle, including when
+        # producer and consumer share the same mechanical formulation.  The
+        # absolute terminal sequence must start from that effective state;
+        # otherwise the first RHO inherits a stale pre-seed target and the
+        # anti-drift audit can fail by roughly twice the allowed slack.
+        recenter_absolute_wheel_q_reference_from_initial_guess(nmpc)
         if echo:
             print(
                 f"common_initial_solution: applied ({common_seed_path}, "

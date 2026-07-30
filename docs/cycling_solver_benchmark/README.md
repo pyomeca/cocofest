@@ -318,6 +318,13 @@ avec
 Cette définition empêche un drift de même signe d’un cycle au suivant. Une
 cible définie à partir du terminal précédent aurait autorisé une accumulation
 de petites erreurs, même si chaque RHO respectait localement sa tolérance.
+Après chargement du seed commun, \(\theta_0\) est systématiquement recalé sur
+le premier état effectivement chargé, même si le seed et le consommateur ont
+la même formulation mécanique. Sans ce recalage, le run 5 RHO
+`30518532002` a produit cinq statuts IPOPT 0 en full, mais un décalage constant
+de `3.94e-3 rad` dès le premier cycle, supérieur au slack absolu. Relâcher la
+tolérance aurait masqué une cible pré-seed périmée; la correction conserve le
+seuil de `0.002 rad`.
 
 Le warm-start primal s’écrit schématiquement :
 
@@ -1168,6 +1175,8 @@ Les corrections associées sont maintenant :
    moins strict configuré à `False`, tout en refusant le sens inverse;
 2. réévaluer \(g(x)\) pour l’audit des solutions compilées IPOPT;
 3. exécuter MadNLP interprété tant que Bioptim ne valide pas sa compilation;
+4. recaler la référence angulaire absolue après tout chargement de seed,
+   y compris sans changement de formulation mécanique;
 4. corriger la détection de structure Fatrop full en SX avant toute nouvelle
    ablation de scaling.
 

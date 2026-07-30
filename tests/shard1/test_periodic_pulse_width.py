@@ -4465,6 +4465,47 @@ def test_terminal_wheel_slack_is_independent_from_first_node_slack():
     np.testing.assert_allclose(q_bounds.max[2, 2], -6.8)
 
 
+def test_absolute_terminal_reference_is_recentered_after_loading_same_formulation_seed():
+    q_bounds = SimpleNamespace(
+        min=np.full((3, 3), -100.0),
+        max=np.full((3, 3), 100.0),
+    )
+    loaded_start = -6.3349272754445485
+    nmpc = SimpleNamespace(
+        anchor_wheel_q_to_absolute_reference=True,
+        position_state_key="q",
+        wheel_state_index=2,
+        absolute_wheel_q_reference=-2.0 * np.pi,
+        absolute_wheel_q_cycle_shift=-2.0 * np.pi,
+        absolute_wheel_q_cycle_index=0,
+        terminal_state_slack={"q": [0.0, 0.0, 0.002]},
+        nlp=[
+            SimpleNamespace(
+                x_init={
+                    "q": SimpleNamespace(
+                        init=np.array(
+                            [[0.0, 0.0], [0.0, 0.0], [loaded_start, -12.6]]
+                        )
+                    )
+                },
+                x_bounds={"q": q_bounds},
+            )
+        ],
+        _sync_acados_state_bounds=lambda: None,
+    )
+
+    applied = periodic_example.recenter_absolute_wheel_q_reference_from_initial_guess(
+        nmpc
+    )
+
+    assert applied is True
+    np.testing.assert_allclose(nmpc.absolute_wheel_q_reference, loaded_start)
+    target = loaded_start - 2.0 * np.pi
+    np.testing.assert_allclose(nmpc._cocofest_terminal_wheel_q_center, target)
+    np.testing.assert_allclose(q_bounds.min[2, 2], target - 0.002)
+    np.testing.assert_allclose(q_bounds.max[2, 2], target + 0.002)
+
+
 class _BoundComplementaritySolver:
     def get(self, stage, field):
         values = {
