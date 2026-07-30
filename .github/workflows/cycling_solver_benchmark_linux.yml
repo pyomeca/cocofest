@@ -779,11 +779,14 @@ jobs:
             run_case sqp-rti-irk-contact-position full "$ACADOS_OPTION_RHOS" SQP_RTI IRK 5 5
           else
             # Only candidates that passed the five-RHO physical screen are
-            # rebuilt for 30/100 RHO. Keep the reference to quantify the gain.
+            # rebuilt for 30/100 RHO. Keep both common-problem references so
+            # the aggregate report never substitutes a contact ablation for
+            # the full formulation used by IPOPT and MadNLP.
             printf '%s\n' \
-              sqp-irk-contact-position-full \
+              sqp-irk-reference-full \
               sqp-irk-reference-reduced \
               > acados-smoke-results/reference-cases.txt
+            run_case sqp-irk-reference full "$ACADOS_SMOKE_RHOS" SQP IRK 5 5
             run_case sqp-irk-reference reduced "$ACADOS_SMOKE_RHOS" SQP IRK 5 5
             run_case sqp-irk-fixed reduced "$ACADOS_OPTION_RHOS" SQP IRK 5 5
             run_case sqp-irk-anderson reduced "$ACADOS_OPTION_RHOS" SQP IRK 5 5

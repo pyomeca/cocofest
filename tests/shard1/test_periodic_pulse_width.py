@@ -3978,7 +3978,9 @@ def test_github_acados_runner_uses_reference_and_option_profiles_sequentially():
     assert 'echo "${variant}-${mechanics}" >> acados-smoke-results/expected-cases.txt' in workflow
     assert "mapfile -t expected_cases < acados-smoke-results/expected-cases.txt" in workflow
     assert "mapfile -t reference_cases < acados-smoke-results/reference-cases.txt" in workflow
-    assert "sqp-irk-contact-position-full" in workflow
+    assert 'run_case sqp-irk-contact-position full "$ACADOS_OPTION_RHOS"' in workflow
+    assert 'run_case sqp-irk-reference full "$ACADOS_SMOKE_RHOS"' in workflow
+    assert "sqp-irk-reference-full" in workflow
     assert 'result="acados-smoke-results/${case_name}/result.json"' in workflow
     assert "sqp-irk-reference-${mechanics}/result.json" not in workflow
     assert 'expected ${#expected_cases[@]} JSON files' in workflow
