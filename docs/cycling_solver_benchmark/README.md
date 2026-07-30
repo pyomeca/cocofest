@@ -1230,6 +1230,22 @@ comme phase de faisabilité, puis toutes les bornes physiques seront rétablies
 avant un SQP final d’optimalité. Le garde ne peut pas réparer à lui seul une
 trajectoire d’états dynamiquement infaisable.
 
+Le palier 5 RHO
+[`30582614882`](https://github.com/mickaelbegon/cocofest/actions/runs/30582614882)
+confirme ce diagnostic. Le garde ouvre effectivement 19 nœuds autour des
+transitions du Biceps et du Triceps, mais RHO 2 échoue encore avec
+`ACADOS_MINSTEP`, un résidu dynamique de `0.483` et un résidu de stationnarité
+de `154`. Le rollout IRK transféré prédirait une cadence hors borne de
+`5.73 rad/s`; les autres défauts dominants sont `F_Triceps`, `F_Delt_post` et
+`F_Biceps`. Les PW ne sont donc pas la cause principale.
+
+Ce même log révèle que l’ancienne homotopie `sqp-irk-two-stage-reduced`
+sélectionnait uniquement les clés full `q/qdot`. Les états reduced étant
+`theta/omega`, l’expansion reportée restait exactement nulle. La sélection
+couvre maintenant `q`, `qdot`, `theta` et `omega`; un test interdit la
+régression. Cette correction vise directement la restauration du rollout
+d’état avant le SQP d’optimalité.
+
 Enfin, le guess terminal ACADOS est bien envoyé en coordonnées scalées,
 $x_N^{ACADOS}=x_N^{physique}/s_x$, comme les stages précédents. Le commit
 Bioptim `733e442c7b429e20a67a7cf4c2b69694c54513b3` ajoute un test qui
@@ -1647,6 +1663,26 @@ retrouvent le même régime. Les temps locaux ont été mesurés avec les deux
 processus en concurrence et ne doivent donc pas servir de comparaison de
 performance. La CI Linux graduelle 5, 30 puis 100 RHO reste la condition de
 certification avant d’interpréter de nouveau le full sur 100 cycles.
+
+Le premier palier Linux
+[`30581627394`](https://github.com/mickaelbegon/cocofest/actions/runs/30581627394)
+confirme séparément les branches NLP full `5/5`; son job ACADOS a échoué
+avant les solves à cause d’un fixture de test incomplet et ne change pas ces
+résultats :
+
+| Solveur full, 5 RHO | Coût | Fatigue exécutée | AUC | Min. $A/A_\mathrm{scale}$ | Temps solveur | Médiane chaude |
+|---|---:|---:|---:|---:|---:|---:|
+| IPOPT/MUMPS | 20.09865 | 19.46230 | 0.166329 | 0.984750 | 21.21 s | 4.18 s |
+| MadNLP/MUMPS | 20.10282 | 19.46637 | 0.166365 | 0.984753 | 26.05 s | 3.41 s |
+
+IPOPT reduced, exécuté sur une machine séparée, obtient `19.86837`, soit un
+coût inférieur de `1.16 %` au full. MadNLP reduced obtient `19.86386`, soit
+`1.20 %` de moins que son full. Les capacités finales sont néanmoins presque
+identiques après cinq cycles; l’écart de coût vient surtout d’une répartition
+d’effort plus coûteuse au Biceps dans le full. Le temps mur-à-mur reduced
+d’IPOPT inclut sa compilation persistante et ne doit pas être comparé au full
+interprété; les colonnes solveur et médiane chaude sont les métriques
+pertinentes ici.
 
 Pour documenter ce que donnent malgré tout les fenêtres isolées au RHO 100,
 le tableau suivant reporte l’état au début du RHO 100, donc après 99

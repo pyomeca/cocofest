@@ -8489,9 +8489,9 @@ def _copy_state_bounds(periodic_nmpc) -> dict[str, tuple[np.ndarray, np.ndarray]
 def build_relaxed_transfer_state_bounds(
     periodic_nmpc,
     padding: float,
-    relaxed_keys: tuple[str, ...] = ("q", "qdot"),
+    relaxed_keys: tuple[str, ...] = ("q", "qdot", "theta", "omega"),
 ) -> tuple[dict[str, tuple[np.ndarray, np.ndarray]], dict[str, float]]:
-    """Enclose selected transferred states without relaxing their first node."""
+    """Enclose full or reduced mechanical states without relaxing their first node."""
 
     if padding < 0.0:
         raise ValueError("Transfer-bound homotopy padding must be non-negative.")

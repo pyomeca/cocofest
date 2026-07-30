@@ -7000,6 +7000,39 @@ def test_transfer_bound_homotopy_only_relaxes_mechanical_states():
     np.testing.assert_allclose(relaxed["A_Triceps"][1], fatigue_bounds.max)
 
 
+def test_transfer_bound_homotopy_relaxes_reduced_mechanical_states():
+    theta_bounds = SimpleNamespace(
+        min=np.array([[-0.1, -1.0, -2.1]]),
+        max=np.array([[0.1, 1.0, -1.9]]),
+    )
+    omega_bounds = SimpleNamespace(
+        min=np.array([[-0.1, -2.0, -3.0]]),
+        max=np.array([[0.1, 2.0, 3.0]]),
+    )
+    nmpc = SimpleNamespace(
+        nlp=[
+            SimpleNamespace(
+                x_init={
+                    "theta": SimpleNamespace(init=np.array([[0.0, -4.0, -5.0]])),
+                    "omega": SimpleNamespace(init=np.array([[0.0, -8.0, -9.0]])),
+                },
+                x_bounds={"theta": theta_bounds, "omega": omega_bounds},
+            )
+        ]
+    )
+
+    relaxed, expansion = periodic_example.build_relaxed_transfer_state_bounds(
+        nmpc, padding=0.1
+    )
+
+    assert expansion["theta"] > 0.0
+    assert expansion["omega"] > 0.0
+    np.testing.assert_allclose(relaxed["theta"][0][:, 0], theta_bounds.min[:, 0])
+    np.testing.assert_allclose(relaxed["omega"][1][:, 0], omega_bounds.max[:, 0])
+    assert relaxed["theta"][0][0, 1] < -4.0
+    assert relaxed["omega"][0][0, 1] < -8.0
+
+
 def test_transfer_bound_homotopy_restores_physical_bounds(monkeypatch):
     class FakeSolver:
         def __init__(self):
