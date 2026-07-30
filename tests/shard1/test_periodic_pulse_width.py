@@ -3813,7 +3813,7 @@ def test_github_acados_runner_uses_reference_and_option_profiles_sequentially():
     )
     assert "inputs.cycles != 'screen' && inputs.cycles != 'acados'" in workflow
     assert "prepare-acados-stack:" in workflow
-    assert "BIOPTIM_PRODUCTION_COMMIT: 04f0e1487f5b2836f4f724664dc0313ee09e9773" in workflow
+    assert "BIOPTIM_PRODUCTION_COMMIT: 9ae08f35a95f8ca167b4f05dfdf69b8e643f667e" in workflow
     assert "ACADOS_COMMIT: 59d93e17d2985fdd73fc58b8a83ed8f83a024171" in workflow
     assert "ACADOS_INSTALL_SCRIPT_BLOB: 5ac8064ab613251e62560b5de8cbbb9550f5c5d0" in workflow
     assert "for mechanics in full reduced" in workflow
@@ -3864,7 +3864,8 @@ def test_github_acados_runner_uses_reference_and_option_profiles_sequentially():
     assert "--acados-control-homotopy-window-max-radius 1e-5" in workflow
     assert "--max-consecutive-failing 2" in workflow
     assert "cycling-acados-smoke-${{ github.run_id }}" in workflow
-    assert "expected_cases+=(\"${variant}-${mechanics}\")" in workflow
+    assert 'echo "${variant}-${mechanics}" >> acados-smoke-results/expected-cases.txt' in workflow
+    assert "mapfile -t expected_cases < acados-smoke-results/expected-cases.txt" in workflow
     assert 'expected ${#expected_cases[@]} JSON files' in workflow
     assert "expected 12 JSON files" not in workflow
     assert "case_slug: fatrop" not in workflow

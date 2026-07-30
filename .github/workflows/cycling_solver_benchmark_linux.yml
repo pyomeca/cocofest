@@ -73,7 +73,7 @@ env:
   BIOPTIM_REPOSITORY: mickaelbegon/BiorbdOptim
   # Dedicated multi-solver integration branch:
   # codex/cocofest-acados-v055-exploration
-  BIOPTIM_PRODUCTION_COMMIT: 04f0e1487f5b2836f4f724664dc0313ee09e9773
+  BIOPTIM_PRODUCTION_COMMIT: 9ae08f35a95f8ca167b4f05dfdf69b8e643f667e
   BIOPTIM_ALPAQA_COMMIT: d84e7e43534360fc048e0be26a3bd69a2abc2d77
   ACADOS_COMMIT: 59d93e17d2985fdd73fc58b8a83ed8f83a024171
   ACADOS_INSTALL_SCRIPT_BLOB: 5ac8064ab613251e62560b5de8cbbb9550f5c5d0
@@ -564,6 +564,12 @@ jobs:
             fi
           done
           mkdir -p acados-smoke-results
+          : > acados-smoke-results/expected-cases.txt
+          acados_extended=false
+          if (( ACADOS_SMOKE_RHOS > 5 || ACADOS_OPTION_RHOS > 5 )); then
+            acados_extended=true
+          fi
+          echo "$acados_extended" > acados-smoke-results/extended-campaign.txt
           run_case() {
             local variant="$1"
             local mechanics="$2"
@@ -578,6 +584,7 @@ jobs:
             local solver_options=()
             local stationarity=1e-3
             mkdir -p "$case_dir"
+            echo "${variant}-${mechanics}" >> acados-smoke-results/expected-cases.txt
             if [[ "$integrator" == "ERK" ]]; then
               collocation_type=EXPLICIT_RUNGE_KUTTA
             fi
@@ -736,23 +743,35 @@ jobs:
             echo "$solver_exit" > "$case_dir/process-exit-code.txt"
           }
 
-          for mechanics in full reduced; do
-            run_case sqp-irk-reference "$mechanics" "$ACADOS_SMOKE_RHOS" SQP IRK 5 5
-            run_case sqp-irk-reset-memory "$mechanics" "$ACADOS_OPTION_RHOS" SQP IRK 5 5
-            run_case sqp-irk-qp-hot "$mechanics" "$ACADOS_OPTION_RHOS" SQP IRK 5 5
-            run_case sqp-irk-fixed "$mechanics" "$ACADOS_OPTION_RHOS" SQP IRK 5 5
-            run_case sqp-irk-anderson "$mechanics" "$ACADOS_OPTION_RHOS" SQP IRK 5 5
-            run_case sqp-irk-two-stage "$mechanics" "$ACADOS_SMOKE_RHOS" SQP IRK 5 5
-            run_case sqp-feasible-qp-irk "$mechanics" "$ACADOS_SMOKE_RHOS" SQP_WITH_FEASIBLE_QP IRK 5 5
-            run_case sqp-feasibility-qp-irk "$mechanics" "$ACADOS_SMOKE_RHOS" SQP_WITH_FEASIBLE_QP IRK 5 5
-            run_case sqp-rti-irk "$mechanics" "$ACADOS_OPTION_RHOS" SQP_RTI IRK 5 5
-            run_case sqp-erk "$mechanics" "$ACADOS_OPTION_RHOS" SQP ERK 20 5
-            run_case sqp-irk-light "$mechanics" "$ACADOS_OPTION_RHOS" SQP IRK 2 3
-          done
-          run_case sqp-irk-contact full "$ACADOS_OPTION_RHOS" SQP IRK 5 5
-          run_case sqp-rti-irk-contact full "$ACADOS_OPTION_RHOS" SQP_RTI IRK 5 5
-          run_case sqp-irk-contact-position full "$ACADOS_OPTION_RHOS" SQP IRK 5 5
-          run_case sqp-rti-irk-contact-position full "$ACADOS_OPTION_RHOS" SQP_RTI IRK 5 5
+          if [[ "$acados_extended" == "false" ]]; then
+            for mechanics in full reduced; do
+              run_case sqp-irk-reference "$mechanics" "$ACADOS_SMOKE_RHOS" SQP IRK 5 5
+              run_case sqp-irk-reset-memory "$mechanics" "$ACADOS_OPTION_RHOS" SQP IRK 5 5
+              run_case sqp-irk-qp-hot "$mechanics" "$ACADOS_OPTION_RHOS" SQP IRK 5 5
+              run_case sqp-irk-fixed "$mechanics" "$ACADOS_OPTION_RHOS" SQP IRK 5 5
+              run_case sqp-irk-anderson "$mechanics" "$ACADOS_OPTION_RHOS" SQP IRK 5 5
+              run_case sqp-irk-two-stage "$mechanics" "$ACADOS_SMOKE_RHOS" SQP IRK 5 5
+              run_case sqp-feasible-qp-irk "$mechanics" "$ACADOS_SMOKE_RHOS" SQP_WITH_FEASIBLE_QP IRK 5 5
+              run_case sqp-feasibility-qp-irk "$mechanics" "$ACADOS_SMOKE_RHOS" SQP_WITH_FEASIBLE_QP IRK 5 5
+              run_case sqp-rti-irk "$mechanics" "$ACADOS_OPTION_RHOS" SQP_RTI IRK 5 5
+              run_case sqp-erk "$mechanics" "$ACADOS_OPTION_RHOS" SQP ERK 20 5
+              run_case sqp-irk-light "$mechanics" "$ACADOS_OPTION_RHOS" SQP IRK 2 3
+            done
+            run_case sqp-irk-contact full "$ACADOS_OPTION_RHOS" SQP IRK 5 5
+            run_case sqp-rti-irk-contact full "$ACADOS_OPTION_RHOS" SQP_RTI IRK 5 5
+            run_case sqp-irk-contact-position full "$ACADOS_OPTION_RHOS" SQP IRK 5 5
+            run_case sqp-rti-irk-contact-position full "$ACADOS_OPTION_RHOS" SQP_RTI IRK 5 5
+          else
+            # Only candidates that passed the five-RHO physical screen are
+            # rebuilt for 30/100 RHO. Keep the reference to quantify the gain.
+            run_case sqp-irk-reference reduced "$ACADOS_SMOKE_RHOS" SQP IRK 5 5
+            run_case sqp-irk-fixed reduced "$ACADOS_OPTION_RHOS" SQP IRK 5 5
+            run_case sqp-irk-anderson reduced "$ACADOS_OPTION_RHOS" SQP IRK 5 5
+            run_case sqp-rti-irk reduced "$ACADOS_OPTION_RHOS" SQP_RTI IRK 5 5
+            run_case sqp-irk-light reduced "$ACADOS_OPTION_RHOS" SQP IRK 2 3
+            run_case sqp-irk-contact-position full "$ACADOS_OPTION_RHOS" SQP IRK 5 5
+            run_case sqp-rti-irk-contact-position full "$ACADOS_OPTION_RHOS" SQP_RTI IRK 5 5
+          fi
 
       - name: Add every ACADOS result to the job summary
         if: always()
@@ -832,31 +851,11 @@ jobs:
       - name: Require every ACADOS case without infrastructure errors
         if: always()
         run: |
-          variants=(
-            sqp-irk-reference
-            sqp-irk-reset-memory
-            sqp-irk-qp-hot
-            sqp-irk-fixed
-            sqp-irk-anderson
-            sqp-irk-two-stage
-            sqp-feasible-qp-irk
-            sqp-feasibility-qp-irk
-            sqp-rti-irk
-            sqp-erk
-            sqp-irk-light
-          )
-          expected_cases=()
-          for mechanics in full reduced; do
-            for variant in "${variants[@]}"; do
-              expected_cases+=("${variant}-${mechanics}")
-            done
-          done
-          expected_cases+=(
-            "sqp-irk-contact-full"
-            "sqp-rti-irk-contact-full"
-            "sqp-irk-contact-position-full"
-            "sqp-rti-irk-contact-position-full"
-          )
+          mapfile -t expected_cases < acados-smoke-results/expected-cases.txt
+          if [[ "${#expected_cases[@]}" -lt 1 ]]; then
+            echo "ACADOS: the expected-case manifest is empty." >&2
+            exit 1
+          fi
           mapfile -t results < <(find acados-smoke-results -name result.json -type f | sort)
           if [[ "${#results[@]}" -ne "${#expected_cases[@]}" ]]; then
             echo "ACADOS: expected ${#expected_cases[@]} JSON files, found ${#results[@]}." >&2
@@ -876,16 +875,31 @@ jobs:
               )
             ' "$result"
           done
-          for mechanics in full reduced; do
-            result="acados-smoke-results/sqp-irk-reference-${mechanics}/result.json"
-            jq -e '
-              (.configurations.acados.use_sx == true) and
-              (
+          if [[ "$(cat acados-smoke-results/extended-campaign.txt)" == "true" ]]; then
+            for case_name in "${expected_cases[@]}"; do
+              result="acados-smoke-results/${case_name}/result.json"
+              jq -e '
+                .configurations.acados.n_windows as $expected |
                 .results[0] |
-                (.attempted_windows > 0 and .error == null)
-              )
-            ' "$result"
-          done
+                (
+                  .success == true and
+                  .physical_success == true and
+                  .validated_cycles == $expected
+                )
+              ' "$result"
+            done
+          else
+            for mechanics in full reduced; do
+              result="acados-smoke-results/sqp-irk-reference-${mechanics}/result.json"
+              jq -e '
+                (.configurations.acados.use_sx == true) and
+                (
+                  .results[0] |
+                  (.attempted_windows > 0 and .error == null)
+                )
+              ' "$result"
+            done
+          fi
 
   screen-options:
     name: Option screen — ${{ matrix.solver }}
@@ -1195,7 +1209,7 @@ jobs:
             timeout_minutes: 300
             benchmark_rhos: ${{ inputs.cycles }}
             cycles_per_window: ${{ inputs.cycles_per_window }}
-            bioptim_commit: 04f0e1487f5b2836f4f724664dc0313ee09e9773
+            bioptim_commit: 9ae08f35a95f8ca167b4f05dfdf69b8e643f667e
             integration_branch: codex/cocofest-acados-v055-exploration
             casadi_cxx_abi: 0
           - solver: madnlp
@@ -1205,7 +1219,7 @@ jobs:
             timeout_minutes: 420
             benchmark_rhos: ${{ inputs.cycles }}
             cycles_per_window: ${{ inputs.cycles_per_window }}
-            bioptim_commit: 04f0e1487f5b2836f4f724664dc0313ee09e9773
+            bioptim_commit: 9ae08f35a95f8ca167b4f05dfdf69b8e643f667e
             integration_branch: codex/cocofest-acados-v055-exploration
             casadi_cxx_abi: 1
     env:

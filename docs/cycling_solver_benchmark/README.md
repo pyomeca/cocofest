@@ -57,10 +57,10 @@ provenance humaine.
 
 | Composant | Version Bioptim réellement utilisée |
 |---|---|
-| Construction et certification des seeds | `04f0e1487f5b2836f4f724664dc0313ee09e9773` |
-| IPOPT full/reduced | `04f0e1487f5b2836f4f724664dc0313ee09e9773` |
-| MadNLP/MUMPS full/reduced | `04f0e1487f5b2836f4f724664dc0313ee09e9773` |
-| ACADOS full/reduced et variantes | `04f0e1487f5b2836f4f724664dc0313ee09e9773` |
+| Construction et certification des seeds | `9ae08f35a95f8ca167b4f05dfdf69b8e643f667e` |
+| IPOPT full/reduced | `9ae08f35a95f8ca167b4f05dfdf69b8e643f667e` |
+| MadNLP/MUMPS full/reduced | `9ae08f35a95f8ca167b4f05dfdf69b8e643f667e` |
+| ACADOS full/reduced et variantes | `9ae08f35a95f8ca167b4f05dfdf69b8e643f667e` |
 
 Ce commit appartient à la branche dédiée
 `codex/cocofest-acados-v055-exploration`. Il part exactement de
@@ -78,7 +78,10 @@ et ajoute sans modifier les interfaces MadNLP/Fatrop :
 - les bornes de contrôle ordonnées et exprimées dans les coordonnées scalées;
 - un JSON ACADOS isolé dans chaque dossier de code généré;
 - une représentation canonique des paramètres runtime permettant de
-  réutiliser la même bibliothèque avec de nouvelles données nodales.
+  réutiliser la même bibliothèque avec de nouvelles données nodales;
+- l’export des contraintes non linéaires avec les variables décisionnelles
+  scalées attendues par les fonctions de pénalité Bioptim. L’ancienne voie
+  appliquait le scaling une seconde fois et créait des résidus artificiels.
 
 La branche Bioptim a passé 17 tests ciblés et un test réel ACADOS `v0.5.5` :
 la seconde OCP a réutilisé la bibliothèque compilée tout en recevant de
@@ -940,6 +943,22 @@ artefact. `check_reuse_possible` vérifie la compatibilité de la bibliothèque;
 les paramètres runtime, les bornes mobiles et la cible terminale sont
 réinjectés après toute remise à zéro.
 
+Lorsque l’un des compteurs ACADOS dépasse 5 RHO, le workflow passe
+automatiquement en campagne étendue. Il ne reconstruit alors que la référence
+reduced et les candidats ayant passé l’écran physique court
+(`FIXED_STEP`, Anderson, RTI et IRK léger), plus les éventuelles variantes full
+de contact certifiées. Un manifeste `expected-cases.txt` accompagne
+l’artefact. Dans ce mode, la CI exige pour chaque cas :
+
+$$
+\texttt{success}=\texttt{physical\_success}=\mathrm{true},
+\qquad
+N_{\mathrm{validated}}=N_{\mathrm{requested}}.
+$$
+
+Un statut solveur seul ne peut donc pas faire passer une campagne 30 ou
+100 RHO.
+
 SQP-RTI n’effectue qu’une itération SQP par RHO. Il est potentiellement très
 rapide, mais exige une trajectoire nominale déjà proche de la variété faisable.
 Ce n’est pas encore le cas après plusieurs cycles.
@@ -991,6 +1010,19 @@ La vitesse tangentielle initiale provient du seed relevé et reste auditée
 strictement; elle n’est pas dupliquée comme égalité dans le QP. Cette variante
 sépare position et vitesse avant d’envisager une pénalisation de Baumgarte, une
 contrainte adoucie ou un second OCP de faisabilité.
+
+L’analyse de ces deux écrans a finalement localisé une erreur en amont dans
+l’interface Bioptim–ACADOS : les fonctions de pénalité sont construites avec
+les variables décisionnelles scalées, mais l’export des contraintes leur
+fournissait les expressions non scalées. La fonction de pénalité appliquait
+alors une seconde fois les facteurs de scaling. Cela explique simultanément le
+résidu de contact artificiel proche de `0.5` malgré un seed projeté et le
+résidu de cadence proche de `38`. Le commit Bioptim
+`9ae08f35a95f8ca167b4f05dfdf69b8e643f667e` corrige les entrées `x`, `u` et
+les états algébriques, et ajoute un test avec scaling non unitaire. La borne
+non linéaire de cadence physique est donc réactivée pour ACADOS dans le nouvel
+écran 5 RHO; les variantes full ne seront admises à 30 RHO que si l’audit
+physique confirme le statut natif.
 
 La première stratégie testée est la voie native
 `SQP_WITH_FEASIBLE_QP` :
