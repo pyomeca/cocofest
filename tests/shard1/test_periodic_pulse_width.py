@@ -2507,6 +2507,19 @@ def test_stimulation_snapshot_rejects_cycle_outside_converged_prefix():
     assert snapshot["reason"] == "only_2_cycles_belong_to_the_converged_prefix"
 
 
+def test_stimulation_snapshot_rejects_nlp_cycle_without_mechanical_certificate():
+    result = _benchmark_result([0], solver_success=True, success=False)
+    result["mechanical_equivalence_audit"] = {
+        "available": True,
+        "passes_tolerance": False,
+    }
+
+    snapshot = comparison_example._stimulation_pattern_snapshot(result, 1)
+
+    assert snapshot["available"] is False
+    assert snapshot["reason"] == "only_0_cycles_belong_to_the_converged_prefix"
+
+
 def test_pulse_width_cycle_variation_reports_aligned_transition_percentiles():
     result = _benchmark_result([0, 0, 0], solver_success=True, success=True)
 

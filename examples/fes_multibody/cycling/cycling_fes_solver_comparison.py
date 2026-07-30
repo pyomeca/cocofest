@@ -1930,7 +1930,7 @@ def _benchmark_window_rows(result: dict) -> list[dict]:
 def _stimulation_pattern_snapshot(result: dict, cycle: int) -> dict:
     """Extract the executed pulse-width pattern of one validated one-cycle RHO."""
 
-    validated_cycles = _validated_cycle_count(result)
+    validated_cycles = _physically_validated_cycle_count(result)
     cycles_per_window = int(getattr(result["args"], "cycles_per_window", 1))
     snapshot = {
         "cycle": int(cycle),

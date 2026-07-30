@@ -1118,6 +1118,31 @@ prépare le RHO 2. La trace `transfer_phase_one` imprimée avant le résumé
 n’est simplement pas assez proche de la variété dynamique et des bornes pour
 restaurer la convergence.
 
+Le screen strict `30565853248` et le palier 30 `30570144903` confirment que
+`FIXED_STEP`, Anderson, l’IRK léger et SQP-RTI reduced ont exactement le même
+préfixe : un RHO physique, puis deux échecs consécutifs. Le problème n’est donc
+pas corrigé par une option de globalisation. Une explication prioritaire est
+maintenant visible dans les NLP reduced : entre les cycles 1 et 2, le
+changement maximal de PW atteint environ `469 µs` au Biceps et `80 µs` au
+Triceps, tandis que l’homotopie ACADOS limite actuellement le déplacement à
+`10 µs`. Les P95 restent pourtant sous `0.3 µs` sur 30 cycles, car ces grands
+écarts correspondent à de rares changements de branche active.
+
+Élargir uniformément le trust region n’est donc pas la bonne conclusion. La
+prochaine ablation doit :
+
+1. réaligner le guess de PW par angle physique avant le décalage;
+2. détecter les quelques nœuds qui quittent `pd0` ou la borne haute;
+3. relâcher seulement ces nœuds jusqu’à la pleine plage physique;
+4. conserver `10 µs` sur les autres nœuds;
+5. rejeter la restauration si la norme des défauts Ding et mécaniques reste
+   au-dessus de `1e-5`.
+
+Une autre référence utile sera deux OCP reduced précompilés : un OCP de
+faisabilité sans objectif de fatigue, puis l’OCP nominal. La vitesse native
+ACADOS du premier RHO (`≈0.1 s`) laisse une marge suffisante pour cette seconde
+résolution si elle évite `ACADOS_MINSTEP`.
+
 La phase I actuelle exige un état par extrémité de tir. Elle est donc
 compatible avec la transcription ACADOS, mais refuse explicitement la
 collocation directe d’IPOPT, MadNLP et FATROP, qui contient des états internes
@@ -1413,15 +1438,13 @@ dérivées, pas d’une meilleure convergence itérative.
 
 Le palier 5 RHO
 [`30565853248`](https://github.com/mickaelbegon/cocofest/actions/runs/30565853248)
-est vert. Le palier 30
-[`30567069442`](https://github.com/mickaelbegon/cocofest/actions/runs/30567069442)
-a produit tous les résultats numériques; son échec final provenait uniquement
-des anciens gates ACADOS décrits en section 14.2. Ces résultats utilisent
-Cocofest `d78e61a`, Bioptim `a3499cab16d7605b8efa7255cf89f1af6a7c59c9`,
-ACADOS `59d93e17d2985fdd73fc58b8a83ed8f83a024171`, des graphes SX, un
-couple externe nul et des coutures exactes pour la cadence et les 20 états
-Ding. Les commits suivants jusqu’à `591aada` ne modifient que le classement
-du préfixe physique et l’orchestration CI.
+est vert. Le palier 30 définitif
+[`30570144903`](https://github.com/mickaelbegon/cocofest/actions/runs/30570144903)
+est également entièrement vert, agrégation incluse. Ces résultats utilisent
+Cocofest `9d1073a501be5688a92748b849e2c3d8c9757394`, Bioptim
+`a3499cab16d7605b8efa7255cf89f1af6a7c59c9`, ACADOS
+`59d93e17d2985fdd73fc58b8a83ed8f83a024171`, des graphes SX, un couple
+externe nul et des coutures exactes pour la cadence et les 20 états Ding.
 
 La distinction entre `RHO résolus` et `préfixe strict` est déterminante :
 un RHO qui converge après le premier échec reste un diagnostic isolé, mais ne
@@ -1433,13 +1456,14 @@ explicitement `physically_validated_cycles`.
 
 | Solveur | Mécanique | RHO résolus/tentés | Préfixe strict | Mur-à-mur | Médiane chaude |
 |---|---|---:|---:|---:|---:|
-| FATROP collocation compilé | full | 0/0 | 0/30 | 31.9 s | — |
-| IPOPT/MUMPS interprété | full | 28/30 | 1/30 | 293.7 s | — |
-| MadNLP/MUMPS interprété | full | 26/30 | 1/30 | 459.8 s | — |
-| ACADOS SQP/IRK | reduced | 1/3 | 1/30 | 16.3 s | — |
-| FATROP collocation compilé | reduced | 30/30 | 30/30 | 200.7 s | 1.447 s |
-| IPOPT/MUMPS compilé | reduced | 30/30 | 30/30 | 150.9 s | **0.718 s** |
-| MadNLP/MUMPS interprété | reduced | 30/30 | 30/30 | **67.9 s** | 0.872 s |
+| ACADOS SQP/IRK | full | 1/3 | 0/30 | 22.5 s | — |
+| FATROP collocation compilé | full | 0/0 | 0/30 | 31.4 s | — |
+| IPOPT/MUMPS interprété | full | 28/30 | 1/30 | 300.4 s | — |
+| MadNLP/MUMPS interprété | full | 26/30 | 1/30 | 420.7 s | — |
+| ACADOS SQP/IRK | reduced | 1/3 | 1/30 | 15.0 s | — |
+| FATROP collocation compilé | reduced | 30/30 | 30/30 | 197.8 s | 1.420 s |
+| IPOPT/MUMPS compilé | reduced | 30/30 | 30/30 | 154.5 s | **0.726 s** |
+| MadNLP/MUMPS interprété | reduced | 30/30 | 30/30 | **68.0 s** | 0.847 s |
 
 FATROP full est une limitation structurelle connue de l’interface collocation,
 pas une non-convergence du problème : sa structure `A` contient des
@@ -1448,7 +1472,9 @@ solve. IPOPT full atteint au RHO 2 une solution primalement faisable
 (`6.86e-6 < 1e-5`) mais termine avec `SOLVER_RET_UNKNOWN`; MadNLP échoue
 également au deuxième RHO. Le préfixe conservateur vaut donc un cycle pour les
 deux solveurs. Les succès ultérieurs ne doivent pas servir au calcul de fatigue
-cumulée.
+cumulée. ACADOS full obtient un statut NLP valide au premier RHO, mais son
+résidu de vitesse tangentielle atteint `0.804 rad/s`; son préfixe physique
+reste donc nul.
 
 Sur les 30 cycles réduits réellement exécutés, les trois NLP donnent :
 
