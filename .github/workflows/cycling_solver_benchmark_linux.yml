@@ -1262,7 +1262,7 @@ jobs:
             timeout_minutes: 300
             benchmark_rhos: ${{ inputs.cycles }}
             cycles_per_window: ${{ inputs.cycles_per_window }}
-            bioptim_commit: a3499cab16d7605b8efa7255cf89f1af6a7c59c9
+            bioptim_commit: efd59c39777c83f97058f8d6c1ef472f78f9925d
             integration_branch: codex/cocofest-acados-v055-exploration
             casadi_cxx_abi: 0
           - solver: madnlp
@@ -1272,7 +1272,7 @@ jobs:
             timeout_minutes: 420
             benchmark_rhos: ${{ inputs.cycles }}
             cycles_per_window: ${{ inputs.cycles_per_window }}
-            bioptim_commit: a3499cab16d7605b8efa7255cf89f1af6a7c59c9
+            bioptim_commit: efd59c39777c83f97058f8d6c1ef472f78f9925d
             integration_branch: codex/cocofest-acados-v055-exploration
             casadi_cxx_abi: 1
           - solver: fatrop
@@ -1282,7 +1282,7 @@ jobs:
             timeout_minutes: 420
             benchmark_rhos: ${{ inputs.cycles }}
             cycles_per_window: ${{ inputs.cycles_per_window }}
-            bioptim_commit: a3499cab16d7605b8efa7255cf89f1af6a7c59c9
+            bioptim_commit: efd59c39777c83f97058f8d6c1ef472f78f9925d
             integration_branch: codex/cocofest-acados-v055-exploration
             casadi_cxx_abi: 0
     env:

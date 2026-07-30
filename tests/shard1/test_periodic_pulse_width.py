@@ -4291,6 +4291,13 @@ def test_github_acados_runner_uses_reference_and_option_profiles_sequentially():
         "BIOPTIM_PRODUCTION_COMMIT: "
         "efd59c39777c83f97058f8d6c1ef472f78f9925d"
     ) in workflow
+    assert (
+        workflow.count(
+            "bioptim_commit: efd59c39777c83f97058f8d6c1ef472f78f9925d"
+        )
+        == 3
+    )
+    assert "a3499cab16d7605b8efa7255cf89f1af6a7c59c9" not in workflow
     assert "ACADOS_COMMIT: 59d93e17d2985fdd73fc58b8a83ed8f83a024171" in workflow
     assert "ACADOS_INSTALL_SCRIPT_BLOB: 5ac8064ab613251e62560b5de8cbbb9550f5c5d0" in workflow
     assert "for mechanics in full reduced" in workflow
