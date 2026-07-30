@@ -69,16 +69,15 @@ elif [[ "$solver" == "fatrop" ]]; then
     )
   fi
 elif [[ "$solver" == "madnlp" ]]; then
-  if [[ "$compile_mode" == "true" ]]; then
-    echo "MadNLP C compilation is not validated by the pinned Bioptim/CasADi interface; use COMPILE=false." >&2
-    exit 2
-  fi
   solver_tolerance=1e-8
   solver_options+=(
     --madnlp-max-iter "$BENCHMARK_MAX_ITER"
     --madnlp-linear-solver "$backend"
     --madnlp-dual-warm-start-mode off
   )
+  if [[ "$compile_mode" == "true" ]]; then
+    solver_options+=(--madnlp-c-compile)
+  fi
 fi
 if [[ "$mechanics" == "reduced" ]]; then
   solver_options+=(--mechanical-formulation reduced)

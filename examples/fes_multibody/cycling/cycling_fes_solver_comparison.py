@@ -3292,6 +3292,10 @@ def main(
     acados_args.acados_transfer_bound_homotopy = (
         acados_transfer_bound_homotopy
     )
+    # The bound homotopy may become primal-feasible before its last SQP
+    # iterate. Retain those iterates so the continuation can restart from the
+    # certified best primal instead of a later, degraded MAXITER iterate.
+    acados_args.acados_store_iterates = bool(acados_transfer_bound_homotopy)
     acados_args.acados_transfer_bound_homotopy_fractions = (
         acados_transfer_bound_homotopy_fractions
     )

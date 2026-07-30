@@ -4259,6 +4259,21 @@ def test_github_acados_runner_uses_reference_and_option_profiles_sequentially():
         'benchmark-results "$BENCHMARK_CYCLES" false'
         in workflow
     )
+    assert (
+        "run_cycling_benchmark_case.sh madnlp-mumps madnlp full mumps collocation "
+        'benchmark-results "$BENCHMARK_CYCLES" false'
+        in workflow
+    )
+    assert (
+        "run_cycling_benchmark_case.sh madnlp-mumps madnlp reduced mumps collocation "
+        'benchmark-results "$BENCHMARK_CYCLES" "${{ inputs.compile_nlp_evaluators }}"'
+        in workflow
+    )
+    assert (
+        'if [[ "$BENCHMARK_SOLVER" == "madnlp" && '
+        '"$result" == *"madnlp-mumps-full/"* ]]'
+        in workflow
+    )
     assert "specified structure of A does not correspond" in workflow
     assert 'case_requires_compile="$COMPILE_NLP_EVALUATORS"' in workflow
     assert 'case_requires_compile=false' in workflow
@@ -4274,7 +4289,7 @@ def test_github_acados_runner_uses_reference_and_option_profiles_sequentially():
     assert "prepare-acados-stack:" in workflow
     assert (
         "BIOPTIM_PRODUCTION_COMMIT: "
-        "733e442c7b429e20a67a7cf4c2b69694c54513b3"
+        "efd59c39777c83f97058f8d6c1ef472f78f9925d"
     ) in workflow
     assert "ACADOS_COMMIT: 59d93e17d2985fdd73fc58b8a83ed8f83a024171" in workflow
     assert "ACADOS_INSTALL_SCRIPT_BLOB: 5ac8064ab613251e62560b5de8cbbb9550f5c5d0" in workflow
@@ -4363,8 +4378,7 @@ def test_github_acados_runner_uses_reference_and_option_profiles_sequentially():
         / "run_cycling_benchmark_case.sh"
     ).read_text(encoding="utf-8")
     assert 'solver_options+=(--ipopt-c-compile)' in benchmark_runner
-    assert "MadNLP C compilation is not validated" in benchmark_runner
-    assert 'solver_options+=(--madnlp-c-compile)' not in benchmark_runner
+    assert 'solver_options+=(--madnlp-c-compile)' in benchmark_runner
     assert '--fatrop-state-scaling "$fatrop_state_scaling"' in benchmark_runner
     assert 'case "$graph_mode" in' in benchmark_runner
     assert "The endurance benchmark is SX-only" in benchmark_runner
@@ -4388,7 +4402,7 @@ def test_github_acados_runner_uses_reference_and_option_profiles_sequentially():
     assert "Compare IPOPT interpreted and compiled evaluators over 5 RHO" not in workflow
     assert "cycling-compile-ablation-" not in workflow
     assert "Compare MadNLP MUMPS interpreted and compiled evaluators" not in workflow
-    assert "Compile IPOPT CasADi evaluators once" in workflow
+    assert "Compile and reuse reduced IPOPT/MadNLP" in workflow
     assert "Checkpoint IPOPT full" in workflow
     assert "Checkpoint MadNLP MUMPS reduced" in workflow
     assert "max-parallel: 2" in workflow
@@ -6243,30 +6257,6 @@ def test_compiled_nlp_tracker_requires_source_at_every_solve(tmp_path, monkeypat
     assert summary["compiled_source_reused"] is False
 
 
-def test_compiled_nlp_plugin_name_patch_only_changes_compiled_interfaces():
-    calls = []
-
-    class FakeInterface:
-        _cocofest_compiled_solver_name_patch = False
-
-        def solve(self, marker):
-            calls.append((self.solver_name, marker))
-            return marker
-
-    periodic_example.patch_bioptim_compiled_nlp_solver_names((FakeInterface,))
-
-    interpreted = FakeInterface()
-    interpreted.opts = SimpleNamespace(c_compile=False)
-    interpreted.solver_name = "Ipopt"
-    compiled = FakeInterface()
-    compiled.opts = SimpleNamespace(c_compile=True)
-    compiled.solver_name = "Madnlp"
-
-    assert interpreted.solve("interpreted") == "interpreted"
-    assert compiled.solve("compiled") == "compiled"
-    assert calls == [("Ipopt", "interpreted"), ("madnlp", "compiled")]
-
-
 def test_c_codegen_resolves_relative_runtime_inputs_before_changing_directory(
     monkeypatch, tmp_path
 ):
@@ -7492,6 +7482,94 @@ def test_transfer_bound_homotopy_only_requires_stationarity_at_physical_stage(
     assert (
         summary["stages"][1]["accepted_as_intermediate_primal_feasible"] is False
     )
+
+
+def test_transfer_bound_homotopy_restores_best_stored_intermediate_iterate(
+    monkeypatch,
+):
+    class FakeSolver:
+        nlp_solver_max_iter = 100
+
+        def set_convergence_tolerance(self, value):
+            self.tolerance = value
+
+        def set_maximum_iterations(self, value):
+            self.nlp_solver_max_iter = value
+
+    bounds = SimpleNamespace(
+        min=np.array([[-0.1, -1.0, -2.1]]),
+        max=np.array([[0.1, 1.0, -1.9]]),
+    )
+    state_guess = SimpleNamespace(init=np.array([[0.0, -4.0, -5.0]]))
+    nmpc = SimpleNamespace(
+        nlp=[
+            SimpleNamespace(
+                x_init={"qdot": state_guess},
+                u_init={"u": SimpleNamespace(init=np.zeros((1, 2)))},
+                x_bounds={"qdot": bounds},
+            )
+        ],
+        ocp_solver=None,
+        _cocofest_fix_controls_to_warmup=False,
+        _correct_init_guess_to_fit_bounds=lambda corrected_input: None,
+        _sync_acados_state_bounds=lambda: None,
+    )
+    solution = SimpleNamespace(
+        status=2, solver_time_to_optimize=0.1, real_time_to_optimize=0.2
+    )
+    monkeypatch.setattr(
+        periodic_example,
+        "snapshot_acados_diagnostics",
+        lambda _: {
+            "residuals": np.array([4e-3, 4e-4, 0.0, 2e-6]),
+            "res_stat_all": np.array([1.0, 2e-3, 4e-3]),
+            "res_eq_all": np.array([1.0, 5e-6, 4e-4]),
+            "res_ineq_all": np.array([0.0, 0.0, 0.0]),
+            "res_comp_all": np.array([0.0, 2e-6, 2e-6]),
+        },
+    )
+
+    def restore_stored_iterate(periodic_nmpc, iterate_index):
+        assert iterate_index == 1
+        state_guess.init[0, 0] = 7.0
+        return {
+            "applied": True,
+            "source": "stored_iterate",
+            "iterate_index": iterate_index,
+        }
+
+    monkeypatch.setattr(
+        periodic_example,
+        "apply_acados_capsule_primal_to_initial_guess",
+        restore_stored_iterate,
+    )
+    monkeypatch.setattr(
+        periodic_example,
+        "apply_solution_directly_to_periodic_nmpc_initial_guess",
+        lambda *args: pytest.fail("The degraded final iterate must not be restored."),
+    )
+    monkeypatch.setattr(
+        periodic_example, "reset_acados_solver_memory", lambda periodic_nmpc: True
+    )
+
+    summary = periodic_example.run_acados_transfer_bound_homotopy(
+        nmpc,
+        FakeSolver(),
+        fractions=(0.5,),
+        padding=0.1,
+        convergence_tolerance=1e-4,
+        stage_iterations=40,
+        max_restarts=0,
+        echo=False,
+        solve_stage=lambda: solution,
+    )
+
+    stage = summary["stages"][0]
+    assert stage["accepted"] is True
+    assert stage["accepted_from_best_stored_iterate"] is True
+    assert stage["accepted_as_intermediate_primal_feasible"] is False
+    assert stage["best_stored_primal"]["iterate_index"] == 1
+    np.testing.assert_allclose(state_guess.init[0, 0], 7.0)
 
 
 def test_transfer_bound_homotopy_backtracks_from_last_accepted_primal(monkeypatch):

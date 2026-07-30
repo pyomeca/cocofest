@@ -6261,43 +6261,6 @@ def nlp_c_compile_enabled(args: argparse.Namespace) -> bool:
     )
 
 
-def patch_bioptim_compiled_nlp_solver_names(interface_classes=None) -> None:
-    """Use CasADi's case-sensitive plugin names when loading generated C.
-
-    The pinned Bioptim integration generates dependencies with the lower-case
-    plugin name, then reloads them with ``SolverType.value`` (``Ipopt`` or
-    ``Madnlp``). CasADi plugin registration is case-sensitive. Keep the patch
-    local to interfaces whose solver options request C compilation.
-    """
-
-    if interface_classes is None:
-        from bioptim.interfaces.fatrop_interface import FatropInterface
-        from bioptim.interfaces.ipopt_interface import IpoptInterface
-        from bioptim.interfaces.madnlp_interface import MadnlpInterface
-
-        interface_classes = (IpoptInterface, MadnlpInterface, FatropInterface)
-
-    for interface_class in interface_classes:
-        if getattr(
-            interface_class, "_cocofest_compiled_solver_name_patch", False
-        ):
-            continue
-        original_solve = interface_class.solve
-
-        def patched_solve(
-            interface,
-            *solve_args,
-            _original_solve=original_solve,
-            **solve_kwargs,
-        ):
-            if bool(getattr(interface.opts, "c_compile", False)):
-                interface.solver_name = interface.solver_name.lower()
-            return _original_solve(interface, *solve_args, **solve_kwargs)
-
-        interface_class.solve = patched_solve
-        interface_class._cocofest_compiled_solver_name_patch = True
-
-
 def summarize_windows(
     sol,
     requested_windows: int,
@@ -8716,6 +8679,8 @@ def run_acados_transfer_bound_homotopy(
                 )
                 residual_history = _acados_residual_history_summary(diagnostics)
                 final_history_residuals = residual_history.get("final")
+                best_history_residuals = residual_history.get("best")
+                best_history_index = residual_history.get("best_index")
                 # ACADOS can leave the previous solve's residual history in
                 # the statistics buffer when the current QP fails before a
                 # complete SQP iteration (status 4). The scalar residuals are
@@ -8744,6 +8709,27 @@ def run_acados_transfer_bound_homotopy(
                     and np.max(np.abs(intermediate_residuals[1:4]))
                     <= convergence_tolerance
                 )
+                best_intermediate_primal_candidate = bool(
+                    intermediate_stage
+                    and residual_history_eligible
+                    and best_history_residuals is not None
+                    and best_history_residuals.size >= 4
+                    and np.all(np.isfinite(best_history_residuals[:4]))
+                    and np.max(np.abs(best_history_residuals[1:4]))
+                    <= convergence_tolerance
+                    and not intermediate_primal_accepted
+                )
+                best_stored_primal = None
+                accepted_from_best_stored_iterate = False
+                if best_intermediate_primal_candidate:
+                    best_stored_primal = apply_acados_capsule_primal_to_initial_guess(
+                        periodic_nmpc,
+                        iterate_index=best_history_index,
+                    )
+                    accepted_from_best_stored_iterate = bool(
+                        best_stored_primal["applied"]
+                        and best_stored_primal.get("source") == "stored_iterate"
+                    )
                 residuals_accepted = (
                     acados_diagnostics_meet_tolerances(
                         diagnostics,
@@ -8755,6 +8741,7 @@ def run_acados_transfer_bound_homotopy(
                 accepted = (
                     residuals_accepted
                     or intermediate_primal_accepted
+                    or accepted_from_best_stored_iterate
                     or (
                         intermediate_stage
                         and _status_is_success(solution.status)
@@ -8783,6 +8770,10 @@ def run_acados_transfer_bound_homotopy(
                     "accepted_as_intermediate_primal_feasible": (
                         intermediate_primal_accepted
                     ),
+                    "accepted_from_best_stored_iterate": (
+                        accepted_from_best_stored_iterate
+                    ),
+                    "best_stored_primal": best_stored_primal,
                     "retryable": retryable,
                     "residuals": None if residuals is None else residuals.copy(),
                     "residual_history": residual_history,
@@ -8798,6 +8789,7 @@ def run_acados_transfer_bound_homotopy(
                         f"control_radius={control_radius} "
                         f"accepted={accepted} "
                         f"intermediate_primal={intermediate_primal_accepted} "
+                        f"best_stored={accepted_from_best_stored_iterate} "
                         f"retryable={retryable} "
                         f"residuals={_format_array(residuals)}"
                     )
@@ -8809,9 +8801,10 @@ def run_acados_transfer_bound_homotopy(
                             f"final={_format_array(residual_history['final'])}"
                         )
                 if accepted:
-                    apply_solution_directly_to_periodic_nmpc_initial_guess(
-                        periodic_nmpc, solution
-                    )
+                    if not accepted_from_best_stored_iterate:
+                        apply_solution_directly_to_periodic_nmpc_initial_guess(
+                            periodic_nmpc, solution
+                        )
                     if solution.status != 0:
                         summary["solver_reset"] = reset_acados_solver_memory(
                             periodic_nmpc
@@ -11595,8 +11588,6 @@ def _should_apply_transfer_phase_one(
 
 
 def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
-    if nlp_c_compile_enabled(args):
-        patch_bioptim_compiled_nlp_solver_names()
     preparation_start = perf_counter()
     apply_assisted_hot_start_defaults(args)
     args.terminal_wheel_q_reference_mode = "absolute_initial"

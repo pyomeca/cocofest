@@ -35,7 +35,7 @@ on:
         default: "2000"
         type: string
       compile_nlp_evaluators:
-        description: Compile IPOPT CasADi evaluators once and reuse them across all RHO (MadNLP unsupported)
+        description: Compile and reuse reduced IPOPT/MadNLP and FATROP CasADi evaluators across all RHO
         required: true
         default: true
         type: boolean
@@ -73,7 +73,7 @@ env:
   BIOPTIM_REPOSITORY: mickaelbegon/BiorbdOptim
   # Dedicated multi-solver integration branch:
   # codex/cocofest-acados-v055-exploration
-  BIOPTIM_PRODUCTION_COMMIT: 733e442c7b429e20a67a7cf4c2b69694c54513b3
+  BIOPTIM_PRODUCTION_COMMIT: efd59c39777c83f97058f8d6c1ef472f78f9925d
   BIOPTIM_ALPAQA_COMMIT: d84e7e43534360fc048e0be26a3bd69a2abc2d77
   ACADOS_COMMIT: 59d93e17d2985fdd73fc58b8a83ed8f83a024171
   ACADOS_INSTALL_SCRIPT_BLOB: 5ac8064ab613251e62560b5de8cbbb9550f5c5d0
@@ -1588,7 +1588,7 @@ jobs:
 
       - name: Run MadNLP MUMPS reduced
         if: matrix.solver == 'madnlp'
-        run: bash .github/scripts/run_cycling_benchmark_case.sh madnlp-mumps madnlp reduced mumps collocation benchmark-results "$BENCHMARK_CYCLES" false
+        run: bash .github/scripts/run_cycling_benchmark_case.sh madnlp-mumps madnlp reduced mumps collocation benchmark-results "$BENCHMARK_CYCLES" "${{ inputs.compile_nlp_evaluators }}"
       - name: Checkpoint MadNLP MUMPS reduced
         if: ${{ always() && matrix.solver == 'madnlp' }}
         continue-on-error: true
@@ -1662,9 +1662,6 @@ jobs:
           BENCHMARK_MODE: ${{ matrix.benchmark_mode }}
           COMPILE_NLP_EVALUATORS: ${{ inputs.compile_nlp_evaluators }}
         run: |
-          if [[ "$BENCHMARK_SOLVER" == "madnlp" ]]; then
-            COMPILE_NLP_EVALUATORS=false
-          fi
           case "$BENCHMARK_SOLVER" in
             ipopt) expected=2 ;;
             madnlp) expected=2 ;;
@@ -1700,6 +1697,9 @@ jobs:
             ' "$result"
             case_requires_compile="$COMPILE_NLP_EVALUATORS"
             if [[ "$BENCHMARK_SOLVER" == "ipopt" && "$result" == *"ipopt-full/"* ]]; then
+              case_requires_compile=false
+            fi
+            if [[ "$BENCHMARK_SOLVER" == "madnlp" && "$result" == *"madnlp-mumps-full/"* ]]; then
               case_requires_compile=false
             fi
             if [[ "$case_requires_compile" == "true" ]]; then

@@ -36,14 +36,15 @@ Ils constituent l’historique antérieur à la campagne séquentielle stricte 5
 - PARDISO et RK4 ne font pas partie de la campagne active. FATROP/collocation
   reduced est certifié sur les paliers 5, 30 puis 100 RHO. FATROP full reste
   diagnostique tant que l’interface n’accepte pas sa structure de collocation.
-- MadNLP reste interprété : la compilation C est refusée par l’interface
-  Bioptim/CasADi épinglée et n’est pas comptée comme une variante valide.
+- MadNLP full reste interprété. MadNLP reduced dispose maintenant d’un chemin
+  C expérimental; la CI doit certifier un seul build, sa réutilisation et
+  l’équivalence numérique avant qu’un gain de performance soit revendiqué.
 - La convergence du solveur ne suffit pas : chaque RHO est soumis à un audit
   indépendant de faisabilité physique avec un seuil de `1e-5`.
 - La mécanique réduite est plus rapide, mais le grand écart de fatigue observé
   historiquement n’est pas une réduction physiologique démontrée. L’équivalence
-  full/reduced sur l’endurance reste à établir, car aucun préfixe full strict
-  ne dépasse actuellement un cycle.
+  full/reduced est réouverte après la correction des bornes de cadence aux
+  stages Radau; le palier 5 est cohérent et les paliers 30/100 restent requis.
 
 ## 0. Versions Bioptim et reproductibilité
 
@@ -59,11 +60,11 @@ provenance humaine.
 
 | Composant | Version Bioptim réellement utilisée |
 |---|---|
-| Construction et certification des seeds | `733e442c7b429e20a67a7cf4c2b69694c54513b3` |
-| IPOPT full/reduced | `733e442c7b429e20a67a7cf4c2b69694c54513b3` |
-| MadNLP/MUMPS full/reduced | `733e442c7b429e20a67a7cf4c2b69694c54513b3` |
-| FATROP/collocation full/reduced | `733e442c7b429e20a67a7cf4c2b69694c54513b3` |
-| ACADOS full/reduced et variantes | `733e442c7b429e20a67a7cf4c2b69694c54513b3` |
+| Construction et certification des seeds | `efd59c39777c83f97058f8d6c1ef472f78f9925d` |
+| IPOPT full/reduced | `efd59c39777c83f97058f8d6c1ef472f78f9925d` |
+| MadNLP/MUMPS full/reduced | `efd59c39777c83f97058f8d6c1ef472f78f9925d` |
+| FATROP/collocation full/reduced | `efd59c39777c83f97058f8d6c1ef472f78f9925d` |
+| ACADOS full/reduced et variantes | `efd59c39777c83f97058f8d6c1ef472f78f9925d` |
 
 Ce commit appartient à la branche dédiée
 `codex/cocofest-acados-v055-exploration`. Il part exactement de
@@ -82,6 +83,8 @@ et rassemble les adaptations communes aux différents solveurs :
 - le scaling du guess terminal ACADOS, vérifié explicitement aux stages 0 et
   N par le test ajouté dans `036b9155`;
 - un JSON ACADOS isolé dans chaque dossier de code généré;
+- la compilation des oracles MadNLP par l’importeur CasADi, avec le nom de
+  plugin minuscule utilisé de façon cohérente à la génération et au chargement;
 - une représentation canonique des paramètres runtime permettant de
   réutiliser la même bibliothèque avec de nouvelles données nodales;
 - l’export des contraintes non linéaires avec les variables décisionnelles
@@ -1424,12 +1427,15 @@ il faut lancer deux workflows identiques avec
 `compile_nlp_evaluators=true/false`; cela évite aussi de biaiser les temps par
 la mémoire résiduelle d’un autre OCP.
 
-`--madnlp-c-compile` reste accepté par les CLI pour ne pas bloquer une future
-intégration, mais le Bioptim épinglé lève explicitement
-`NotImplementedError` avant le premier solve. Le runner refuse donc cette
-combinaison tôt et les campagnes MadNLP sont interprétées. Il ne faut ni
-présenter un cas à zéro RHO comme un échec de MadNLP, ni contourner cette garde
-sans validation des dérivées compilées.
+Le SHA Bioptim actif autorise maintenant `--madnlp-c-compile`. Le support a
+été vérifié localement sur un NLP CasADi minimal et sur l’OCP pendule Bioptim :
+la génération, le chargement par `Importer("nlp.c", "shell")` et la résolution
+MadNLP convergent. Le benchmark active d’abord ce chemin uniquement pour
+reduced; full reste interprété pour éviter de reproduire les arrêts mémoire
+observés lors de la compilation IPOPT full. La CI exige les mêmes preuves de
+réutilisation et de bornes mobiles que pour IPOPT/FATROP. Tant que le palier
+Linux 5 RHO n’est pas vert, cette compilation doit rester qualifiée
+d’expérimentale et aucun gain ne doit être annoncé.
 
 Le mode compilé CasADi peut aussi omettre `Solution.constraints`. L’audit
 Cocofest reconstruit désormais $g(x)$ depuis le NLP symbolique et le vecteur
@@ -2199,8 +2205,9 @@ gh workflow run cycling_solver_benchmark_linux.yml \
 ```
 
 `compile_nlp_evaluators=true` active les évaluateurs C persistants pour IPOPT
-reduced et FATROP reduced. IPOPT full et MadNLP restent interprétés; FATROP
-full échoue actuellement avant compilation lors de la détection de structure.
+reduced, MadNLP/MUMPS reduced et FATROP reduced. IPOPT full et MadNLP full
+restent interprétés; FATROP full échoue actuellement avant compilation lors
+de la détection de structure.
 
 ### 14.2 Campagne graduelle obligatoire
 
