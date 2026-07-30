@@ -4269,7 +4269,10 @@ def test_github_acados_runner_uses_reference_and_option_profiles_sequentially():
     assert "--acados-check-reuse-possible" in workflow
     assert "--acados-byrd-omojokon-slack-relaxation-factor 1.00001" in workflow
     assert "run_case sqp-irk-two-stage" in workflow
-    assert "--acados-transfer-bound-homotopy-fractions 0,1" in workflow
+    assert (
+        "--acados-transfer-bound-homotopy-fractions "
+        "0,0.125,0.25,0.375,0.5,0.625,0.75,0.875,1"
+    ) in workflow
     assert "--acados-transfer-bound-homotopy-iterations 20" in workflow
     assert "--acados-transfer-bound-homotopy-solver-tolerance 1e-4" in workflow
     assert "run_case sqp-feasible-qp-irk" in workflow
@@ -7169,6 +7172,85 @@ def test_transfer_bound_homotopy_accepts_last_finite_nlp_iterate(monkeypatch):
     assert summary["stages"][0]["accepted"] is True
     assert summary["stages"][0]["accepted_from_residual_history"] is True
     assert summary["stages"][0]["solver_reset"] is True
+
+
+def test_transfer_bound_homotopy_only_requires_stationarity_at_physical_stage(
+    monkeypatch,
+):
+    class FakeSolver:
+        nlp_solver_max_iter = 100
+
+        def set_convergence_tolerance(self, value):
+            self.tolerance = value
+
+        def set_maximum_iterations(self, value):
+            self.nlp_solver_max_iter = value
+
+    bounds = SimpleNamespace(
+        min=np.array([[-0.1, -1.0, -2.1]]),
+        max=np.array([[0.1, 1.0, -1.9]]),
+    )
+    nmpc = SimpleNamespace(
+        nlp=[
+            SimpleNamespace(
+                x_init={"qdot": SimpleNamespace(init=np.array([[0.0, -4.0, -5.0]]))},
+                u_init={"u": SimpleNamespace(init=np.zeros((1, 2)))},
+                x_bounds={"qdot": bounds},
+            )
+        ],
+        ocp_solver=None,
+        _cocofest_fix_controls_to_warmup=False,
+        _correct_init_guess_to_fit_bounds=lambda corrected_input: None,
+        _sync_acados_state_bounds=lambda: None,
+    )
+    solutions = [
+        SimpleNamespace(
+            status=2, solver_time_to_optimize=0.1, real_time_to_optimize=0.2
+        ),
+        SimpleNamespace(
+            status=0, solver_time_to_optimize=0.1, real_time_to_optimize=0.2
+        ),
+    ]
+    monkeypatch.setattr(
+        periodic_example,
+        "snapshot_acados_diagnostics",
+        lambda _: {
+            "residuals": np.array([1e-2, 1e-5, 0.0, 1e-6]),
+            "res_stat_all": np.array([1e-2]),
+            "res_eq_all": np.array([1e-5]),
+            "res_ineq_all": np.array([0.0]),
+            "res_comp_all": np.array([1e-6]),
+        },
+    )
+    monkeypatch.setattr(
+        periodic_example,
+        "apply_solution_directly_to_periodic_nmpc_initial_guess",
+        lambda periodic_nmpc, accepted_solution: None,
+    )
+    monkeypatch.setattr(
+        periodic_example, "reset_acados_solver_memory", lambda periodic_nmpc: True
+    )
+
+    summary = periodic_example.run_acados_transfer_bound_homotopy(
+        nmpc,
+        FakeSolver(),
+        fractions=(0.0, 1.0),
+        padding=0.1,
+        convergence_tolerance=1e-4,
+        stage_iterations=10,
+        max_restarts=0,
+        echo=False,
+        solve_stage=lambda: solutions.pop(0),
+    )
+
+    assert summary["completed"] is False
+    assert [stage["accepted"] for stage in summary["stages"]] == [True, False]
+    assert (
+        summary["stages"][0]["accepted_as_intermediate_primal_feasible"] is True
+    )
+    assert (
+        summary["stages"][1]["accepted_as_intermediate_primal_feasible"] is False
+    )
 
 
 def test_transfer_sqp_restarts_from_nearly_feasible_iterate(monkeypatch):

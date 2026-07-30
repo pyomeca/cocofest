@@ -1246,6 +1246,38 @@ couvre maintenant `q`, `qdot`, `theta` et `omega`; un test interdit la
 régression. Cette correction vise directement la restauration du rollout
 d’état avant le SQP d’optimalité.
 
+Le screen Linux
+[`30583818938`](https://github.com/mickaelbegon/cocofest/actions/runs/30583818938)
+confirme que ce correctif agit effectivement sur la bonne variable. Au RHO 2
+reduced, le rollout IRK sort `omega` de sa borne de `5.7308 rad/s` et la
+relaxation nécessaire atteint `6.1282 rad/s`. Le premier palier, avec bornes
+entièrement relâchées, converge avec
+
+$$
+\left(r_\mathrm{stat},r_\mathrm{eq},r_\mathrm{ineq},r_\mathrm{comp}\right)
+=\left(5.17\,10^{-5},1.25\,10^{-6},4.80\,10^{-11},2.49\,10^{-6}\right).
+$$
+
+Le problème transféré est donc restaurable. C’est le resserrement direct
+`0 → 1` qui échoue : le meilleur résidu d’égalité du palier physique reste à
+`5.93e-2`. Au RHO 3, le dernier itéré du palier relâché est déjà primalement
+faisable (`r_eq=4.37e-5`, `r_comp=4.59e-6`) mais sa stationnarité
+(`1.75e-3`) dépassait le seuil commun `1e-4`. Exiger l’optimalité à ce palier
+intermédiaire n’a pas de justification : il sert seulement à fournir un point
+faisable au sous-problème suivant.
+
+La continuation corrigée utilise donc les fractions
+`0, 0.125, ..., 0.875, 1`. Les paliers strictement inférieurs à 1 peuvent
+transmettre un itéré dont les résidus d’égalité, d’inégalité et de
+complémentarité sont sous `1e-4`, même si sa stationnarité ne l’est pas encore.
+Le palier physique final à `1` conserve le critère strict sur les quatre
+résidus; cette distinction ne peut donc pas certifier une solution qui ne
+satisfait que les bornes relâchées. Avec l’expansion observée, chaque pas
+déplace une borne d’au plus environ `0.77 rad/s`, contre plus de `6 rad/s`
+avec le saut direct. Cette grille est volontairement prudente pour le prochain
+palier; elle pourra ensuite être raccourcie en mesurant le plus grand pas qui
+conserve la faisabilité.
+
 Enfin, le guess terminal ACADOS est bien envoyé en coordonnées scalées,
 $x_N^{ACADOS}=x_N^{physique}/s_x$, comme les stages précédents. Le commit
 Bioptim `733e442c7b429e20a67a7cf4c2b69694c54513b3` ajoute un test qui

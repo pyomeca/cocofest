@@ -8690,14 +8690,35 @@ def run_acados_transfer_bound_homotopy(
                     and np.all(np.isfinite(final_history_residuals))
                     and np.max(np.abs(final_history_residuals)) <= convergence_tolerance
                 )
-                accepted = (
-                    _status_is_success(solution.status)
-                    or acados_diagnostics_meet_tolerances(
+                intermediate_stage = not np.isclose(fraction, 1.0)
+                intermediate_residuals = (
+                    final_history_residuals
+                    if final_history_residuals is not None
+                    else residuals
+                )
+                intermediate_primal_accepted = bool(
+                    intermediate_stage
+                    and intermediate_residuals is not None
+                    and intermediate_residuals.size >= 4
+                    and np.all(np.isfinite(intermediate_residuals[:4]))
+                    and np.max(np.abs(intermediate_residuals[1:4]))
+                    <= convergence_tolerance
+                )
+                residuals_accepted = (
+                    acados_diagnostics_meet_tolerances(
                         diagnostics,
                         convergence_tolerance=convergence_tolerance,
                         stationarity_tolerance=convergence_tolerance,
                     )
                     or final_history_accepted
+                )
+                accepted = (
+                    residuals_accepted
+                    or intermediate_primal_accepted
+                    or (
+                        intermediate_stage
+                        and _status_is_success(solution.status)
+                    )
                 )
                 retryable = bool(
                     not accepted
@@ -8716,6 +8737,9 @@ def run_acados_transfer_bound_homotopy(
                     "status": solution.status,
                     "accepted": accepted,
                     "accepted_from_residual_history": final_history_accepted,
+                    "accepted_as_intermediate_primal_feasible": (
+                        intermediate_primal_accepted
+                    ),
                     "retryable": retryable,
                     "residuals": None if residuals is None else residuals.copy(),
                     "residual_history": residual_history,
@@ -8729,7 +8753,9 @@ def run_acados_transfer_bound_homotopy(
                         f"stage={stage_index} attempt={attempt} "
                         f"fraction={fraction:.6g} status={solution.status} "
                         f"control_radius={control_radius} "
-                        f"accepted={accepted} retryable={retryable} "
+                        f"accepted={accepted} "
+                        f"intermediate_primal={intermediate_primal_accepted} "
+                        f"retryable={retryable} "
                         f"residuals={_format_array(residuals)}"
                     )
                     if residual_history:
