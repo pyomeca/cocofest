@@ -2407,3 +2407,102 @@ restauration ACADOS sont moins risquées qu’un surrogate appris.
   chaque couture et l’angle terminal est ancré absolument. Ces audits ont
   précisément empêché de confondre fenêtres isolées et endurance exécutable.
 - Alpaqa ne fonctionne pas sur cette formulation et reste hors production.
+
+## 19. Réouverture de la comparaison full/reduced
+
+Le run Linux 30 RHO
+[`30588507555`](https://github.com/mickaelbegon/cocofest/actions/runs/30588507555)
+change le diagnostic précédent. Avec la tolérance de position de contact
+`2e-5 m` au début de chaque RHO, IPOPT et MadNLP convergent désormais 30/30
+au sens NLP en full comme en reduced. La correction traite donc bien
+l'incohérence de couture qui limitait auparavant le préfixe à un cycle. Les
+résultats full de ce run ne sont toutefois plus considérés physiquement
+valides après la correction de l'audit tous-points décrite ci-dessous.
+
+| Solveur/formulation | RHO stricts | Fatigue exécutée | AUC | Capacité minimale | Médiane solveur |
+|---|---:|---:|---:|---:|---:|
+| IPOPT full | 30/30 | 200.343 | 1.39088 | 0.97350 | 3.568 s |
+| IPOPT reduced | 30/30 | 256.519 | 1.52072 | 0.96419 | 0.598 s |
+| MadNLP/MUMPS full | 30/30 | 192.582 | 1.36867 | 0.97441 | 1.953 s |
+| MadNLP/MUMPS reduced | 30/30 | 256.415 | 1.52022 | 0.96418 | 0.779 s |
+| FATROP reduced | 30/30 | 256.488 | 1.52055 | 0.96418 | 1.511 s |
+
+La concordance IPOPT/MadNLP/FATROP en reduced est excellente. En revanche,
+la fatigue full est 22 à 25 % plus faible que la fatigue reduced selon le
+solveur. L'écart est concentré dans le Biceps et, secondairement, le Triceps :
+
+| Muscle | IPOPT full | IPOPT reduced | MadNLP full | MadNLP reduced |
+|---|---:|---:|---:|---:|
+| Biceps | 93.539 | 145.524 | 86.441 | 145.561 |
+| Delt_ant | 66.822 | 66.827 | 66.729 | 66.734 |
+| Delt_post | 31.496 | 31.431 | 31.427 | 31.362 |
+| Triceps | 8.485 | 12.737 | 7.985 | 12.758 |
+
+Ce résultat ne doit pas être interprété comme un gain physiologique de la
+formulation full. Le noyau réduit a été revalidé sur 1000 points aléatoires
+de la variété de contact : erreur d'accélération médiane
+`5.87e-4 rad/s²`, erreur relative P95 `1.97e-5`, erreur maximale des
+coefficients force-longueur `2.73e-9`, force-vitesse `5.55e-9` et passifs
+`5.17e-10`. Le fit de Fourier n'explique donc pas un écart de cette amplitude.
+
+L'audit montre plutôt une différence d'ensemble admissible pendant la
+collocation. La contrainte de cadence physique full est imposée aux nœuds de
+tir, tous les quatre points dans le vecteur de collocation de degré 3. Entre
+ces nœuds, la solution full atteint `-9.668 rad/s` avec IPOPT et
+`-9.620 rad/s` avec MadNLP, soit des dépassements respectifs de `0.385` et
+`0.337 rad/s`. Aux nœuds audités, le dépassement n'est que d'environ
+`0.0027 rad/s`. Reduced borne directement `omega` sur tous ses points et ne
+présente aucun dépassement significatif. Les écarts hors variété restent
+petits (`2.33e-4 rad` en configuration et `5.41e-3 rad/s` en vitesse
+tangentielle), mais le régime de vitesse intra-intervalle et la branche locale
+de stimulation divergent à partir d'environ RHO 9.
+
+Deux corrections sont maintenant actives :
+
+1. le verdict physique utilise la violation maximale sur tous les points de
+   collocation, plus seulement le sous-échantillonnage aux nœuds de tir;
+2. la contrainte full calcule la cadence physique au début et aux trois stages
+   Radau de chaque intervalle, puis séparément au terminal.
+
+Le premier test IPOPT local apparié converge avec ces contraintes. Son coût
+de fenêtre vaut `3.7194043`, contre `3.7194409` pour reduced dans le run Linux,
+soit un écart relatif d'environ `9.8e-6`. Avant la correction des stages, le
+coût full était `3.7545491`. Cette quasi-identité au premier RHO soutient
+fortement l'hypothèse causale d'un ensemble admissible discret asymétrique;
+elle doit maintenant être confirmée à 5, 30 puis 100 RHO.
+
+Les prochaines ablations doivent donc être appariées :
+
+1. imposer la cadence physique aux points de collocation full, ou utiliser une
+   transcription sans états de collocation libres;
+2. projeter une solution full complète vers reduced et la réoptimiser, puis
+   lever la solution reduced vers full;
+3. comparer au même point les RHS mécaniques, les coefficients de Hill, les
+   forces et le coût intégré;
+4. ne certifier l'équivalence physiologique qu'après disparition de l'écart
+   de coût à ensemble admissible identique.
+
+FATROP full reste bloqué avant le solveur : la détection automatique trouve
+une structure de gaps incompatible avec l'interface (`nu` et `ng` irréguliers
+au dernier intervalle). FATROP reduced reste utilisable.
+
+### 19.1 Warm-start ACADOS adaptatif
+
+Le run
+[`30588487246`](https://github.com/mickaelbegon/cocofest/actions/runs/30588487246)
+montre que la continuation adaptative des bornes est directionnellement utile,
+mais encore trop lente et insuffisante pour la production. Reduced atteint
+plusieurs fois la fraction physique `lambda=1`, mais RHO 2 reste bloqué près
+de `lambda=0.117` avec un résidu dynamique `1.37e-4`, juste au-dessus du seuil
+`1e-4`. La restauration consomme `39.09 s` sur quatre transferts.
+
+L'analyse a aussi trouvé que les statistiques ACADOS peuvent conserver un
+historique de résidus obsolète après `ACADOS_QP_FAILURE`. Un palier en
+`status=4` ne peut donc plus être certifié par cet historique; seuls les
+résidus courants sont acceptés. L'historique reste admissible pour un
+`status=2` après de vraies itérations SQP. Le prochain écran porte les paliers
+de 20 à 40 itérations, sans relâcher le seuil final à `lambda=1`.
+
+RTI reste une phase de polissage éventuelle, pas un solveur autonome : il est
+rapide, mais aucune variante RTI n'a produit un préfixe physique au-delà du
+premier RHO.

@@ -6662,12 +6662,12 @@ def audit_mechanical_trajectory(
             ),
             "passes_velocity_tolerance": velocity_error <= velocity_tolerance_rad_s,
             "passes_physical_crank_velocity_bounds": (
-                omega_violation <= velocity_tolerance_rad_s
+                all_node_omega_violation <= velocity_tolerance_rad_s
             ),
             "passes_tolerance": (
                 configuration_error <= configuration_tolerance_rad
                 and velocity_error <= velocity_tolerance_rad_s
-                and omega_violation <= velocity_tolerance_rad_s
+                and all_node_omega_violation <= velocity_tolerance_rad_s
             ),
         }
     )
@@ -8713,15 +8713,24 @@ def run_acados_transfer_bound_homotopy(
                 )
                 residual_history = _acados_residual_history_summary(diagnostics)
                 final_history_residuals = residual_history.get("final")
+                # ACADOS can leave the previous solve's residual history in
+                # the statistics buffer when the current QP fails before a
+                # complete SQP iteration (status 4). The scalar residuals are
+                # refreshed for the current attempt, so stale history must
+                # never certify a QP failure. A max-iteration exit (status 2)
+                # has completed SQP iterations and may expose a useful final
+                # finite iterate.
+                residual_history_eligible = solution.status == 2
                 final_history_accepted = bool(
-                    final_history_residuals is not None
+                    residual_history_eligible
+                    and final_history_residuals is not None
                     and np.all(np.isfinite(final_history_residuals))
                     and np.max(np.abs(final_history_residuals)) <= convergence_tolerance
                 )
                 intermediate_stage = not np.isclose(fraction, 1.0)
                 intermediate_residuals = (
                     final_history_residuals
-                    if final_history_residuals is not None
+                    if residual_history_eligible and final_history_residuals is not None
                     else residuals
                 )
                 intermediate_primal_accepted = bool(
@@ -8766,6 +8775,7 @@ def run_acados_transfer_bound_homotopy(
                     "control_radius": control_radius,
                     "status": solution.status,
                     "accepted": accepted,
+                    "residual_history_eligible": residual_history_eligible,
                     "accepted_from_residual_history": final_history_accepted,
                     "accepted_as_intermediate_primal_feasible": (
                         intermediate_primal_accepted

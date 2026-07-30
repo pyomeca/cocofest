@@ -148,6 +148,31 @@ def test_full_contact_position_stabilization_avoids_velocity_redundancy(monkeypa
     assert captured[0][1]["max_bound"] == 2e-5
 
 
+def test_full_cadence_constraint_covers_collocation_stages_and_terminal(monkeypatch):
+    captured = []
+
+    class FakeConstraintList:
+        def add(self, constraint, **kwargs):
+            captured.append((constraint, kwargs))
+
+    monkeypatch.setattr(mhe_example, "ConstraintList", FakeConstraintList)
+    model = SimpleNamespace(marker_index=lambda name: 7)
+
+    mhe_example.set_constraints(
+        model,
+        enforce_start_constraints=False,
+        enforce_physical_crank_velocity_bounds=True,
+    )
+
+    assert len(captured) == 2
+    assert captured[0][0] is (
+        mhe_example.physical_crank_velocity_all_collocation_points_constraint
+    )
+    assert captured[0][1]["node"] == Node.ALL_SHOOTING
+    assert captured[1][0] is mhe_example.physical_crank_velocity_constraint
+    assert captured[1][1]["node"] == Node.END
+
+
 def test_full_transfer_contact_projection_preserves_bound_crank_states():
     class Kinematics:
         @staticmethod
@@ -4284,7 +4309,7 @@ def test_github_acados_runner_uses_reference_and_option_profiles_sequentially():
         in workflow
     )
     assert "--acados-transfer-bound-homotopy-max-refinements 16" in workflow
-    assert "--acados-transfer-bound-homotopy-iterations 20" in workflow
+    assert "--acados-transfer-bound-homotopy-iterations 40" in workflow
     assert "--acados-transfer-bound-homotopy-solver-tolerance 1e-4" in workflow
     assert "run_case sqp-feasible-qp-irk" in workflow
     assert "run_case sqp-feasibility-qp-irk" in workflow
@@ -4851,6 +4876,81 @@ def test_physical_crank_velocity_uses_center_to_hand_kinematics():
     omega = mhe_example.physical_crank_velocity_constraint(controller)
 
     assert omega == pytest.approx(-5.0)
+
+
+def test_physical_crank_velocity_includes_all_collocation_points():
+    class FakeBioModel:
+        @staticmethod
+        def marker_index(name):
+            return {"hand": 0, "global_wheel_center": 1}[name]
+
+        @staticmethod
+        def marker(index):
+            values = (
+                np.array([1.0, 0.0, 0.0])
+                if index == 0
+                else np.array([0.0, 0.0, 0.0])
+            )
+            return lambda q, parameters: values
+
+        @staticmethod
+        def marker_velocity(index):
+            if index == 0:
+                return lambda q, qdot, parameters: np.array(
+                    [0.0, qdot[0], 0.0]
+                )
+            return lambda q, qdot, parameters: np.zeros(3)
+
+    controller = SimpleNamespace(
+        model=SimpleNamespace(bio_model=FakeBioModel()),
+        states={
+            "q": SimpleNamespace(
+                cx_start=np.zeros(3),
+                cx_intermediates_list=[np.zeros(3), np.zeros(3)],
+            ),
+            "qdot": SimpleNamespace(
+                cx_start=np.array([-5.0, 0.0, 0.0]),
+                cx_intermediates_list=[
+                    np.array([-7.0, 0.0, 0.0]),
+                    np.array([-9.0, 0.0, 0.0]),
+                ],
+            ),
+        },
+        parameters=SimpleNamespace(cx=np.array([])),
+    )
+
+    omega = mhe_example.physical_crank_velocity_all_collocation_points_constraint(
+        controller
+    )
+
+    np.testing.assert_allclose(np.asarray(omega).reshape(-1), [-5.0, -7.0, -9.0])
+
+
+def test_mechanical_audit_rejects_collocation_only_cadence_violation():
+    class FakeKinematics:
+        @staticmethod
+        def project_generalized_trajectory(q, qdot):
+            return (
+                np.asarray(q[:1], dtype=float),
+                np.asarray(qdot[:1], dtype=float),
+                {
+                    "maximum_configuration_projection_error_rad": 0.0,
+                    "maximum_tangent_velocity_residual_rad_s": 0.0,
+                },
+            )
+
+    omega = np.array([[-6.0, -10.0, -6.0, -6.0, -6.0, -6.0, -6.0, -6.0]])
+    _, _, audit = periodic_example.audit_mechanical_trajectory(
+        {"q": np.zeros((3, omega.shape[1])), "qdot": np.vstack((omega, omega, omega))},
+        SimpleNamespace(kinematics=FakeKinematics()),
+        velocity_tolerance_rad_s=0.1,
+        cadence_node_stride=4,
+    )
+
+    assert audit["maximum_physical_crank_velocity_bound_violation_rad_s"] == 0.0
+    assert audit["maximum_all_node_crank_velocity_bound_violation_rad_s"] > 0.7
+    assert audit["passes_physical_crank_velocity_bounds"] is False
+    assert audit["passes_tolerance"] is False
 
 
 def test_historical_pulse_width_seed_is_clipped_with_bound_warning(tmp_path):
@@ -7118,7 +7218,9 @@ def test_transfer_bound_homotopy_restores_physical_bounds(monkeypatch):
     assert fixed_control_values == [False, False]
 
 
-def test_transfer_bound_homotopy_accepts_last_finite_nlp_iterate(monkeypatch):
+def test_transfer_bound_homotopy_accepts_last_finite_maxiter_nlp_iterate(
+    monkeypatch,
+):
     class FakeSolver:
         nlp_solver_max_iter = 100
 
@@ -7146,7 +7248,7 @@ def test_transfer_bound_homotopy_accepts_last_finite_nlp_iterate(monkeypatch):
         _sync_acados_state_bounds=lambda: None,
     )
     solution = SimpleNamespace(
-        status=4, solver_time_to_optimize=0.1, real_time_to_optimize=0.2
+        status=2, solver_time_to_optimize=0.1, real_time_to_optimize=0.2
     )
     monkeypatch.setattr(
         periodic_example,
@@ -7181,8 +7283,77 @@ def test_transfer_bound_homotopy_accepts_last_finite_nlp_iterate(monkeypatch):
 
     assert summary["completed"] is True
     assert summary["stages"][0]["accepted"] is True
+    assert summary["stages"][0]["residual_history_eligible"] is True
     assert summary["stages"][0]["accepted_from_residual_history"] is True
     assert summary["stages"][0]["solver_reset"] is True
+
+
+def test_transfer_bound_homotopy_rejects_stale_history_after_qp_failure(
+    monkeypatch,
+):
+    class FakeSolver:
+        nlp_solver_max_iter = 100
+
+        def set_convergence_tolerance(self, value):
+            self.tolerance = value
+
+        def set_maximum_iterations(self, value):
+            self.nlp_solver_max_iter = value
+
+    bounds = SimpleNamespace(
+        min=np.array([[-0.1, -1.0, -2.1]]),
+        max=np.array([[0.1, 1.0, -1.9]]),
+    )
+    nmpc = SimpleNamespace(
+        nlp=[
+            SimpleNamespace(
+                x_init={
+                    "qdot": SimpleNamespace(init=np.array([[0.0, -4.0, -5.0]]))
+                },
+                u_init={"u": SimpleNamespace(init=np.zeros((1, 2)))},
+                x_bounds={"qdot": bounds},
+            )
+        ],
+        ocp_solver=None,
+        _cocofest_fix_controls_to_warmup=False,
+        _correct_init_guess_to_fit_bounds=lambda corrected_input: None,
+        _sync_acados_state_bounds=lambda: None,
+    )
+    solution = SimpleNamespace(
+        status=4, solver_time_to_optimize=0.1, real_time_to_optimize=0.2
+    )
+    monkeypatch.setattr(
+        periodic_example,
+        "snapshot_acados_diagnostics",
+        lambda _: {
+            "residuals": np.array([100.0, 10.0, 1.0, 0.1]),
+            "res_stat_all": np.array([1e-8]),
+            "res_eq_all": np.array([1e-8]),
+            "res_ineq_all": np.array([1e-8]),
+            "res_comp_all": np.array([1e-8]),
+        },
+    )
+    monkeypatch.setattr(
+        periodic_example, "reset_acados_solver_memory", lambda periodic_nmpc: True
+    )
+
+    summary = periodic_example.run_acados_transfer_bound_homotopy(
+        nmpc,
+        FakeSolver(),
+        fractions=(1.0,),
+        padding=0.1,
+        convergence_tolerance=1e-4,
+        stage_iterations=10,
+        max_restarts=0,
+        echo=False,
+        solve_stage=lambda: solution,
+    )
+
+    assert summary["completed"] is False
+    assert summary["termination_reason"] == "initial_stage_failed"
+    assert summary["stages"][0]["accepted"] is False
+    assert summary["stages"][0]["residual_history_eligible"] is False
+    assert summary["stages"][0]["accepted_from_residual_history"] is False
 
 
 def test_transfer_bound_homotopy_only_requires_stationarity_at_physical_stage(

@@ -1950,17 +1950,14 @@ def wheel_cycle_boundary_constraint(
     return controller.states[position_state_key].cx[position_state_index]
 
 
-def physical_crank_velocity_constraint(
-    controller,
+def _physical_crank_velocity(
+    bio_model,
+    q,
+    qdot,
+    parameters,
     hand_marker: str = "hand",
     center_marker: str = "global_wheel_center",
 ):
-    """Return the angular velocity of the physical center-to-hand vector."""
-
-    bio_model = controller.model.bio_model
-    q = controller.states["q"].cx
-    qdot = controller.states["qdot"].cx
-    parameters = controller.parameters.cx
     hand_index = bio_model.marker_index(hand_marker)
     center_index = bio_model.marker_index(center_marker)
     hand = bio_model.marker(hand_index)(q, parameters)
@@ -1977,6 +1974,51 @@ def physical_crank_velocity_constraint(
     return (
         crank[0] * crank_velocity[1] - crank[1] * crank_velocity[0]
     ) / squared_radius
+
+
+def physical_crank_velocity_constraint(
+    controller,
+    hand_marker: str = "hand",
+    center_marker: str = "global_wheel_center",
+):
+    """Return physical crank velocity at the controller's selected node."""
+
+    return _physical_crank_velocity(
+        controller.model.bio_model,
+        controller.states["q"].cx,
+        controller.states["qdot"].cx,
+        controller.parameters.cx,
+        hand_marker=hand_marker,
+        center_marker=center_marker,
+    )
+
+
+def physical_crank_velocity_all_collocation_points_constraint(
+    controller,
+    hand_marker: str = "hand",
+    center_marker: str = "global_wheel_center",
+):
+    """Return physical crank velocity at a shooting node and its stages."""
+
+    from casadi import vertcat
+
+    q_points = [controller.states["q"].cx_start]
+    q_points.extend(controller.states["q"].cx_intermediates_list)
+    qdot_points = [controller.states["qdot"].cx_start]
+    qdot_points.extend(controller.states["qdot"].cx_intermediates_list)
+    return vertcat(
+        *[
+            _physical_crank_velocity(
+                controller.model.bio_model,
+                q,
+                qdot,
+                controller.parameters.cx,
+                hand_marker=hand_marker,
+                center_marker=center_marker,
+            )
+            for q, qdot in zip(q_points, qdot_points, strict=True)
+        ]
+    )
 
 
 def physical_crank_terminal_alignment_constraint(
@@ -2113,8 +2155,18 @@ def set_constraints(
                 "The physical crank-velocity margin must be positive."
             )
         constraints.add(
+            physical_crank_velocity_all_collocation_points_constraint,
+            node=Node.ALL_SHOOTING,
+            min_bound=(
+                physical_crank_velocity_target - physical_crank_velocity_margin
+            ),
+            max_bound=(
+                physical_crank_velocity_target + physical_crank_velocity_margin
+            ),
+        )
+        constraints.add(
             physical_crank_velocity_constraint,
-            node=Node.ALL,
+            node=Node.END,
             min_bound=(
                 physical_crank_velocity_target - physical_crank_velocity_margin
             ),
