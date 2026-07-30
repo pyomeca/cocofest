@@ -29,8 +29,8 @@ Ils servent de référence avant la nouvelle campagne séquentielle 5, 30 puis
 - Les quatre muscles fournissent 20 états de Ding; la mécanique complète porte
   le total à 26 états et la mécanique réduite à 22.
 - La référence NLP utilise une collocation Radau de degré 3.
-- Tous les OCP, warm-starts IPOPT et raffinements de la campagne active
-  utilisent SX. Le runner refuse explicitement une demande MX.
+- Tous les OCP et warm-starts IPOPT de la campagne active utilisent SX. Le
+  runner refuse explicitement une demande MX.
 - MadNLP utilise exclusivement MUMPS, transmis à libMad sous le nom typé
   exact `MumpsSolver`. La CI échoue si libMad signale une option inconnue.
 - PARDISO, Fatrop et RK4 ne font pas partie de la campagne active. Leurs
@@ -884,8 +884,12 @@ SX apporte donc ici un gain d’évaluation du même NLP, sans changement
 scientifique mesurable de la solution.
 
 Ce résultat justifie la règle de production : le profil IPOPT périodique, le
-warm-up standard, le raffinement IPOPT d’ACADOS et les NLP IPOPT/MadNLP sont
-tous construits en SX. Le script d’exécution refuse `mx`, le JSON doit
+warm-up standard et les NLP IPOPT/MadNLP sont construits en SX. Le
+raffinement IPOPT auxiliaire d’ACADOS reste SX lorsqu’il est demandé, mais la
+CI ne le répète plus : le seed commun est déjà la solution certifiée d’un
+IPOPT collocation SX, et deux runners ont été arrêtés après environ 150 s
+pendant la construction redondante du raffinement full. Le script d’exécution
+refuse `mx`, le JSON doit
 contenir `use_sx=true`, et le rapport affiche le type de graphe. MX reste
 uniquement une donnée historique de justification.
 

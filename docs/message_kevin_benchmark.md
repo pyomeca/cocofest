@@ -19,7 +19,10 @@ La nouvelle campagne active compare :
 - ACADOS full et reduced, avec ses variantes de restauration et RTI.
 
 Tous les graphes de la campagne sont maintenant SX, y compris le warm-up
-IPOPT et le raffinement IPOPT utilisé par ACADOS. Ce choix est mesuré, pas
+IPOPT. ACADOS consomme directement ce seed IPOPT/collocation SX certifié :
+son raffinement IPOPT auxiliaire n’est plus répété dans chaque variante,
+car deux runners ont été arrêtés après environ 150 s pendant sa construction
+full redondante. Ce choix SX est mesuré, pas
 seulement supposé : sur 30 RHO, SX a réduit la médiane chaude de 57.5 à
 60.5 % par rapport à MX, soit une accélération de 2.35× à 2.53×. Les quatre
 comparaisons IPOPT/MadNLP full/reduced ont convergé 30/30, avec un écart

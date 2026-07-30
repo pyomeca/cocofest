@@ -3702,7 +3702,7 @@ def test_github_acados_runner_uses_reference_and_option_profiles_sequentially():
     assert "--ipopt-use-sx" in benchmark_runner
     assert "--ipopt-no-use-sx" not in benchmark_runner
     assert "--ipopt-use-sx" in workflow
-    assert "--periodic-ipopt-refinement-use-sx" in workflow
+    assert "--disable-periodic-ipopt-refinement" in workflow
     assert '"mumps": "MumpsSolver"' in workflow
     assert ".configurations.acados.use_sx == true" in workflow
     assert re.search(

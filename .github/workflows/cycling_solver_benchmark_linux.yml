@@ -646,7 +646,7 @@ jobs:
               --ipopt-profile periodic_collocation \
               --ipopt-use-sx \
               --ipopt-enforce-start-constraints \
-              --periodic-ipopt-refinement-use-sx \
+              --disable-periodic-ipopt-refinement \
               --cycles-per-window 1 \
               --stimulations-per-cycle 30 \
               --n-windows "$rhos" \
