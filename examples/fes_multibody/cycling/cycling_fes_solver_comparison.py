@@ -58,6 +58,7 @@ BENCHMARK_CONFIGURATION_FIELDS = (
     "model_formulation",
     "mechanical_formulation",
     "mechanical_equivalence_audit",
+    "full_contact_constraints_all_nodes",
     "torque_application",
     "ode_solver",
     "collocation_degree",
@@ -2456,6 +2457,7 @@ def main(
     mechanical_formulation: str = "full",
     reduced_cycling_profile: str | Path | None = None,
     experimental_reduced_acados: bool = False,
+    full_contact_constraints_all_nodes: bool = False,
     n_threads: int | None = None,
     compact_rho_output: bool = False,
     resistive_torque: float = DEFAULT_CRANK_TORQUE_NM,
@@ -3186,6 +3188,9 @@ def main(
     # are computed.
     for solver_configuration in solver_args.values():
         solver_configuration.mechanical_equivalence_audit = True
+        solver_configuration.full_contact_constraints_all_nodes = bool(
+            full_contact_constraints_all_nodes
+        )
         solver_configuration.reduced_cycling_profile = (
             None
             if reduced_cycling_profile is None
@@ -3291,6 +3296,14 @@ def build_cli() -> argparse.ArgumentParser:
         help=(
             "Enable the uncertified reduced ACADOS SQP path for one-cycle "
             "rollout/projection diagnostics."
+        ),
+    )
+    parser.add_argument(
+        "--full-contact-constraints-all-nodes",
+        action="store_true",
+        help=(
+            "For full mechanics, constrain wheel-centre position and velocity "
+            "at every shooting node to prevent contact-manifold drift."
         ),
     )
     parser.add_argument(
@@ -4245,6 +4258,9 @@ if __name__ == "__main__":
         mechanical_formulation=args.mechanical_formulation,
         reduced_cycling_profile=args.reduced_cycling_profile,
         experimental_reduced_acados=args.experimental_reduced_acados,
+        full_contact_constraints_all_nodes=(
+            args.full_contact_constraints_all_nodes
+        ),
         n_threads=args.n_threads,
         compact_rho_output=args.compact_rho_output,
         resistive_torque=args.resistive_torque,

@@ -2451,6 +2451,14 @@ def build_argument_parser() -> argparse.ArgumentParser:
         action="store_false",
         help="Disable the start-of-window posture constraints.",
     )
+    parser.add_argument(
+        "--full-contact-constraints-all-nodes",
+        action="store_true",
+        help=(
+            "For full mechanics, impose wheel-centre position and velocity "
+            "constraints at every shooting node to suppress holonomic drift."
+        ),
+    )
     parser.set_defaults(use_sx=True, enforce_start_constraints=False)
     return parser
 
@@ -11670,6 +11678,9 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
         "turn_number": args.cycles_per_window,
         "pedal_config": {"x_center": 0.35, "y_center": 0.0, "radius": 0.1},
         "enforce_start_constraints": args.enforce_start_constraints,
+        "enforce_contact_constraints_all_nodes": bool(
+            args.full_contact_constraints_all_nodes
+        ),
         "enforce_physical_crank_velocity_bounds": bool(
             build_mechanical_audit_profile
             and args.mechanical_formulation == "full"

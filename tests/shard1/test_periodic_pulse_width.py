@@ -51,6 +51,29 @@ def _muscle_model():
     )
 
 
+def test_full_contact_stabilization_constrains_every_shooting_node(monkeypatch):
+    captured = []
+
+    class FakeConstraintList:
+        def add(self, constraint, **kwargs):
+            captured.append((constraint, kwargs))
+
+    monkeypatch.setattr(mhe_example, "ConstraintList", FakeConstraintList)
+    model = SimpleNamespace(marker_index=lambda name: 7)
+
+    mhe_example.set_constraints(
+        model,
+        enforce_start_constraints=False,
+        enforce_contact_constraints_all_nodes=True,
+    )
+
+    assert len(captured) == 2
+    assert all(kwargs["node"] == Node.ALL for _, kwargs in captured)
+    assert captured[0][1]["marker_index"] == 7
+    assert captured[1][1]["first_marker"] == "wheel_center"
+    assert captured[1][1]["second_marker"] == "global_wheel_center"
+
+
 def test_updating_full_model_preserves_every_force_relationship(monkeypatch):
     captured = {}
 
@@ -3187,6 +3210,20 @@ def test_ipopt_dual_warm_start_cli_defaults_to_bound_multipliers():
     assert comparison_args.alpaqa_dual_warm_start_mode == "constraints"
     assert periodic_args.primal_feasibility_threshold is None
     assert comparison_args.primal_feasibility_threshold is None
+
+
+def test_full_contact_stabilization_is_opt_in_on_both_clis():
+    periodic_parser = periodic_example.build_argument_parser()
+    comparison_parser = comparison_example.build_cli()
+
+    assert not periodic_parser.parse_args([]).full_contact_constraints_all_nodes
+    assert not comparison_parser.parse_args([]).full_contact_constraints_all_nodes
+    assert periodic_parser.parse_args(
+        ["--full-contact-constraints-all-nodes"]
+    ).full_contact_constraints_all_nodes
+    assert comparison_parser.parse_args(
+        ["--full-contact-constraints-all-nodes"]
+    ).full_contact_constraints_all_nodes
 
 
 def test_common_primal_threshold_is_independent_of_nlp_solver_tolerance():

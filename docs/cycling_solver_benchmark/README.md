@@ -413,8 +413,11 @@ parfaitement faisable au niveau accélération.
 
 Dans l’implémentation courante, les contraintes explicites de position et de
 vitesse du centre du pédalier ne sont ajoutées au nœud initial que lorsque
-`enforce_start_constraints=True`. Le profil du benchmark les désactive
-actuellement. C’est une différence centrale avec la mécanique réduite.
+`enforce_start_constraints=True`. Le profil IPOPT de référence les active,
+mais le profil ACADOS historique les désactive. L’option expérimentale
+`--full-contact-constraints-all-nodes` les impose à tous les nœuds de tir pour
+mesurer si la stabilisation de la variété holonome corrige le drift ACADOS.
+C’est une différence centrale avec la mécanique réduite.
 
 ## 4. Mécanique réduite
 
@@ -576,15 +579,21 @@ formulation complète peut poursuivre la trajectoire hors variété. Les longueu
 musculaires, vitesses de contraction, bras de levier et forces nécessaires
 sont alors différents.
 
-Le benchmark impose maintenant $c(q_0)=0$ et
-$J(q_0)\dot q_0=0$ au début de chaque RHO. Ces contraintes ne sont pas
-dupliquées à tous les nœuds : elles seraient redondantes avec la dynamique
-contrainte au niveau accélération et pourraient rendre le KKT déficient en
-rang. En complément, chaque trajectoire full est projetée sur la variété
-réduite. Le rapport contient désormais l’erreur maximale/RMS de configuration,
+Le profil NLP de référence impose maintenant $c(q_0)=0$ et
+$J(q_0)\dot q_0=0$ au début de chaque RHO. Pour ACADOS, la variante de
+référence conserve encore le profil historique sans ces égalités explicites;
+le seed est sur la variété, mais cela ne suffit pas à empêcher le drift après
+linéarisation. Une ablation ajoute donc $c(q_k)=0$ et
+$J(q_k)\dot q_k=0$ à tous les nœuds. Ces égalités sont mathématiquement
+redondantes avec la dynamique contrainte au niveau accélération lorsque
+l’intégration est exacte; elles peuvent aussi dégrader le rang du KKT. Elles
+restent donc expérimentales jusqu’à la comparaison SQP/RTI 5 RHO.
+
+Dans tous les cas, chaque trajectoire full est projetée a posteriori sur la
+variété réduite. Le rapport contient l’erreur maximale/RMS de configuration,
 le résidu maximal/RMS de vitesse tangentielle et les traces physiques
 $\theta,\omega$. Une trajectoire qui dépasse `0.01 rad` ou `0.1 rad/s` est
-marquée physiquement invalide, même si le solveur converge.
+marquée physiquement invalide, même si le solveur retourne le statut zéro.
 
 Le seed historique a aussi été construit à l’aide d’un modèle d’IK qui contient
 des transformations fixes différentes de celles du modèle dynamique. Cette
@@ -934,6 +943,38 @@ réinjectés après toute remise à zéro.
 SQP-RTI n’effectue qu’une itération SQP par RHO. Il est potentiellement très
 rapide, mais exige une trajectoire nominale déjà proche de la variété faisable.
 Ce n’est pas encore le cas après plusieurs cycles.
+
+Le run Linux `30548599804`, ACADOS `v0.5.5`, a rendu cette distinction
+indispensable :
+
+| Variante reduced, 5 RHO | Succès physique | Médiane chaude | Coût exécuté |
+|---|---:|---:|---:|
+| SQP/IRK référence | 5/5 | `0.141 s` | `18.03737` |
+| SQP/IRK `FIXED_STEP` | 5/5 | `0.103 s` | `18.03737` |
+| SQP/IRK Anderson | 5/5 | `0.096 s` | `18.03737` |
+| SQP/IRK léger, 2 pas IRK | 5/5 | `0.057 s` | `18.03744` |
+| SQP-RTI/IRK | 5/5 | `0.036 s` | `18.03402` |
+
+La remise à zéro de la mémoire ne change ni la solution ni le temps de façon
+utile (`0.140 s`). Le hot-start HPIPM niveau 2 échoue dès le premier RHO.
+`BYRD_OMOJOKUN` converge, mais est plus lent (`0.121 s`) que
+`FIXED_STEP`/Anderson.
+
+En full, aucun SQP ne valide le premier RHO. Le RTI retourne pourtant cinq
+statuts zéro en `0.044 s` médian. Ce résultat est un faux positif solveur :
+l’audit trouve jusqu’à `4.40 rad/s` de violation de cadence, `8.34 rad/s` de
+résidu tangent et une trajectoire très loin de la variété de contact. Le CSV
+exporte donc désormais séparément `solver_success`, `physical_success`,
+`success` et `mechanical_audit_passed`. La campagne 30 RHO ne doit jamais
+sélectionner une variante sur le seul statut natif ACADOS.
+
+Deux ablations full sont ajoutées à l’écran suivant :
+
+- SQP/IRK avec position et vitesse de contact à tous les nœuds;
+- SQP-RTI/IRK avec les mêmes contraintes.
+
+Elles testent directement l’hypothèse de drift holonome avant d’envisager une
+relaxation, une pénalisation de Baumgarte ou un second OCP de faisabilité.
 
 La première stratégie testée est la voie native
 `SQP_WITH_FEASIBLE_QP` :

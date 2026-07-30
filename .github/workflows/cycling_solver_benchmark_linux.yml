@@ -643,6 +643,15 @@ jobs:
                 --acados-anderson-activation-threshold 0.1
               )
             fi
+            if [[ "$variant" == *"-contact" ]]; then
+              if [[ "$mechanics" != "full" ]]; then
+                echo "All-node contact variants require full mechanics." >&2
+                return 2
+              fi
+              solver_options+=(
+                --full-contact-constraints-all-nodes
+              )
+            fi
             if [[ "$variant" == "sqp-feasibility-qp-irk" ]]; then
               # Native two-stage path in one precompiled OCP: start with the
               # feasibility QP, then let ACADOS switch to the nominal fatigue
@@ -731,6 +740,8 @@ jobs:
             run_case sqp-erk "$mechanics" "$ACADOS_OPTION_RHOS" SQP ERK 20 5
             run_case sqp-irk-light "$mechanics" "$ACADOS_OPTION_RHOS" SQP IRK 2 3
           done
+          run_case sqp-irk-contact full "$ACADOS_OPTION_RHOS" SQP IRK 5 5
+          run_case sqp-rti-irk-contact full "$ACADOS_OPTION_RHOS" SQP_RTI IRK 5 5
 
       - name: Add every ACADOS result to the job summary
         if: always()
@@ -760,7 +771,7 @@ jobs:
         if: always()
         run: |
           output="acados-smoke-results/acados-option-screen.csv"
-          echo "case,nlp_solver,search_direction,integrator,sim_steps,newton_iter,reset_solver,qp_warm_start,anderson,anderson_threshold,byrd_slack_factor,transfer_bound_homotopy,validated_cycles,attempted_rho,solve_hot_median_s,effective_hot_median_s,effective_hot_p90_s,restoration_total_s,executed_fatigue_objective,minimum_capacity_ratio,first_failed_rho" > "$output"
+          echo "case,nlp_solver,search_direction,integrator,sim_steps,newton_iter,reset_solver,qp_warm_start,anderson,anderson_threshold,byrd_slack_factor,transfer_bound_homotopy,all_node_contact,solver_success,physical_success,success,mechanical_audit_passed,validated_cycles,attempted_rho,solve_hot_median_s,effective_hot_median_s,effective_hot_p90_s,restoration_total_s,executed_fatigue_objective,minimum_capacity_ratio,first_failed_rho" > "$output"
           while IFS= read -r result; do
             case_name="$(basename "$(dirname "$result")")"
             jq -r --arg case "$case_name" '
@@ -779,6 +790,11 @@ jobs:
                 $config.acados_anderson_activation_threshold,
                 $config.acados_byrd_omojokon_slack_relaxation_factor,
                 $config.acados_transfer_bound_homotopy,
+                $config.full_contact_constraints_all_nodes,
+                .solver_success,
+                .physical_success,
+                .success,
+                .mechanical_equivalence_audit.passes_tolerance,
                 .validated_cycles,
                 .attempted_windows,
                 .hot_wall_time_median_s,
@@ -823,6 +839,10 @@ jobs:
               expected_cases+=("${variant}-${mechanics}")
             done
           done
+          expected_cases+=(
+            "sqp-irk-contact-full"
+            "sqp-rti-irk-contact-full"
+          )
           mapfile -t results < <(find acados-smoke-results -name result.json -type f | sort)
           if [[ "${#results[@]}" -ne "${#expected_cases[@]}" ]]; then
             echo "ACADOS: expected ${#expected_cases[@]} JSON files, found ${#results[@]}." >&2

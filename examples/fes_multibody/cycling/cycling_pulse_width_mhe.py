@@ -862,6 +862,10 @@ def prepare_nmpc(
     external_force = cycling_info.get("resistive_torque")
     constant_crank_torque = cycling_info.get("constant_crank_torque")
     enforce_start_constraints = cycling_info.get("enforce_start_constraints", True)
+    enforce_contact_constraints_all_nodes = cycling_info.get(
+        "enforce_contact_constraints_all_nodes",
+        False,
+    )
     enforce_physical_crank_velocity_bounds = cycling_info.get(
         "enforce_physical_crank_velocity_bounds",
         False,
@@ -1069,6 +1073,9 @@ def prepare_nmpc(
     constraints = set_constraints(
         model,
         enforce_start_constraints=enforce_start_constraints,
+        enforce_contact_constraints_all_nodes=(
+            enforce_contact_constraints_all_nodes
+        ),
         x_init=x_init,
         cycle_len=cycle_len,
         n_cycles_simultaneous=n_cycles_simultaneous,
@@ -1888,6 +1895,7 @@ def set_constraints(
     bio_model,
     enforce_start_constraints: bool = True,
     *,
+    enforce_contact_constraints_all_nodes: bool = False,
     x_init: InitialGuessList | None = None,
     cycle_len: int | None = None,
     n_cycles_simultaneous: int = 1,
@@ -1900,13 +1908,20 @@ def set_constraints(
     physical_crank_terminal_angle: float | None = None,
 ):
     constraints = ConstraintList()
-    if enforce_start_constraints and not isinstance(
-        bio_model, ReducedFesCyclingModel
-    ):
+    is_reduced = isinstance(bio_model, ReducedFesCyclingModel)
+    if enforce_contact_constraints_all_nodes and is_reduced:
+        raise ValueError(
+            "All-node marker contact constraints apply only to the full "
+            "mechanical formulation."
+        )
+    if (enforce_start_constraints or enforce_contact_constraints_all_nodes) and not is_reduced:
+        contact_node = (
+            Node.ALL if enforce_contact_constraints_all_nodes else Node.START
+        )
         # --- Constraining wheel center position to a fix position --- #
         constraints.add(
             ConstraintFcn.TRACK_MARKERS_VELOCITY,
-            node=Node.START,
+            node=contact_node,
             marker_index=bio_model.marker_index("wheel_center"),
             axes=[Axis.X, Axis.Y],
         )
@@ -1914,7 +1929,7 @@ def set_constraints(
             ConstraintFcn.SUPERIMPOSE_MARKERS,
             first_marker="wheel_center",
             second_marker="global_wheel_center",
-            node=Node.START,
+            node=contact_node,
             axes=[Axis.X, Axis.Y],
         )
     if enforce_physical_crank_velocity_bounds:
