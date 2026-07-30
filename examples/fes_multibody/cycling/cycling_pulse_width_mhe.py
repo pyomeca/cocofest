@@ -914,6 +914,8 @@ def prepare_nmpc(
     if mechanical_formulation not in ("full", "reduced"):
         raise ValueError("mechanical_formulation must be 'full' or 'reduced'.")
     reduced_dynamics = simulation_conditions.get("reduced_cycling_dynamics")
+    if isinstance(reduced_dynamics, (str, os.PathLike)):
+        reduced_dynamics = ReducedCyclingDynamics.load(reduced_dynamics)
     # --- Pickle file info --- #
     initial_guess_path = simulation_conditions["init_guess_file_path"]
 
@@ -959,8 +961,6 @@ def prepare_nmpc(
             raise ValueError(
                 "reduced_cycling_dynamics is required for the reduced formulation."
             )
-        if isinstance(reduced_dynamics, (str, os.PathLike)):
-            reduced_dynamics = ReducedCyclingDynamics.load(reduced_dynamics)
         theta_init, omega_init, projection_audit = (
             reduced_dynamics.kinematics.project_generalized_trajectory(
                 np.asarray(full_mechanical_init["q"].init, dtype=float),
@@ -1030,6 +1030,15 @@ def prepare_nmpc(
         )
     else:
         x_init = full_mechanical_init
+        coordinate_qdot_bounds = None
+        if reduced_dynamics is not None:
+            coordinate_qdot_bounds = (
+                full_coordinate_qdot_bounds_from_reduced_profile(
+                    reduced_dynamics,
+                    physical_crank_velocity_target=wheel_qdot_regularization_target,
+                    physical_crank_velocity_margin=wheel_qdot_bound_margin,
+                )
+            )
         x_bounds, x_init = set_x_bounds(
             model=model,
             x_init=x_init,
@@ -1037,6 +1046,7 @@ def prepare_nmpc(
             ode_solver=ode_solver,
             init_file_path=initial_guess_path,
             wheel_qdot_bound_margin=wheel_qdot_bound_margin,
+            coordinate_qdot_bounds=coordinate_qdot_bounds,
         )
 
     # --- Set states scaling --- #
@@ -1260,6 +1270,7 @@ def set_x_bounds(
     ode_solver: OdeSolver,
     init_file_path: str,
     wheel_qdot_bound_margin: float = 3.0,
+    coordinate_qdot_bounds: tuple[np.ndarray, np.ndarray] | None = None,
 ) -> tuple[BoundsList, InitialGuessList]:
     if wheel_qdot_bound_margin <= 0:
         raise ValueError("wheel_qdot_bound_margin must be strictly positive.")
@@ -1345,6 +1356,33 @@ def set_x_bounds(
     qdot_x_bounds.max[1] = [forearm_qdot[1], forearm_qdot[1], forearm_qdot[1]]
     qdot_x_bounds.min[2] = [wheel_qdot[0], wheel_qdot[0], wheel_qdot[0]]
     qdot_x_bounds.max[2] = [wheel_qdot[1], wheel_qdot[1], wheel_qdot[1]]
+    if coordinate_qdot_bounds is not None:
+        coordinate_lower, coordinate_upper = (
+            np.asarray(values, dtype=float).reshape(-1)
+            for values in coordinate_qdot_bounds
+        )
+        if (
+            coordinate_lower.size != model.nb_qdot
+            or coordinate_upper.size != model.nb_qdot
+            or not np.all(np.isfinite(coordinate_lower))
+            or not np.all(np.isfinite(coordinate_upper))
+            or np.any(coordinate_lower >= coordinate_upper)
+        ):
+            raise ValueError(
+                "coordinate_qdot_bounds must contain finite, ordered bounds "
+                f"for all {model.nb_qdot} generalized velocities."
+            )
+        for index in range(model.nb_qdot):
+            lower = min(
+                float(qdot_x_bounds.min[index, 1]),
+                float(coordinate_lower[index]),
+            )
+            upper = max(
+                float(qdot_x_bounds.max[index, 1]),
+                float(coordinate_upper[index]),
+            )
+            qdot_x_bounds.min[index] = [lower, lower, lower]
+            qdot_x_bounds.max[index] = [upper, upper, upper]
 
     x_bounds.add(
         key="qdot",
@@ -1354,6 +1392,47 @@ def set_x_bounds(
     )
 
     return x_bounds, x_init
+
+
+def full_coordinate_qdot_bounds_from_reduced_profile(
+    reduced_dynamics: ReducedCyclingDynamics,
+    *,
+    physical_crank_velocity_target: float,
+    physical_crank_velocity_margin: float,
+    sample_count: int = 721,
+    relative_padding: float = 0.01,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Envelope ``qdot = dq/dtheta * omega`` over one crank revolution."""
+
+    if physical_crank_velocity_margin <= 0:
+        raise ValueError("physical_crank_velocity_margin must be positive.")
+    if sample_count < 3:
+        raise ValueError("sample_count must be at least three.")
+    if not np.isfinite(relative_padding) or relative_padding < 0:
+        raise ValueError("relative_padding must be finite and non-negative.")
+
+    kinematics = reduced_dynamics.kinematics
+    theta = kinematics.theta_origin + kinematics.direction * np.linspace(
+        0.0, 2.0 * np.pi, sample_count
+    )
+    tangent = np.column_stack(
+        [
+            np.asarray(kinematics.tangent(value), dtype=float).reshape(-1)
+            for value in theta
+        ]
+    )
+    omega_bounds = (
+        physical_crank_velocity_target - physical_crank_velocity_margin,
+        physical_crank_velocity_target + physical_crank_velocity_margin,
+    )
+    candidates = np.concatenate(
+        [tangent * omega for omega in omega_bounds],
+        axis=1,
+    )
+    lower = np.min(candidates, axis=1)
+    upper = np.max(candidates, axis=1)
+    padding = np.maximum(1e-6, relative_padding * (upper - lower))
+    return lower - padding, upper + padding
 
 
 def set_reduced_x_bounds(
@@ -2044,6 +2123,7 @@ def updating_model(
         previous_stim=model.muscles_dynamics_model[0].previous_stim,
         activate_force_length_relationship=model.activate_force_length_relationship,
         activate_force_velocity_relationship=model.activate_force_velocity_relationship,
+        activate_passive_force_relationship=model.activate_passive_force_relationship,
         activate_residual_torque=model.activate_residual_torque,
         parameters=parameters,
         external_force_set=external_force_set,

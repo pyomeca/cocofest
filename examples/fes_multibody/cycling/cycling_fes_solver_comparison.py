@@ -82,9 +82,19 @@ BENCHMARK_CONFIGURATION_FIELDS = (
     "acados_sim_stages",
     "acados_sim_steps",
     "acados_newton_iter",
+    "acados_qp_cond_n",
+    "acados_qp_warm_start_level",
+    "acados_warm_start_first_qp",
+    "acados_warm_start_first_qp_from_nlp",
     "acados_hessian_approx",
     "acados_nlp_solver_type",
     "acados_search_direction_mode",
+    "acados_reset_solver_before_solve",
+    "acados_check_reuse_possible",
+    "acados_code_reuse_tolerance",
+    "acados_with_anderson_acceleration",
+    "acados_anderson_activation_threshold",
+    "acados_byrd_omojokon_slack_relaxation_factor",
     "acados_assisted_hot_start",
     "acados_control_homotopy_radii",
     "acados_control_homotopy_tolerance",
@@ -1898,9 +1908,12 @@ def _stimulation_pattern_snapshot(result: dict, cycle: int) -> dict:
     controls = limited.get("control_traces", {})
     start = (cycle - 1) * shooting_per_cycle
     stop = cycle * shooting_per_cycle
-    wheel_angle = np.asarray(limited.get("wheel_angle_trace", []), dtype=float).reshape(
-        -1
-    )
+    wheel_angle = np.asarray(
+        limited.get("physical_crank_angle_trace")
+        if limited.get("physical_crank_angle_trace") is not None
+        else limited.get("wheel_angle_trace", []),
+        dtype=float,
+    ).reshape(-1)
     if wheel_angle.size < stop + 1 or not np.all(
         np.isfinite(wheel_angle[start : stop + 1])
     ):
@@ -2550,6 +2563,10 @@ def main(
     acados_tolerance: float | None = None,
     acados_stationarity_tolerance: float | None = None,
     acados_qp_iter_max: int = 50,
+    acados_qp_cond_n: int | None = None,
+    acados_qp_warm_start_level: int = 0,
+    acados_warm_start_first_qp: bool = False,
+    acados_warm_start_first_qp_from_nlp: bool = False,
     acados_dual_warm_start_mode: str = "reset",
     acados_levenberg_marquardt: float = 0.0,
     acados_regularize_method: str = "GERSHGORIN_LEVENBERG_MARQUARDT",
@@ -2562,6 +2579,12 @@ def main(
     acados_qpscaling_scale_objective: str = "OBJECTIVE_GERSHGORIN",
     acados_qpscaling_scale_constraints: str = "INF_NORM",
     acados_ext_qp_res: bool = False,
+    acados_reset_solver_before_solve: bool = False,
+    acados_check_reuse_possible: bool = False,
+    acados_code_reuse_tolerance: float = 1e-12,
+    acados_with_anderson_acceleration: bool = False,
+    acados_anderson_activation_threshold: float = 0.1,
+    acados_byrd_omojokon_slack_relaxation_factor: float = 1.00001,
     acados_project_qdot_from_q: bool = False,
     shared_transfer_full_dynamics_rollout: bool = False,
     shared_transfer_phase_one: bool = False,
@@ -2952,6 +2975,26 @@ def main(
         acados_control_homotopy_window_max_radius
     )
     acados_args.acados_dual_warm_start_mode = acados_dual_warm_start_mode
+    acados_args.acados_qp_cond_n = acados_qp_cond_n
+    acados_args.acados_qp_warm_start_level = acados_qp_warm_start_level
+    acados_args.acados_warm_start_first_qp = acados_warm_start_first_qp
+    acados_args.acados_warm_start_first_qp_from_nlp = (
+        acados_warm_start_first_qp_from_nlp
+    )
+    acados_args.acados_reset_solver_before_solve = (
+        acados_reset_solver_before_solve
+    )
+    acados_args.acados_check_reuse_possible = acados_check_reuse_possible
+    acados_args.acados_code_reuse_tolerance = acados_code_reuse_tolerance
+    acados_args.acados_with_anderson_acceleration = (
+        acados_with_anderson_acceleration
+    )
+    acados_args.acados_anderson_activation_threshold = (
+        acados_anderson_activation_threshold
+    )
+    acados_args.acados_byrd_omojokon_slack_relaxation_factor = (
+        acados_byrd_omojokon_slack_relaxation_factor
+    )
     acados_args.acados_proximal_control_weights = acados_proximal_control_weights
     acados_args.acados_proximal_control_each_window = (
         acados_proximal_control_each_window
@@ -4011,6 +4054,17 @@ def build_cli() -> argparse.ArgumentParser:
         help="Stationarity tolerance applied independently from ACADOS feasibility.",
     )
     parser.add_argument("--acados-qp-iter-max", type=int, default=50)
+    parser.add_argument("--acados-qp-cond-n", type=int, default=None)
+    parser.add_argument(
+        "--acados-qp-warm-start-level",
+        type=int,
+        choices=(0, 1, 2, 3),
+        default=0,
+    )
+    parser.add_argument("--acados-warm-start-first-qp", action="store_true")
+    parser.add_argument(
+        "--acados-warm-start-first-qp-from-nlp", action="store_true"
+    )
     parser.add_argument(
         "--acados-dual-warm-start-mode",
         choices=("preserve", "reset", "shift"),
@@ -4067,6 +4121,20 @@ def build_cli() -> argparse.ArgumentParser:
         default="INF_NORM",
     )
     parser.add_argument("--acados-ext-qp-res", action="store_true")
+    parser.add_argument("--acados-reset-solver-before-solve", action="store_true")
+    parser.add_argument("--acados-check-reuse-possible", action="store_true")
+    parser.add_argument("--acados-code-reuse-tolerance", type=float, default=1e-12)
+    parser.add_argument(
+        "--acados-with-anderson-acceleration", action="store_true"
+    )
+    parser.add_argument(
+        "--acados-anderson-activation-threshold", type=float, default=0.1
+    )
+    parser.add_argument(
+        "--acados-byrd-omojokon-slack-relaxation-factor",
+        type=float,
+        default=1.00001,
+    )
     parser.add_argument("--acados-project-qdot-from-q", action="store_true")
     parser.add_argument("--acados-diagnostics", action="store_true")
     parser.add_argument("--disable-periodic-fes-warmup-projection", action="store_true")
@@ -4328,6 +4396,12 @@ if __name__ == "__main__":
         acados_tolerance=args.acados_tolerance,
         acados_stationarity_tolerance=args.acados_stationarity_tolerance,
         acados_qp_iter_max=args.acados_qp_iter_max,
+        acados_qp_cond_n=args.acados_qp_cond_n,
+        acados_qp_warm_start_level=args.acados_qp_warm_start_level,
+        acados_warm_start_first_qp=args.acados_warm_start_first_qp,
+        acados_warm_start_first_qp_from_nlp=(
+            args.acados_warm_start_first_qp_from_nlp
+        ),
         acados_dual_warm_start_mode=args.acados_dual_warm_start_mode,
         acados_levenberg_marquardt=args.acados_levenberg_marquardt,
         acados_regularize_method=args.acados_regularize_method,
@@ -4340,6 +4414,18 @@ if __name__ == "__main__":
         acados_qpscaling_scale_objective=args.acados_qpscaling_scale_objective,
         acados_qpscaling_scale_constraints=args.acados_qpscaling_scale_constraints,
         acados_ext_qp_res=args.acados_ext_qp_res,
+        acados_reset_solver_before_solve=args.acados_reset_solver_before_solve,
+        acados_check_reuse_possible=args.acados_check_reuse_possible,
+        acados_code_reuse_tolerance=args.acados_code_reuse_tolerance,
+        acados_with_anderson_acceleration=(
+            args.acados_with_anderson_acceleration
+        ),
+        acados_anderson_activation_threshold=(
+            args.acados_anderson_activation_threshold
+        ),
+        acados_byrd_omojokon_slack_relaxation_factor=(
+            args.acados_byrd_omojokon_slack_relaxation_factor
+        ),
         acados_project_qdot_from_q=args.acados_project_qdot_from_q,
         shared_transfer_full_dynamics_rollout=(
             args.shared_transfer_full_dynamics_rollout

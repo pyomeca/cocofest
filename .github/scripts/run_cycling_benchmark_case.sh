@@ -105,7 +105,7 @@ python "$workspace/examples/fes_multibody/cycling/cycling_fes_solver_comparison.
   --standard-warmup-seed "$workspace/.github/benchmark-seeds/legacy-resistive-0p22-warmup.npz" \
   --legacy-standard-warmup-seed-signed-torque 0.22 \
   --standard-warmup-seed-continuation \
-  --common-initial-solution "$workspace/benchmark-seed/common-${mechanics}.npz" \
+  --common-initial-solution "$workspace/benchmark-seed/common-reduced.npz" \
   --no-optional-nlp-periodic-ipopt-hot-start \
   --warmup-ipopt-linear-solver mumps \
   --ipopt-linear-solver mumps \

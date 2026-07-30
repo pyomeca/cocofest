@@ -51,6 +51,108 @@ def _muscle_model():
     )
 
 
+def test_updating_full_model_preserves_every_force_relationship(monkeypatch):
+    captured = {}
+
+    def fake_fes_model(**kwargs):
+        captured.update(kwargs)
+        return SimpleNamespace(**kwargs)
+
+    monkeypatch.setattr(mhe_example, "FesMskModel", fake_fes_model)
+    muscle = SimpleNamespace(stim_time=[0.0], previous_stim=None)
+    model = SimpleNamespace(
+        name="cycling",
+        biorbd_path="cycling.bioMod",
+        muscles_dynamics_model=[muscle],
+        activate_force_length_relationship=True,
+        activate_force_velocity_relationship=True,
+        activate_passive_force_relationship=True,
+        activate_residual_torque=False,
+        constant_external_torque=np.array([0.2]),
+    )
+
+    updated = mhe_example.updating_model(
+        model,
+        external_force_set="external",
+        parameters="parameters",
+    )
+
+    assert updated.activate_force_length_relationship is True
+    assert updated.activate_force_velocity_relationship is True
+    assert updated.activate_passive_force_relationship is True
+    assert captured["constant_external_torque"] is model.constant_external_torque
+
+
+def test_full_qdot_envelope_contains_every_lifted_reduced_velocity():
+    class Kinematics:
+        theta_origin = 0.0
+        direction = 1.0
+
+        @staticmethod
+        def tangent(theta):
+            return np.array(
+                [
+                    0.4 * np.sin(theta),
+                    0.5 * np.cos(theta),
+                    1.0 + 0.45 * np.cos(theta),
+                ]
+            )
+
+    reduced = SimpleNamespace(kinematics=Kinematics())
+    lower, upper = mhe_example.full_coordinate_qdot_bounds_from_reduced_profile(
+        reduced,
+        physical_crank_velocity_target=-2.0 * np.pi,
+        physical_crank_velocity_margin=3.0,
+        sample_count=721,
+        relative_padding=0.01,
+    )
+
+    for theta in np.linspace(0.0, 2.0 * np.pi, 721):
+        tangent = reduced.kinematics.tangent(theta)
+        for omega in (-2.0 * np.pi - 3.0, -2.0 * np.pi + 3.0):
+            lifted_qdot = tangent * omega
+            assert np.all(lifted_qdot >= lower)
+            assert np.all(lifted_qdot <= upper)
+    assert lower[2] < -13.4
+    assert upper[2] > -1.9
+
+
+@pytest.mark.parametrize(
+    "overrides, message",
+    (
+        (
+            {"nlp_solver_type": "SQP_WITH_FEASIBLE_QP", "ext_qp_res": True},
+            "does not support",
+        ),
+        (
+            {
+                "with_anderson_acceleration": True,
+                "globalization": "FUNNEL_L1PEN_LINESEARCH",
+            },
+            "requires FIXED_STEP",
+        ),
+        (
+            {"byrd_omojokon_slack_relaxation_factor": 0.99},
+            "must be finite and >= 1",
+        ),
+    ),
+)
+def test_acados_v055_rejects_unsafe_option_combinations(overrides, message):
+    options = {
+        "nlp_solver_type": "SQP",
+        "globalization": "FIXED_STEP",
+        "ext_qp_res": False,
+        "code_reuse_tolerance": 1e-12,
+        "with_anderson_acceleration": False,
+        "anderson_activation_threshold": 0.1,
+        "byrd_omojokon_slack_relaxation_factor": 1.00001,
+    }
+    options.update(overrides)
+
+    with pytest.raises(ValueError, match=message):
+        periodic_example.validate_acados_v055_options(**options)
+
+
 def _dynamics(model, pulse_width, numerical_timeseries):
     return np.asarray(
         model.system_dynamics(
@@ -555,6 +657,12 @@ def test_common_target_seed_enables_the_robust_acados_reference_preparation():
     assert args.acados_transfer_irk_rollout is True
     assert args.acados_bind_first_node_fes_states is True
     assert args.acados_dual_warm_start_mode == "reset"
+    assert args.acados_reset_solver_before_solve is False
+    assert args.acados_check_reuse_possible is False
+    assert args.acados_code_reuse_tolerance == 1e-12
+    assert args.acados_with_anderson_acceleration is False
+    assert args.acados_anderson_activation_threshold == 0.1
+    assert args.acados_byrd_omojokon_slack_relaxation_factor == 1.00001
     assert args.acados_nlp_solver_type == "SQP"
     assert args.acados_hessian_approx == "GAUSS_NEWTON"
 
@@ -2208,6 +2316,11 @@ def test_stimulation_snapshots_use_one_based_cycles_and_real_crank_phase():
         "wheel_angle_trace": np.linspace(
             0.0, -2.0 * np.pi * cycle_count, cycle_count * shooting_per_cycle + 1
         ),
+        "physical_crank_angle_trace": np.linspace(
+            0.2,
+            0.2 - 2.0 * np.pi * cycle_count,
+            cycle_count * shooting_per_cycle + 1,
+        ),
         "state_traces": {
             "qdot": np.vstack(
                 (
@@ -2234,6 +2347,10 @@ def test_stimulation_snapshots_use_one_based_cycles_and_real_crank_phase():
         cycle_10["muscles"]["Biceps"]["pulse_width_us"], [10.0, 10.0]
     )
     np.testing.assert_allclose(cycle_10["crank_phase_rad"], [0.0, np.pi])
+    np.testing.assert_allclose(
+        cycle_10["crank_angle_rad"],
+        [0.2 - 18.0 * np.pi, 0.2 - 19.0 * np.pi],
+    )
     np.testing.assert_allclose(cycle_10["crank_velocity_rad_s"], [-1.0, -1.0])
     np.testing.assert_allclose(
         snapshots["cycle_30"]["muscles"]["Biceps"]["pulse_width_us"],
@@ -3631,16 +3748,30 @@ def test_github_acados_runner_uses_reference_and_option_profiles_sequentially():
     )
     assert "inputs.cycles != 'screen' && inputs.cycles != 'acados'" in workflow
     assert "prepare-acados-stack:" in workflow
-    assert "ACADOS_COMMIT: 48e223e85f0408ebfd1d8c6d6fb0589e9c41b3aa" in workflow
+    assert "BIOPTIM_PRODUCTION_COMMIT: 04f0e1487f5b2836f4f724664dc0313ee09e9773" in workflow
+    assert "ACADOS_COMMIT: 59d93e17d2985fdd73fc58b8a83ed8f83a024171" in workflow
+    assert "ACADOS_INSTALL_SCRIPT_BLOB: 5ac8064ab613251e62560b5de8cbbb9550f5c5d0" in workflow
     assert "for mechanics in full reduced" in workflow
     assert workflow.index("prepare_case reduced") < workflow.index("prepare_case full")
     assert (
         '--common-initial-solution "$GITHUB_WORKSPACE/benchmark-seed-result/common-reduced.npz"'
         in workflow
     )
+    assert '--common-initial-solution "benchmark-seed/common-reduced.npz"' in workflow
     assert "--experimental-reduced-acados" in workflow
     assert "--common-initial-solution" in workflow
     assert "run_case sqp-irk-reference" in workflow
+    assert "run_case sqp-irk-reset-memory" in workflow
+    assert "--acados-reset-solver-before-solve" in workflow
+    assert "run_case sqp-irk-qp-hot" in workflow
+    assert "--acados-qp-warm-start-level 2" in workflow
+    assert "--acados-warm-start-first-qp-from-nlp" in workflow
+    assert "run_case sqp-irk-fixed" in workflow
+    assert "run_case sqp-irk-anderson" in workflow
+    assert "--acados-with-anderson-acceleration" in workflow
+    assert "--acados-anderson-activation-threshold 0.1" in workflow
+    assert "--acados-check-reuse-possible" in workflow
+    assert "--acados-byrd-omojokon-slack-relaxation-factor 1.00001" in workflow
     assert "run_case sqp-irk-two-stage" in workflow
     assert "--acados-transfer-bound-homotopy-fractions 0,1" in workflow
     assert "--acados-transfer-bound-homotopy-iterations 20" in workflow

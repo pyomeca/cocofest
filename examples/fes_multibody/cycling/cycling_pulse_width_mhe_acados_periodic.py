@@ -1374,6 +1374,52 @@ def build_argument_parser() -> argparse.ArgumentParser:
         help="Initialize the first QP warm start from the current NLP iterate.",
     )
     parser.add_argument(
+        "--acados-reset-solver-before-solve",
+        action="store_true",
+        help=(
+            "Reset ACADOS and the QP-solver memory before each NLP solve. "
+            "This is an ACADOS >=0.5.5 diagnostic option; the projected "
+            "Cocofest primal is injected again after the reset."
+        ),
+    )
+    parser.add_argument(
+        "--acados-check-reuse-possible",
+        action="store_true",
+        help=(
+            "Ask ACADOS >=0.5.5 to validate whether its generated code can be "
+            "reused. Each benchmark case must use an isolated JSON/code folder."
+        ),
+    )
+    parser.add_argument(
+        "--acados-code-reuse-tolerance",
+        type=float,
+        default=1e-12,
+        help="Numerical comparison tolerance used by the ACADOS code-reuse audit.",
+    )
+    parser.add_argument(
+        "--acados-with-anderson-acceleration",
+        action="store_true",
+        help=(
+            "Enable ACADOS Anderson acceleration. It is accepted only with "
+            "FIXED_STEP globalization."
+        ),
+    )
+    parser.add_argument(
+        "--acados-anderson-activation-threshold",
+        type=float,
+        default=0.1,
+        help="Residual threshold below which ACADOS activates Anderson acceleration.",
+    )
+    parser.add_argument(
+        "--acados-byrd-omojokon-slack-relaxation-factor",
+        type=float,
+        default=1.00001,
+        help=(
+            "Slack relaxation factor for the Byrd-Omojokun feasible-QP direction; "
+            "must be finite and at least one."
+        ),
+    )
+    parser.add_argument(
         "--acados-dual-warm-start-mode",
         choices=("preserve", "reset", "shift"),
         default="reset",
@@ -3336,6 +3382,20 @@ def _codegen_signature(args: argparse.Namespace) -> str:
         "acados_warm_start_first_qp_from_nlp": (
             args.acados_warm_start_first_qp_from_nlp
         ),
+        "acados_reset_solver_before_solve": (
+            args.acados_reset_solver_before_solve
+        ),
+        "acados_check_reuse_possible": args.acados_check_reuse_possible,
+        "acados_code_reuse_tolerance": args.acados_code_reuse_tolerance,
+        "acados_with_anderson_acceleration": (
+            args.acados_with_anderson_acceleration
+        ),
+        "acados_anderson_activation_threshold": (
+            args.acados_anderson_activation_threshold
+        ),
+        "acados_byrd_omojokon_slack_relaxation_factor": (
+            args.acados_byrd_omojokon_slack_relaxation_factor
+        ),
         "acados_qpscaling_scale_objective": args.acados_qpscaling_scale_objective,
         "acados_qpscaling_scale_constraints": args.acados_qpscaling_scale_constraints,
         "acados_ext_qp_res": args.acados_ext_qp_res,
@@ -3389,6 +3449,45 @@ def set_acados_unsafe_option(solver: Solver.ACADOS, value, name: str) -> None:
     setattr(solver, f"_{name}", value)
 
 
+def validate_acados_v055_options(
+    *,
+    nlp_solver_type: str,
+    globalization: str,
+    ext_qp_res: bool,
+    code_reuse_tolerance: float,
+    with_anderson_acceleration: bool,
+    anderson_activation_threshold: float,
+    byrd_omojokon_slack_relaxation_factor: float,
+) -> None:
+    """Reject option combinations that ACADOS 0.5.5 cannot use safely."""
+
+    if nlp_solver_type == "SQP_WITH_FEASIBLE_QP" and ext_qp_res:
+        raise ValueError(
+            "ACADOS 0.5.5 does not support --acados-ext-qp-res with "
+            "SQP_WITH_FEASIBLE_QP."
+        )
+    if with_anderson_acceleration and globalization != "FIXED_STEP":
+        raise ValueError(
+            "ACADOS Anderson acceleration requires FIXED_STEP globalization."
+        )
+    if not np.isfinite(code_reuse_tolerance) or code_reuse_tolerance < 0:
+        raise ValueError("ACADOS code-reuse tolerance must be finite and non-negative.")
+    if (
+        not np.isfinite(byrd_omojokon_slack_relaxation_factor)
+        or byrd_omojokon_slack_relaxation_factor < 1
+    ):
+        raise ValueError(
+            "ACADOS Byrd-Omojokun slack relaxation factor must be finite and >= 1."
+        )
+    if (
+        not np.isfinite(anderson_activation_threshold)
+        or anderson_activation_threshold < 0
+    ):
+        raise ValueError(
+            "ACADOS Anderson activation threshold must be finite and non-negative."
+        )
+
+
 def configure_acados_solver(
     model_name: str,
     generated_code_path: str,
@@ -3423,8 +3522,26 @@ def configure_acados_solver(
     qpscaling_scale_constraints: str,
     ext_qp_res: bool,
     store_iterates: bool,
+    reset_solver_before_solve: bool = False,
+    check_reuse_possible: bool = False,
+    code_reuse_tolerance: float = 1e-12,
+    with_anderson_acceleration: bool = False,
+    anderson_activation_threshold: float = 0.1,
+    byrd_omojokon_slack_relaxation_factor: float = 1.00001,
     print_level: int = 0,
 ) -> Solver.ACADOS:
+    validate_acados_v055_options(
+        nlp_solver_type=nlp_solver_type,
+        globalization=globalization,
+        ext_qp_res=ext_qp_res,
+        code_reuse_tolerance=code_reuse_tolerance,
+        with_anderson_acceleration=with_anderson_acceleration,
+        anderson_activation_threshold=anderson_activation_threshold,
+        byrd_omojokon_slack_relaxation_factor=(
+            byrd_omojokon_slack_relaxation_factor
+        ),
+    )
+
     solver = Solver.ACADOS()
     solver.set_acados_dir(str(ensure_acados_environment()))
     solver.set_c_generated_code_path(generated_code_path)
@@ -3499,6 +3616,39 @@ def configure_acados_solver(
         warm_start_first_qp_from_nlp,
         "nlp_solver_warm_start_first_qp_from_nlp",
     )
+    for setter_name, value, unsafe_name in (
+        (
+            "set_reset_solver_before_solve",
+            reset_solver_before_solve,
+            "reset_solver_before_solve",
+        ),
+        (
+            "set_check_reuse_possible",
+            check_reuse_possible,
+            "check_reuse_possible",
+        ),
+        ("set_tol_code_reuse", code_reuse_tolerance, "tol_code_reuse"),
+        (
+            "set_with_anderson_acceleration",
+            with_anderson_acceleration,
+            "with_anderson_acceleration",
+        ),
+        (
+            "set_anderson_activation_threshold",
+            anderson_activation_threshold,
+            "anderson_activation_threshold",
+        ),
+        (
+            "set_byrd_omojokon_slack_relaxation_factor",
+            byrd_omojokon_slack_relaxation_factor,
+            "byrd_omojokon_slack_relaxation_factor",
+        ),
+    ):
+        setter = getattr(solver, setter_name, None)
+        if setter is not None:
+            setter(value)
+        elif value not in (False, None):
+            set_acados_unsafe_option(solver, value, unsafe_name)
     return solver
 
 
@@ -11523,7 +11673,6 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
         "enforce_physical_crank_velocity_bounds": bool(
             build_mechanical_audit_profile
             and args.mechanical_formulation == "full"
-            and args.solver != "acados"
         ),
         # The custom terminal phase constraint remains experimental: the
         # current Bioptim/CasADi stack aborts while initializing IPOPT when
@@ -11983,6 +12132,30 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
             print(f"acados_regularize_method: {args.acados_regularize_method}")
             print(f"acados_levenberg_marquardt: {args.acados_levenberg_marquardt}")
             print(f"acados_globalization: {args.acados_globalization}")
+            print(
+                "acados_reset_solver_before_solve: "
+                f"{args.acados_reset_solver_before_solve}"
+            )
+            print(
+                "acados_check_reuse_possible: "
+                f"{args.acados_check_reuse_possible}"
+            )
+            print(
+                "acados_code_reuse_tolerance: "
+                f"{args.acados_code_reuse_tolerance}"
+            )
+            print(
+                "acados_with_anderson_acceleration: "
+                f"{args.acados_with_anderson_acceleration}"
+            )
+            print(
+                "acados_anderson_activation_threshold: "
+                f"{args.acados_anderson_activation_threshold}"
+            )
+            print(
+                "acados_byrd_omojokon_slack_relaxation_factor: "
+                f"{args.acados_byrd_omojokon_slack_relaxation_factor}"
+            )
             print(f"acados_fixed_step_length: {args.acados_fixed_step_length}")
             print(f"acados_nlp_qp_tol_strategy: {args.acados_nlp_qp_tol_strategy}")
             print(f"acados_qp_iter_max: {args.acados_qp_iter_max}")
@@ -13426,6 +13599,15 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
 
     solver_first_iter = None
     if args.solver == "acados":
+        if (
+            args.acados_warm_start_first_qp_from_nlp
+            and args.acados_qp_cond_n not in (None, nmpc.nlp[0].ns)
+        ):
+            raise ValueError(
+                "--acados-warm-start-first-qp-from-nlp requires full "
+                f"condensing (qp_cond_N={nmpc.nlp[0].ns}); received "
+                f"{args.acados_qp_cond_n}."
+            )
         nmpc._cocofest_fix_controls_to_warmup = args.acados_fix_controls_to_warmup
         nmpc._cocofest_fixed_control_tolerance = args.acados_fixed_control_tolerance
         nmpc._cocofest_discrete_substeps = (
@@ -13481,6 +13663,18 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
             qpscaling_scale_constraints=args.acados_qpscaling_scale_constraints,
             ext_qp_res=args.acados_ext_qp_res,
             store_iterates=args.acados_store_iterates,
+            reset_solver_before_solve=args.acados_reset_solver_before_solve,
+            check_reuse_possible=args.acados_check_reuse_possible,
+            code_reuse_tolerance=args.acados_code_reuse_tolerance,
+            with_anderson_acceleration=(
+                args.acados_with_anderson_acceleration
+            ),
+            anderson_activation_threshold=(
+                args.acados_anderson_activation_threshold
+            ),
+            byrd_omojokon_slack_relaxation_factor=(
+                args.acados_byrd_omojokon_slack_relaxation_factor
+            ),
             print_level=args.acados_print_level,
         )
         if (

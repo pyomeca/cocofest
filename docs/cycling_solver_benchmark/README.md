@@ -53,19 +53,41 @@ et effectue chaque checkout par SHA complet. Le SHA est la référence
 reproductible; les noms de branche servent uniquement à documenter la
 provenance humaine.
 
-### 0.1 Campagne d’endurance principale
+### 0.1 Workflow actif pour la nouvelle campagne
 
 | Composant | Version Bioptim réellement utilisée |
 |---|---|
-| Construction et certification des seeds | `3523f1745e315f07761159d7e06bd2d876026704` |
-| IPOPT full/reduced | `3523f1745e315f07761159d7e06bd2d876026704` |
-| MadNLP/MUMPS full/reduced | `3523f1745e315f07761159d7e06bd2d876026704` |
-| ACADOS full/reduced et variantes | `3523f1745e315f07761159d7e06bd2d876026704` |
+| Construction et certification des seeds | `04f0e1487f5b2836f4f724664dc0313ee09e9773` |
+| IPOPT full/reduced | `04f0e1487f5b2836f4f724664dc0313ee09e9773` |
+| MadNLP/MUMPS full/reduced | `04f0e1487f5b2836f4f724664dc0313ee09e9773` |
+| ACADOS full/reduced et variantes | `04f0e1487f5b2836f4f724664dc0313ee09e9773` |
 
-Ce commit date du 27 juillet 2026 et porte le correctif
-`Fix Fatrop physical bound auditing`. Le workflow lui associe le libellé de
-provenance `codex/fatrop-cocofest-benchmark`, mais ne fait jamais un checkout
-flottant de cette branche.
+Ce commit appartient à la branche dédiée
+`codex/cocofest-acados-v055-exploration`. Il part exactement de
+`3523f1745e315f07761159d7e06bd2d876026704`, utilisé par la campagne publiée,
+et ajoute sans modifier les interfaces MadNLP/Fatrop :
+
+- ACADOS `v0.5.5`, sous-module
+  `59d93e17d2985fdd73fc58b8a83ed8f83a024171`, contre `v0.5.1` auparavant;
+- les paramètres numériques modifiables aux `N+1` nœuds;
+- la remise à zéro du solveur, les modes SQP/RTI/feasible-QP et les nouveaux
+  diagnostics;
+- Anderson et le facteur de relaxation Byrd–Omojokun;
+- la sauvegarde de l’état primal-dual, qui n’est volontairement pas utilisée
+  pour écraser le rollout/projection primal de Cocofest;
+- les bornes de contrôle ordonnées et exprimées dans les coordonnées scalées;
+- un JSON ACADOS isolé dans chaque dossier de code généré;
+- une représentation canonique des paramètres runtime permettant de
+  réutiliser la même bibliothèque avec de nouvelles données nodales.
+
+La branche Bioptim a passé 17 tests ciblés et un test réel ACADOS `v0.5.5` :
+la seconde OCP a réutilisé la bibliothèque compilée tout en recevant de
+nouvelles valeurs aux six nœuds. Le workflow effectue toujours un checkout par
+SHA complet; le nom de branche documente seulement la provenance.
+
+Les résultats 100 RHO de la section 11 ont été produits avec l’ancien SHA
+`3523f1745e315f07761159d7e06bd2d876026704`. Ils restent historiques jusqu’à
+la fin de la nouvelle campagne graduelle 5, 30 puis 100 RHO.
 
 ### 0.2 Fatrop historique et patchs Bioptim
 
@@ -94,7 +116,7 @@ Bioptim 3523f1745e315f07761159d7e06bd2d876026704
 
 Fatrop n’est plus installé ni exécuté par la campagne SX-only. Le reduced SX
 a résolu le smoke d’un RHO, mais le full SX s’arrête avant le premier RHO avec
-une incohérence de structure de \(A\). Le réintroduire exigerait de corriger
+une incohérence de structure de $A$. Le réintroduire exigerait de corriger
 cette structure dans Bioptim puis de valider full et reduced en SX; revenir à
 MX contredirait le protocole numérique courant.
 
@@ -121,26 +143,26 @@ une modification ultérieure du README.
 
 ### 1.1 États musculaires
 
-Pour chaque muscle \(m\), le modèle de Ding avec fatigue utilise cinq états :
+Pour chaque muscle $m$, le modèle de Ding avec fatigue utilise cinq états :
 
-\[
+$$
 x_m =
 \begin{bmatrix}
 C_{N,m} & F_m & A_m & \tau_{1,m} & K_{\mathrm M,m}
 \end{bmatrix}^{\mathsf T}.
-\]
+$$
 
 Ils représentent respectivement le complexe calcium-troponine, la force, la
 capacité de production de force et deux paramètres dynamiques qui évoluent avec
 la fatigue. Avec quatre muscles,
 
-\[
+$$
 n_{\mathrm{Ding}} = 4 \times 5 = 20.
-\]
+$$
 
 La dynamique de force peut être écrite sous la forme :
 
-\[
+$$
 \dot F_m =
 \left[
 A_m^\mathrm{eff}(PW_m)
@@ -150,69 +172,69 @@ A_m^\mathrm{eff}(PW_m)
 {\tau_{1,m}+\tau_2\frac{C_{N,m}}{K_{\mathrm M,m}+C_{N,m}}}
 \right]
 \left(f_{\ell,m} f_{v,m}+f_{\mathrm{passif},m}\right),
-\]
+$$
 
 où l’effet de la largeur d’impulsion est
 
-\[
+$$
 A_m^\mathrm{eff}(PW_m)
 =
 A_m\left[
 1-\exp\left(-\frac{PW_m-pd0_m}{pdt_m}\right)
 \right].
-\]
+$$
 
 Les trois états lents de fatigue suivent :
 
-\[
+$$
 \dot A_m
 =
 -\frac{A_m-A_{\mathrm{scale},m}}{\tau_{\mathrm{fat},m}}
 +\alpha_{A,m}F_m,
-\]
+$$
 
-\[
+$$
 \dot \tau_{1,m}
 =
 -\frac{\tau_{1,m}-\tau_{1,\mathrm{rest},m}}{\tau_{\mathrm{fat},m}}
 +\alpha_{\tau_1,m}F_m,
-\]
+$$
 
-\[
+$$
 \dot K_{\mathrm M,m}
 =
 -\frac{K_{\mathrm M,m}-K_{\mathrm M,\mathrm{rest},m}}{\tau_{\mathrm{fat},m}}
 +\alpha_{K_m,m}F_m.
-\]
+$$
 
-Dans les paramètres courants, \(\alpha_A<0\), tandis que
-\(\alpha_{\tau_1}>0\) et \(\alpha_{K_m}>0\).
+Dans les paramètres courants, $\alpha_A<0$, tandis que
+$\alpha_{\tau_1}>0$ et $\alpha_{K_m}>0$.
 La force élevée et répétée fait diminuer la capacité normalisée
-\(A_m/A_{\mathrm{scale},m}\).
+$A_m/A_{\mathrm{scale},m}$.
 
 ### 1.2 Largeurs d’impulsion
 
 Chaque muscle possède 30 commandes de largeur d’impulsion par cycle :
 
-\[
+$$
 u_k =
 \begin{bmatrix}
 PW_{1,k} & PW_{2,k} & PW_{3,k} & PW_{4,k}
 \end{bmatrix}^{\mathsf T},
 \qquad k=0,\ldots,29.
-\]
+$$
 
 Les bornes physiques sont
 
-\[
+$$
 pd0_m \le PW_{m,k} \le 600\ \mu\mathrm{s}.
-\]
+$$
 
 Pour les paramètres Ding courants,
 
-\[
+$$
 pd0 \simeq 131.405\ \mu\mathrm{s}.
-\]
+$$
 
 `pd0` est le vrai zéro de recrutement du modèle. Une commande inactive doit
 être fixée à `pd0`, et non à une largeur d’impulsion numérique nulle. Les seeds
@@ -223,7 +245,7 @@ correction produit un warning.
 
 L’objectif continu quadratique est
 
-\[
+$$
 J =
 10\,000
 \int_0^T
@@ -232,17 +254,17 @@ J =
 1-\frac{A_m(t)}{A_{\mathrm{scale},m}}
 \right)^2
 \,dt,
-\]
+$$
 
-où le poids de fatigue actif vaut \(10\,000\). Les autres composantes de coût
+où le poids de fatigue actif vaut $10\,000$. Les autres composantes de coût
 sont désactivées dans le benchmark :
 
-\[
+$$
 w_{\mathrm{force}} =
 w_{\mathrm{contrôle}} =
 w_{\mathrm{angle\ terminal}} =
 w_{\dot q} = 0.
-\]
+$$
 
 Le solveur minimise donc la fatigue, pas la force, la charge électrique ou la
 régularité des stimulations. Cette absence de régularisation autorise plusieurs
@@ -255,14 +277,14 @@ Deux métriques doivent être distinguées :
    cycles réellement exécutés;
 2. `fatigue_auc_cycles`, définie par
 
-   \[
+   $$
    \mathrm{AUC}_{\mathrm{fatigue}}
    =
    \int
    \sum_m
    \left(1-\frac{A_m}{A_{\mathrm{scale},m}}\right)
    d(\mathrm{cycle}).
-   \]
+   $$
 
 Le coût quadratique amplifie les muscles fortement fatigués. Un rapport de
 coût de 6 ou 7 ne signifie donc pas nécessairement une AUC 6 ou 7 fois plus
@@ -271,25 +293,25 @@ grande.
 ## 2. Receding horizon
 
 Le terme RHO désigne ici une résolution de l’OCP dans la séquence à horizon
-glissant. Pour un cycle par OCP, la résolution \(r\) optimise
+glissant. Pour un cycle par OCP, la résolution $r$ optimise
 
-\[
+$$
 \mathcal P_r:
 \quad
 \min_{z_r} f(z_r;p_r)
-\]
+$$
 
 sous
 
-\[
+$$
 g(z_r;p_r)=0,
 \qquad
 \underline g_r \le h(z_r;p_r)\le\overline g_r,
 \qquad
 \underline z_r\le z_r\le\overline z_r.
-\]
+$$
 
-Le vecteur \(p_r\) regroupe les informations qui changent sans modifier le
+Le vecteur $p_r$ regroupe les informations qui changent sans modifier le
 graphe symbolique :
 
 - l’état exécuté du cycle précédent;
@@ -300,25 +322,25 @@ graphe symbolique :
 
 La cible terminale est absolue :
 
-\[
+$$
 \theta_{\mathrm{cible}}(r)
 =
 \theta_0+r\Delta\theta,
 \qquad
 \Delta\theta=-2\pi,
-\]
+$$
 
 avec
 
-\[
+$$
 \left|\theta(T)-\theta_{\mathrm{cible}}(r)\right|
 \le 0.002\ \mathrm{rad}.
-\]
+$$
 
 Cette définition empêche un drift de même signe d’un cycle au suivant. Une
 cible définie à partir du terminal précédent aurait autorisé une accumulation
 de petites erreurs, même si chaque RHO respectait localement sa tolérance.
-Après chargement du seed commun, \(\theta_0\) est systématiquement recalé sur
+Après chargement du seed commun, $\theta_0$ est systématiquement recalé sur
 le premier état effectivement chargé, même si le seed et le consommateur ont
 la même formulation mécanique. Sans ce recalage, le run 5 RHO
 `30518532002` a produit cinq statuts IPOPT 0 en full, mais un décalage constant
@@ -328,17 +350,17 @@ seuil de `0.002 rad`.
 
 Le warm-start primal s’écrit schématiquement :
 
-\[
+$$
 z_{r+1}^{(0)}
 =
 \Pi_{\mathcal B_{r+1}}
 \left(
 \mathcal S z_r^\star
 \right),
-\]
+$$
 
-où \(\mathcal S\) décale la trajectoire d’un cycle et
-\(\Pi_{\mathcal B_{r+1}}\) la projette dans les nouvelles bornes. Les états de
+où $\mathcal S$ décale la trajectoire d’un cycle et
+$\Pi_{\mathcal B_{r+1}}$ la projette dans les nouvelles bornes. Les états de
 fatigue sont continus; ils ne sont pas remis à leur valeur reposée.
 
 Le benchmark autorise deux échecs consécutifs afin de distinguer un échec
@@ -350,40 +372,40 @@ invalide.
 
 La mécanique complète possède trois coordonnées généralisées :
 
-\[
+$$
 q\in\mathbb R^3,
 \qquad
 \dot q\in\mathbb R^3.
-\]
+$$
 
 Avec les 20 états musculaires :
 
-\[
+$$
 n_x^{\mathrm{full}}=20+3+3=26.
-\]
+$$
 
 Les équations contraintes sont :
 
-\[
+$$
 M(q)\ddot q+h(q,\dot q)
 =
 \tau_{\mathrm{muscles}}(q,\dot q,F)
 +\tau_{\mathrm{ext}}
 +J_c(q)^{\mathsf T}\lambda,
-\]
+$$
 
-\[
+$$
 J_c(q)\ddot q+\dot J_c(q,\dot q)\dot q=0.
-\]
+$$
 
 La seconde équation impose une accélération de contact nulle. Elle n’impose
 pas à elle seule :
 
-\[
+$$
 c(q)=0,
 \qquad
 J_c(q)\dot q=0.
-\]
+$$
 
 Ces deux conditions doivent être vraies au départ. Sinon, une erreur de
 position ou de vitesse de contact peut être propagée par une dynamique
@@ -398,25 +420,25 @@ actuellement. C’est une différence centrale avec la mécanique réduite.
 
 Les deux contraintes holonomes réduisent les trois coordonnées mécaniques à
 un degré de liberté. La formulation réduite utilise l’angle physique non
-enroulé du pédalier \(\theta\) et sa vitesse \(\omega\) :
+enroulé du pédalier $\theta$ et sa vitesse $\omega$ :
 
-\[
+$$
 x_{\mathrm{mécanique}}^{\mathrm{reduced}}
 =
 \begin{bmatrix}\theta & \omega\end{bmatrix}^{\mathsf T},
 \qquad
 n_x^{\mathrm{reduced}}=20+2=22.
-\]
+$$
 
 Elle n’impose pas une vitesse constante :
 
-\[
+$$
 \dot\theta=\omega.
-\]
+$$
 
 ### 4.1 Construction de la variété
 
-Pour chaque angle \(\theta\), trois équations déterminent \(q(\theta)\) :
+Pour chaque angle $\theta$, trois équations déterminent $q(\theta)$ :
 
 1. position horizontale du centre du pédalier;
 2. position verticale du centre du pédalier;
@@ -424,7 +446,7 @@ Pour chaque angle \(\theta\), trois équations déterminent \(q(\theta)\) :
 
 La solution périodique est représentée par
 
-\[
+$$
 q(\theta)
 =
 w\,s(\theta)+
@@ -432,35 +454,35 @@ w\,s(\theta)+
 \left(
 a_k\cos(k\theta)+b_k\sin(k\theta)
 \right),
-\]
+$$
 
-où \(w\,s(\theta)\) porte l’enroulement non périodique de la coordonnée du
+où $w\,s(\theta)$ porte l’enroulement non périodique de la coordonnée du
 pédalier. Les dérivées sont analytiques :
 
-\[
+$$
 \dot q = T(\theta)\omega,
 \qquad
 T(\theta)=\frac{dq}{d\theta},
-\]
+$$
 
-\[
+$$
 \ddot q
 =
 T(\theta)\dot\omega
 +\frac{d^2q}{d\theta^2}\omega^2.
-\]
+$$
 
 ### 4.2 Projection dynamique
 
 La projection tangentielle donne
 
-\[
+$$
 M_{\mathrm{eff}}(\theta)=T^{\mathsf T}M(q(\theta))T,
-\]
+$$
 
 et
 
-\[
+$$
 \dot\omega
 =
 \frac{
@@ -471,7 +493,7 @@ et
 }{
 M_{\mathrm{eff}}(\theta)
 }.
-\]
+$$
 
 Les coefficients périodiques suivants sont tabulés puis ajustés par séries de
 Fourier :
@@ -482,7 +504,7 @@ Fourier :
 - efficacité mécanique de chaque muscle;
 - efficacité du couple externe;
 - longueurs musculaires normalisées;
-- vitesses musculaires par unité de \(\omega\).
+- vitesses musculaires par unité de $\omega$.
 
 Les lois force-longueur, force-vitesse et passive originales sont ensuite
 évaluées avec ces géométries. Le réseau musculaire ou le modèle Ding n’est pas
@@ -519,6 +541,26 @@ python examples/fes_multibody/cycling/validate_reduced_cycling_dynamics.py \
 
 ## 5. Pourquoi full et reduced ne sont pas encore équivalents
 
+Un audit indépendant a montré que les résultats full/reduced publiés ne
+comparaient pas exactement le même problème. Quatre défauts certains sont
+maintenant corrigés dans le code, mais les tableaux historiques ne doivent pas
+être réinterprétés rétroactivement :
+
+1. `updating_model()` perdait l’activation de la relation de force passive dans
+   le full, tandis que reduced la conservait;
+2. `qdot[2]` recevait numériquement la borne de cadence physique `omega`, bien
+   que `qdot[2] = (dq_2/dtheta) omega`;
+3. `common-full.npz` provenait d’un RHO de certification supplémentaire, donc
+   full et reduced ne commençaient pas au même instant;
+4. le CSV des stimulations utilisait `q[2]` pour la phase full et `theta` pour
+   reduced, tout en exportant une vitesse physique.
+
+Le workflow actif utilise désormais `common-reduced.npz` pour les deux
+formulations. Le full est relevé par `q=q(theta)` et
+`qdot=T(theta) omega`; son solve de certification reste un audit et ne
+remplace plus le seed partagé. Les patrons utilisent toujours
+`physical_crank_angle_trace` lorsqu’elle existe.
+
 ### 5.1 Erreur de contact du seed full
 
 Dans le seed full commun du run `30487321536` :
@@ -529,19 +571,19 @@ Dans le seed full commun du run `30487321536` :
 - la projection sur la variété réduite corrige jusqu’à `0.575 rad`;
 - le résidu de vitesse tangentielle atteint `3.23 rad/s`.
 
-La réduction reconstruit toujours une posture sur \(c(q)=0\), tandis que la
+La réduction reconstruit toujours une posture sur $c(q)=0$, tandis que la
 formulation complète peut poursuivre la trajectoire hors variété. Les longueurs
 musculaires, vitesses de contraction, bras de levier et forces nécessaires
 sont alors différents.
 
-Le benchmark impose maintenant \(c(q_0)=0\) et
-\(J(q_0)\dot q_0=0\) au début de chaque RHO. Ces contraintes ne sont pas
+Le benchmark impose maintenant $c(q_0)=0$ et
+$J(q_0)\dot q_0=0$ au début de chaque RHO. Ces contraintes ne sont pas
 dupliquées à tous les nœuds : elles seraient redondantes avec la dynamique
 contrainte au niveau accélération et pourraient rendre le KKT déficient en
 rang. En complément, chaque trajectoire full est projetée sur la variété
 réduite. Le rapport contient désormais l’erreur maximale/RMS de configuration,
 le résidu maximal/RMS de vitesse tangentielle et les traces physiques
-\(\theta,\omega\). Une trajectoire qui dépasse `0.01 rad` ou `0.1 rad/s` est
+$\theta,\omega$. Une trajectoire qui dépasse `0.01 rad` ou `0.1 rad/s` est
 marquée physiquement invalide, même si le solveur converge.
 
 Le seed historique a aussi été construit à l’aide d’un modèle d’IK qui contient
@@ -553,33 +595,51 @@ Un second défaut a été corrigé dans la construction du warm-start de
 collocation. Radau degré 3 n’utilise pas quatre temps uniformes dans chaque
 intervalle, mais
 
-\[
+$$
 \tau=[0,\ 0.1550510257,\ 0.6449489743,\ 1].
-\]
+$$
 
 L’IK et ses dérivées sont maintenant évalués sur ces temps physiques, y
-compris les temps dupliqués entre le point Radau \(\tau=1\) et le nœud de tir
-suivant. Le recentrage de \(\theta\) utilise également cette grille et applique
-à \(\omega\) la dérivée temporelle de la correction, au lieu de modifier
+compris les temps dupliqués entre le point Radau $\tau=1$ et le nœud de tir
+suivant. Le recentrage de $\theta$ utilise également cette grille et applique
+à $\omega$ la dérivée temporelle de la correction, au lieu de modifier
 l’angle seul.
 
 ### 5.2 Angle relatif contre angle physique
 
 Dans la formulation complète, `q[2]` est une rotation articulaire relative.
-Dans la formulation réduite, \(\theta\) est l’angle physique du vecteur
+Dans la formulation réduite, $\theta$ est l’angle physique du vecteur
 centre-main. Le long de la variété :
 
-\[
+$$
 \frac{dq_2}{d\theta}\in[0.591,\ 1.452].
-\]
+$$
 
-Borner `qdot[2]` et \(\omega\) avec le même intervalle numérique ne borne donc
-pas la même cadence physique. De même, appliquer un couple constant sur
+Borner `qdot[2]` et $\omega$ avec le même intervalle numérique ne borne donc
+pas la même cadence physique. Pour la plage courante
+`\omega in [-9.283185, -3.283185] rad/s`, l’enveloppe relevée est :
+
+| Coordonnée | Enveloppe du relèvement | Ancienne borne full |
+|---|---:|---:|
+| `qdot[0]` | `[-3.3112, 3.6917]` | `[-10, 10]` |
+| `qdot[1]` | `[-4.7001, 4.7001]` | `[-14, 10]` |
+| `qdot[2]` | `[-13.4810, -1.9400]` | `[-9.2832, -3.2832]` |
+
+Aux cycles 10 et 30 de l’ancien artefact, le relèvement de l’optimum reduced
+violait l’ancienne borne full à 3 nœuds sur 30, jusqu’à `2.247 rad/s`.
+L’optimum reduced n’était donc littéralement pas admissible dans le full.
+
+Le code échantillonne maintenant `T(theta)` sur un tour, calcule les quatre
+produits de chaque extrême de `T_i` et `omega`, ajoute une marge numérique,
+puis élargit les bornes full sans resserrer les deux autres coordonnées. La
+contrainte non linéaire porte toujours la vraie borne de cadence physique.
+
+De même, appliquer un couple constant sur
 `q[2]` donne en coordonnée physique une efficacité modulée par
-\(dq_2/d\theta\).
+$dq_2/d\theta$.
 
 Ce point ne contribue pas par le couple externe dans le run courant, puisque
-\(\tau_{\mathrm{ext}}=0\), mais il affecte les bornes de vitesse et les
+$\tau_{\mathrm{ext}}=0$, mais il affecte les bornes de vitesse et les
 diagnostics de phase.
 
 ### 5.3 Effet sur les stimulations et la fatigue
@@ -591,20 +651,20 @@ communs, les maxima sont respectivement proches de `570/594 µs` contre
 
 La non-linéarité
 
-\[
+$$
 1-\exp\left(-\frac{PW-pd0}{pdt}\right)
-\]
+$$
 
 rend les pics de PW beaucoup plus importants que ne le suggère une simple
 comparaison des moyennes. La différence de recrutement se transforme
-directement en force, puis en fatigue de \(A\), \(\tau_1\) et \(K_m\).
+directement en force, puis en fatigue de $A$, $\tau_1$ et $K_m$.
 
 ### 5.4 Expérience appariée requise
 
 Avant d’interpréter le gain de fatigue comme physiologique, il faut :
 
 1. construire le seed full par relèvement exact
-   \(q=q(\theta)\), \(\dot q=T(\theta)\omega\);
+   $q=q(\theta)$, $\dot q=T(\theta)\omega$;
 2. imposer la position et la vitesse de contact au premier nœud de chaque RHO;
 3. auditer les résidus de contact à tous les nœuds;
 4. utiliser le même angle et la même vitesse physiques pour les bornes et la
@@ -617,15 +677,18 @@ Avant d’interpréter le gain de fatigue comme physiologique, il faut :
 Seul l’écart résiduel après ce test peut être attribué à la réduction
 dynamique.
 
-Les quatre premières briques sont maintenant engagées dans la CI :
+Les quatre premières briques sont maintenant implémentées et doivent être
+recertifiées par la nouvelle CI :
 
 - le seed reduced est résolu en premier;
 - le seed full est initialisé avec le relèvement exact
-  \(q(\theta),T(\theta)\omega\);
+  $q(\theta),T(\theta)\omega$;
 - les bornes mécaniques du seed full sont recadrées sans tronquer ce
   relèvement;
 - les contraintes de contact initiales et les bornes de cadence physique sont
-  actives pour les NLP;
+  actives pour les NLP et ACADOS full;
+- l’enveloppe des vitesses généralisées full contient tous les relèvements de
+  la plage de cadence reduced;
 - les phases, cadences et résidus de variété sont audités dans les coordonnées
   physiques.
 
@@ -641,33 +704,33 @@ le benchmark non apparié. Ce résultat local est très encourageant mais ne
 remplace pas encore le test CI apparié de 30 puis 100 RHO.
 
 Pour le full, la tolérance terminale portée par `q[2]` est réduite par
-\(\min_\theta |dq_2/d\theta|\), afin qu’elle implique la tolérance physique
-absolue demandée sur \(\theta\). Une contrainte terminale vectorielle
+$\min_\theta |dq_2/d\theta|$, afin qu’elle implique la tolérance physique
+absolue demandée sur $\theta$. Une contrainte terminale vectorielle
 cross/dot plus directe a été prototypée, mais elle fait actuellement avorter
 l’initialisation IPOPT dans la pile Bioptim/CasADi locale; elle reste donc
 désactivée et la phase physique terminale demeure vérifiée a posteriori.
 
 ## 6. Discrétisation et taille du NLP
 
-Le benchmark NLP utilise \(N=30\) intervalles et une collocation Radau de
-degré \(d=3\). Pour un état de taille \(n_x\), le nombre approximatif de
+Le benchmark NLP utilise $N=30$ intervalles et une collocation Radau de
+degré $d=3$. Pour un état de taille $n_x$, le nombre approximatif de
 variables d’état stockées est
 
-\[
+$$
 n_x\left[1+N(d+1)\right].
-\]
+$$
 
-En ajoutant \(4N=120\) commandes :
+En ajoutant $4N=120$ commandes :
 
-\[
+$$
 n_z^{\mathrm{full}}
 \approx 26(121)+120=3266,
-\]
+$$
 
-\[
+$$
 n_z^{\mathrm{reduced}}
 \approx 22(121)+120=2782.
-\]
+$$
 
 La réduction du nombre de variables est donc d’environ 15 %, insuffisante pour
 expliquer seule le gain de temps proche de 2. Le principal gain vient de la
@@ -675,20 +738,20 @@ réduction de la complexité des dérivées mécaniques.
 
 Pour chaque intervalle, les équations de collocation ont la forme
 
-\[
+$$
 X_{k,j}
 =
 X_k+h\sum_{r=1}^{d}a_{jr}f(X_{k,r},U_k),
-\]
+$$
 
-\[
+$$
 X_{k+1}
 =
 X_k+h\sum_{r=1}^{d}b_r f(X_{k,r},U_k).
-\]
+$$
 
 Le classement temporel des variables place les blocs
-\((X_k,U_k,X_{k,1},\ldots)\) de manière à préserver la structure par étage.
+$(X_k,U_k,X_{k,1},\ldots)$ de manière à préserver la structure par étage.
 Il est utilisé pour IPOPT et MadNLP dans la campagne active. Les essais
 Fatrop historiques utilisaient le même ordre. ACADOS conserve son organisation
 native par étage.
@@ -698,7 +761,7 @@ native par étage.
 Une itération de Newton ou de point intérieur conduit schématiquement au
 système KKT :
 
-\[
+$$
 \begin{bmatrix}
 H_L+D & J_g^{\mathsf T}\\
 J_g & 0
@@ -713,10 +776,10 @@ J_g & 0
 r_{\mathrm{dual}}\\
 r_{\mathrm{primal}}
 \end{bmatrix},
-\]
+$$
 
-où \(H_L\) est le Hessien du Lagrangien, \(J_g\) le Jacobien des contraintes
-et \(D\) la contribution de barrière ou de régularisation.
+où $H_L$ est le Hessien du Lagrangien, $J_g$ le Jacobien des contraintes
+et $D$ la contribution de barrière ou de régularisation.
 
 ### 7.1 IPOPT
 
@@ -776,7 +839,7 @@ Cette exploitation requiert :
 Le scaling générique des états modifie le coefficient identité du prochain
 état dans les gaps. Sans correction, Fatrop refuse la formulation full avec
 le diagnostic « structure of A does not correspond » : le bloc associé à
-\(x_{k+1}\) n’est plus l’identité attendue par le solveur structuré.
+$x_{k+1}$ n’est plus l’identité attendue par le solveur structuré.
 
 Fatrop relâche aussi les bornes de manière relative. Comme certaines capacités
 de fatigue valent plusieurs milliers, un facteur relatif apparemment faible
@@ -787,17 +850,17 @@ l’audit indépendant.
 Les anciens tests ont porté sur le commit Bioptim épinglé et le correctif
 minimal de la branche `codex/fatrop-scaling-audit`. Chaque gap
 
-\[
+$$
 S z_{k+1}-\Phi(Sz_k,u_k)=0
-\]
+$$
 
 en
 
-\[
+$$
 z_{k+1}-S^{-1}\Phi(Sz_k,u_k)=0,
-\]
+$$
 
-de sorte que le Jacobien par rapport à \(z_{k+1}\) reste exactement
+de sorte que le Jacobien par rapport à $z_{k+1}$ reste exactement
 l’identité. La même transformation est appliquée aux helpers de collocation
 et aux transitions de phase séquentielles. Le patch conserve simultanément
 le resserrement physique des bornes présent dans notre commit Bioptim plus
@@ -815,11 +878,11 @@ SX-only.
 
 ACADOS résout une suite de QP :
 
-\[
+$$
 \min_{\Delta z}
 \frac12\Delta z^{\mathsf T}H_{\mathrm{GN}}\Delta z
 +g^{\mathsf T}\Delta z
-\]
+$$
 
 sous la linéarisation des dynamiques et des contraintes. La référence utilise :
 
@@ -828,6 +891,38 @@ sous la linéarisation des dynamiques et des contraintes. La référence utilise
 - intégration IRK;
 - HPIPM;
 - code généré une fois et réutilisé.
+
+Le workflow actif compare d’abord `v0.5.5` avec exactement les options de la
+référence `v0.5.1`. Les nouvelles options ne sont donc pas confondues avec le
+changement de version. L’ordre de l’écran court, sur 5 RHO, est :
+
+1. SQP/IRK de référence, duals remis à zéro;
+2. remise à zéro de la mémoire ACADOS/HPIPM avant chaque résolution;
+3. hot-start HPIPM niveau 2, premier QP initialisé par l’itéré NLP et
+   condensation complète `cond_N=N`;
+4. contrôle SQP avec `FIXED_STEP`, sans Anderson;
+5. même contrôle avec Anderson, seuil d’activation `0.1`;
+6. `SQP_WITH_FEASIBLE_QP`, direction Byrd–Omojokun et facteur de slack
+   `1.00001`.
+
+Les garde-fous refusent explicitement :
+
+- Anderson avec une globalisation autre que `FIXED_STEP`;
+- les résidus QP étendus avec `SQP_WITH_FEASIBLE_QP`, combinaison refusée par
+  ACADOS `v0.5.5`;
+- un facteur Byrd–Omojokun non fini ou inférieur à un;
+- un premier QP initialisé depuis le NLP avec une condensation partielle.
+
+La boucle RHO n’appelle jamais `solve(..., warm_start=previous_solution)`.
+Cette voie Bioptim restaurerait `x/u` après le rollout Cocofest et annulerait
+la projection mécanique. Le primal reste donc celui du
+shift–rollout–projection Cocofest; les duals `pi/lam` sont traités
+explicitement et les slacks primaux `sl/su` ne sont pas restaurés.
+
+Chaque variante possède son propre dossier de code, son JSON, son log et son
+artefact. `check_reuse_possible` vérifie la compatibilité de la bibliothèque;
+les paramètres runtime, les bornes mobiles et la cible terminale sont
+réinjectés après toute remise à zéro.
 
 SQP-RTI n’effectue qu’une itération SQP par RHO. Il est potentiellement très
 rapide, mais exige une trajectoire nominale déjà proche de la variété faisable.
@@ -882,7 +977,7 @@ Sur le screen de 30 RHO du run `30475768127`, la médiane chaude est :
 | MadNLP/MUMPS reduced | 3.002 s | 1.187 s | 60.5 % | 2.53× |
 
 Le gain est calculé par
-\((T_\mathrm{MX}-T_\mathrm{SX})/T_\mathrm{MX}\), sur les RHO chauds 2 à 30.
+$(T_\mathrm{MX}-T_\mathrm{SX})/T_\mathrm{MX}$, sur les RHO chauds 2 à 30.
 Les quatre cas ont validé 30/30 RHO. Les statuts sont identiques et les écarts
 absolus maximaux d’objectif par fenêtre valent respectivement
 `8.6e-12`, `1.0e-11`, `2.46e-11` et `5.01e-11`. Les nombres d’itérations sont
@@ -914,9 +1009,9 @@ et Hessien. Elles ne compilent pas le solveur non linéaire lui-même.
 Le graphe reste constant durant les RHO. Les données mobiles sont fournies
 numériquement :
 
-\[
+$$
 x_0,\quad l_x,\quad u_x,\quad l_g,\quad u_g.
-\]
+$$
 
 Un mode correctement persistant doit exporter :
 
@@ -969,8 +1064,8 @@ présenter un cas à zéro RHO comme un échec de MadNLP, ni contourner cette ga
 sans validation des dérivées compilées.
 
 Le mode compilé CasADi peut aussi omettre `Solution.constraints`. L’audit
-Cocofest reconstruit désormais \(g(x)\) depuis le NLP symbolique et le vecteur
-de décision, puis le compare aux bornes originales \(l_g,u_g\). Ainsi, une
+Cocofest reconstruit désormais $g(x)$ depuis le NLP symbolique et le vecteur
+de décision, puis le compare aux bornes originales $l_g,u_g$. Ainsi, une
 solution compilée n’est plus rejetée seulement parce que `inf_pr` et le champ
 de contraintes ne sont pas exportés.
 
@@ -987,9 +1082,9 @@ Un RHO est valide seulement si :
 
 Le seuil physique commun est
 
-\[
+$$
 \varepsilon_{\mathrm{phys}}=10^{-5}.
-\]
+$$
 
 Les tolérances internes peuvent différer :
 
@@ -1025,12 +1120,12 @@ Le benchmark distingue :
 
 Les mesures principales après construction sont :
 
-\[
+$$
 t_{\mathrm{hot,med}}
 =
 \operatorname{médiane}
 \{t_r:r\ge2,\ r\ \mathrm{valide}\},
-\]
+$$
 
 et le P90 chaud, qui expose les queues de latence.
 
@@ -1086,7 +1181,7 @@ est la référence courante. Il a été lancé après deux paliers verts à 5 et
 - MadNLP interprété avec `MumpsSolver`;
 - deux échecs consécutifs permis.
 
-| Solveur | Mécanique | Préfixe strict | Convergés et faisables isolément/tentés | Médiane chaude | P90 chaud | Mur-à-mur | Coût fatigue | AUC | Min. \(A/A_\mathrm{scale}\) |
+| Solveur | Mécanique | Préfixe strict | Convergés et faisables isolément/tentés | Médiane chaude | P90 chaud | Mur-à-mur | Coût fatigue | AUC | Min. $A/A_\mathrm{scale}$ |
 |---|---|---:|---:|---:|---:|---:|---:|---:|---:|
 | IPOPT compilé/MUMPS | full | 100/100 | 100/100 | **1.444 s** | 1.698 s | 612.4 s | 11406.60 | 16.489 | 0.86736 |
 | MadNLP/MUMPS | full | 100/100 | 100/100 | 2.600 s | 2.899 s | **350.1 s** | 11344.72 | 16.460 | 0.86795 |
@@ -1130,7 +1225,7 @@ observée et les bornes mobiles changent sans reconstruction du graphe.
 
 #### Fatigue des quatre muscles
 
-| Solveur/mécanique | Muscle | Coût | AUC (cycles) | \(A_\mathrm{final}/A_\mathrm{scale}\) |
+| Solveur/mécanique | Muscle | Coût | AUC (cycles) | $A_\mathrm{final}/A_\mathrm{scale}$ |
 |---|---|---:|---:|---:|
 | IPOPT/full | Biceps | 7161.04 | 7.656 | 0.86736 |
 | IPOPT/full | Delt_ant | 918.74 | 2.792 | 0.95191 |
@@ -1194,7 +1289,7 @@ pour la comparaison historique :
 - deux échecs consécutifs autorisés;
 - seed commun par formulation.
 
-| Solveur | Mécanique | RHO | Médiane chaude | P90 chaud | Mur-à-mur | Coût fatigue | AUC | Min. \(A/A_\mathrm{scale}\) |
+| Solveur | Mécanique | RHO | Médiane chaude | P90 chaud | Mur-à-mur | Coût fatigue | AUC | Min. $A/A_\mathrm{scale}$ |
 |---|---|---:|---:|---:|---:|---:|---:|---:|
 | IPOPT/MUMPS | full | 100/100 | 2.250 s | 2.566 s | 304.3 s | 4429.09 | 10.0179 | 0.9059 |
 | IPOPT/MUMPS | reduced | 100/100 | 1.245 s | 1.480 s | 223.4 s | 658.27 | 4.8262 | 0.9769 |
@@ -1211,7 +1306,7 @@ backend particulier.
 
 ### 11.3 Fatigue historique par muscle avec IPOPT
 
-| Mécanique | Muscle | Coût | AUC | \(A_\mathrm{final}/A_\mathrm{scale}\) |
+| Mécanique | Muscle | Coût | AUC | $A_\mathrm{final}/A_\mathrm{scale}$ |
 |---|---|---:|---:|---:|
 | full | Biceps | 3381.58 | 5.195 | 0.9059 |
 | full | Triceps | 771.65 | 2.531 | 0.9594 |
@@ -1289,7 +1384,7 @@ Les corrections associées sont maintenant :
 
 1. autoriser un seed `enforce_start_constraints=True` pour un consommateur
    moins strict configuré à `False`, tout en refusant le sens inverse;
-2. réévaluer \(g(x)\) pour l’audit des solutions compilées IPOPT;
+2. réévaluer $g(x)$ pour l’audit des solutions compilées IPOPT;
 3. exécuter MadNLP interprété tant que Bioptim ne valide pas sa compilation;
 4. recaler la référence angulaire absolue après tout chargement de seed,
    y compris sans changement de formulation mécanique;
@@ -1322,9 +1417,9 @@ la collocation.
 
 La puissance mécanique externe est
 
-\[
+$$
 P_{\mathrm{ext}}=\tau_{\mathrm{ext}}\dot\theta.
-\]
+$$
 
 Le pédalier tourne dans le sens négatif. Un couple signé négatif fournit donc
 une puissance positive et assiste le mouvement; un couple signé positif est
@@ -1385,7 +1480,7 @@ premier candidat proche de la faisabilité, puis une fenêtre décalée avec une
 infaisabilité d’environ `4.57e-2`. L’échec est donc lié au problème
 multi-fenêtre et pas uniquement à un budget de 60 secondes trop court.
 
-#### Échec sous résistance signée \(+0.22\ \mathrm{N.m}\)
+#### Échec sous résistance signée $+0.22\ \mathrm{N.m}$
 
 Dans l’expérience historique résistive :
 
@@ -1593,16 +1688,18 @@ bash -n .github/scripts/run_cycling_benchmark_case.sh
 
 Ordre recommandé :
 
-1. terminer le seed full par relèvement exact du seed reduced;
-2. ajouter les résidus cartésiens \(c(q)\) et \(J(q)\dot q\) au rapport, en
+1. recertifier sur 5 RHO les quatre corrections full/reduced : force passive,
+   seed commun, enveloppe `qdot` et phase physique;
+2. rejouer les mêmes PW et les 20 mêmes états Ding dans les deux mécaniques
+   pour comparer les RHS et défauts de transcription;
+3. ajouter les résidus cartésiens $c(q)$ et $J(q)\dot q$ au rapport, en
    plus des résidus de projection maintenant disponibles;
-3. lier la cadence physique entre deux RHO et définir les bornes/cibles avec
-   \(\theta,\omega\), pas `q[2],qdot[2]`;
-4. relancer 1 puis 30 RHO full/reduced avec le même seed relevé exactement;
-5. vérifier les PW, forces, puissance et états Ding sur une trajectoire
-   commune;
+4. lier la cadence physique entre deux RHO et définir les bornes/cibles avec
+   $\theta,\omega$, pas `q[2],qdot[2]`;
+5. ne passer à 30 RHO que si la comparaison 5 RHO reste appariée;
 6. seulement ensuite interpréter la fatigue et étendre à 100 RHO;
-7. évaluer `FEASIBILITY_QP -> SQP`, puis seulement si nécessaire construire
+7. évaluer reset, hot-start HPIPM, Anderson et
+   `FEASIBILITY_QP -> SQP`, puis seulement si nécessaire construire
    les deux OCP de restauration/optimalité;
 8. tester RTI après convergence répétée du SQP complet;
 9. comparer deux workflows dédiés, compilation activée puis désactivée, et
@@ -1633,9 +1730,12 @@ restauration ACADOS sont moins risquées qu’un surrogate appris.
   full, `178.4 s` reduced). Le résidu de temps IPOPT est cohérent avec une
   génération/compilation non amortie, sans constituer une mesure séparée de
   cette étape.
-- MadNLP/MUMPS reduced donne donc le meilleur compromis NLP sur cette longueur,
-  mais la formulation reduced n’est pas encore comparable physiologiquement à
-  full.
+- MadNLP/MUMPS reduced donne le meilleur compromis NLP sur cette campagne
+  historique, mais l’écart de fatigue full/reduced publié n’est pas
+  interprétable physiologiquement : les anciens problèmes n’avaient ni la
+  même loi passive, ni le même ensemble admissible, ni le même instant initial.
+- Les quatre incohérences certaines sont corrigées dans le workflow actif; une
+  campagne graduelle 5, 30 puis 100 RHO doit remplacer les valeurs historiques.
 - MadNLP utilise explicitement `MumpsSolver`; toute option ignorée devient une
   erreur de CI.
 - PARDISO/MKL n’apporte pas de gain et est archivé.

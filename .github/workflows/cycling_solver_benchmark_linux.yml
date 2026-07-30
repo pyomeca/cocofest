@@ -71,10 +71,12 @@ env:
   # CasADi 3.7.2's sparse Alpaqa interface targets this compatibility fork.
   ALPAQA_COMMIT: bf9f87d59640501ea72f94aa6e2d4e62b20c677b
   BIOPTIM_REPOSITORY: mickaelbegon/BiorbdOptim
-  BIOPTIM_PRODUCTION_COMMIT: 3523f1745e315f07761159d7e06bd2d876026704
+  # Dedicated multi-solver integration branch:
+  # codex/cocofest-acados-v055-exploration
+  BIOPTIM_PRODUCTION_COMMIT: 04f0e1487f5b2836f4f724664dc0313ee09e9773
   BIOPTIM_ALPAQA_COMMIT: d84e7e43534360fc048e0be26a3bd69a2abc2d77
-  ACADOS_COMMIT: 48e223e85f0408ebfd1d8c6d6fb0589e9c41b3aa
-  ACADOS_INSTALL_SCRIPT_BLOB: a30489718f4c8a103b602d320fabe0f921c64b9d
+  ACADOS_COMMIT: 59d93e17d2985fdd73fc58b8a83ed8f83a024171
+  ACADOS_INSTALL_SCRIPT_BLOB: 5ac8064ab613251e62560b5de8cbbb9550f5c5d0
   LIBMAD_REPOSITORY: mickaelbegon/libMad
   # This public libMad revision also contains PARDISO support, but the
   # benchmark certifies and selects only its built-in MumpsSolver.
@@ -82,7 +84,7 @@ env:
   JULIAC_COMMIT: 73be8587a80bbb65dab7acd71d406f72867a3571
   JULIA_VERSION: "1.12.6"
   CONDA_ENV_NAME: cocofest-cycling-benchmark
-  NUMERICAL_STACK_CACHE_VERSION: v1
+  NUMERICAL_STACK_CACHE_VERSION: v2
   OMP_NUM_THREADS: "1"
   OPENBLAS_NUM_THREADS: "1"
   MKL_NUM_THREADS: "1"
@@ -553,7 +555,7 @@ jobs:
           BENCHMARK_Q_SLACK: ${{ inputs.terminal_wheel_q_slack }}
           COCOFEST_BENCHMARK_COMMIT: ${{ github.sha }}
           BIOPTIM_BENCHMARK_COMMIT: ${{ env.BIOPTIM_PRODUCTION_COMMIT }}
-          BIOPTIM_INTEGRATION_BRANCH: codex/fatrop-cocofest-benchmark
+          BIOPTIM_INTEGRATION_BRANCH: codex/cocofest-acados-v055-exploration
         run: |
           for count in "$ACADOS_SMOKE_RHOS" "$ACADOS_OPTION_RHOS"; do
             if ! [[ "$count" =~ ^[1-9][0-9]*$ ]]; then
@@ -613,6 +615,32 @@ jobs:
               # inconsistent, then switch back to the nominal optimality step.
               solver_options+=(
                 --acados-search-direction-mode BYRD_OMOJOKUN
+                --acados-byrd-omojokon-slack-relaxation-factor 1.00001
+              )
+            fi
+            if [[ "$variant" == "sqp-irk-reset-memory" ]]; then
+              solver_options+=(
+                --acados-reset-solver-before-solve
+              )
+            fi
+            if [[ "$variant" == "sqp-irk-qp-hot" ]]; then
+              solver_options+=(
+                --acados-qp-cond-n 30
+                --acados-qp-warm-start-level 2
+                --acados-warm-start-first-qp
+                --acados-warm-start-first-qp-from-nlp
+              )
+            fi
+            if [[ "$variant" == "sqp-irk-fixed" ]]; then
+              solver_options+=(
+                --acados-globalization FIXED_STEP
+              )
+            fi
+            if [[ "$variant" == "sqp-irk-anderson" ]]; then
+              solver_options+=(
+                --acados-globalization FIXED_STEP
+                --acados-with-anderson-acceleration
+                --acados-anderson-activation-threshold 0.1
               )
             fi
             if [[ "$variant" == "sqp-feasibility-qp-irk" ]]; then
@@ -657,7 +685,7 @@ jobs:
               --standard-warmup-seed .github/benchmark-seeds/legacy-resistive-0p22-warmup.npz \
               --legacy-standard-warmup-seed-signed-torque 0.22 \
               --standard-warmup-seed-continuation \
-              --common-initial-solution "benchmark-seed/common-${mechanics}.npz" \
+              --common-initial-solution "benchmark-seed/common-reduced.npz" \
               --warmup-ipopt-linear-solver mumps \
               --ipopt-linear-solver mumps \
               --ipopt-disable-historical-initial-guess \
@@ -666,6 +694,7 @@ jobs:
               --first-node-wheel-q-slack 0 \
               --terminal-wheel-q-slack "$BENCHMARK_Q_SLACK" \
               --acados-dir "$CONDA_PREFIX" \
+              --acados-check-reuse-possible \
               --acados-max-iter 100 \
               --acados-control-homotopy-radii 1e-6,1e-5 \
               --acados-control-homotopy-tolerance 2e-2 \
@@ -691,6 +720,10 @@ jobs:
 
           for mechanics in full reduced; do
             run_case sqp-irk-reference "$mechanics" "$ACADOS_SMOKE_RHOS" SQP IRK 5 5
+            run_case sqp-irk-reset-memory "$mechanics" "$ACADOS_OPTION_RHOS" SQP IRK 5 5
+            run_case sqp-irk-qp-hot "$mechanics" "$ACADOS_OPTION_RHOS" SQP IRK 5 5
+            run_case sqp-irk-fixed "$mechanics" "$ACADOS_OPTION_RHOS" SQP IRK 5 5
+            run_case sqp-irk-anderson "$mechanics" "$ACADOS_OPTION_RHOS" SQP IRK 5 5
             run_case sqp-irk-two-stage "$mechanics" "$ACADOS_SMOKE_RHOS" SQP IRK 5 5
             run_case sqp-feasible-qp-irk "$mechanics" "$ACADOS_SMOKE_RHOS" SQP_WITH_FEASIBLE_QP IRK 5 5
             run_case sqp-feasibility-qp-irk "$mechanics" "$ACADOS_SMOKE_RHOS" SQP_WITH_FEASIBLE_QP IRK 5 5
@@ -727,7 +760,7 @@ jobs:
         if: always()
         run: |
           output="acados-smoke-results/acados-option-screen.csv"
-          echo "case,nlp_solver,search_direction,integrator,sim_steps,newton_iter,transfer_bound_homotopy,validated_cycles,attempted_rho,solve_hot_median_s,effective_hot_median_s,effective_hot_p90_s,restoration_total_s,executed_fatigue_objective,minimum_capacity_ratio,first_failed_rho" > "$output"
+          echo "case,nlp_solver,search_direction,integrator,sim_steps,newton_iter,reset_solver,qp_warm_start,anderson,anderson_threshold,byrd_slack_factor,transfer_bound_homotopy,validated_cycles,attempted_rho,solve_hot_median_s,effective_hot_median_s,effective_hot_p90_s,restoration_total_s,executed_fatigue_objective,minimum_capacity_ratio,first_failed_rho" > "$output"
           while IFS= read -r result; do
             case_name="$(basename "$(dirname "$result")")"
             jq -r --arg case "$case_name" '
@@ -740,6 +773,11 @@ jobs:
                 $config.acados_integrator_type,
                 $config.acados_sim_steps,
                 $config.acados_newton_iter,
+                $config.acados_reset_solver_before_solve,
+                $config.acados_qp_warm_start_level,
+                $config.acados_with_anderson_acceleration,
+                $config.acados_anderson_activation_threshold,
+                $config.acados_byrd_omojokon_slack_relaxation_factor,
                 $config.acados_transfer_bound_homotopy,
                 .validated_cycles,
                 .attempted_windows,
@@ -768,6 +806,10 @@ jobs:
         run: |
           variants=(
             sqp-irk-reference
+            sqp-irk-reset-memory
+            sqp-irk-qp-hot
+            sqp-irk-fixed
+            sqp-irk-anderson
             sqp-irk-two-stage
             sqp-feasible-qp-irk
             sqp-feasibility-qp-irk
@@ -1025,7 +1067,7 @@ jobs:
               --standard-warmup-seed .github/benchmark-seeds/legacy-resistive-0p22-warmup.npz \
               --legacy-standard-warmup-seed-signed-torque 0.22 \
               --standard-warmup-seed-continuation \
-              --common-initial-solution benchmark-seed/common-full.npz \
+              --common-initial-solution benchmark-seed/common-reduced.npz \
               --no-optional-nlp-periodic-ipopt-hot-start \
               --warmup-ipopt-linear-solver mumps \
               --ipopt-linear-solver mumps \
@@ -1119,8 +1161,8 @@ jobs:
             timeout_minutes: 300
             benchmark_rhos: ${{ inputs.cycles }}
             cycles_per_window: ${{ inputs.cycles_per_window }}
-            bioptim_commit: 3523f1745e315f07761159d7e06bd2d876026704
-            integration_branch: codex/fatrop-cocofest-benchmark
+            bioptim_commit: 04f0e1487f5b2836f4f724664dc0313ee09e9773
+            integration_branch: codex/cocofest-acados-v055-exploration
             casadi_cxx_abi: 0
           - solver: madnlp
             backend: mumps
@@ -1129,8 +1171,8 @@ jobs:
             timeout_minutes: 420
             benchmark_rhos: ${{ inputs.cycles }}
             cycles_per_window: ${{ inputs.cycles_per_window }}
-            bioptim_commit: 3523f1745e315f07761159d7e06bd2d876026704
-            integration_branch: codex/fatrop-cocofest-benchmark
+            bioptim_commit: 04f0e1487f5b2836f4f724664dc0313ee09e9773
+            integration_branch: codex/cocofest-acados-v055-exploration
             casadi_cxx_abi: 1
     env:
       # IPOPT uses the wheel ABI; source-built CasADi/libMad follows
