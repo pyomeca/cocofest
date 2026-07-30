@@ -1203,7 +1203,7 @@ jobs:
     timeout-minutes: ${{ matrix.timeout_minutes }}
     strategy:
       fail-fast: false
-      max-parallel: 2
+      max-parallel: 3
       matrix:
         include:
           - solver: ipopt
@@ -1226,6 +1226,16 @@ jobs:
             bioptim_commit: a3499cab16d7605b8efa7255cf89f1af6a7c59c9
             integration_branch: codex/cocofest-acados-v055-exploration
             casadi_cxx_abi: 1
+          - solver: fatrop
+            backend: fatrop
+            case_slug: fatrop-collocation
+            benchmark_mode: main
+            timeout_minutes: 420
+            benchmark_rhos: ${{ inputs.cycles }}
+            cycles_per_window: ${{ inputs.cycles_per_window }}
+            bioptim_commit: a3499cab16d7605b8efa7255cf89f1af6a7c59c9
+            integration_branch: codex/cocofest-acados-v055-exploration
+            casadi_cxx_abi: 0
     env:
       # IPOPT uses the wheel ABI; source-built CasADi/libMad follows
       # Conda's modern libstdc++ ABI.
@@ -1535,6 +1545,32 @@ jobs:
           if-no-files-found: warn
           retention-days: 30
 
+      - name: Run FATROP collocation full
+        if: matrix.solver == 'fatrop'
+        run: bash .github/scripts/run_cycling_benchmark_case.sh fatrop-collocation fatrop full fatrop collocation benchmark-results "$BENCHMARK_CYCLES" "${{ inputs.compile_nlp_evaluators }}" sx full
+      - name: Checkpoint FATROP collocation full
+        if: ${{ always() && matrix.solver == 'fatrop' }}
+        continue-on-error: true
+        uses: actions/upload-artifact@v7
+        with:
+          name: cycling-fatigue-linux-fatrop-collocation-full-${{ github.run_id }}
+          path: benchmark-results/fatrop-collocation-full/
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Run FATROP collocation reduced
+        if: matrix.solver == 'fatrop'
+        run: bash .github/scripts/run_cycling_benchmark_case.sh fatrop-collocation fatrop reduced fatrop collocation benchmark-results "$BENCHMARK_CYCLES" "${{ inputs.compile_nlp_evaluators }}" sx full
+      - name: Checkpoint FATROP collocation reduced
+        if: ${{ always() && matrix.solver == 'fatrop' }}
+        continue-on-error: true
+        uses: actions/upload-artifact@v7
+        with:
+          name: cycling-fatigue-linux-fatrop-collocation-reduced-${{ github.run_id }}
+          path: benchmark-results/fatrop-collocation-reduced/
+          if-no-files-found: warn
+          retention-days: 30
+
       - name: Add every sequential result to the job summary
         if: always()
         shell: bash
@@ -1578,6 +1614,7 @@ jobs:
           case "$BENCHMARK_SOLVER" in
             ipopt) expected=2 ;;
             madnlp) expected=2 ;;
+            fatrop) expected=2 ;;
             *) echo "Unexpected benchmark solver: $BENCHMARK_SOLVER" >&2; exit 1 ;;
           esac
           mapfile -t results < <(find benchmark-results -name result.json -type f | sort)
@@ -1710,7 +1747,7 @@ jobs:
           fi
           python .github/scripts/summarize_cycling_benchmark.py \
             --output-dir benchmark-report \
-            --expected-cases ipopt/full,madnlp-mumps/full,acados/full,ipopt/reduced,madnlp-mumps/reduced,acados/reduced \
+            --expected-cases ipopt/full,madnlp-mumps/full,fatrop-collocation/full,acados/full,ipopt/reduced,madnlp-mumps/reduced,fatrop-collocation/reduced,acados/reduced \
             "${result_files[@]}"
           cat benchmark-report/benchmark-comparison.md >> "$GITHUB_STEP_SUMMARY"
 
