@@ -111,11 +111,11 @@ L’ancienne campagne Fatrop transformait ce checkout, dans cet ordre :
    qui normalise les gaps, les helpers de collocation et les transitions de
    phase pour préserver le bloc identité exigé par Fatrop.
 
-Le second patch est un port minimal du commit Bioptim
+Le second patch était un port minimal du commit Bioptim
 `70c384517af48502e5e1bda6c48beb4c515cb8a1`
-(`fix: support scaled constraints with FATROP`, 28 juillet 2026). La branche
-`codex/fatrop-scaling-audit` complète n’est pas utilisée, car elle ne contient
-pas les correctifs plus récents présents dans le SHA de production.
+(`fix: support scaled constraints with FATROP`, 28 juillet 2026). Ce commit est
+maintenant intégré directement à la branche multi-solveurs dédiée, avec les
+correctifs plus récents de bornes et d’organisation temporelle.
 
 La version effective des résultats Fatrop historiques doit donc être
 identifiée par le triplet :
@@ -126,11 +126,14 @@ Bioptim 3523f1745e315f07761159d7e06bd2d876026704
 + bioptim-fatrop-scaled-gaps.patch
 ```
 
-Fatrop n’est plus installé ni exécuté par la campagne SX-only. Le reduced SX
-a résolu le smoke d’un RHO, mais le full SX s’arrête avant le premier RHO avec
-une incohérence de structure de $A$. Le réintroduire exigerait de corriger
-cette structure dans Bioptim puis de valider full et reduced en SX; revenir à
-MX contredirait le protocole numérique courant.
+Le run `30559215416` a montré deux comportements distincts. Avec scaling
+FATROP `full`, le détecteur automatique refuse la structure de $A$ avant le
+premier RHO; ce profil reste donc une ablation négative. Avec compilation C,
+le chargement utilisait encore le nom sensible à la casse `Fatrop`; la voie
+locale de Cocofest inclut désormais `FatropInterface` dans la normalisation du
+nom de plugin. Le benchmark SX/collocation suivant revient au scaling `none`,
+qui est le profil des anciens CI convergents, tout en conservant les correctifs
+de continuité scalée dans la branche pour les essais dédiés.
 
 ### 0.3 Screens historiques séparés
 

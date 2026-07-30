@@ -6159,10 +6159,11 @@ def patch_bioptim_compiled_nlp_solver_names(interface_classes=None) -> None:
     """
 
     if interface_classes is None:
+        from bioptim.interfaces.fatrop_interface import FatropInterface
         from bioptim.interfaces.ipopt_interface import IpoptInterface
         from bioptim.interfaces.madnlp_interface import MadnlpInterface
 
-        interface_classes = (IpoptInterface, MadnlpInterface)
+        interface_classes = (IpoptInterface, MadnlpInterface, FatropInterface)
 
     for interface_class in interface_classes:
         if getattr(

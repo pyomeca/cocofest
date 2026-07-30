@@ -1547,7 +1547,7 @@ jobs:
 
       - name: Run FATROP collocation full
         if: matrix.solver == 'fatrop'
-        run: bash .github/scripts/run_cycling_benchmark_case.sh fatrop-collocation fatrop full fatrop collocation benchmark-results "$BENCHMARK_CYCLES" "${{ inputs.compile_nlp_evaluators }}" sx full
+        run: bash .github/scripts/run_cycling_benchmark_case.sh fatrop-collocation fatrop full fatrop collocation benchmark-results "$BENCHMARK_CYCLES" "${{ inputs.compile_nlp_evaluators }}" sx none
       - name: Checkpoint FATROP collocation full
         if: ${{ always() && matrix.solver == 'fatrop' }}
         continue-on-error: true
@@ -1560,7 +1560,7 @@ jobs:
 
       - name: Run FATROP collocation reduced
         if: matrix.solver == 'fatrop'
-        run: bash .github/scripts/run_cycling_benchmark_case.sh fatrop-collocation fatrop reduced fatrop collocation benchmark-results "$BENCHMARK_CYCLES" "${{ inputs.compile_nlp_evaluators }}" sx full
+        run: bash .github/scripts/run_cycling_benchmark_case.sh fatrop-collocation fatrop reduced fatrop collocation benchmark-results "$BENCHMARK_CYCLES" "${{ inputs.compile_nlp_evaluators }}" sx none
       - name: Checkpoint FATROP collocation reduced
         if: ${{ always() && matrix.solver == 'fatrop' }}
         continue-on-error: true
