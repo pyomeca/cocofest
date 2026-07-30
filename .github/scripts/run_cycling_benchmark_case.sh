@@ -88,6 +88,7 @@ python examples/fes_multibody/cycling/cycling_fes_solver_comparison.py \
   --solvers "$solver" \
   --objective fatigue \
   --ipopt-profile periodic_collocation \
+  --ipopt-enforce-start-constraints \
   --cycles-per-window "$BENCHMARK_CYCLES_PER_WINDOW" \
   --stimulations-per-cycle 30 \
   --n-windows "$case_windows" \
@@ -104,6 +105,7 @@ python examples/fes_multibody/cycling/cycling_fes_solver_comparison.py \
   --warmup-ipopt-linear-solver mumps \
   --ipopt-linear-solver mumps \
   --ipopt-disable-historical-initial-guess \
+  --reduced-cycling-profile benchmark-seed/reduced-cycling-fourier12.npz \
   --state-scaling full \
   --first-node-wheel-q-slack 0 \
   --terminal-wheel-q-slack "$BENCHMARK_Q_SLACK" \

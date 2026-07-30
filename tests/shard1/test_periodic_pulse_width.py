@@ -749,6 +749,42 @@ def test_common_initial_solution_metadata_allows_a_transcription_change(tmp_path
     )
 
 
+def test_common_initial_solution_metadata_allows_exact_reduced_to_full_lift(
+    tmp_path,
+):
+    args = SimpleNamespace(
+        model_formulation="periodic_node",
+        mechanical_formulation="full",
+        cycles_per_window=1,
+        stimulations_per_cycle=30,
+        objective="fatigue",
+        objective_shape="quadratic",
+        constant_crank_torque=-0.2,
+        torque_application="constant",
+        enforce_start_constraints=True,
+        acados_wheel_q_slack=0.0,
+        acados_terminal_wheel_q_slack=0.002,
+        terminal_wheel_q_reference_mode="absolute_initial",
+        pulse_width_scaling=0.0025,
+        pulse_width_active_set="none",
+        ode_solver="collocation",
+        nlp_ordering_strategy="time_major",
+        solver="ipopt",
+        warmup_cycles_consumed=1,
+    )
+    metadata = periodic_example._common_initial_solution_metadata(args)
+    metadata["mechanical_formulation"] = "reduced"
+    seed = periodic_example._WarmupSolutionAdapter(
+        {"theta": np.zeros((1, 2)), "omega": -np.ones((1, 2))},
+        {},
+        metadata=metadata,
+    )
+
+    periodic_example._validate_common_initial_solution_metadata(
+        seed, args, tmp_path / "common-reduced.npz"
+    )
+
+
 def test_common_initial_solution_metadata_rejects_a_different_warmup_cycle(
     tmp_path,
 ):
@@ -1103,6 +1139,96 @@ def test_standard_warmup_projects_reduced_mechanics_and_clips_pw():
         adapted.decision_controls()["last_pulse_width_Biceps"],
         [[0.000131405, 0.0006]],
     )
+
+
+def test_reduced_common_seed_is_lifted_exactly_for_full_mechanics():
+    class FakeKinematics:
+        @staticmethod
+        def lift_generalized_trajectory(theta, omega):
+            return (
+                np.vstack((theta, 2.0 * theta, 3.0 * theta)),
+                np.vstack((omega, 2.0 * omega, 3.0 * omega)),
+            )
+
+    warmup = periodic_example._WarmupSolutionAdapter(
+        states={
+            "theta": np.array([[0.0, -1.0, -2.0]]),
+            "omega": np.array([[-4.0, -5.0, -6.0]]),
+        },
+        controls={"last_pulse_width_Biceps": np.full((1, 2), 0.0002)},
+    )
+    target = SimpleNamespace(
+        _cocofest_mechanical_equivalence_dynamics=SimpleNamespace(
+            kinematics=FakeKinematics()
+        ),
+        nlp=[
+            SimpleNamespace(
+                model=SimpleNamespace(
+                    muscles_dynamics_model=[
+                        SimpleNamespace(muscle_name="Biceps", pd0=0.000131405)
+                    ]
+                ),
+                x_init={
+                    "q": SimpleNamespace(init=np.zeros((3, 3))),
+                    "qdot": SimpleNamespace(init=np.zeros((3, 3))),
+                },
+                u_init={
+                    "last_pulse_width_Biceps": SimpleNamespace(init=np.zeros((1, 2)))
+                },
+            )
+        ],
+    )
+
+    adapted = periodic_example._adapt_warmup_solution_to_periodic_nodes(
+        target, warmup
+    )
+
+    np.testing.assert_allclose(
+        adapted.decision_states()["q"],
+        [[0.0, -1.0, -2.0], [0.0, -2.0, -4.0], [0.0, -3.0, -6.0]],
+    )
+    np.testing.assert_allclose(
+        adapted.decision_states()["qdot"],
+        [[-4.0, -5.0, -6.0], [-8.0, -10.0, -12.0], [-12.0, -15.0, -18.0]],
+    )
+
+
+def test_mechanical_equivalence_audit_rejects_off_manifold_full_motion():
+    from cocofest.dynamics.reduced_cycling import ReducedCyclingKinematics
+
+    theta = np.linspace(0.0, -2.0 * np.pi, 31)
+    q_samples = np.vstack(
+        (
+            0.8 + 0.2 * np.cos(theta),
+            1.4 + 0.3 * np.sin(theta),
+            theta + 0.1 * np.sin(theta),
+        )
+    )
+    kinematics = ReducedCyclingKinematics.fit(theta, q_samples, order=2)
+    omega = -5.0 * np.ones_like(theta)
+    q, qdot = kinematics.lift_generalized_trajectory(theta, omega)
+    q[0, 10] += 0.05
+    qdot[1, 15] += 0.5
+    summary = {
+        "state_traces": {"q": q, "qdot": qdot},
+        "diagnostics": {"is_physical": True, "issues": []},
+        "physical_success": True,
+        "success": True,
+    }
+
+    periodic_example.attach_mechanical_equivalence_audit(
+        summary,
+        SimpleNamespace(kinematics=kinematics),
+    )
+
+    assert summary["mechanical_equivalence_audit"]["available"]
+    assert not summary["mechanical_equivalence_audit"]["passes_tolerance"]
+    assert not summary["physical_success"]
+    assert "mechanical_trajectory_off_reduced_manifold" in summary["diagnostics"][
+        "issues"
+    ]
+    assert summary["physical_crank_angle_trace"].shape == theta.shape
+    assert summary["physical_crank_velocity_trace"].shape == omega.shape
 
 
 def test_control_homotopy_stops_on_failure_and_restores_bounds(monkeypatch):
@@ -3398,10 +3524,17 @@ def test_github_acados_runner_uses_reference_and_option_profiles_sequentially():
     )
     assert ".compiled_nlp_reuse.compiled_library_build_count == 1" in workflow
     assert ".compiled_nlp_reuse.graph_rebuild_detected == false" in workflow
+    assert ".compiled_nlp_reuse.runtime_bounds_changed == true" in workflow
+    assert ".compiled_nlp_reuse.observed_solves == .attempted_windows" in workflow
     assert "inputs.cycles != 'screen' && inputs.cycles != 'acados'" in workflow
     assert "prepare-acados-stack:" in workflow
     assert "ACADOS_COMMIT: 48e223e85f0408ebfd1d8c6d6fb0589e9c41b3aa" in workflow
     assert "for mechanics in full reduced" in workflow
+    assert workflow.index("prepare_case reduced") < workflow.index("prepare_case full")
+    assert (
+        '--common-initial-solution "$GITHUB_WORKSPACE/benchmark-seed-result/common-reduced.npz"'
+        in workflow
+    )
     assert "--experimental-reduced-acados" in workflow
     assert "--common-initial-solution" in workflow
     assert "run_case sqp-irk-reference" in workflow
@@ -3410,6 +3543,8 @@ def test_github_acados_runner_uses_reference_and_option_profiles_sequentially():
     assert "--acados-transfer-bound-homotopy-iterations 20" in workflow
     assert "--acados-transfer-bound-homotopy-solver-tolerance 1e-4" in workflow
     assert "run_case sqp-feasible-qp-irk" in workflow
+    assert "run_case sqp-feasibility-qp-irk" in workflow
+    assert "--acados-search-direction-mode FEASIBILITY_QP" in workflow
     assert "SQP_WITH_FEASIBLE_QP IRK" in workflow
     assert (
         'run_case sqp-feasible-qp-irk "$mechanics" "$ACADOS_SMOKE_RHOS"'
@@ -3431,19 +3566,13 @@ def test_github_acados_runner_uses_reference_and_option_profiles_sequentially():
     assert "--max-consecutive-failing 2" in workflow
     assert "cycling-acados-smoke-${{ github.run_id }}" in workflow
     assert (
-        "run_cycling_benchmark_case.sh fatrop-rk4 fatrop full structured rk4"
-        in workflow
-    )
-    assert (
-        "run_cycling_benchmark_case.sh fatrop-rk4 fatrop reduced structured rk4"
-        in workflow
-    )
-    assert (
-        "run_cycling_benchmark_case.sh fatrop-rk4-compiled-probe fatrop full "
-        "structured rk4 "
-        "benchmark-probes 1 true"
+        "run_cycling_benchmark_case.sh fatrop-collocation fatrop full structured "
+        'collocation benchmark-results "$BENCHMARK_CYCLES" '
+        '"${{ inputs.compile_nlp_evaluators }}" mx'
     ) in workflow
-    assert "cycling-fatrop-compile-probe-full-${{ github.run_id }}" in workflow
+    assert "fatrop-rk4" not in workflow
+    assert "Compare Fatrop interpreted and compiled evaluators over 5 RHO" in workflow
+    assert "cycling-compile-ablation-fatrop-${{ github.run_id }}" in workflow
     benchmark_runner = (
         Path(__file__).resolve().parents[2]
         / ".github"
@@ -3452,9 +3581,17 @@ def test_github_acados_runner_uses_reference_and_option_profiles_sequentially():
     ).read_text(encoding="utf-8")
     assert 'solver_options+=(--ipopt-c-compile)' in benchmark_runner
     assert 'solver_options+=(--madnlp-c-compile)' in benchmark_runner
+    assert "--ipopt-enforce-start-constraints" in benchmark_runner
+    assert "--reduced-cycling-profile benchmark-seed/" in benchmark_runner
+    assert "Compare IPOPT interpreted and compiled evaluators over 5 RHO" in workflow
+    assert (
+        "Compare MadNLP MUMPS interpreted and compiled evaluators over 5 RHO"
+        in workflow
+    )
     assert "Checkpoint IPOPT full" in workflow
-    assert "Checkpoint Fatrop RK4 reduced" in workflow
-    assert "max-parallel: 3" in workflow
+    assert "Checkpoint Fatrop collocation reduced" in workflow
+    assert "max-parallel: 4" in workflow
+    assert "case_slug: fatrop-probes" not in workflow
     assert re.search(r"\n  benchmark:.*?\n    needs: prepare-seed", workflow, re.DOTALL)
     assert re.search(
         r"- solver: ipopt\b.*?- solver: fatrop\b.*?- solver: madnlp\b",
@@ -3463,15 +3600,17 @@ def test_github_acados_runner_uses_reference_and_option_profiles_sequentially():
     )
     assert "timeout_minutes: 360" in workflow
     assert "Screen IPOPT MX full over 30 RHO" in workflow
-    assert "Screen Fatrop RK4 SX reduced over 30 RHO" in workflow
-    assert "Screen Fatrop collocation SX full over 30 RHO" in workflow
+    assert "Screen Fatrop collocation SX reduced over 1 RHO" in workflow
+    assert "Screen Fatrop collocation SX full over 1 RHO" in workflow
     assert re.search(
-        r"- name: Screen Fatrop RK4 SX full over 30 RHO\s+"
-        r"if: matrix\.solver == 'fatrop'\s+continue-on-error: true",
+        r"- name: Screen Fatrop collocation SX full over 1 RHO\s+"
+        r"if: matrix\.case_slug == 'fatrop'\s+"
+        r"continue-on-error: true",
         workflow,
     )
+    assert "timeout --signal=TERM --kill-after=30s 10m" in workflow
     assert "Screen MadNLP MUMPS MX reduced over 30 RHO" in workflow
-    assert "expected_graph_screens=4" in workflow
+    assert 'if [[ "$BENCHMARK_SOLVER" != "fatrop" ]]' in workflow
     assert "Download the SX graph-mode screens" in workflow
     assert "--ipopt-use-sx" in (
         Path(__file__).resolve().parents[2]
@@ -3832,11 +3971,12 @@ def test_reduced_theta_seed_is_recentered_on_absolute_cycle_targets():
     theta = np.array([[0.1, -3.0, -6.0, -9.0, -12.1]])
     omega = -np.ones_like(theta)
 
-    corrected, audit = mhe_example.recenter_reduced_theta_seed(
+    corrected, corrected_omega, audit = mhe_example.recenter_reduced_theta_seed(
         theta,
         omega,
         nodes_per_cycle=2,
         cycles=2,
+        node_time_grid_s=np.array([0.0, 0.3, 1.0, 1.2, 2.0]),
     )
 
     np.testing.assert_allclose(
@@ -3845,6 +3985,68 @@ def test_reduced_theta_seed_is_recentered_on_absolute_cycle_targets():
     )
     assert audit["maximum_boundary_error_before_rad"] > 0.1
     assert audit["maximum_theta_change_rad"] > 0.1
+    assert audit["maximum_omega_change_rad_s"] > 0.0
+    assert not np.allclose(corrected_omega, omega)
+
+
+def test_collocation_warm_start_uses_radau_abscissae():
+    ode_solver = SimpleNamespace(
+        is_direct_collocation=True,
+        polynomial_degree=3,
+        method="radau",
+    )
+
+    grid = mhe_example.state_initial_guess_time_grid(
+        n_shooting=2,
+        turn_number=1,
+        ode_solver=ode_solver,
+    )
+
+    expected_local = np.array([0.0, 0.15505102572168222, 0.6449489742783179, 1.0])
+    np.testing.assert_allclose(grid[:4], expected_local / 2.0, atol=1e-14)
+    np.testing.assert_allclose(
+        grid[4:8], (1.0 + expected_local) / 2.0, atol=1e-14
+    )
+    assert grid[3] == grid[4]
+    assert grid[-1] == 1.0
+
+
+def test_physical_crank_velocity_uses_center_to_hand_kinematics():
+    class FakeBioModel:
+        @staticmethod
+        def marker_index(name):
+            return {"hand": 0, "global_wheel_center": 1}[name]
+
+        @staticmethod
+        def marker(index):
+            values = (
+                np.array([1.0, 0.0, 0.0])
+                if index == 0
+                else np.array([0.0, 0.0, 0.0])
+            )
+            return lambda q, parameters: values
+
+        @staticmethod
+        def marker_velocity(index):
+            values = (
+                np.array([0.0, -5.0, 0.0])
+                if index == 0
+                else np.array([0.0, 0.0, 0.0])
+            )
+            return lambda q, qdot, parameters: values
+
+    controller = SimpleNamespace(
+        model=SimpleNamespace(bio_model=FakeBioModel()),
+        states={
+            "q": SimpleNamespace(cx=np.zeros(3)),
+            "qdot": SimpleNamespace(cx=np.zeros(3)),
+        },
+        parameters=SimpleNamespace(cx=np.array([])),
+    )
+
+    omega = mhe_example.physical_crank_velocity_constraint(controller)
+
+    assert omega == pytest.approx(-5.0)
 
 
 def test_historical_pulse_width_seed_is_clipped_with_bound_warning(tmp_path):

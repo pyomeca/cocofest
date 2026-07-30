@@ -311,6 +311,53 @@ class ReducedCyclingKinematics:
             + curvature * float(omega) ** 2,
         )
 
+    def lift_generalized_trajectory(
+        self,
+        theta: np.ndarray,
+        omega: np.ndarray | None = None,
+    ) -> tuple[np.ndarray, np.ndarray | None]:
+        """Lift physical crank coordinates onto the full contact manifold.
+
+        ``theta`` and ``omega`` may be one-dimensional arrays or row vectors.
+        The returned arrays always have shape ``(nb_q, number_of_nodes)``.
+        """
+
+        theta = np.asarray(theta, dtype=float)
+        if theta.ndim == 2:
+            if theta.shape[0] != 1:
+                raise ValueError("theta must be a vector or a single-row array.")
+            theta = theta[0]
+        elif theta.ndim != 1:
+            raise ValueError("theta must be a vector or a single-row array.")
+        if not np.all(np.isfinite(theta)):
+            raise ValueError("theta must contain only finite values.")
+
+        lifted_q = np.column_stack(
+            [np.asarray(self.q(value), dtype=float) for value in theta]
+        )
+        if omega is None:
+            return lifted_q, None
+
+        omega = np.asarray(omega, dtype=float)
+        if omega.ndim == 2:
+            if omega.shape[0] != 1:
+                raise ValueError("omega must be a vector or a single-row array.")
+            omega = omega[0]
+        elif omega.ndim != 1:
+            raise ValueError("omega must be a vector or a single-row array.")
+        if omega.shape != theta.shape:
+            raise ValueError("omega must contain one value per theta node.")
+        if not np.all(np.isfinite(omega)):
+            raise ValueError("omega must contain only finite values.")
+
+        lifted_qdot = np.column_stack(
+            [
+                np.asarray(self.tangent(theta_value), dtype=float) * omega_value
+                for theta_value, omega_value in zip(theta, omega)
+            ]
+        )
+        return lifted_q, lifted_qdot
+
     def project_generalized_trajectory(
         self,
         q: np.ndarray,
@@ -341,6 +388,7 @@ class ReducedCyclingKinematics:
         theta = np.empty(q.shape[1])
         omega = None if qdot is None else np.empty(q.shape[1])
         residuals = np.empty(q.shape[1])
+        velocity_residuals = None if qdot is None else np.empty(q.shape[1])
         iterations = np.empty(q.shape[1], dtype=int)
         periodic_origin = self.periodic_residual.evaluate(0.0)
         previous_progress = None
@@ -383,17 +431,38 @@ class ReducedCyclingKinematics:
                 omega[node] = float(
                     tangent @ qdot[:, node] / (tangent @ tangent)
                 )
+                velocity_residuals[node] = float(
+                    np.linalg.norm(
+                        tangent * omega[node] - qdot[:, node],
+                        ord=np.inf,
+                    )
+                )
             previous_progress = float(self.progress(theta_value))
             previous_q = q[:, node]
 
-        return theta[np.newaxis, :], (
-            None if omega is None else omega[np.newaxis, :]
-        ), {
+        audit = {
             "maximum_configuration_projection_error_rad": float(
                 np.max(residuals)
             ),
+            "root_mean_square_configuration_projection_error_rad": float(
+                np.sqrt(np.mean(np.square(residuals)))
+            ),
             "maximum_projection_iterations": int(np.max(iterations)),
         }
+        if velocity_residuals is not None:
+            audit.update(
+                {
+                    "maximum_tangent_velocity_residual_rad_s": float(
+                        np.max(velocity_residuals)
+                    ),
+                    "root_mean_square_tangent_velocity_residual_rad_s": float(
+                        np.sqrt(np.mean(np.square(velocity_residuals)))
+                    ),
+                }
+            )
+        return theta[np.newaxis, :], (
+            None if omega is None else omega[np.newaxis, :]
+        ), audit
 
     def casadi_kinematics(self, theta, omega=None, theta_acceleration=None):
         from casadi import DM

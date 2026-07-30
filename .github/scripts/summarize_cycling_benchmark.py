@@ -30,13 +30,11 @@ COMPARABILITY_FIELDS = (
 DEFAULT_EXPECTED_SOLVERS = ("ipopt", "fatrop", "madnlp")
 DEFAULT_EXPECTED_CASES = (
     "ipopt/full",
-    "fatrop-rk4/full",
     "fatrop-collocation/full",
     "madnlp-pardiso/full",
     "madnlp-mumps/full",
     "acados/full",
     "ipopt/reduced",
-    "fatrop-rk4/reduced",
     "fatrop-collocation/reduced",
     "madnlp-pardiso/reduced",
     "madnlp-mumps/reduced",
@@ -122,6 +120,95 @@ def _requested_rho_count(entry: dict) -> int | None:
     except (TypeError, ValueError):
         return None
     return max(0, requested_cycles - cycles_per_window + 1)
+
+
+def _ratio(numerator, denominator) -> float | None:
+    numerator = _finite(numerator)
+    denominator = _finite(denominator)
+    if numerator is None or denominator is None or denominator <= 0.0:
+        return None
+    return numerator / denominator
+
+
+def fatrop_internal_timing_rows(entry: dict) -> list[dict]:
+    """Return one normalized Fatrop oracle-timing row per solved RHO."""
+
+    if str(entry["result"].get("solver", "")).lower() != "fatrop":
+        return []
+    rows = []
+    for stats in entry["result"].get("nlp_solver_stats") or []:
+        native = stats.get("fatrop") or {}
+        window = stats.get("window")
+        iterations = native.get("iterations_count", stats.get("iter_count"))
+        total = native.get("time_total", stats.get("t_wall_total"))
+        hessian = native.get("eval_hess_time", stats.get("t_wall_nlp_hess_l"))
+        jacobian = native.get("eval_jac_time", stats.get("t_wall_nlp_jac_g"))
+        constraints = native.get("eval_cv_time", stats.get("t_wall_nlp_g"))
+        structure = native.get("compute_sd_time")
+        hessian_count = native.get("eval_hess_count", stats.get("n_call_nlp_hess_l"))
+        jacobian_count = native.get("eval_jac_count", stats.get("n_call_nlp_jac_g"))
+        rows.append(
+            {
+                "solver": "fatrop",
+                "mechanical_formulation": _mechanical_formulation(entry),
+                "case": _entry_case(entry),
+                "window": window,
+                "rho": int(window) + 1 if window is not None else None,
+                "iterations": iterations,
+                "total_wall_time_s": _finite(total),
+                "hessian_wall_time_s": _finite(hessian),
+                "jacobian_wall_time_s": _finite(jacobian),
+                "constraint_wall_time_s": _finite(constraints),
+                "structure_detection_wall_time_s": _finite(structure),
+                "hessian_evaluations": hessian_count,
+                "jacobian_evaluations": jacobian_count,
+                "total_wall_time_per_iteration_s": _ratio(total, iterations),
+                "hessian_wall_time_per_iteration_s": _ratio(hessian, iterations),
+                "jacobian_wall_time_per_iteration_s": _ratio(jacobian, iterations),
+                "hessian_wall_time_per_evaluation_s": _ratio(hessian, hessian_count),
+                "jacobian_wall_time_per_evaluation_s": _ratio(jacobian, jacobian_count),
+                "derivative_wall_time_fraction": _ratio(
+                    sum(
+                        value
+                        for value in (_finite(hessian), _finite(jacobian))
+                        if value is not None
+                    ),
+                    total,
+                ),
+            }
+        )
+    return rows
+
+
+def fatrop_internal_timing_summary(entry: dict) -> dict | None:
+    """Aggregate Fatrop derivative and structure-detection costs over a run."""
+
+    rows = fatrop_internal_timing_rows(entry)
+    if not rows:
+        return None
+
+    def total(field: str) -> float:
+        return sum(
+            value for row in rows if (value := _finite(row.get(field))) is not None
+        )
+
+    iterations = total("iterations")
+    total_wall = total("total_wall_time_s")
+    hessian = total("hessian_wall_time_s")
+    jacobian = total("jacobian_wall_time_s")
+    return {
+        "case": _entry_case(entry),
+        "rho_count": len(rows),
+        "mean_iterations": iterations / len(rows) if rows else None,
+        "total_wall_time_s": total_wall,
+        "hessian_wall_time_s": hessian,
+        "jacobian_wall_time_s": jacobian,
+        "structure_detection_wall_time_s": total("structure_detection_wall_time_s"),
+        "total_wall_time_per_iteration_s": _ratio(total_wall, iterations),
+        "hessian_wall_time_per_iteration_s": _ratio(hessian, iterations),
+        "jacobian_wall_time_per_iteration_s": _ratio(jacobian, iterations),
+        "derivative_wall_time_fraction": _ratio(hessian + jacobian, total_wall),
+    }
 
 
 def load_benchmark_files(paths: list[Path]) -> list[dict]:
@@ -479,6 +566,35 @@ def write_rho_csv(path: Path, entries: list[dict]) -> None:
                 )
 
 
+def write_fatrop_internal_timing_csv(path: Path, entries: list[dict]) -> None:
+    fieldnames = (
+        "solver",
+        "mechanical_formulation",
+        "case",
+        "window",
+        "rho",
+        "iterations",
+        "total_wall_time_s",
+        "hessian_wall_time_s",
+        "jacobian_wall_time_s",
+        "constraint_wall_time_s",
+        "structure_detection_wall_time_s",
+        "hessian_evaluations",
+        "jacobian_evaluations",
+        "total_wall_time_per_iteration_s",
+        "hessian_wall_time_per_iteration_s",
+        "jacobian_wall_time_per_iteration_s",
+        "hessian_wall_time_per_evaluation_s",
+        "jacobian_wall_time_per_evaluation_s",
+        "derivative_wall_time_fraction",
+    )
+    with path.open("w", newline="", encoding="utf-8") as stream:
+        writer = csv.DictWriter(stream, fieldnames=fieldnames)
+        writer.writeheader()
+        for entry in entries:
+            writer.writerows(fatrop_internal_timing_rows(entry))
+
+
 def write_stimulation_csv(path: Path, entries: list[dict]) -> None:
     fieldnames = (
         "solver",
@@ -587,8 +703,7 @@ def write_pulse_width_variation_csv(path: Path, entries: list[dict]) -> None:
                             "case": _entry_case(entry),
                             "muscle": muscle.get("muscle"),
                             **{
-                                field: transition.get(field)
-                                for field in fieldnames[4:]
+                                field: transition.get(field) for field in fieldnames[4:]
                             },
                         }
                     )
@@ -695,6 +810,36 @@ def render_markdown(
                 stop=(row.get("stop") or {}).get("label", "—"),
             )
         )
+
+    fatrop_timings = [
+        summary
+        for entry in entries
+        if (summary := fatrop_internal_timing_summary(entry)) is not None
+    ]
+    if fatrop_timings:
+        lines.extend(
+            [
+                "",
+                "## Décomposition interne Fatrop",
+                "",
+                "Les temps proviennent des oracles natifs Fatrop/CasADi. Le coût moyen par itération permet de distinguer un grand nombre d’itérations d’un graphe de dérivées intrinsèquement coûteux.",
+                "",
+                "| Formulation | RHO | Itérations moyennes | Hessienne (s) | Jacobienne (s) | Détection structure (s) | Temps/itération (s) | Hessienne/itération (s) | Jacobienne/itération (s) | Fraction dérivées |",
+                "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
+            ]
+        )
+        for timing in fatrop_timings:
+            lines.append(
+                f"| {timing['case'].upper()} | {timing['rho_count']} | "
+                f"{_fmt(timing.get('mean_iterations'), 2)} | "
+                f"{_fmt(timing.get('hessian_wall_time_s'))} | "
+                f"{_fmt(timing.get('jacobian_wall_time_s'))} | "
+                f"{_fmt(timing.get('structure_detection_wall_time_s'))} | "
+                f"{_fmt(timing.get('total_wall_time_per_iteration_s'), 6)} | "
+                f"{_fmt(timing.get('hessian_wall_time_per_iteration_s'), 6)} | "
+                f"{_fmt(timing.get('jacobian_wall_time_per_iteration_s'), 6)} | "
+                f"{_fmt(timing.get('derivative_wall_time_fraction'), 4)} |"
+            )
 
     lines.extend(
         [
@@ -1011,6 +1156,9 @@ def main() -> None:
         encoding="utf-8",
     )
     write_rho_csv(args.output_dir / "rho-timings.csv", entries)
+    write_fatrop_internal_timing_csv(
+        args.output_dir / "fatrop-internal-timings.csv", entries
+    )
     write_stimulation_csv(args.output_dir / "stimulation-patterns.csv", entries)
     write_muscle_fatigue_csv(args.output_dir / "muscle-fatigue.csv", entries)
     write_pulse_width_variation_csv(

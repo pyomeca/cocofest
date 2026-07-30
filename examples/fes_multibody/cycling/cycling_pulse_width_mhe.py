@@ -862,6 +862,10 @@ def prepare_nmpc(
     external_force = cycling_info.get("resistive_torque")
     constant_crank_torque = cycling_info.get("constant_crank_torque")
     enforce_start_constraints = cycling_info.get("enforce_start_constraints", True)
+    enforce_physical_crank_velocity_bounds = cycling_info.get(
+        "enforce_physical_crank_velocity_bounds",
+        False,
+    )
     # --- Cost function info --- #
     minimize_force = simulation_conditions["minimize_force"]
     minimize_fatigue = simulation_conditions["minimize_fatigue"]
@@ -968,11 +972,16 @@ def prepare_nmpc(
             if ode_solver.is_direct_collocation
             else 1
         )
-        theta_init, recenter_audit = recenter_reduced_theta_seed(
+        theta_init, omega_init, recenter_audit = recenter_reduced_theta_seed(
             theta_init,
             omega_init,
             nodes_per_cycle=state_nodes_per_cycle,
             cycles=n_cycles_simultaneous,
+            node_time_grid_s=state_initial_guess_time_grid(
+                n_shooting=window_n_shooting,
+                turn_number=turn_number,
+                ode_solver=ode_solver,
+            ),
         )
         if recenter_audit["maximum_theta_change_rad"] > 1e-4:
             warnings.warn(
@@ -1058,6 +1067,14 @@ def prepare_nmpc(
             "theta" if mechanical_formulation == "reduced" else "q"
         ),
         position_state_index=0 if mechanical_formulation == "reduced" else 2,
+        enforce_physical_crank_velocity_bounds=(
+            enforce_physical_crank_velocity_bounds
+        ),
+        physical_crank_velocity_target=wheel_qdot_regularization_target,
+        physical_crank_velocity_margin=wheel_qdot_bound_margin,
+        physical_crank_terminal_angle=cycling_info.get(
+            "physical_crank_terminal_angle"
+        ),
     )
 
     # --- Set objective --- #
@@ -1173,20 +1190,22 @@ def set_q_qdot_init(
             "../../msk_models/Wu/Modified_Wu_Shoulder_Model_Cycling_for_IK.bioMod"
         )
         # biorbd_model_path = "../../msk_models/Seth/Modified_UL_Seth_2D_Cycling_for_IK.bioMod"
-        n_shooting = (
-            n_shooting * (ode_solver.polynomial_degree + 1)
-            if ode_solver.is_direct_collocation
-            else n_shooting
+        sample_times = state_initial_guess_time_grid(
+            n_shooting=n_shooting,
+            turn_number=turn_number,
+            ode_solver=ode_solver,
         )
+        initial_guess_intervals = sample_times.size - 1
         # --- Run inverse kinematics --- #
         q_guess, qdot_guess, qddot_guess = inverse_kinematics_cycling(
             biorbd_model_path,
-            n_shooting,
+            initial_guess_intervals,
             x_center=pedal_config["x_center"],
             y_center=pedal_config["y_center"],
             radius=pedal_config["radius"],
             ik_method="trf",
             cycling_number=turn_number,
+            sample_times=sample_times,
         )
         # --- Set q and qdot initial guesses values obtained by inverse kinematics --- #
         if ode_solver.is_direct_collocation:
@@ -1201,6 +1220,37 @@ def set_q_qdot_init(
             )
 
     return x_init
+
+
+def state_initial_guess_time_grid(
+    *,
+    n_shooting: int,
+    turn_number: int,
+    ode_solver: OdeSolver,
+) -> np.ndarray:
+    """Return the physical time of every state in an ALL_POINTS warm-start."""
+
+    if n_shooting < 1 or turn_number < 1:
+        raise ValueError("n_shooting and turn_number must be strictly positive.")
+    if not ode_solver.is_direct_collocation:
+        return np.linspace(0.0, float(turn_number), n_shooting + 1)
+
+    from casadi import collocation_points
+
+    degree = int(ode_solver.polynomial_degree)
+    method = str(getattr(ode_solver, "method", "radau")).lower()
+    local_nodes = np.concatenate(
+        ([0.0], np.asarray(collocation_points(degree, method), dtype=float))
+    )
+    interval_duration = float(turn_number) / n_shooting
+    grid = np.concatenate(
+        [
+            (interval + local_nodes) * interval_duration
+            for interval in range(n_shooting)
+        ]
+        + [np.array([float(turn_number)])]
+    )
+    return grid
 
 
 def set_x_bounds(
@@ -1513,7 +1563,8 @@ def recenter_reduced_theta_seed(
     *,
     nodes_per_cycle: int,
     cycles: int,
-) -> tuple[np.ndarray, dict[str, float]]:
+    node_time_grid_s: np.ndarray | None = None,
+) -> tuple[np.ndarray, np.ndarray, dict[str, float]]:
     """Remove accumulated cycle-boundary drift from a reduced warm-start."""
 
     theta = np.asarray(theta, dtype=float).reshape((1, -1))
@@ -1530,8 +1581,20 @@ def recenter_reduced_theta_seed(
         direction = -1.0
     signed_cycle_shift = direction * 2.0 * np.pi
     corrected = theta.copy()
+    corrected_omega = omega.copy()
+    if node_time_grid_s is None:
+        node_time_grid_s = np.linspace(0.0, float(cycles), expected_nodes)
+    else:
+        node_time_grid_s = np.asarray(node_time_grid_s, dtype=float).reshape(-1)
+        if node_time_grid_s.size != expected_nodes:
+            raise ValueError(
+                "node_time_grid_s must contain one time per reduced state node."
+            )
+        if np.any(np.diff(node_time_grid_s) < 0.0):
+            raise ValueError("node_time_grid_s must be non-decreasing.")
     reference = float(theta[0, 0])
     maximum_change = 0.0
+    maximum_omega_change = 0.0
     maximum_boundary_error = 0.0
     for cycle in range(int(cycles)):
         start = cycle * int(nodes_per_cycle)
@@ -1543,19 +1606,30 @@ def recenter_reduced_theta_seed(
             abs(float(theta[0, start]) - target_start),
             abs(float(theta[0, stop]) - target_stop),
         )
-        correction = np.linspace(
-            target_start - float(theta[0, start]),
-            target_stop - float(theta[0, stop]),
-            stop - start + 1,
+        start_correction = target_start - float(theta[0, start])
+        stop_correction = target_stop - float(theta[0, stop])
+        cycle_times = node_time_grid_s[start : stop + 1]
+        cycle_duration = float(cycle_times[-1] - cycle_times[0])
+        if cycle_duration <= 0.0:
+            raise ValueError("Each cycle must span a positive physical duration.")
+        phase = (cycle_times - cycle_times[0]) / cycle_duration
+        correction = start_correction + phase * (
+            stop_correction - start_correction
         )
+        omega_correction = (stop_correction - start_correction) / cycle_duration
         corrected[0, start : stop + 1] = (
             theta[0, start : stop + 1] + correction
         )
+        corrected_omega[0, start : stop + 1] = (
+            omega[0, start : stop + 1] + omega_correction
+        )
         maximum_change = max(maximum_change, float(np.max(np.abs(correction))))
-    return corrected, {
+        maximum_omega_change = max(maximum_omega_change, abs(omega_correction))
+    return corrected, corrected_omega, {
         "signed_cycle_shift_rad": signed_cycle_shift,
         "maximum_boundary_error_before_rad": maximum_boundary_error,
         "maximum_theta_change_rad": maximum_change,
+        "maximum_omega_change_rad_s": maximum_omega_change,
     }
 
 
@@ -1677,6 +1751,60 @@ def wheel_cycle_boundary_constraint(
     return controller.states[position_state_key].cx[position_state_index]
 
 
+def physical_crank_velocity_constraint(
+    controller,
+    hand_marker: str = "hand",
+    center_marker: str = "global_wheel_center",
+):
+    """Return the angular velocity of the physical center-to-hand vector."""
+
+    bio_model = controller.model.bio_model
+    q = controller.states["q"].cx
+    qdot = controller.states["qdot"].cx
+    parameters = controller.parameters.cx
+    hand_index = bio_model.marker_index(hand_marker)
+    center_index = bio_model.marker_index(center_marker)
+    hand = bio_model.marker(hand_index)(q, parameters)
+    center = bio_model.marker(center_index)(q, parameters)
+    hand_velocity = bio_model.marker_velocity(hand_index)(
+        q, qdot, parameters
+    )
+    center_velocity = bio_model.marker_velocity(center_index)(
+        q, qdot, parameters
+    )
+    crank = hand[:2] - center[:2]
+    crank_velocity = hand_velocity[:2] - center_velocity[:2]
+    squared_radius = crank[0] ** 2 + crank[1] ** 2
+    return (
+        crank[0] * crank_velocity[1] - crank[1] * crank_velocity[0]
+    ) / squared_radius
+
+
+def physical_crank_terminal_alignment_constraint(
+    controller,
+    target_angle: float,
+    hand_marker: str = "hand",
+    center_marker: str = "global_wheel_center",
+):
+    """Align the terminal center-to-hand vector with a physical phase."""
+
+    from casadi import vertcat
+
+    bio_model = controller.model.bio_model
+    q = controller.states["q"].cx
+    parameters = controller.parameters.cx
+    hand = bio_model.marker(bio_model.marker_index(hand_marker))(q, parameters)
+    center = bio_model.marker(bio_model.marker_index(center_marker))(
+        q, parameters
+    )
+    crank = hand[:2] - center[:2]
+    target_cos = np.cos(float(target_angle))
+    target_sin = np.sin(float(target_angle))
+    cross = crank[0] * target_sin - crank[1] * target_cos
+    forward = crank[0] * target_cos + crank[1] * target_sin
+    return vertcat(cross, forward)
+
+
 def set_constraints(
     bio_model,
     enforce_start_constraints: bool = True,
@@ -1687,6 +1815,10 @@ def set_constraints(
     wheel_cycle_boundary_slack: float | None = None,
     position_state_key: str = "q",
     position_state_index: int = 2,
+    enforce_physical_crank_velocity_bounds: bool = False,
+    physical_crank_velocity_target: float = -2.0 * np.pi,
+    physical_crank_velocity_margin: float = 3.0,
+    physical_crank_terminal_angle: float | None = None,
 ):
     constraints = ConstraintList()
     if enforce_start_constraints and not isinstance(
@@ -1706,6 +1838,33 @@ def set_constraints(
             node=Node.START,
             axes=[Axis.X, Axis.Y],
         )
+    if enforce_physical_crank_velocity_bounds:
+        if isinstance(bio_model, ReducedFesCyclingModel):
+            raise ValueError(
+                "Reduced mechanics enforce cadence directly through omega bounds."
+            )
+        if physical_crank_velocity_margin <= 0.0:
+            raise ValueError(
+                "The physical crank-velocity margin must be positive."
+            )
+        constraints.add(
+            physical_crank_velocity_constraint,
+            node=Node.ALL,
+            min_bound=(
+                physical_crank_velocity_target - physical_crank_velocity_margin
+            ),
+            max_bound=(
+                physical_crank_velocity_target + physical_crank_velocity_margin
+            ),
+        )
+        if physical_crank_terminal_angle is not None:
+            constraints.add(
+                physical_crank_terminal_alignment_constraint,
+                node=Node.END,
+                target_angle=float(physical_crank_terminal_angle),
+                min_bound=np.array([0.0, 0.0]),
+                max_bound=np.array([0.0, np.inf]),
+            )
 
     if wheel_cycle_boundary_slack is None or n_cycles_simultaneous <= 1:
         return constraints

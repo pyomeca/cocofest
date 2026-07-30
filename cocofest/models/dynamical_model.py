@@ -417,7 +417,7 @@ class FesMskModel(BiorbdModel, StateDynamicsWithContacts):
                     muscle=nlp.model.bio_model.model.muscle(muscle_idx),
                     q=Q,
                 )
-                if nlp.model.activate_force_velocity_relationship
+                if nlp.model.activate_force_length_relationship
                 else 1
             )
             muscle_force_length_coeff = Function("muscle_force_length_coeff", [Q, Qdot], [muscle_force_length_coeff])(

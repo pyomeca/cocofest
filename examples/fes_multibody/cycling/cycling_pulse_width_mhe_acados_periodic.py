@@ -3068,6 +3068,19 @@ def _validate_common_initial_solution_metadata(
         "warmup_cycles_consumed",
     ):
         if metadata.get(field) != expected[field]:
+            if field == "mechanical_formulation":
+                seed_states = seed.decision_states(to_merge=SolutionMerge.NODES)
+                bridge_is_supported = (
+                    metadata.get(field) == "reduced"
+                    and expected[field] == "full"
+                    and {"theta", "omega"} <= set(seed_states)
+                ) or (
+                    metadata.get(field) == "full"
+                    and expected[field] == "reduced"
+                    and {"q", "qdot"} <= set(seed_states)
+                )
+                if bridge_is_supported:
+                    continue
             raise ValueError(
                 f"Common initial solution '{seed_path}' has {field}="
                 f"{metadata.get(field)!r}, expected {expected[field]!r}."
@@ -5716,6 +5729,28 @@ class CompiledNlpReuseTracker:
         self._solver_objects = []
         self._bound_fingerprints = []
         self._observations = []
+        self._compiled_source_signatures = []
+        self._compiled_source_cache = {}
+
+    def _compiled_source_signature(self) -> dict | None:
+        """Identify CasADi's generated source without recompiling or loading it."""
+
+        source = Path.cwd() / "nlp.c"
+        if not source.is_file():
+            return None
+        stat = source.stat()
+        stat_key = (str(source), int(stat.st_size), int(stat.st_mtime_ns))
+        cached = self._compiled_source_cache.get(stat_key)
+        if cached is not None:
+            return dict(cached)
+        signature = {
+            "path": str(source),
+            "size_bytes": int(stat.st_size),
+            "mtime_ns": int(stat.st_mtime_ns),
+            "sha256": hashlib.sha256(source.read_bytes()).hexdigest(),
+        }
+        self._compiled_source_cache[stat_key] = signature
+        return dict(signature)
 
     @staticmethod
     def _bounds_fingerprint(nmpc) -> str:
@@ -5768,12 +5803,16 @@ class CompiledNlpReuseTracker:
             self._solver_objects.append(compiled_solver)
             build_index = len(self._solver_objects) - 1
         fingerprint = self._bounds_fingerprint(nmpc)
+        compiled_source = self._compiled_source_signature()
         self._bound_fingerprints.append(fingerprint)
+        if compiled_source is not None:
+            self._compiled_source_signatures.append(compiled_source)
         self._observations.append(
             {
                 "window": int(window),
                 "compiled_library_index": int(build_index),
                 "bounds_fingerprint": fingerprint,
+                "compiled_source": compiled_source,
             }
         )
 
@@ -5781,6 +5820,15 @@ class CompiledNlpReuseTracker:
         build_count = len(self._solver_objects)
         observation_count = len(self._observations)
         unique_bound_vectors = len(set(self._bound_fingerprints))
+        unique_compiled_sources = {
+            (
+                item["path"],
+                item["size_bytes"],
+                item["mtime_ns"],
+                item["sha256"],
+            )
+            for item in self._compiled_source_signatures
+        }
         return {
             "enabled": self.enabled,
             "runtime_inputs": list(self.runtime_inputs),
@@ -5792,6 +5840,14 @@ class CompiledNlpReuseTracker:
             "graph_rebuild_detected": bool(build_count > 1),
             "unique_runtime_bound_vectors": unique_bound_vectors,
             "runtime_bounds_changed": bool(unique_bound_vectors > 1),
+            "compiled_source_observed": bool(self._compiled_source_signatures),
+            "compiled_source_observation_count": len(
+                self._compiled_source_signatures
+            ),
+            "unique_compiled_source_versions": len(unique_compiled_sources),
+            "compiled_source_reused": bool(
+                observation_count > 1 and len(unique_compiled_sources) == 1
+            ),
             "observations": list(self._observations),
         }
 
@@ -6101,6 +6157,209 @@ def build_single_shot_summary(
         "diagnostics": diagnostics,
         "success": bool(solver_success and physical_success),
     }
+
+
+def audit_mechanical_trajectory(
+    state_traces: dict[str, np.ndarray],
+    reduced_cycling_dynamics: ReducedCyclingDynamics,
+    *,
+    configuration_tolerance_rad: float = 1e-2,
+    velocity_tolerance_rad_s: float = 1e-1,
+    crank_velocity_target_rad_s: float = DEFAULT_CRANK_QDOT_RAD_S,
+    crank_velocity_margin_rad_s: float = 3.0,
+    cadence_node_stride: int = 1,
+) -> tuple[np.ndarray, np.ndarray, dict]:
+    """Express either formulation in the same physical crank coordinates."""
+
+    if configuration_tolerance_rad < 0.0 or velocity_tolerance_rad_s < 0.0:
+        raise ValueError("Mechanical-audit tolerances must be non-negative.")
+    if crank_velocity_margin_rad_s <= 0.0:
+        raise ValueError("The physical crank-velocity margin must be positive.")
+    if cadence_node_stride < 1:
+        raise ValueError("cadence_node_stride must be strictly positive.")
+    kinematics = reduced_cycling_dynamics.kinematics
+    if "theta" in state_traces and "omega" in state_traces:
+        theta = np.asarray(state_traces["theta"], dtype=float)
+        omega = np.asarray(state_traces["omega"], dtype=float)
+        lifted_q, lifted_qdot = kinematics.lift_generalized_trajectory(theta, omega)
+        projected_theta, projected_omega, audit = (
+            kinematics.project_generalized_trajectory(lifted_q, lifted_qdot)
+        )
+        source_formulation = "reduced"
+    elif "q" in state_traces and "qdot" in state_traces:
+        projected_theta, projected_omega, audit = (
+            kinematics.project_generalized_trajectory(
+                np.asarray(state_traces["q"], dtype=float),
+                np.asarray(state_traces["qdot"], dtype=float),
+            )
+        )
+        source_formulation = "full"
+    else:
+        raise KeyError(
+            "Mechanical audit requires theta/omega or q/qdot state traces."
+        )
+
+    configuration_error = float(
+        audit["maximum_configuration_projection_error_rad"]
+    )
+    velocity_error = float(
+        audit.get("maximum_tangent_velocity_residual_rad_s", 0.0)
+    )
+    physical_omega = projected_omega[0]
+    audited_omega = physical_omega[::cadence_node_stride]
+    omega_lower = float(
+        crank_velocity_target_rad_s - crank_velocity_margin_rad_s
+    )
+    omega_upper = float(
+        crank_velocity_target_rad_s + crank_velocity_margin_rad_s
+    )
+    omega_violation = float(
+        max(
+            0.0,
+            omega_lower - float(np.min(audited_omega)),
+            float(np.max(audited_omega)) - omega_upper,
+        )
+    )
+    all_node_omega_violation = float(
+        max(
+            0.0,
+            omega_lower - float(np.min(physical_omega)),
+            float(np.max(physical_omega)) - omega_upper,
+        )
+    )
+    audit.update(
+        {
+            "source_formulation": source_formulation,
+            "configuration_tolerance_rad": float(configuration_tolerance_rad),
+            "velocity_tolerance_rad_s": float(velocity_tolerance_rad_s),
+            "physical_crank_velocity_min_rad_s": float(
+                np.min(physical_omega)
+            ),
+            "physical_crank_velocity_max_rad_s": float(
+                np.max(physical_omega)
+            ),
+            "physical_crank_velocity_lower_bound_rad_s": omega_lower,
+            "physical_crank_velocity_upper_bound_rad_s": omega_upper,
+            "cadence_audit_node_stride": int(cadence_node_stride),
+            "audited_physical_crank_velocity_min_rad_s": float(
+                np.min(audited_omega)
+            ),
+            "audited_physical_crank_velocity_max_rad_s": float(
+                np.max(audited_omega)
+            ),
+            "maximum_physical_crank_velocity_bound_violation_rad_s": (
+                omega_violation
+            ),
+            "maximum_all_node_crank_velocity_bound_violation_rad_s": (
+                all_node_omega_violation
+            ),
+            "passes_configuration_tolerance": (
+                configuration_error <= configuration_tolerance_rad
+            ),
+            "passes_velocity_tolerance": velocity_error <= velocity_tolerance_rad_s,
+            "passes_physical_crank_velocity_bounds": (
+                omega_violation <= velocity_tolerance_rad_s
+            ),
+            "passes_tolerance": (
+                configuration_error <= configuration_tolerance_rad
+                and velocity_error <= velocity_tolerance_rad_s
+                and omega_violation <= velocity_tolerance_rad_s
+            ),
+        }
+    )
+    return projected_theta[0], projected_omega[0], audit
+
+
+def attach_mechanical_equivalence_audit(
+    summary: dict,
+    reduced_cycling_dynamics: ReducedCyclingDynamics | None,
+) -> dict:
+    """Attach physical crank traces and reject visibly off-manifold motion."""
+
+    if reduced_cycling_dynamics is None:
+        summary["mechanical_equivalence_audit"] = {
+            "available": False,
+            "passes_tolerance": False,
+            "reason": "reduced_cycling_profile_unavailable",
+        }
+        return summary
+    try:
+        args = summary.get("args")
+        ode_solver = str(getattr(args, "ode_solver", "")).lower()
+        cadence_node_stride = (
+            int(getattr(args, "collocation_degree", 3)) + 1
+            if ode_solver in {"collocation", "irk"}
+            else 1
+        )
+        theta, omega, audit = audit_mechanical_trajectory(
+            summary.get("state_traces") or {},
+            reduced_cycling_dynamics,
+            crank_velocity_target_rad_s=float(
+                getattr(
+                    args,
+                    "wheel_qdot_regularization_target",
+                    DEFAULT_CRANK_QDOT_RAD_S,
+                )
+            ),
+            crank_velocity_margin_rad_s=float(
+                getattr(args, "wheel_qdot_bound_margin", 3.0)
+            ),
+            cadence_node_stride=cadence_node_stride,
+        )
+    except (KeyError, ValueError) as error:
+        summary["mechanical_equivalence_audit"] = {
+            "available": False,
+            "passes_tolerance": False,
+            "reason": f"{type(error).__name__}: {error}",
+        }
+        return summary
+
+    audit["available"] = True
+    summary["physical_crank_angle_trace"] = theta
+    summary["physical_crank_velocity_trace"] = omega
+    summary["physical_crank_absolute_reference"] = float(theta[0])
+    summary["mechanical_equivalence_audit"] = audit
+    summary.setdefault("diagnostics", {})["mechanical_equivalence"] = audit
+    physical_crank_diagnostics = None
+    covered_cycles = int(summary.get("covered_cycles") or 0)
+    if covered_cycles > 0:
+        terminal_slack = float(
+            getattr(args, "acados_terminal_wheel_q_slack", 0.0)
+        )
+        numerical_tolerance = float(
+            getattr(args, "primal_feasibility_threshold", 1e-5) or 1e-5
+        )
+        physical_crank_diagnostics = diagnose_wheel_trace(
+            theta,
+            requested_windows=covered_cycles,
+            expected_cycle_shift=-2.0 * np.pi,
+            cycle_progress_tolerance=2.0 * terminal_slack
+            + 2.0 * numerical_tolerance,
+            absolute_cycle_reference=float(theta[0]),
+            absolute_cycle_tolerance=terminal_slack + numerical_tolerance,
+        )
+        summary["physical_crank_diagnostics"] = physical_crank_diagnostics
+        summary["diagnostics"]["physical_crank"] = physical_crank_diagnostics
+    physical_trace_passes = (
+        physical_crank_diagnostics is None
+        or physical_crank_diagnostics["is_physical"]
+    )
+    if not audit["passes_tolerance"] or not physical_trace_passes:
+        issues = summary["diagnostics"].setdefault("issues", [])
+        if (
+            not audit["passes_tolerance"]
+            and "mechanical_trajectory_off_reduced_manifold" not in issues
+        ):
+            issues.append("mechanical_trajectory_off_reduced_manifold")
+        if (
+            not physical_trace_passes
+            and "physical_crank_progress_out_of_bounds" not in issues
+        ):
+            issues.append("physical_crank_progress_out_of_bounds")
+        summary["diagnostics"]["is_physical"] = False
+        summary["physical_success"] = False
+        summary["success"] = False
+    return summary
 
 
 def diagnose_wheel_trace(
@@ -8960,6 +9219,29 @@ def _adapt_warmup_solution_to_periodic_nodes(
     }
     target_state_keys = set(periodic_nmpc.nlp[0].x_init.keys())
     if (
+        {"q", "qdot"} <= target_state_keys
+        and "theta" in resampled_states
+        and "omega" in resampled_states
+    ):
+        bridge_dynamics = getattr(
+            periodic_nmpc,
+            "_cocofest_mechanical_equivalence_dynamics",
+            None,
+        )
+        if bridge_dynamics is None:
+            raise RuntimeError(
+                "A reduced mechanical profile is required to lift theta/omega "
+                "onto the full q/qdot contact manifold."
+            )
+        lifted_q, lifted_qdot = (
+            bridge_dynamics.kinematics.lift_generalized_trajectory(
+                resampled_states["theta"],
+                resampled_states["omega"],
+            )
+        )
+        resampled_states["q"] = lifted_q
+        resampled_states["qdot"] = lifted_qdot
+    if (
         {"theta", "omega"} <= target_state_keys
         and "q" in resampled_states
         and "qdot" in resampled_states
@@ -9715,10 +9997,24 @@ def apply_solution_directly_to_periodic_nmpc_initial_guess(
     if recenter_kinematic_bounds:
         for key in ("q", "qdot"):
             if key in periodic_nmpc.nlp[0].x_bounds.keys():
-                _recenter_boundary_bounds(
-                    periodic_nmpc.nlp[0].x_bounds[key],
+                values = np.asarray(
                     periodic_nmpc.nlp[0].x_init[key].init,
+                    dtype=float,
                 )
+                bounds = periodic_nmpc.nlp[0].x_bounds[key]
+                _recenter_boundary_bounds(
+                    bounds,
+                    values,
+                )
+                if values.shape[1] > 2 and np.asarray(bounds.min).shape[1] >= 2:
+                    # A physical omega interval does not map to the same
+                    # numerical interval for relative qdot[2]. Preserve the
+                    # exact lifted seed at collocation nodes; physical cadence
+                    # is audited separately in theta/omega coordinates.
+                    interior_min = np.min(values[:, 1:-1], axis=1)
+                    interior_max = np.max(values[:, 1:-1], axis=1)
+                    bounds.min[:, 1] = np.minimum(bounds.min[:, 1], interior_min)
+                    bounds.max[:, 1] = np.maximum(bounds.max[:, 1], interior_max)
 
     periodic_nmpc._correct_init_guess_to_fit_bounds(corrected_input="states")
     periodic_nmpc._correct_init_guess_to_fit_bounds(corrected_input="controls")
@@ -10720,7 +11016,16 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
         raise ValueError("--acados-transfer-mechanical-substeps must be positive.")
     if args.acados_transfer_mechanical_restoration and args.solver != "acados":
         raise ValueError(
-            "Reduced transfer mechanical restoration is only available with ACADOS."
+            "Transfer mechanical restoration is only available with ACADOS."
+        )
+    if (
+        args.acados_transfer_mechanical_restoration
+        and args.mechanical_formulation != "full"
+    ):
+        raise ValueError(
+            "The current q/qdot transfer mechanical restoration is not "
+            "compatible with reduced theta/omega mechanics. Use the IRK "
+            "rollout and bound homotopy for reduced ACADOS."
         )
     if args.acados_transfer_rollout_max_bound_violation < 0:
         raise ValueError(
@@ -10994,6 +11299,9 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
     )
     reduced_cycling_dynamics = None
     reduced_profile_build_time_s = 0.0
+    build_mechanical_audit_profile = bool(
+        getattr(args, "mechanical_equivalence_audit", False)
+    )
     if args.mechanical_formulation == "reduced":
         if not args.compact_rho_output:
             warnings.warn(
@@ -11013,6 +11321,7 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
             )
         if args.torque_application != "constant":
             raise ValueError("Reduced mechanics require --torque-application constant.")
+    if args.mechanical_formulation == "reduced" or build_mechanical_audit_profile:
         reduced_profile_path = (
             args.reduced_cycling_profile
             if args.reduced_cycling_profile is not None
@@ -11119,6 +11428,17 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
         "turn_number": args.cycles_per_window,
         "pedal_config": {"x_center": 0.35, "y_center": 0.0, "radius": 0.1},
         "enforce_start_constraints": args.enforce_start_constraints,
+        "enforce_physical_crank_velocity_bounds": bool(
+            build_mechanical_audit_profile
+            and args.mechanical_formulation == "full"
+            and args.solver != "acados"
+        ),
+        # The custom terminal phase constraint remains experimental: the
+        # current Bioptim/CasADi stack aborts while initializing IPOPT when
+        # that vector-valued terminal constraint is enabled. Absolute physical
+        # phase is audited after every solve until the scalar formulation is
+        # certified.
+        "physical_crank_terminal_angle": None,
         "periodic_cn_sum_approximation": periodic_cn_sum_approximation,
     }
     if use_external_forces:
@@ -11213,6 +11533,7 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
 
     nmpc = prepare_nmpc(model, mhe_info, cycling_info, nmpc_simulation_conditions)
     nmpc.n_cycles_simultaneous = args.cycles_per_window
+    nmpc._cocofest_mechanical_equivalence_dynamics = reduced_cycling_dynamics
     if args.solver == "acados":
         patch_bioptim_acados_interface()
 
@@ -11243,14 +11564,31 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
             "Tau1_": 5e-3,
             "Km_": 5e-3,
         }
+        terminal_position_slack = args.acados_terminal_wheel_q_slack
+        if (
+            position_key == "q"
+            and reduced_cycling_dynamics is not None
+            and terminal_position_slack > 0.0
+        ):
+            theta_samples = (
+                reduced_cycling_dynamics.kinematics.theta_origin
+                + reduced_cycling_dynamics.kinematics.direction
+                * np.linspace(0.0, 2.0 * np.pi, 361)
+            )
+            wheel_tangent = np.abs(
+                reduced_cycling_dynamics.kinematics.tangent(theta_samples)[
+                    wheel_index
+                ]
+            )
+            terminal_position_slack *= float(np.min(wheel_tangent))
         nmpc.terminal_state_slack = {
             position_key: (
-                [args.acados_terminal_wheel_q_slack]
+                [terminal_position_slack]
                 if position_key == "theta"
-                else [0.0, 0.0, args.acados_terminal_wheel_q_slack]
+                else [0.0, 0.0, terminal_position_slack]
             ),
         }
-        set_terminal_wheel_q_bound_slack(nmpc, args.acados_terminal_wheel_q_slack)
+        set_terminal_wheel_q_bound_slack(nmpc, terminal_position_slack)
         # The periodic-node states have the same physical meaning as the
         # historical Ding states. Keep their initial value near the IPOPT
         # warmup; otherwise ACADOS can manufacture a low-cost but nonphysical
@@ -11814,9 +12152,50 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
         common_seed_path = _resolve_standard_warmup_seed(args.common_initial_solution)
         common_seed = _load_warmup_cache(common_seed_path)
         _validate_common_initial_solution_metadata(common_seed, args, common_seed_path)
-        apply_solution_directly_to_periodic_nmpc_initial_guess(nmpc, common_seed)
+        seed_mechanical_formulation = (
+            (common_seed.metadata or {}).get("mechanical_formulation")
+        )
+        mechanical_bridge = (
+            seed_mechanical_formulation is not None
+            and seed_mechanical_formulation != args.mechanical_formulation
+        )
+        apply_solution_directly_to_periodic_nmpc_initial_guess(
+            nmpc,
+            common_seed,
+            recenter_kinematic_bounds=mechanical_bridge,
+        )
+        if mechanical_bridge and getattr(
+            nmpc, "anchor_wheel_q_to_absolute_reference", False
+        ):
+            position_key = nmpc.position_state_key
+            wheel_index = nmpc.wheel_state_index
+            bridged_start = float(
+                np.asarray(
+                    nmpc.nlp[0].x_init[position_key].init,
+                    dtype=float,
+                )[wheel_index, 0]
+            )
+            cycle_index = int(
+                getattr(nmpc, "absolute_wheel_q_cycle_index", 0)
+            )
+            cycle_shift = float(
+                getattr(nmpc, "absolute_wheel_q_cycle_shift", -2.0 * np.pi)
+            )
+            nmpc.absolute_wheel_q_reference = (
+                bridged_start - cycle_index * cycle_shift
+            )
+            nmpc._cocofest_terminal_wheel_q_center = (
+                bridged_start + cycle_shift
+            )
+            set_terminal_wheel_q_bound_slack(
+                nmpc,
+                nmpc.terminal_state_slack[position_key][wheel_index],
+            )
         if echo:
-            print(f"common_initial_solution: applied ({common_seed_path})")
+            print(
+                f"common_initial_solution: applied ({common_seed_path}, "
+                f"mechanical_bridge={mechanical_bridge})"
+            )
         if args.solver == "acados" and not args.disable_periodic_fes_warmup_projection:
             common_projection = project_periodic_fes_initial_guess(
                 nmpc,
@@ -12156,12 +12535,32 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
     initial_guess_snapshot = initial_guess_audit.pop("snapshot")
     initial_guess_state_traces = initial_guess_snapshot["states"]
     initial_guess_control_traces = initial_guess_snapshot["controls"]
+    if build_mechanical_audit_profile and reduced_cycling_dynamics is not None:
+        _, _, mechanical_initial_guess_audit = audit_mechanical_trajectory(
+            initial_guess_state_traces,
+            reduced_cycling_dynamics,
+            crank_velocity_target_rad_s=args.wheel_qdot_regularization_target,
+            crank_velocity_margin_rad_s=args.wheel_qdot_bound_margin,
+        )
+        initial_guess_audit["mechanical_equivalence"] = (
+            mechanical_initial_guess_audit
+        )
     if echo:
         print(
             "initial_guess_audit: "
             f"signature={initial_guess_audit['signature']} "
             f"finite={initial_guess_audit['finite']}"
         )
+        if initial_guess_audit.get("mechanical_equivalence") is not None:
+            mechanical_audit = initial_guess_audit["mechanical_equivalence"]
+            print(
+                "initial_guess_mechanical_equivalence: "
+                "configuration_max_rad="
+                f"{mechanical_audit['maximum_configuration_projection_error_rad']:.6g} "
+                "velocity_max_rad_s="
+                f"{mechanical_audit.get('maximum_tangent_velocity_residual_rad_s', 0.0):.6g} "
+                f"passes={mechanical_audit['passes_tolerance']}"
+            )
     initial_guess_preparation_time_s = perf_counter() - preparation_start
     if echo:
         print(
@@ -13289,6 +13688,10 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
             summary["cycle_boundary_homotopy_summary"] = cycle_boundary_homotopy_summary
         if terminal_wheel_bound_summaries:
             summary["terminal_wheel_bound_summaries"] = terminal_wheel_bound_summaries
+        if build_mechanical_audit_profile:
+            attach_mechanical_equivalence_audit(
+                summary, reduced_cycling_dynamics
+            )
         return summary
 
     try:
@@ -13441,6 +13844,8 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
     summary["absolute_wheel_q_origin_reference"] = absolute_wheel_q_origin_reference
     summary["absolute_wheel_q_start_cycle_index"] = absolute_wheel_q_start_cycle_index
     summary["native_solver_status"] = _native_solver_status(nmpc)
+    if build_mechanical_audit_profile:
+        attach_mechanical_equivalence_audit(summary, reduced_cycling_dynamics)
     return summary
 
 

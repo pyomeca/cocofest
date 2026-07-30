@@ -97,12 +97,19 @@ def test_reduced_kinematics_retains_variable_crank_velocity():
     omega_nodes = -5.0 - 0.8 * np.sin(theta_nodes)
     full_q = kinematics.q(theta_nodes)
     full_qdot = kinematics.tangent(theta_nodes) * omega_nodes
+    lifted_q, lifted_qdot = kinematics.lift_generalized_trajectory(
+        theta_nodes, omega_nodes
+    )
+    np.testing.assert_allclose(lifted_q, full_q)
+    np.testing.assert_allclose(lifted_qdot, full_qdot)
     projected_theta, projected_omega, audit = (
         kinematics.project_generalized_trajectory(full_q, full_qdot)
     )
     np.testing.assert_allclose(projected_theta, theta_nodes[np.newaxis, :], atol=1e-10)
     np.testing.assert_allclose(projected_omega, omega_nodes[np.newaxis, :], atol=1e-10)
     assert audit["maximum_configuration_projection_error_rad"] < 1e-10
+    assert audit["maximum_tangent_velocity_residual_rad_s"] < 1e-10
+    assert audit["root_mean_square_configuration_projection_error_rad"] < 1e-10
 
 
 def test_wu_reduced_dynamics_matches_constrained_forward_dynamics(tmp_path):

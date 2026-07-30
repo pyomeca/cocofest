@@ -57,6 +57,7 @@ BENCHMARK_CONFIGURATION_FIELDS = (
     "objective_shape",
     "model_formulation",
     "mechanical_formulation",
+    "mechanical_equivalence_audit",
     "torque_application",
     "ode_solver",
     "collocation_degree",
@@ -392,7 +393,7 @@ def _shooting_node_control_trace(
 
 
 def _truncate_result_to_cycles(result: dict, cycle_count: int) -> dict:
-    return {
+    truncated = {
         **result,
         "wheel_angle_trace": _shooting_node_state_trace(
             result["wheel_angle_trace"], result, cycle_count
@@ -406,6 +407,12 @@ def _truncate_result_to_cycles(result: dict, cycle_count: int) -> dict:
             for key, values in result.get("control_traces", {}).items()
         },
     }
+    for key in ("physical_crank_angle_trace", "physical_crank_velocity_trace"):
+        if result.get(key) is not None:
+            truncated[key] = _shooting_node_state_trace(
+                result[key], result, cycle_count
+            )
+    return truncated
 
 
 def _window_performance(result: dict) -> dict:
@@ -667,9 +674,12 @@ def _cycle_boundary_wheel_angle_metrics(result: dict, cycle_count: int) -> dict:
         return metrics
 
     limited = _truncate_result_to_cycles(result, cycle_count)
-    wheel_angle = np.asarray(limited.get("wheel_angle_trace", []), dtype=float).reshape(
-        -1
-    )
+    wheel_angle = np.asarray(
+        limited.get("physical_crank_angle_trace")
+        if limited.get("physical_crank_angle_trace") is not None
+        else limited.get("wheel_angle_trace", []),
+        dtype=float,
+    ).reshape(-1)
     shooting_per_cycle = int(result["args"].stimulations_per_cycle)
     expected_size = cycle_count * shooting_per_cycle + 1
     if (
@@ -681,7 +691,9 @@ def _cycle_boundary_wheel_angle_metrics(result: dict, cycle_count: int) -> dict:
 
     cycle_shift = float(np.sign(wheel_angle[-1] - wheel_angle[0]) * 2.0 * np.pi)
     boundaries = wheel_angle[::shooting_per_cycle]
-    reference = result.get("absolute_wheel_q_reference")
+    reference = result.get("physical_crank_absolute_reference")
+    if reference is None:
+        reference = result.get("absolute_wheel_q_reference")
     if reference is None:
         reference = wheel_angle[0]
     reference = float(reference)
@@ -1906,14 +1918,25 @@ def _stimulation_pattern_snapshot(result: dict, cycle: int) -> dict:
         2.0 * np.pi,
     ).tolist()
     state_traces = limited.get("state_traces", {})
-    qdot = state_traces.get("qdot")
-    velocity_index = 2
+    qdot = limited.get("physical_crank_velocity_trace")
+    velocity_index = 0
+    if qdot is None:
+        qdot = state_traces.get("qdot")
+        velocity_index = 2
     if qdot is None:
         qdot = state_traces.get("omega")
         velocity_index = 0
     if qdot is not None:
         qdot = np.asarray(qdot, dtype=float)
-        if qdot.ndim == 2 and qdot.shape[0] > velocity_index and qdot.shape[1] >= stop:
+        if qdot.ndim == 1 and qdot.size >= stop:
+            crank_velocity = qdot[start:stop]
+            if np.all(np.isfinite(crank_velocity)):
+                snapshot["crank_velocity_rad_s"] = crank_velocity.tolist()
+        elif (
+            qdot.ndim == 2
+            and qdot.shape[0] > velocity_index
+            and qdot.shape[1] >= stop
+        ):
             crank_velocity = qdot[velocity_index, start:stop]
             if np.all(np.isfinite(crank_velocity)):
                 snapshot["crank_velocity_rad_s"] = crank_velocity.tolist()
@@ -2249,6 +2272,12 @@ def solver_overview_rows(results: dict[str, dict]) -> list[dict]:
                 "fatigue_by_state": fatigue,
                 "external_crank_power": external_crank_power,
                 "cycle_boundary_wheel_angle": cycle_boundary_wheel_angle,
+                "mechanical_equivalence_audit": result.get(
+                    "mechanical_equivalence_audit"
+                ),
+                "physical_crank_diagnostics": result.get(
+                    "physical_crank_diagnostics"
+                ),
                 "control_saturation": saturation,
                 "pulse_width_active_set_summary": result.get(
                     "pulse_width_active_set_summary"
@@ -3108,6 +3137,17 @@ def main(
         "madnlp": madnlp_args,
         "alpaqa": alpaqa_args,
     }
+    # A benchmark comparison must use a common physical crank coordinate.
+    # Full q/qdot traces are therefore projected onto the same contact
+    # manifold as the reduced theta/omega OCP before phase and cadence metrics
+    # are computed.
+    for solver_configuration in solver_args.values():
+        solver_configuration.mechanical_equivalence_audit = True
+        solver_configuration.reduced_cycling_profile = (
+            None
+            if reduced_cycling_profile is None
+            else Path(reduced_cycling_profile)
+        )
     if mechanical_formulation not in ("full", "reduced"):
         raise ValueError("mechanical_formulation must be 'full' or 'reduced'.")
     if mechanical_formulation == "reduced":

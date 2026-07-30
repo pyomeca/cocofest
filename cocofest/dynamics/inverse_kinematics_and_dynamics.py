@@ -84,6 +84,7 @@ def inverse_kinematics_cycling(
     radius: int | float,
     ik_method: str = "trf",
     cycling_number: int = 1,
+    sample_times: np.ndarray | None = None,
 ) -> tuple:
     """
     Perform the inverse kinematics of a cycling movement
@@ -135,12 +136,25 @@ def inverse_kinematics_cycling(
     ):
         print("The model not strictly 2d. Warm start not optimal.")
 
-    f = interp1d(
-        np.linspace(0, -360 * cycling_number, 360 * cycling_number + 1),
-        np.linspace(0, -360 * cycling_number, 360 * cycling_number + 1),
-        kind="linear",
-    )
-    x_new = f(np.linspace(0, -360 * cycling_number, n_shooting + 1))
+    if sample_times is None:
+        sample_times = np.linspace(0.0, float(cycling_number), n_shooting + 1)
+    else:
+        sample_times = np.asarray(sample_times, dtype=float).reshape(-1)
+        if sample_times.size != n_shooting + 1:
+            raise ValueError(
+                "sample_times must contain exactly n_shooting + 1 values."
+            )
+        if not np.all(np.isfinite(sample_times)):
+            raise ValueError("sample_times must contain only finite values.")
+        if np.any(np.diff(sample_times) < 0.0):
+            raise ValueError("sample_times must be non-decreasing.")
+        if not np.isclose(sample_times[0], 0.0) or not np.isclose(
+            sample_times[-1], float(cycling_number)
+        ):
+            raise ValueError(
+                "sample_times must span [0, cycling_number]."
+            )
+    x_new = -360.0 * sample_times
     x_new_rad = np.deg2rad(x_new)
 
     x_y_z_coord = np.array([get_circle_coord(theta, x_center, y_center, radius) for theta in x_new_rad]).T
@@ -151,7 +165,6 @@ def inverse_kinematics_cycling(
         wheel_center_x_y_z_coord[:, np.newaxis, np.newaxis], (1, 1, n_shooting + 1)
     )  # Wheel marker_target
     target_marker = np.concatenate((target_marker_hand, target_marker_wheel_center), axis=1)
-    time_step = cycling_number / n_shooting
     ik = biorbd.InverseKinematics(model, target_marker)
     # biorbd 1.12's Python IK helper calls ``to_array`` internally even when
     # built with CasADi, whose NodeSegment and Jacobian wrappers expose
@@ -159,8 +172,38 @@ def inverse_kinematics_cycling(
     ik._marker_diff = _biorbd_marker_residual
     ik._marker_jacobian = _biorbd_marker_jacobian
     ik_q = ik.solve(method=ik_method)
-    ik_qdot = np.array([np.gradient(ik_q[i], time_step) for i in range(ik_q.shape[0])])
-    ik_qddot = np.array([np.gradient(ik_qdot[i], time_step) for i in range(ik_qdot.shape[0])])
+    # Direct collocation contains a Radau point at tau=1 followed by the next
+    # shooting node at the same physical time. Differentiate on the unique
+    # time grid, then expand the velocities back to Bioptim's ALL_POINTS grid.
+    unique_times, unique_indices, inverse_indices = np.unique(
+        sample_times, return_index=True, return_inverse=True
+    )
+    if unique_times.size < 2:
+        raise ValueError("At least two distinct sample times are required.")
+    gradient_edge_order = 2 if unique_times.size >= 3 else 1
+    unique_q = ik_q[:, unique_indices]
+    unique_qdot = np.array(
+        [
+            np.gradient(
+                unique_q[index],
+                unique_times,
+                edge_order=gradient_edge_order,
+            )
+            for index in range(unique_q.shape[0])
+        ]
+    )
+    unique_qddot = np.array(
+        [
+            np.gradient(
+                unique_qdot[index],
+                unique_times,
+                edge_order=gradient_edge_order,
+            )
+            for index in range(unique_qdot.shape[0])
+        ]
+    )
+    ik_qdot = unique_qdot[:, inverse_indices]
+    ik_qddot = unique_qddot[:, inverse_indices]
     return ik_q, ik_qdot, ik_qddot
 
 

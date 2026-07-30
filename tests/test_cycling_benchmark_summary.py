@@ -1,3 +1,4 @@
+import csv
 import importlib.util
 import math
 from pathlib import Path
@@ -213,6 +214,95 @@ def test_markdown_attributes_acados_restoration_time_to_effective_rho_time():
     assert "| ACADOS/REDUCED | 0.800 | 2 |" in markdown
     assert "| ACADOS/REDUCED | 2 |" in markdown
     assert "| 0.060 | 0.080 | 0.140 |" in markdown
+
+
+def test_fatrop_internal_timings_are_normalized_and_exported(tmp_path):
+    entry = {
+        "runtime": {},
+        "configuration": {
+            "mechanical_formulation": "reduced",
+            "ode_solver": "collocation",
+        },
+        "result": {
+            "solver": "fatrop",
+            "nlp_solver_stats": [
+                {
+                    "window": 0,
+                    "iter_count": 5,
+                    "fatrop": {
+                        "iterations_count": 5,
+                        "time_total": 2.0,
+                        "eval_hess_time": 0.8,
+                        "eval_jac_time": 0.4,
+                        "eval_cv_time": 0.1,
+                        "compute_sd_time": 0.2,
+                        "eval_hess_count": 4,
+                        "eval_jac_count": 5,
+                    },
+                },
+                {
+                    "window": 1,
+                    "iter_count": 10,
+                    "fatrop": {
+                        "iterations_count": 10,
+                        "time_total": 3.0,
+                        "eval_hess_time": 1.2,
+                        "eval_jac_time": 0.6,
+                        "eval_cv_time": 0.15,
+                        "compute_sd_time": 0.3,
+                        "eval_hess_count": 8,
+                        "eval_jac_count": 10,
+                    },
+                },
+            ],
+            "windows": [],
+            "stimulation_patterns": {},
+        },
+    }
+
+    rows = summary.fatrop_internal_timing_rows(entry)
+    aggregate = summary.fatrop_internal_timing_summary(entry)
+
+    assert len(rows) == 2
+    assert rows[0]["case"] == "fatrop-collocation/reduced"
+    assert rows[0]["rho"] == 1
+    assert math.isclose(rows[0]["total_wall_time_per_iteration_s"], 0.4)
+    assert math.isclose(rows[0]["hessian_wall_time_per_evaluation_s"], 0.2)
+    assert math.isclose(rows[0]["derivative_wall_time_fraction"], 0.6)
+    assert aggregate is not None
+    assert aggregate["rho_count"] == 2
+    assert math.isclose(aggregate["mean_iterations"], 7.5)
+    assert math.isclose(aggregate["total_wall_time_s"], 5.0)
+    assert math.isclose(aggregate["structure_detection_wall_time_s"], 0.5)
+    assert math.isclose(aggregate["derivative_wall_time_fraction"], 0.6)
+
+    csv_path = tmp_path / "fatrop-internal-timings.csv"
+    summary.write_fatrop_internal_timing_csv(csv_path, [entry])
+    with csv_path.open(newline="", encoding="utf-8") as stream:
+        exported = list(csv.DictReader(stream))
+    assert len(exported) == 2
+    assert exported[1]["rho"] == "2"
+    assert exported[1]["iterations"] == "10"
+
+    markdown = summary.render_markdown([entry], [])
+    assert "## Décomposition interne Fatrop" in markdown
+    assert "| FATROP-COLLOCATION/REDUCED | 2 | 7.50 |" in markdown
+
+
+def test_fatrop_internal_timings_ignore_other_solvers():
+    entry = {
+        "configuration": {
+            "mechanical_formulation": "full",
+            "ode_solver": "collocation",
+        },
+        "result": {
+            "solver": "ipopt",
+            "nlp_solver_stats": [{"window": 0, "iter_count": 3}],
+        },
+    }
+
+    assert summary.fatrop_internal_timing_rows(entry) == []
+    assert summary.fatrop_internal_timing_summary(entry) is None
 
 
 def test_configuration_comparability_is_scoped_by_mechanical_formulation():
