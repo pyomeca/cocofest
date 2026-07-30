@@ -3979,6 +3979,8 @@ def test_github_acados_runner_uses_reference_and_option_profiles_sequentially():
     assert "mapfile -t expected_cases < acados-smoke-results/expected-cases.txt" in workflow
     assert 'expected ${#expected_cases[@]} JSON files' in workflow
     assert "expected 12 JSON files" not in workflow
+    assert ".configurations.acados.n_windows > 5" in workflow
+    assert ".validated_cycles == $expected" not in workflow
     assert "case_slug: fatrop-collocation" in workflow
     assert "Run FATROP collocation full" in workflow
     assert "Run FATROP collocation reduced" in workflow

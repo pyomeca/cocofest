@@ -1857,6 +1857,12 @@ Pour chaque palier, remplacer `cycles`, `acados_smoke_rhos` et, pour le
 diagnostic principal ACADOS, `acados_option_rhos` par l’horizon voulu. Les
 non-convergences numériques restent des résultats scientifiques; une absence
 de JSON, un graphe non-SX ou une option libMad ignorée fait échouer la CI.
+Le run 30 RHO `30567069442` a révélé qu’un ancien gate ACADOS exigeait à tort
+la convergence physique de toutes les variantes sur tout horizon supérieur à
+cinq. Le gate vérifie désormais la présence de tous les cas, l’usage de SX,
+un `n_windows > 5` réellement transmis et l’absence d’erreur
+d’infrastructure sur les références full/reduced; une non-convergence ACADOS
+reste dans le rapport sans rendre le workflow rouge.
 
 Pour mesurer la compilation, relancer sur le même type de runner avec :
 

@@ -890,31 +890,23 @@ jobs:
               )
             ' "$result"
           done
-          if [[ "$(cat acados-smoke-results/extended-campaign.txt)" == "true" ]]; then
-            for case_name in "${expected_cases[@]}"; do
-              result="acados-smoke-results/${case_name}/result.json"
-              jq -e '
-                .configurations.acados.n_windows as $expected |
+          extended_campaign="$(cat acados-smoke-results/extended-campaign.txt)"
+          for mechanics in full reduced; do
+            result="acados-smoke-results/sqp-irk-reference-${mechanics}/result.json"
+            jq -e --arg extended "$extended_campaign" '
+              (.configurations.acados.use_sx == true) and
+              (
+                if $extended == "true"
+                then .configurations.acados.n_windows > 5
+                else true
+                end
+              ) and
+              (
                 .results[0] |
-                (
-                  .success == true and
-                  .physical_success == true and
-                  .validated_cycles == $expected
-                )
-              ' "$result"
-            done
-          else
-            for mechanics in full reduced; do
-              result="acados-smoke-results/sqp-irk-reference-${mechanics}/result.json"
-              jq -e '
-                (.configurations.acados.use_sx == true) and
-                (
-                  .results[0] |
-                  (.attempted_windows > 0 and .error == null)
-                )
-              ' "$result"
-            done
-          fi
+                (.attempted_windows > 0 and .error == null)
+              )
+            ' "$result"
+          done
 
   screen-options:
     name: Option screen — ${{ matrix.solver }}
