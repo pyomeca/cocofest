@@ -3876,6 +3876,11 @@ def test_github_acados_runner_uses_reference_and_option_profiles_sequentially():
         '"$BENCHMARK_CYCLES" "${{ inputs.compile_nlp_evaluators }}"'
         in workflow
     )
+    assert (
+        "run_cycling_benchmark_case.sh ipopt ipopt full mumps collocation "
+        'benchmark-results "$BENCHMARK_CYCLES" false'
+        in workflow
+    )
     assert ".compiled_nlp_reuse.compiled_library_build_count == 1" in workflow
     assert ".compiled_nlp_reuse.graph_rebuild_detected == false" in workflow
     assert ".compiled_nlp_reuse.runtime_bounds_changed == true" in workflow

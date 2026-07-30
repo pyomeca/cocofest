@@ -1241,10 +1241,18 @@ Le temps de compilation est compté dans le mur-à-mur, mais pas dans la médian
 chaude. Sur Apple Silicon, le coût initial peut dépasser le gain pour un petit
 nombre de RHO. L’intérêt doit être évalué sur 100 RHO sous Linux.
 
-Les campagnes principales full/reduced IPOPT utilisent la compilation
-persistante quand `compile_nlp_evaluators=true`. Ce sont elles qui certifient
-la compilation sur le problème d’endurance réellement mesuré. Pour chaque run
-compilé multi-RHO, la CI exige :
+Le cas IPOPT reduced utilise la compilation persistante quand
+`compile_nlp_evaluators=true`. Il certifie la compilation sur le problème
+d’endurance réellement mesuré. Le full reste SX interprété : sur le runner
+GitHub hébergé, la génération C du NLP full à 26 états et collocation a reçu
+deux fois un `SIGTERM 143` avant tout artefact, dont une fois exactement après
+cinq minutes malgré un heartbeat toutes les 45 secondes
+(`30560155975`, `30563108224`). Ce comportement est une limite de ressources
+ou de supervision du runner, pas une non-convergence IPOPT. Une ablation full
+compilée reste possible sur un runner plus robuste, mais ne doit plus bloquer
+la référence scientifique full interprétée.
+
+Pour chaque run compiled reduced multi-RHO, la CI exige :
 
 ```text
 observed_solves == attempted_windows
@@ -1806,8 +1814,9 @@ gh workflow run cycling_solver_benchmark_linux.yml \
   -f acados_option_rhos=100
 ```
 
-`compile_nlp_evaluators=true` ne concerne que IPOPT. MadNLP reste interprété
-dans le même run.
+`compile_nlp_evaluators=true` active les évaluateurs C persistants pour IPOPT
+reduced et FATROP reduced. IPOPT full et MadNLP restent interprétés; FATROP
+full échoue actuellement avant compilation lors de la détection de structure.
 
 ### 14.2 Campagne graduelle obligatoire
 
