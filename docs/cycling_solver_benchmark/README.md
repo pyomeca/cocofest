@@ -5,10 +5,19 @@ pédalage FES. Il regroupe le problème scientifique, les formulations
 mathématiques, la discrétisation, les stratégies de warm-start, les critères
 de validation, l’organisation GitHub Actions et l’interprétation des résultats.
 
-Le benchmark courant compare IPOPT, MadNLP, Fatrop et ACADOS. Alpaqa reste
-documenté comme intégration non fonctionnelle. Les résultats chiffrés ci-dessous
-proviennent principalement du
+La campagne courante est volontairement **SX-only** et compare IPOPT/MUMPS,
+MadNLP/MUMPS et ACADOS, en mécanique full et reduced. PARDISO est archivé :
+il n’a apporté aucun gain à MadNLP. Fatrop est également sorti de l’endurance
+courante, car sa formulation full échoue encore en SX lors de l’identification
+de la structure des gaps. Alpaqa reste documenté comme intégration non
+fonctionnelle.
+
+Les résultats historiques d’endurance proviennent principalement du
 [run Linux 30487321536](https://github.com/mickaelbegon/cocofest/actions/runs/30487321536).
+La preuve comparative SX/MX vient du
+[run Linux 30475768127](https://github.com/mickaelbegon/cocofest/actions/runs/30475768127).
+Ils servent de référence avant la nouvelle campagne séquentielle 5, 30 puis
+100 RHO.
 
 ## Résumé opérationnel
 
@@ -20,10 +29,12 @@ proviennent principalement du
 - Les quatre muscles fournissent 20 états de Ding; la mécanique complète porte
   le total à 26 états et la mécanique réduite à 22.
 - La référence NLP utilise une collocation Radau de degré 3.
-- IPOPT et MadNLP utilisent actuellement des graphes SX et le scaling complet.
-- Fatrop utilise la collocation, un graphe MX et le scaling complet avec
-  normalisation explicite de ses contraintes de gap.
-- RK4 n’appartient plus au benchmark Fatrop courant.
+- Tous les OCP, warm-starts IPOPT et raffinements de la campagne active
+  utilisent SX. Le runner refuse explicitement une demande MX.
+- MadNLP utilise exclusivement MUMPS, transmis à libMad sous le nom typé
+  exact `MumpsSolver`. La CI échoue si libMad signale une option inconnue.
+- PARDISO, Fatrop et RK4 ne font pas partie de la campagne active. Leurs
+  anciens résultats sont conservés comme diagnostics historiques.
 - MadNLP reste interprété : la compilation C est refusée par l’interface
   Bioptim/CasADi épinglée et n’est pas comptée comme une variante valide.
 - La convergence du solveur ne suffit pas : chaque RHO est soumis à un audit
@@ -48,8 +59,7 @@ provenance humaine.
 |---|---|
 | Construction et certification des seeds | `3523f1745e315f07761159d7e06bd2d876026704` |
 | IPOPT full/reduced | `3523f1745e315f07761159d7e06bd2d876026704` |
-| MadNLP MUMPS/PARDISO full/reduced | `3523f1745e315f07761159d7e06bd2d876026704` |
-| Fatrop full/reduced | même SHA, puis les deux patchs de la section suivante |
+| MadNLP/MUMPS full/reduced | `3523f1745e315f07761159d7e06bd2d876026704` |
 | ACADOS full/reduced et variantes | `3523f1745e315f07761159d7e06bd2d876026704` |
 
 Ce commit date du 27 juillet 2026 et porte le correctif
@@ -57,9 +67,9 @@ Ce commit date du 27 juillet 2026 et porte le correctif
 provenance `codex/fatrop-cocofest-benchmark`, mais ne fait jamais un checkout
 flottant de cette branche.
 
-### 0.2 Patchs Bioptim appliqués à Fatrop
+### 0.2 Fatrop historique et patchs Bioptim
 
-Seul le job Fatrop transforme ce checkout, dans cet ordre :
+L’ancienne campagne Fatrop transformait ce checkout, dans cet ordre :
 
 1. [`bioptim-fatrop-c-compile-plugin-case.patch`](../../.github/patches/bioptim-fatrop-c-compile-plugin-case.patch),
    qui corrige la casse du nom du plugin lors du chargement des évaluateurs C;
@@ -73,13 +83,20 @@ Le second patch est un port minimal du commit Bioptim
 `codex/fatrop-scaling-audit` complète n’est pas utilisée, car elle ne contient
 pas les correctifs plus récents présents dans le SHA de production.
 
-La version effective du cas Fatrop doit donc être identifiée par le triplet :
+La version effective des résultats Fatrop historiques doit donc être
+identifiée par le triplet :
 
 ```text
 Bioptim 3523f1745e315f07761159d7e06bd2d876026704
 + bioptim-fatrop-c-compile-plugin-case.patch
 + bioptim-fatrop-scaled-gaps.patch
 ```
+
+Fatrop n’est plus installé ni exécuté par la campagne SX-only. Le reduced SX
+a résolu le smoke d’un RHO, mais le full SX s’arrête avant le premier RHO avec
+une incohérence de structure de \(A\). Le réintroduire exigerait de corriger
+cette structure dans Bioptim puis de valider full et reduced en SX; revenir à
+MX contredirait le protocole numérique courant.
 
 ### 0.3 Screens historiques séparés
 
@@ -88,7 +105,7 @@ deux intégrations historiques :
 
 | Screen | Commit Bioptim | Provenance |
 |---|---|---|
-| MadNLP/PARDISO | `346eb1d445e6ba67010b96c6f16ba830185119e7` | `codex/madnlp-integration-master` |
+| MadNLP/MUMPS, mode `cycles=screen` | `346eb1d445e6ba67010b96c6f16ba830185119e7` | `codex/madnlp-integration-master` |
 | Alpaqa/PANOC | `d84e7e43534360fc048e0be26a3bd69a2abc2d77` | `codex/alpaqa-integration` |
 
 Ces résultats ne doivent pas être mélangés avec ceux de la campagne principale
@@ -665,7 +682,8 @@ X_k+h\sum_{r=1}^{d}b_r f(X_{k,r},U_k).
 
 Le classement temporel des variables place les blocs
 \((X_k,U_k,X_{k,1},\ldots)\) de manière à préserver la structure par étage.
-Il est utilisé pour IPOPT, MadNLP et Fatrop. ACADOS conserve son organisation
+Il est utilisé pour IPOPT et MadNLP dans la campagne active. Les essais
+Fatrop historiques utilisaient le même ordre. ACADOS conserve son organisation
 native par étage.
 
 ## 7. Systèmes KKT et solveurs
@@ -708,17 +726,37 @@ multiplicateurs de bornes après contrôle de leur taille.
 ### 7.2 MadNLP
 
 MadNLP suit également une méthode primal-dual de point intérieur avec Hessien
-exact. Le runtime libMad expose notamment :
+exact. Le backend retenu est MUMPS. L’API utilisateur garde le nom portable
+`mumps`, mais libMad attend un nom de type Julia, sensible à la casse :
+`MumpsSolver`. L’ancien passage de la chaîne `mumps` produisait :
 
-- MUMPS;
-- PARDISO/MKL sur Linux x86-64;
-- UMFPACK et LAPACK pour des diagnostics plus ciblés.
+```text
+libMAD WARNING: option linear_solver is of unknown type mumps, ignoring
+```
+
+Le calcul continuait parce que MUMPS est aussi le défaut creux de MadNLP
+0.9.2; le résultat était donc souvent correct, mais le choix demandé n’était
+pas réellement certifié. L’adaptateur traduit maintenant
+`mumps -> MumpsSolver`. Le smoke runtime vérifie cette valeur et chaque log
+est rejeté si l’avertissement réapparaît.
+
+PARDISO/MKL est laissé de côté. Sur le run `30511306081`, MUMPS était environ
+30 % plus rapide en médiane full (`2.571 s` contre `3.668 s`) et 6 % plus
+rapide en reduced (`1.155 s` contre `1.234 s`); les temps mur-à-mur étaient
+également inférieurs (`350.0 s` contre `466.2 s`, puis `178.0 s` contre
+`186.4 s`). Cette comparaison avait encore l’ancien avertissement côté
+MUMPS, donc la campagne courante remesure explicitement `MumpsSolver`, sans
+présenter PARDISO comme une variante active. Le commit libMad épinglé contient
+toujours son code PARDISO, mais le workflow ne le sélectionne ni ne le
+certifie. L’installation utilise le smoke `no_hsl_example`, qui exerce MUMPS
+sans instancier PARDISO; `basic_problem` n’est volontairement plus lancé car
+il testait aussi `PardisoMKLSolver`.
 
 Le benchmark garde le transfert des multiplicateurs désactivé. Les blocs duaux
 ne sont pas encore décalés structurellement avec le RHO; le primal décalé est
 le warm-start fiable.
 
-### 7.3 Fatrop
+### 7.3 Fatrop — diagnostic historique, hors campagne SX-only
 
 Fatrop exploite la structure d’OCP pour résoudre les systèmes linéaires par
 une factorisation de type Riccati plutôt que comme une matrice KKT générique.
@@ -739,7 +777,7 @@ peut produire un écart absolu supérieur au seuil physique. L’interface serre
 les bornes transmises à Fatrop tout en conservant les bornes originales pour
 l’audit indépendant.
 
-Le benchmark porte maintenant sur le commit Bioptim épinglé le correctif
+Les anciens tests ont porté sur le commit Bioptim épinglé et le correctif
 minimal de la branche `codex/fatrop-scaling-audit`. Chaque gap
 
 \[
@@ -759,11 +797,12 @@ le resserrement physique des bornes présent dans notre commit Bioptim plus
 récent; la branche complète n’est pas utilisée car elle est en retard de
 28 commits sur cette base.
 
-La campagne principale utilise désormais
-`--fatrop-state-scaling full`. Une ablation indépendante de cinq RHO compare
-`none/full`, pour les mécaniques full et reduced, avant d’attribuer un gain au
-scaling. Les 7 tests Bioptim dédiés au patch passent localement; la validation
-sur l’OCP FES full reste à confirmer par le prochain run Linux.
+Les 7 tests Bioptim dédiés au patch passent localement, mais cela ne suffit
+pas : Fatrop full échoue encore avec SX lors de la détection de structure,
+alors que reduced SX a seulement passé un smoke 1/1. La campagne active
+n’utilise donc pas Fatrop. Ses métriques MX antérieures restent utiles pour
+localiser le coût des dérivées, mais ne sont pas mélangées aux résultats
+SX-only.
 
 ### 7.4 ACADOS
 
@@ -826,18 +865,29 @@ MX représente un graphe matriciel général. SX développe davantage les
 opérations scalaires et peut produire un graphe plus grand à construire, mais
 des évaluations plus simples à optimiser et compiler.
 
-Sur le screen de 30 RHO :
+Sur le screen de 30 RHO du run `30475768127`, la médiane chaude est :
 
-| Cas | MX médiane | SX médiane | Gain SX |
-|---|---:|---:|---:|
-| IPOPT full | 5.549 s | 2.328 s | 58.0 % |
-| IPOPT reduced | 2.972 s | 1.263 s | 57.5 % |
-| MadNLP/MUMPS full | 6.182 s | 2.584 s | 58.2 % |
-| MadNLP/MUMPS reduced | 3.002 s | 1.187 s | 60.5 % |
+| Cas | MX médiane | SX médiane | Gain SX | Accélération |
+|---|---:|---:|---:|---:|
+| IPOPT full | 5.549 s | 2.328 s | 58.0 % | 2.38× |
+| IPOPT reduced | 2.972 s | 1.263 s | 57.5 % | 2.35× |
+| MadNLP/MUMPS full | 6.182 s | 2.584 s | 58.2 % | 2.39× |
+| MadNLP/MUMPS reduced | 3.002 s | 1.187 s | 60.5 % | 2.53× |
 
-Les quatre cas ont validé 30/30 RHO. IPOPT et MadNLP utilisent donc SX par
-défaut. Fatrop reste en MX dans l’endurance; ses sondes SX sont isolées avec
-un seul RHO et une limite de processus de 10 minutes.
+Le gain est calculé par
+\((T_\mathrm{MX}-T_\mathrm{SX})/T_\mathrm{MX}\), sur les RHO chauds 2 à 30.
+Les quatre cas ont validé 30/30 RHO. Les statuts sont identiques et les écarts
+absolus maximaux d’objectif par fenêtre valent respectivement
+`8.6e-12`, `1.0e-11`, `2.46e-11` et `5.01e-11`. Les nombres d’itérations sont
+identiques, sauf MadNLP reduced avec un écart maximal de trois itérations.
+SX apporte donc ici un gain d’évaluation du même NLP, sans changement
+scientifique mesurable de la solution.
+
+Ce résultat justifie la règle de production : le profil IPOPT périodique, le
+warm-up standard, le raffinement IPOPT d’ACADOS et les NLP IPOPT/MadNLP sont
+tous construits en SX. Le script d’exécution refuse `mx`, le JSON doit
+contenir `use_sx=true`, et le rapport affiche le type de graphe. MX reste
+uniquement une donnée historique de justification.
 
 ### 8.2 Évaluateurs C persistants
 
@@ -845,7 +895,6 @@ Les options sont :
 
 ```text
 --ipopt-c-compile
---fatrop-c-compile
 ```
 
 Elles compilent les fonctions CasADi de coût, contraintes, gradient, Jacobien
@@ -871,9 +920,9 @@ Le temps de compilation est compté dans le mur-à-mur, mais pas dans la médian
 chaude. Sur Apple Silicon, le coût initial peut dépasser le gain pour un petit
 nombre de RHO. L’intérêt doit être évalué sur 100 RHO sous Linux.
 
-La CI exécute, sur le même runner, une ablation interprété/compilé de cinq RHO
-pour IPOPT et Fatrop. Les campagnes principales full/reduced de ces deux
-solveurs utilisent aussi la compilation persistante quand
+La CI exécute, sur le même runner, une ablation IPOPT
+interprété/compilé de cinq RHO. Les campagnes principales full/reduced IPOPT
+utilisent aussi la compilation persistante quand
 `compile_nlp_evaluators=true`. La CI exige le même nombre de cycles validés,
 la même faisabilité physique et des métriques de fatigue compatibles.
 Pour les runs compilés multi-RHO, elle exige aussi :
@@ -923,7 +972,7 @@ Les tolérances internes peuvent différer :
 
 - IPOPT : typiquement `1e-6`;
 - MadNLP : `1e-8` dans l’endurance;
-- Fatrop : réglages propres à sa structure;
+- Fatrop : réglages propres à sa structure dans les diagnostics historiques;
 - ACADOS : tolérances de dynamique, stationnarité, inégalité et
   complémentarité.
 
@@ -965,7 +1014,7 @@ et le P90 chaud, qui expose les queues de latence.
 `end_to_end_wall_time_s` reste important pour un déploiement complet, mais ne
 doit pas être confondu avec le coût d’un RHO après compilation.
 
-Pour Fatrop, le rapport exporte par RHO :
+Pour les artefacts Fatrop historiques, le rapport exportait par RHO :
 
 - temps total interne;
 - temps Hessien;
@@ -991,9 +1040,10 @@ La formulation réduite effectue davantage d’itérations, mais chaque itérati
 est environ 2.2 fois moins coûteuse. Le gain vient donc surtout du graphe de
 dérivées, pas d’une meilleure convergence itérative.
 
-## 11. Résultats Linux de référence
+## 11. Résultats Linux historiques de référence
 
-Configuration du run `30487321536` :
+Configuration du run `30487321536`, antérieur à la règle SX-only et conservé
+pour la comparaison historique :
 
 - 100 RHO;
 - un cycle par OCP;
@@ -1036,13 +1086,16 @@ backend particulier.
 Environ 83 % de l’écart de coût provient du Biceps et 17 % du Triceps. Les
 deltoïdes sont presque inchangés.
 
-### 11.2 MUMPS, PARDISO et MA57
+### 11.2 Choix MUMPS; PARDISO et MA57 archivés
 
-PARDISO/MKL ne bat pas MUMPS sur le runner GitHub courant :
+PARDISO/MKL ne bat pas MUMPS dans les deux campagnes Linux observées. Le run
+`30511306081` donne l’écart le plus net :
 
-- full : médiane environ 7.5 % plus élevée;
-- reduced : médiane environ 10.9 % plus élevée;
-- trajectoires et objectifs MadNLP numériquement identiques.
+- full : `2.571 s` avec MUMPS contre `3.668 s` avec PARDISO, soit MUMPS
+  environ 30 % plus rapide;
+- reduced : `1.155 s` contre `1.234 s`, soit environ 6 %;
+- mur-à-mur : `350.0 s` contre `466.2 s` en full et `178.0 s` contre
+  `186.4 s` en reduced.
 
 Cela ne signifie pas que PARDISO est intrinsèquement inférieur. Le runner
 dispose de peu de cœurs, le coût des dérivées est important et la
@@ -1056,8 +1109,8 @@ L’étude IPOPT/MA57 sur macOS a montré :
   variables;
 - aucun indice d’une mauvaise bibliothèque HSL.
 
-MUMPS reste la référence portable. MA57 doit être comparé avec des répétitions
-entrelacées et des compteurs de factorisation plus directs.
+MUMPS reste la référence portable et le seul backend MadNLP actif. MA57 reste
+un résultat IPOPT historique; il n’est pas ajouté à la matrice courante.
 
 ### 11.3 ACADOS
 
@@ -1099,7 +1152,8 @@ Les corrections associées sont maintenant :
    moins strict configuré à `False`, tout en refusant le sens inverse;
 2. réévaluer \(g(x)\) pour l’audit des solutions compilées IPOPT;
 3. exécuter MadNLP interprété tant que Bioptim ne valide pas sa compilation;
-4. normaliser les gaps Fatrop et tester explicitement `none/full`.
+4. corriger la détection de structure Fatrop full en SX avant toute nouvelle
+   ablation de scaling.
 
 Le run a aussi confirmé que la compilation IPOPT coûte cher au premier appel
 (environ 400 s sur ce runner) pour un gain chaud modeste. Elle peut améliorer
@@ -1227,8 +1281,7 @@ suivie d’un polissage dans l’espace nodal complet.
 Le workflow parallélise surtout les expériences :
 
 - une machine IPOPT;
-- une machine Fatrop;
-- une machine MadNLP;
+- une machine MadNLP/MUMPS;
 - une machine ACADOS;
 - full et reduced séquentiels sur une même machine pour réutiliser
   l’environnement.
@@ -1244,7 +1297,6 @@ linéaire. Les limites principales sont :
 
 Le workflow donne le nombre de cœurs disponibles à CasADi/Bioptim, mais fixe
 les pools BLAS/OpenMP imbriqués à un thread pour éviter la sursouscription.
-PARDISO/MKL peut recevoir un réglage spécifique lors d’un benchmark contrôlé.
 
 Sur 48 cœurs, le meilleur rendement immédiat reste de lancer plusieurs
 solveurs, formulations ou répétitions en parallèle. Le speedup d’un seul RHO
@@ -1258,13 +1310,12 @@ Le workflow est
 Ses étapes principales sont :
 
 1. `prepare-seed` : construction et certification des seeds full/reduced;
-2. `prepare-madnlp-stack` : CasADi/libMad et PARDISO/MKL;
+2. `prepare-madnlp-stack` : CasADi/libMad et certification de
+   `MumpsSolver`;
 3. `prepare-acados-stack` : installation et cache ACADOS;
 4. `benchmark` :
    - IPOPT full puis reduced;
-   - Fatrop-collocation full puis reduced, ablations C/scaling et sondes SX
-     sur la même machine;
-   - MadNLP/MUMPS et PARDISO interprétés, full puis reduced;
+   - MadNLP/MUMPS interprété, full puis reduced;
 5. `acados-smoke` : full/reduced et options séquentiellement;
 6. `report` : agrégation des JSON, CSV, logs et patrons de stimulation.
 
@@ -1290,8 +1341,22 @@ gh workflow run cycling_solver_benchmark_linux.yml \
   -f acados_option_rhos=5
 ```
 
-`compile_nlp_evaluators=true` ne concerne que IPOPT et Fatrop. MadNLP reste
-interprété dans le même run.
+`compile_nlp_evaluators=true` ne concerne que IPOPT. MadNLP reste interprété
+dans le même run.
+
+### 14.2 Campagne graduelle obligatoire
+
+Une modification numérique ou d’infrastructure est validée successivement :
+
+1. `cycles=5`, pour certifier les seeds, le runtime MUMPS, SX et les artefacts;
+2. `cycles=30`, seulement si tous les cas attendus du palier 5 sont présents,
+   sans erreur d’infrastructure ni avertissement libMad;
+3. `cycles=100`, seulement après le même verdict au palier 30.
+
+Pour chaque palier, remplacer `cycles`, `acados_smoke_rhos` et, pour le
+diagnostic principal ACADOS, `acados_option_rhos` par l’horizon voulu. Les
+non-convergences numériques restent des résultats scientifiques; une absence
+de JSON, un graphe non-SX ou une option libMad ignorée fait échouer la CI.
 
 Pour mesurer la compilation, relancer sur le même type de runner avec :
 
@@ -1328,13 +1393,12 @@ Le rapport combiné contient :
 - `benchmark-comparison.md` : synthèse lisible;
 - `benchmark-comparison.json` : données et provenance complètes;
 - `rho-timings.csv` : temps et statuts par RHO;
-- `fatrop-internal-timings.csv` : Hessien, Jacobien, structure et itérations;
 - `stimulation-patterns.csv` : PW aux checkpoints, angle et phase physiques;
 - `muscle-fatigue.csv` : coût, AUC et capacité par muscle;
 - `pulse-width-cycle-variation.csv` : variation des PW entre cycles;
 - chaque `result.json` individuel;
 - chaque `solver.log`;
-- les sondes SX et compilation.
+- l’ablation de compilation IPOPT.
 
 Les patrons sont comparés aux cycles 10 et 30. Ils sont aussi interpolés selon
 la phase réelle du pédalier afin de séparer une stratégie de stimulation
@@ -1403,8 +1467,8 @@ Ordre recommandé :
 8. tester RTI après convergence répétée du SQP complet;
 9. exploiter l’ablation CI compilation activée/désactivée et confirmer le
    hash persistant du source généré;
-10. répéter MUMPS/PARDISO/MA57 de manière entrelacée avant toute conclusion
-    sur 30 à 48 cœurs.
+10. profiler séparément dérivées et factorisation MUMPS avant d’augmenter le
+    nombre de threads.
 
 Un surrogate neuronal ne doit être envisagé qu’après profilage. La mécanique
 réduite de Fourier est déjà très précise et son noyau isolé est environ 40 fois
@@ -1426,10 +1490,13 @@ restauration ACADOS sont moins risquées qu’un surrogate appris.
 - IPOPT/MUMPS full reste la référence robuste.
 - MadNLP/MUMPS reduced donne le meilleur temps parmi les NLP 100/100, mais la
   formulation reduced n’est pas encore comparable physiologiquement à full.
-- PARDISO/MKL n’apporte pas de gain sur le runner actuel.
-- Fatrop/collocation est robuste mais plus lent; son coût est dominé par les
-  dérivées et la détection de structure.
-- RK4 est archivé pour Fatrop.
+- MadNLP utilise explicitement `MumpsSolver`; toute option ignorée devient une
+  erreur de CI.
+- PARDISO/MKL n’apporte pas de gain et est archivé.
+- Fatrop et RK4 sont archivés; Fatrop full doit d’abord devenir compatible SX
+  avant une réintégration.
+- SX réduit de 57.5 à 60.5 % la médiane chaude face à MX, à objectifs
+  identiques à environ `5e-11` près; la campagne active est donc SX-only.
 - ACADOS offre le potentiel sous la seconde, mais sa faisabilité inter-RHO
   doit être restaurée.
 - Alpaqa ne fonctionne pas sur cette formulation et reste hors production.

@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-if [[ "$(uname -s)" != "Linux" || "$(uname -m)" != "x86_64" ]]; then
-  echo "MadNLP/PARDISO requires an x86-64 Linux runner." >&2
+if [[ "$(uname -s)" != "Linux" ]]; then
+  echo "The compiled libMad benchmark runtime requires Linux." >&2
   exit 1
 fi
 
@@ -20,4 +20,4 @@ if ! strings "$libgcc_path" | grep -qx 'GCC_13.0.0'; then
   exit 1
 fi
 
-echo "Compatible MadNLP host runtime: $libgcc_path"
+echo "Compatible MadNLP/MUMPS host runtime: $libgcc_path"

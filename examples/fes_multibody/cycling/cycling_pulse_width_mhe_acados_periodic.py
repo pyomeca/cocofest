@@ -2276,9 +2276,10 @@ def build_argument_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--periodic-ipopt-refinement-use-sx",
         action="store_true",
+        default=True,
         help=(
-            "Build the auxiliary periodic IPOPT refinement with SX graphs. "
-            "By default it uses MX to reduce memory pressure."
+            "Build the auxiliary periodic IPOPT refinement with SX graphs "
+            "(the benchmark default and supported production mode)."
         ),
     )
     parser.add_argument(
@@ -10810,7 +10811,10 @@ def run_standard_ipopt_warmup(
     warmup_mhe_info["ode_solver"] = OdeSolver.COLLOCATION(
         polynomial_degree=3, method="radau"
     )
-    warmup_mhe_info["use_sx"] = False
+    # The endurance benchmark is SX-only.  Keeping the standard IPOPT bridge
+    # in the same graph family avoids paying MX evaluation costs in an
+    # otherwise SX solve and makes the graph mode auditable end to end.
+    warmup_mhe_info["use_sx"] = True
 
     warmup_cycling_info = dict(cycling_info)
     warmup_cycling_info["enforce_start_constraints"] = True

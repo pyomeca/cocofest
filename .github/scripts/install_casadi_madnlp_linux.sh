@@ -39,7 +39,7 @@ echo "Building CasADi revision $casadi_checkout_commit"
 
 # CasADi's current libMad integration consumes a release-style archive. Feed
 # it the runtime already built and certified from the pinned libMad branch.
-libmad_archive="$build_root/libMad-pardiso.tar.gz"
+libmad_archive="$build_root/libMad-mumps.tar.gz"
 tar -C "$libmad_install_dir" -czf "$libmad_archive" .
 libmad_hash="$(sha256sum "$libmad_archive" | awk '{print $1}')"
 

@@ -14,7 +14,7 @@ ode_solver="$5"
 case_root="${6:-benchmark-results}"
 case_windows="${7:-${BENCHMARK_CYCLES:?BENCHMARK_CYCLES is required}}"
 compile_mode="${8:-false}"
-graph_mode="${9:-}"
+graph_mode="${9:-sx}"
 fatrop_state_scaling="${10:-none}"
 case_dir="${GITHUB_WORKSPACE:?GITHUB_WORKSPACE is required}/${case_root}/${case_slug}-${mechanics}"
 result="$case_dir/result.json"
@@ -23,19 +23,12 @@ solver_tolerance=1e-6
 
 mkdir -p "$case_dir"
 
-if [[ -z "$graph_mode" ]]; then
-  # The Linux 30-RHO screen shows a ~60% hot-solve reduction for IPOPT and
-  # MadNLP with SX. Fatrop remains MX until its independent screen completes.
-  if [[ "$solver" == "fatrop" ]]; then
-    graph_mode=mx
-  else
-    graph_mode=sx
-  fi
-fi
 case "$graph_mode" in
   sx) solver_options+=(--ipopt-use-sx) ;;
-  mx) solver_options+=(--ipopt-no-use-sx) ;;
-  *) echo "GRAPH must be 'sx' or 'mx', got '$graph_mode'." >&2; exit 2 ;;
+  *)
+    echo "The endurance benchmark is SX-only; GRAPH must be 'sx', got '$graph_mode'." >&2
+    exit 2
+    ;;
 esac
 
 if [[ "$solver" == "ipopt" ]]; then
@@ -123,6 +116,21 @@ python examples/fes_multibody/cycling/cycling_fes_solver_comparison.py \
 solver_exit="${PIPESTATUS[0]}"
 set -e
 echo "$solver_exit" > "$case_dir/process-exit-code.txt"
+
+# A libMad type warning means that the requested backend was not applied even
+# when MadNLP subsequently converges with its default.  Treat this as an
+# infrastructure/configuration failure so a mislabeled benchmark cannot pass.
+if grep -Fq "libMAD WARNING: option linear_solver is of unknown type" "$case_dir/solver.log"; then
+  echo "libMad rejected the requested linear_solver type." >&2
+  exit 1
+fi
+
+if [[ -f "$result" ]] && ! jq -e --arg solver "$solver" \
+  '.configurations[$solver].use_sx == true' "$result" >/dev/null
+then
+  echo "The generated result is not SX even though the benchmark is SX-only." >&2
+  exit 1
+fi
 
 # Numerical non-convergence belongs in result.json and must not prevent later
 # cases or the immediate artifact checkpoint from running on the same machine.

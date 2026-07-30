@@ -121,7 +121,7 @@ def test_configure_madnlp_maps_pardiso_mkl_to_native_libmad_type():
     ) in solver.calls
 
 
-def test_configure_madnlp_keeps_mumps_runtime_name():
+def test_configure_madnlp_maps_mumps_to_native_libmad_type():
     solver = configure_nlp_solver(
         "madnlp",
         max_iterations=321,
@@ -130,7 +130,7 @@ def test_configure_madnlp_keeps_mumps_runtime_name():
         check_availability=False,
     )
 
-    assert ("set_option_unsafe", "mumps", "linear_solver") in solver.calls
+    assert ("set_option_unsafe", "MumpsSolver", "linear_solver") in solver.calls
 
 
 def test_configure_fatrop_uses_time_structured_native_options():

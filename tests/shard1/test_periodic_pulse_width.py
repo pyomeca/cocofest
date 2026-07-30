@@ -2733,13 +2733,13 @@ def test_solver_clis_accept_explicit_thread_count():
     periodic_args = periodic_example.build_argument_parser().parse_args(
         ["--n-threads", "8"]
     )
-    pardiso_args = comparison_example.build_cli().parse_args(
-        ["--madnlp-linear-solver", "pardiso_mkl"]
+    mumps_args = comparison_example.build_cli().parse_args(
+        ["--madnlp-linear-solver", "mumps"]
     )
     comparison_args = comparison_example.build_cli().parse_args(["--n-threads", "8"])
 
     assert periodic_args.n_threads == 8
-    assert pardiso_args.madnlp_linear_solver == "pardiso_mkl"
+    assert mumps_args.madnlp_linear_solver == "mumps"
     assert comparison_args.n_threads == 8
 
 
@@ -3664,17 +3664,9 @@ def test_github_acados_runner_uses_reference_and_option_profiles_sequentially():
     assert "--acados-control-homotopy-window-max-radius 1e-5" in workflow
     assert "--max-consecutive-failing 2" in workflow
     assert "cycling-acados-smoke-${{ github.run_id }}" in workflow
-    assert (
-        "run_cycling_benchmark_case.sh fatrop-collocation fatrop full structured "
-        'collocation benchmark-results "$BENCHMARK_CYCLES" '
-        '"${{ inputs.compile_nlp_evaluators }}" mx full'
-    ) in workflow
+    assert "case_slug: fatrop" not in workflow
+    assert "madnlp-pardiso" not in workflow
     assert "fatrop-rk4" not in workflow
-    assert "Compare Fatrop interpreted and compiled evaluators over 5 RHO" in workflow
-    assert "cycling-compile-ablation-fatrop-${{ github.run_id }}" in workflow
-    assert "bioptim-fatrop-scaled-gaps.patch" in workflow
-    assert "Compare Fatrop state scaling over 5 RHO" in workflow
-    assert "cycling-scaling-ablation-fatrop-${{ github.run_id }}" in workflow
     benchmark_runner = (
         Path(__file__).resolve().parents[2]
         / ".github"
@@ -3685,54 +3677,55 @@ def test_github_acados_runner_uses_reference_and_option_profiles_sequentially():
     assert "MadNLP C compilation is not validated" in benchmark_runner
     assert 'solver_options+=(--madnlp-c-compile)' not in benchmark_runner
     assert '--fatrop-state-scaling "$fatrop_state_scaling"' in benchmark_runner
+    assert 'case "$graph_mode" in' in benchmark_runner
+    assert "The endurance benchmark is SX-only" in benchmark_runner
+    assert "libMAD WARNING: option linear_solver is of unknown type" in (
+        benchmark_runner
+    )
+    assert ".configurations[$solver].use_sx == true" in benchmark_runner
     assert "--ipopt-enforce-start-constraints" in benchmark_runner
     assert "--reduced-cycling-profile benchmark-seed/" in benchmark_runner
     assert "Compare IPOPT interpreted and compiled evaluators over 5 RHO" in workflow
     assert "Compare MadNLP MUMPS interpreted and compiled evaluators" not in workflow
-    assert (
-        "Compile IPOPT/Fatrop CasADi evaluators once"
-        in workflow
-    )
+    assert "Compile IPOPT CasADi evaluators once" in workflow
     assert "Checkpoint IPOPT full" in workflow
-    assert "Checkpoint Fatrop collocation reduced" in workflow
-    assert "max-parallel: 4" in workflow
-    assert "case_slug: fatrop-probes" not in workflow
+    assert "Checkpoint MadNLP MUMPS reduced" in workflow
+    assert "max-parallel: 2" in workflow
     assert re.search(r"\n  benchmark:.*?\n    needs: prepare-seed", workflow, re.DOTALL)
     assert re.search(
-        r"- solver: ipopt\b.*?- solver: fatrop\b.*?- solver: madnlp\b",
+        r"- solver: ipopt\b.*?- solver: madnlp\b",
         workflow,
         flags=re.DOTALL,
     )
-    assert "timeout_minutes: 360" in workflow
-    assert "Screen IPOPT MX full over 30 RHO" in workflow
-    assert "Screen Fatrop collocation SX reduced over 1 RHO" in workflow
-    assert "Screen Fatrop collocation SX full over 1 RHO" in workflow
+    assert " MX " not in workflow
+    assert " pardiso_mkl " not in workflow
+    assert "--ipopt-use-sx" in benchmark_runner
+    assert "--ipopt-no-use-sx" not in benchmark_runner
+    assert "--ipopt-use-sx" in workflow
+    assert "--periodic-ipopt-refinement-use-sx" in workflow
+    assert '"mumps": "MumpsSolver"' in workflow
+    assert ".configurations.acados.use_sx == true" in workflow
     assert re.search(
-        r"- name: Screen Fatrop collocation SX full over 1 RHO\s+"
-        r"if: matrix\.case_slug == 'fatrop'\s+"
-        r"continue-on-error: true",
+        r"madnlp_common=\(\s+"
+        r"--madnlp-max-iter 2000\s+"
+        r"--madnlp-linear-solver mumps",
         workflow,
     )
-    assert "timeout --signal=TERM --kill-after=30s 10m" in workflow
-    assert "Screen MadNLP MUMPS MX reduced over 30 RHO" in workflow
-    assert 'if [[ "$BENCHMARK_SOLVER" != "fatrop" ]]' in workflow
-    assert "Download the SX graph-mode screens" in workflow
-    assert "--ipopt-use-sx" in (
-        Path(__file__).resolve().parents[2]
-        / ".github"
-        / "scripts"
-        / "run_cycling_benchmark_case.sh"
-    ).read_text(encoding="utf-8")
-    assert "--ipopt-no-use-sx" in (
-        Path(__file__).resolve().parents[2]
-        / ".github"
-        / "scripts"
-        / "run_cycling_benchmark_case.sh"
-    ).read_text(encoding="utf-8")
+    assert "unknown type mumps" not in workflow
     assert "merge-multiple: true" in workflow  # ACADOS remains a single artifact.
 
+    mumps_installer = (
+        Path(__file__).resolve().parents[2]
+        / ".github"
+        / "scripts"
+        / "install_libmad_mumps_linux.sh"
+    ).read_text(encoding="utf-8")
+    assert '"$build_dir/no_hsl_example"' in mumps_installer
+    assert '"$build_dir/basic_problem"' not in mumps_installer
+    assert "option linear_solver is of unknown type" in mumps_installer
 
-def test_benchmark_readme_tracks_every_pinned_bioptim_revision_and_patch():
+
+def test_benchmark_readme_tracks_every_active_bioptim_revision_and_patch():
     repository_root = Path(__file__).resolve().parents[2]
     workflow = (
         repository_root
@@ -3755,7 +3748,6 @@ def test_benchmark_readme_tracks_every_pinned_bioptim_revision_and_patch():
     )
 
     assert pinned_revisions
-    assert applied_patches
     assert "mickaelbegon/BiorbdOptim" in benchmark_readme
     for revision in pinned_revisions:
         assert revision in benchmark_readme
@@ -6788,7 +6780,7 @@ def test_periodic_collocation_ipopt_profile_is_available():
     assert defaults["model_formulation"] == "periodic_node"
     assert defaults["torque_application"] == "constant"
     assert defaults["ode_solver"] == "collocation"
-    assert defaults["use_sx"] is False
+    assert defaults["use_sx"] is True
 
     periodic_args = periodic_example.build_argument_parser().parse_args(
         ["--periodic-ipopt-refinement-ode-solver", "collocation"]

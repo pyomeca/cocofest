@@ -26,17 +26,14 @@ COMPARABILITY_FIELDS = (
     "constant_crank_torque",
     "crank_torque_role",
     "primal_feasibility_threshold",
+    "use_sx",
 )
-DEFAULT_EXPECTED_SOLVERS = ("ipopt", "fatrop", "madnlp")
+DEFAULT_EXPECTED_SOLVERS = ("ipopt", "madnlp")
 DEFAULT_EXPECTED_CASES = (
     "ipopt/full",
-    "fatrop-collocation/full",
-    "madnlp-pardiso/full",
     "madnlp-mumps/full",
     "acados/full",
     "ipopt/reduced",
-    "fatrop-collocation/reduced",
-    "madnlp-pardiso/reduced",
     "madnlp-mumps/reduced",
     "acados/reduced",
 )
@@ -761,8 +758,8 @@ def render_markdown(
             "séparément. Le même seuil de faisabilité physique est exigé."
         ),
         "",
-        "| Solveur/formulation | Tol. interne | Seuil physique | Convergence | RHO résolus | Préfixe strict | 1er échec | Mur-à-mur (s) | Préparation (s) | Profil réduit (s) | Solve/RHO médian (s) | Effectif/RHO médian (s) | Effectif/RHO P90 (s) | Arrêt |",
-        "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|",
+        "| Solveur/formulation | Graphe | Tol. interne | Seuil physique | Convergence | RHO résolus | Préfixe strict | 1er échec | Mur-à-mur (s) | Préparation (s) | Profil réduit (s) | Solve/RHO médian (s) | Effectif/RHO médian (s) | Effectif/RHO P90 (s) | Arrêt |",
+        "|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|",
     ]
     for entry in entries:
         row = entry["result"]
@@ -777,8 +774,9 @@ def render_markdown(
             ),
         )
         lines.append(
-            "| {case} | {solver_tolerance} | {physical_threshold} | {success} | {successful}/{attempted} | {validated}/{requested} | {first_failed_rho} | {e2e} | {prep} | {profile} | {median} | {effective_median} | {effective_p90} | {stop} |".format(
+            "| {case} | {graph} | {solver_tolerance} | {physical_threshold} | {success} | {successful}/{attempted} | {validated}/{requested} | {first_failed_rho} | {e2e} | {prep} | {profile} | {median} | {effective_median} | {effective_p90} | {stop} |".format(
                 case=_entry_label(entry),
+                graph="SX" if entry["configuration"].get("use_sx") is True else "NON-SX",
                 solver_tolerance=_fmt_scientific(
                     entry["configuration"].get("nlp_tolerance")
                 ),

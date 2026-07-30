@@ -174,7 +174,7 @@ IPOPT_PROFILE_DEFAULTS = {
         "rk_steps": 1,
         "collocation_degree": 3,
         "collocation_method": "radau",
-        "use_sx": False,
+        "use_sx": True,
         "enforce_start_constraints": True,
         "disable_standard_ipopt_warmup": False,
         "disable_periodic_fes_warmup_projection": True,
@@ -200,7 +200,7 @@ IPOPT_PROFILE_DEFAULTS = {
         "rk_steps": 1,
         "collocation_degree": 3,
         "collocation_method": "radau",
-        "use_sx": False,
+        "use_sx": True,
         "enforce_start_constraints": False,
         "disable_standard_ipopt_warmup": False,
         "disable_periodic_fes_warmup_projection": False,
@@ -1293,7 +1293,7 @@ def _solver_config(
             acados_diagnostics=False,
             periodic_ipopt_refinement=False,
             periodic_ipopt_refinement_iterations=periodic_ipopt_refinement_iterations,
-            periodic_ipopt_refinement_use_sx=False,
+            periodic_ipopt_refinement_use_sx=True,
             warmup_state_comparison_limit=warmup_state_comparison_limit,
             disable_historical_ipopt_initial_guess=(
                 ipopt_disable_historical_initial_guess
@@ -2615,7 +2615,7 @@ def main(
     acados_diagnostics: bool = False,
     periodic_ipopt_refinement: bool = True,
     periodic_ipopt_refinement_iterations: int = 300,
-    periodic_ipopt_refinement_use_sx: bool = False,
+    periodic_ipopt_refinement_use_sx: bool = True,
     periodic_ipopt_refinement_ode_solver: str = "target",
     warmup_state_comparison_limit: int = 12,
     state_comparison_limit: int = 12,
@@ -2765,7 +2765,7 @@ def main(
         acados_diagnostics=acados_diagnostics,
         periodic_ipopt_refinement=False,
         periodic_ipopt_refinement_iterations=periodic_ipopt_refinement_iterations,
-        periodic_ipopt_refinement_use_sx=False,
+        periodic_ipopt_refinement_use_sx=True,
         warmup_state_comparison_limit=warmup_state_comparison_limit,
         ipopt_profile=ipopt_profile,
         ipopt_model_formulation=ipopt_model_formulation,
@@ -4138,9 +4138,10 @@ def build_cli() -> argparse.ArgumentParser:
     parser.add_argument(
         "--periodic-ipopt-refinement-use-sx",
         action="store_true",
+        default=True,
         help=(
-            "Build the auxiliary periodic IPOPT refinement with SX graphs. "
-            "By default it uses MX to reduce memory pressure."
+            "Build the auxiliary periodic IPOPT refinement with SX graphs "
+            "(the benchmark default and supported production mode)."
         ),
     )
     parser.add_argument(

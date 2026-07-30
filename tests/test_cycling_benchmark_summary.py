@@ -104,6 +104,7 @@ def test_markdown_distinguishes_successful_windows_from_strict_prefix():
             "n_windows": 100,
             "nlp_tolerance": 1e-8,
             "primal_feasibility_threshold": 1e-5,
+            "use_sx": True,
         },
         "result": {
             "solver": "madnlp",
@@ -127,7 +128,8 @@ def test_markdown_distinguishes_successful_windows_from_strict_prefix():
     assert "RHO résolus" in markdown
     assert "Préfixe strict" in markdown
     assert (
-        "| MADNLP/FULL | 1.0e-08 | 1.0e-05 | non | 99/100 | 85/100 | 86 |" in markdown
+        "| MADNLP/FULL | SX | 1.0e-08 | 1.0e-05 | non | 99/100 | 85/100 | 86 |"
+        in markdown
     )
     assert "même si les fenêtres suivantes récupèrent" in markdown
 
@@ -349,6 +351,23 @@ def test_numerical_transcription_choices_do_not_change_physical_comparability():
     ]
 
     assert summary.configuration_mismatches(entries) == []
+
+
+def test_graph_type_is_a_required_comparability_field():
+    def entry(solver, use_sx):
+        return {
+            "configuration": {
+                "mechanical_formulation": "full",
+                "use_sx": use_sx,
+            },
+            "result": {"solver": solver},
+        }
+
+    mismatches = summary.configuration_mismatches(
+        [entry("ipopt", True), entry("madnlp", False)]
+    )
+
+    assert [item["field"] for item in mismatches] == ["use_sx"]
 
 
 def test_requested_rho_count_accounts_for_multi_cycle_window():

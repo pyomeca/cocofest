@@ -20,6 +20,11 @@ MADNLP_LINEAR_SOLVER_NAMES = (
     "cucholesky",
 )
 MADNLP_LINEAR_SOLVER_RUNTIME_NAMES = {
+    # libMad transports ``linear_solver`` as a Julia ``Type``.  Its type
+    # registry is case-sensitive, so the user-facing alias must never be sent
+    # literally (``mumps`` is rejected and silently falls back to the MadNLP
+    # default after emitting an "unknown type" warning).
+    "mumps": "MumpsSolver",
     "pardiso_mkl": "PardisoMKLSolver",
 }
 # MadNLP 0.9.2 defines LogLevels as TRACE=1 through ERROR=6.  The libMad

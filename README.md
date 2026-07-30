@@ -241,6 +241,13 @@ This benchmark uses a Bioptim fork pinned by full Git SHA, with
 solver-specific patches where documented; it does not use the general
 `bioptim==3.4.0` installation shown above.
 
+The active endurance matrix is SX-only: IPOPT/MUMPS, MadNLP/MUMPS and ACADOS,
+each with full and reduced mechanics. MadNLP passes the exact libMad backend
+type `MumpsSolver`; PARDISO is archived because it showed no speedup. Fatrop
+is also outside the active matrix until its full formulation passes the
+structured-gap checks with SX. Historical MX/Fatrop/PARDISO results remain
+clearly separated in the dedicated report.
+
 <a id="initial-value-problem"></a>
 ## 🎯 Initial value problem
 

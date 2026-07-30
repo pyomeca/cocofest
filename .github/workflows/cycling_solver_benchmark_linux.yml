@@ -35,7 +35,7 @@ on:
         default: "2000"
         type: string
       compile_nlp_evaluators:
-        description: Compile IPOPT/Fatrop CasADi evaluators once and reuse them across all RHO (MadNLP unsupported)
+        description: Compile IPOPT CasADi evaluators once and reuse them across all RHO (MadNLP unsupported)
         required: true
         default: true
         type: boolean
@@ -76,7 +76,9 @@ env:
   ACADOS_COMMIT: 48e223e85f0408ebfd1d8c6d6fb0589e9c41b3aa
   ACADOS_INSTALL_SCRIPT_BLOB: a30489718f4c8a103b602d320fabe0f921c64b9d
   LIBMAD_REPOSITORY: mickaelbegon/libMad
-  LIBMAD_PARDISO_COMMIT: 5529f23a6bff33c566ad954da38d352f1f172356
+  # This public libMad revision also contains PARDISO support, but the
+  # benchmark certifies and selects only its built-in MumpsSolver.
+  LIBMAD_COMMIT: 5529f23a6bff33c566ad954da38d352f1f172356
   JULIAC_COMMIT: 73be8587a80bbb65dab7acd71d406f72867a3571
   JULIA_VERSION: "1.12.6"
   CONDA_ENV_NAME: cocofest-cycling-benchmark
@@ -189,6 +191,7 @@ jobs:
               --solvers ipopt \
               --objective fatigue \
               --ipopt-profile periodic_collocation \
+              --ipopt-use-sx \
               --ipopt-enforce-start-constraints \
               --cycles-per-window "$BENCHMARK_CYCLES_PER_WINDOW" \
               --stimulations-per-cycle 30 \
@@ -234,7 +237,7 @@ jobs:
   prepare-madnlp-stack:
     name: Prepare the cached MadNLP numerical stack
     # The long benchmark MadNLP runner restores/builds its own stack so IPOPT
-    # and Fatrop never wait for MadNLP preparation. This pre-warm job is only
+    # never waits for MadNLP preparation. This pre-warm job is only
     # retained for the focused solver-option screen.
     if: inputs.cycles == 'screen'
     runs-on: ${{ inputs.runner_label }}
@@ -249,11 +252,11 @@ jobs:
       - name: Checkout Cocofest
         uses: actions/checkout@v6
 
-      - name: Checkout the pinned libMad PARDISO runtime
+      - name: Checkout the pinned libMad runtime
         uses: actions/checkout@v6
         with:
           repository: ${{ env.LIBMAD_REPOSITORY }}
-          ref: ${{ env.LIBMAD_PARDISO_COMMIT }}
+          ref: ${{ env.LIBMAD_COMMIT }}
           path: .benchmark-deps/libMad
 
       - name: Set up the Linux benchmark environment
@@ -268,7 +271,7 @@ jobs:
         uses: actions/cache/restore@v6
         with:
           path: ${{ env.CONDA }}/envs/${{ env.CONDA_ENV_NAME }}
-          key: numerical-stack-${{ env.NUMERICAL_STACK_CACHE_VERSION }}-${{ inputs.runner_label }}-${{ runner.arch }}-madnlp-${{ env.CASADI_MADNLP_COMMIT }}-${{ env.LIBMAD_PARDISO_COMMIT }}-${{ hashFiles('.github/cycling-benchmark-linux-environment.yml', '.github/scripts/install_biorbd_casadi_linux.sh', '.github/scripts/install_casadi_madnlp_linux.sh') }}
+          key: numerical-stack-${{ env.NUMERICAL_STACK_CACHE_VERSION }}-${{ inputs.runner_label }}-${{ runner.arch }}-madnlp-mumps-${{ env.CASADI_MADNLP_COMMIT }}-${{ env.LIBMAD_COMMIT }}-${{ hashFiles('.github/cycling-benchmark-linux-environment.yml', '.github/scripts/install_biorbd_casadi_linux.sh', '.github/scripts/install_casadi_madnlp_linux.sh') }}
 
       - name: Install the benchmark dependencies
         if: steps.madnlp-stack-cache.outputs.cache-hit != 'true'
@@ -287,42 +290,42 @@ jobs:
         id: prepared-madnlp-runtime
         uses: actions/cache/restore@v6
         with:
-          path: .cache/madnlp-pardiso
-          key: libmad-pardiso-${{ inputs.runner_label }}-${{ runner.arch }}-julia-${{ env.JULIA_VERSION }}-${{ env.LIBMAD_PARDISO_COMMIT }}-${{ env.JULIAC_COMMIT }}
+          path: .cache/madnlp-mumps
+          key: libmad-mumps-${{ inputs.runner_label }}-${{ runner.arch }}-julia-${{ env.JULIA_VERSION }}-${{ env.LIBMAD_COMMIT }}-${{ env.JULIAC_COMMIT }}
 
       - name: Verify the MadNLP host runtime
-        run: bash .github/scripts/check_libmad_pardiso_host_linux.sh
+        run: bash .github/scripts/check_libmad_host_linux.sh
 
-      - name: Install Julia for the MadNLP PARDISO runtime
+      - name: Install Julia for the MadNLP MUMPS runtime
         if: steps.prepared-madnlp-runtime.outputs.cache-hit != 'true'
         uses: julia-actions/install-juliaup@05d98a2ef433ca0723a8221e38c4723ea92b0c5f # v3.1.4
         with:
           channel: ${{ env.JULIA_VERSION }}
 
-      - name: Build the MadNLP PARDISO runtime
+      - name: Build the MadNLP MUMPS runtime
         if: steps.prepared-madnlp-runtime.outputs.cache-hit != 'true'
         run: |
-          bash .github/scripts/install_libmad_pardiso_linux.sh \
+          bash .github/scripts/install_libmad_mumps_linux.sh \
             .benchmark-deps/libMad \
-            .cache/madnlp-pardiso \
+            .cache/madnlp-mumps \
             "$JULIAC_COMMIT"
 
       - name: Save the certified MadNLP runtime
         if: steps.prepared-madnlp-runtime.outputs.cache-hit != 'true'
         uses: actions/cache/save@v6
         with:
-          path: .cache/madnlp-pardiso
-          key: libmad-pardiso-${{ inputs.runner_label }}-${{ runner.arch }}-julia-${{ env.JULIA_VERSION }}-${{ env.LIBMAD_PARDISO_COMMIT }}-${{ env.JULIAC_COMMIT }}
+          path: .cache/madnlp-mumps
+          key: libmad-mumps-${{ inputs.runner_label }}-${{ runner.arch }}-julia-${{ env.JULIA_VERSION }}-${{ env.LIBMAD_COMMIT }}-${{ env.JULIAC_COMMIT }}
 
       - name: Configure the MadNLP runtime
         run: |
-          echo "LD_LIBRARY_PATH=$GITHUB_WORKSPACE/.cache/madnlp-pardiso/lib:$GITHUB_WORKSPACE/.cache/madnlp-pardiso/share/julia/lib:${LD_LIBRARY_PATH:-}" \
+          echo "LD_LIBRARY_PATH=$GITHUB_WORKSPACE/.cache/madnlp-mumps/lib:$GITHUB_WORKSPACE/.cache/madnlp-mumps/share/julia/lib:${LD_LIBRARY_PATH:-}" \
             >> "$GITHUB_ENV"
 
       - name: Build the MadNLP numerical stack
         if: steps.madnlp-stack-cache.outputs.cache-hit != 'true'
         run: |
-          bash .github/scripts/install_casadi_madnlp_linux.sh .cache/madnlp-pardiso
+          bash .github/scripts/install_casadi_madnlp_linux.sh .cache/madnlp-mumps
           bash .github/scripts/install_biorbd_casadi_linux.sh
 
       - name: Validate the MadNLP numerical stack
@@ -341,7 +344,7 @@ jobs:
         uses: actions/cache/save@v6
         with:
           path: ${{ env.CONDA }}/envs/${{ env.CONDA_ENV_NAME }}
-          key: numerical-stack-${{ env.NUMERICAL_STACK_CACHE_VERSION }}-${{ inputs.runner_label }}-${{ runner.arch }}-madnlp-${{ env.CASADI_MADNLP_COMMIT }}-${{ env.LIBMAD_PARDISO_COMMIT }}-${{ hashFiles('.github/cycling-benchmark-linux-environment.yml', '.github/scripts/install_biorbd_casadi_linux.sh', '.github/scripts/install_casadi_madnlp_linux.sh') }}
+          key: numerical-stack-${{ env.NUMERICAL_STACK_CACHE_VERSION }}-${{ inputs.runner_label }}-${{ runner.arch }}-madnlp-mumps-${{ env.CASADI_MADNLP_COMMIT }}-${{ env.LIBMAD_COMMIT }}-${{ hashFiles('.github/cycling-benchmark-linux-environment.yml', '.github/scripts/install_biorbd_casadi_linux.sh', '.github/scripts/install_casadi_madnlp_linux.sh') }}
 
   prepare-acados-stack:
     name: Prepare the cached ACADOS numerical stack
@@ -641,7 +644,9 @@ jobs:
               --solvers acados \
               --objective fatigue \
               --ipopt-profile periodic_collocation \
+              --ipopt-use-sx \
               --ipopt-enforce-start-constraints \
+              --periodic-ipopt-refinement-use-sx \
               --cycles-per-window 1 \
               --stimulations-per-cycle 30 \
               --n-windows "$rhos" \
@@ -768,15 +773,21 @@ jobs:
           fi
           for result in "${results[@]}"; do
             jq -e '
-              .results[0] |
-              (.solver != null)
+              (.configurations.acados.use_sx == true) and
+              (
+                .results[0] |
+                (.solver != null)
+              )
             ' "$result"
           done
           for mechanics in full reduced; do
             result="acados-smoke-results/sqp-irk-reference-${mechanics}/result.json"
             jq -e '
-              .results[0] |
-              (.attempted_windows > 0 and .error == null)
+              (.configurations.acados.use_sx == true) and
+              (
+                .results[0] |
+                (.attempted_windows > 0 and .error == null)
+              )
             ' "$result"
           done
 
@@ -792,7 +803,7 @@ jobs:
       matrix:
         include:
           - solver: madnlp
-            backend: pardiso_mkl
+            backend: mumps
             bioptim_commit: 346eb1d445e6ba67010b96c6f16ba830185119e7
             integration_branch: codex/madnlp-integration-master
             casadi_cxx_abi: 1
@@ -818,12 +829,12 @@ jobs:
           ref: ${{ matrix.bioptim_commit }}
           path: .benchmark-deps/bioptim
 
-      - name: Checkout the pinned libMad PARDISO runtime
+      - name: Checkout the pinned libMad runtime
         if: matrix.solver == 'madnlp'
         uses: actions/checkout@v6
         with:
           repository: ${{ env.LIBMAD_REPOSITORY }}
-          ref: ${{ env.LIBMAD_PARDISO_COMMIT }}
+          ref: ${{ env.LIBMAD_COMMIT }}
           path: .benchmark-deps/libMad
 
       - name: Set up the Linux benchmark environment
@@ -839,7 +850,7 @@ jobs:
         uses: actions/cache/restore@v6
         with:
           path: ${{ env.CONDA }}/envs/${{ env.CONDA_ENV_NAME }}
-          key: numerical-stack-${{ env.NUMERICAL_STACK_CACHE_VERSION }}-${{ inputs.runner_label }}-${{ runner.arch }}-madnlp-${{ env.CASADI_MADNLP_COMMIT }}-${{ env.LIBMAD_PARDISO_COMMIT }}-${{ hashFiles('.github/cycling-benchmark-linux-environment.yml', '.github/scripts/install_biorbd_casadi_linux.sh', '.github/scripts/install_casadi_madnlp_linux.sh') }}
+          key: numerical-stack-${{ env.NUMERICAL_STACK_CACHE_VERSION }}-${{ inputs.runner_label }}-${{ runner.arch }}-madnlp-mumps-${{ env.CASADI_MADNLP_COMMIT }}-${{ env.LIBMAD_COMMIT }}-${{ hashFiles('.github/cycling-benchmark-linux-environment.yml', '.github/scripts/install_biorbd_casadi_linux.sh', '.github/scripts/install_casadi_madnlp_linux.sh') }}
 
       - name: Install the benchmark dependencies
         if: matrix.solver != 'madnlp' || steps.screen-numerical-stack-cache.outputs.cache-hit != 'true'
@@ -858,9 +869,6 @@ jobs:
           fi
           echo "BENCHMARK_THREADS=$available_cores" >> "$GITHUB_ENV"
           echo "CMAKE_BUILD_PARALLEL_LEVEL=$available_cores" >> "$GITHUB_ENV"
-          if [[ "${{ matrix.solver }}" == "madnlp" && "${{ matrix.backend }}" == "pardiso_mkl" ]]; then
-            echo "MKL_NUM_THREADS=$available_cores" >> "$GITHUB_ENV"
-          fi
           lscpu
           grep '^Cpus_allowed_list' /proc/self/status || true
 
@@ -869,45 +877,45 @@ jobs:
         id: screen-madnlp-cache
         uses: actions/cache@v6
         with:
-          path: .cache/madnlp-pardiso
-          key: libmad-pardiso-${{ inputs.runner_label }}-${{ runner.arch }}-julia-${{ env.JULIA_VERSION }}-${{ env.LIBMAD_PARDISO_COMMIT }}-${{ env.JULIAC_COMMIT }}
+          path: .cache/madnlp-mumps
+          key: libmad-mumps-${{ inputs.runner_label }}-${{ runner.arch }}-julia-${{ env.JULIA_VERSION }}-${{ env.LIBMAD_COMMIT }}-${{ env.JULIAC_COMMIT }}
 
       - name: Verify the MadNLP host runtime
         if: matrix.solver == 'madnlp'
-        run: bash .github/scripts/check_libmad_pardiso_host_linux.sh
+        run: bash .github/scripts/check_libmad_host_linux.sh
 
-      - name: Install Julia for the MadNLP PARDISO runtime
+      - name: Install Julia for the MadNLP MUMPS runtime
         if: matrix.solver == 'madnlp' && steps.screen-madnlp-cache.outputs.cache-hit != 'true'
         uses: julia-actions/install-juliaup@05d98a2ef433ca0723a8221e38c4723ea92b0c5f # v3.1.4
         with:
           channel: ${{ env.JULIA_VERSION }}
 
-      - name: Build the MadNLP PARDISO runtime
+      - name: Build the MadNLP MUMPS runtime
         if: matrix.solver == 'madnlp' && steps.screen-madnlp-cache.outputs.cache-hit != 'true'
         run: |
-          bash .github/scripts/install_libmad_pardiso_linux.sh \
+          bash .github/scripts/install_libmad_mumps_linux.sh \
             .benchmark-deps/libMad \
-            .cache/madnlp-pardiso \
+            .cache/madnlp-mumps \
             "$JULIAC_COMMIT"
 
       - name: Save the certified MadNLP runtime
         if: matrix.solver == 'madnlp' && steps.screen-madnlp-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@v6
         with:
-          path: .cache/madnlp-pardiso
-          key: libmad-pardiso-${{ inputs.runner_label }}-${{ runner.arch }}-julia-${{ env.JULIA_VERSION }}-${{ env.LIBMAD_PARDISO_COMMIT }}-${{ env.JULIAC_COMMIT }}
+          path: .cache/madnlp-mumps
+          key: libmad-mumps-${{ inputs.runner_label }}-${{ runner.arch }}-julia-${{ env.JULIA_VERSION }}-${{ env.LIBMAD_COMMIT }}-${{ env.JULIAC_COMMIT }}
 
       - name: Configure the MadNLP runtime
         if: matrix.solver == 'madnlp'
         run: |
-          test -f .cache/madnlp-pardiso/lib/libMad.so
-          echo "LD_LIBRARY_PATH=$GITHUB_WORKSPACE/.cache/madnlp-pardiso/lib:$GITHUB_WORKSPACE/.cache/madnlp-pardiso/share/julia/lib:${LD_LIBRARY_PATH:-}" \
+          test -f .cache/madnlp-mumps/lib/libMad.so
+          echo "LD_LIBRARY_PATH=$GITHUB_WORKSPACE/.cache/madnlp-mumps/lib:$GITHUB_WORKSPACE/.cache/madnlp-mumps/share/julia/lib:${LD_LIBRARY_PATH:-}" \
             >> "$GITHUB_ENV"
-          echo "LIBMAD_BENCHMARK_COMMIT=$LIBMAD_PARDISO_COMMIT" >> "$GITHUB_ENV"
+          echo "LIBMAD_BENCHMARK_COMMIT=$LIBMAD_COMMIT" >> "$GITHUB_ENV"
 
       - name: Build CasADi with the libMad ABI
         if: matrix.solver == 'madnlp' && steps.screen-numerical-stack-cache.outputs.cache-hit != 'true'
-        run: bash .github/scripts/install_casadi_madnlp_linux.sh .cache/madnlp-pardiso
+        run: bash .github/scripts/install_casadi_madnlp_linux.sh .cache/madnlp-mumps
 
       - name: Build CasADi with IPOPT and Alpaqa
         if: matrix.solver == 'alpaqa'
@@ -984,6 +992,7 @@ jobs:
               --solvers "$BENCHMARK_SOLVER" \
               --objective fatigue \
               --ipopt-profile periodic_collocation \
+              --ipopt-use-sx \
               --ipopt-enforce-start-constraints \
               --cycles-per-window 1 \
               --stimulations-per-cycle 30 \
@@ -1010,7 +1019,20 @@ jobs:
               --output-json "$GITHUB_WORKSPACE/benchmark-option-screen/${variant}.json" \
               "$@" \
               2>&1 | tee "benchmark-option-screen/${variant}.log"
-            jq -e '.results[0] | (.attempted_windows > 0 and .error == null)' \
+            if grep -Fq \
+              "libMAD WARNING: option linear_solver is of unknown type" \
+              "benchmark-option-screen/${variant}.log"
+            then
+              echo "libMad rejected the requested linear_solver type." >&2
+              exit 1
+            fi
+            jq -e '
+              (.configurations | to_entries | all(.value.use_sx == true)) and
+              (
+                .results[0] |
+                (.attempted_windows > 0 and .error == null)
+              )
+            ' \
               "benchmark-option-screen/${variant}.json"
             echo "::endgroup::"
           }
@@ -1041,17 +1063,13 @@ jobs:
           else
             madnlp_common=(
               --madnlp-max-iter 2000
+              --madnlp-linear-solver mumps
               --madnlp-dual-warm-start-mode off
             )
             run_case madnlp-tol1e-6-default 4 1e-6 "${madnlp_common[@]}"
             run_case madnlp-tol1e-7-default 4 1e-7 "${madnlp_common[@]}"
             run_case madnlp-tol1e-8-default 4 1e-8 "${madnlp_common[@]}"
-            run_case madnlp-tol1e-7-mumps 4 1e-7 \
-              "${madnlp_common[@]}" --madnlp-linear-solver mumps
-            run_case madnlp-tol1e-7-umfpack 4 1e-7 \
-              "${madnlp_common[@]}" --madnlp-linear-solver umfpack
-            run_case madnlp-tol1e-8-pardiso-mkl 4 1e-8 \
-              "${madnlp_common[@]}" --madnlp-linear-solver pardiso_mkl
+            run_case madnlp-tol1e-7-mumps 4 1e-7 "${madnlp_common[@]}"
           fi
 
       - name: Upload the option-screen JSON and logs
@@ -1071,7 +1089,7 @@ jobs:
     timeout-minutes: ${{ matrix.timeout_minutes }}
     strategy:
       fail-fast: false
-      max-parallel: 4
+      max-parallel: 2
       matrix:
         include:
           - solver: ipopt
@@ -1084,19 +1102,8 @@ jobs:
             bioptim_commit: 3523f1745e315f07761159d7e06bd2d876026704
             integration_branch: codex/fatrop-cocofest-benchmark
             casadi_cxx_abi: 0
-          - solver: fatrop
-            backend: structured
-            case_slug: fatrop
-            benchmark_mode: main
-            # GitHub-hosted jobs are capped at six hours.
-            timeout_minutes: 360
-            benchmark_rhos: ${{ inputs.cycles }}
-            cycles_per_window: ${{ inputs.cycles_per_window }}
-            bioptim_commit: 3523f1745e315f07761159d7e06bd2d876026704
-            integration_branch: codex/fatrop-cocofest-benchmark
-            casadi_cxx_abi: 0
           - solver: madnlp
-            backend: pardiso_mkl
+            backend: mumps
             case_slug: madnlp
             benchmark_mode: main
             timeout_minutes: 420
@@ -1106,7 +1113,7 @@ jobs:
             integration_branch: codex/fatrop-cocofest-benchmark
             casadi_cxx_abi: 1
     env:
-      # IPOPT/Fatrop use the wheel ABI; source-built CasADi/libMad follows
+      # IPOPT uses the wheel ABI; source-built CasADi/libMad follows
       # Conda's modern libstdc++ ABI.
       CASADI_CXX_ABI: ${{ matrix.casadi_cxx_abi }}
       PYTHONPATH: ${{ github.workspace }}
@@ -1134,20 +1141,12 @@ jobs:
           ref: ${{ matrix.bioptim_commit }}
           path: .benchmark-deps/bioptim
 
-      - name: Apply the certified Fatrop integration fixes
-        if: matrix.solver == 'fatrop'
-        run: |
-          git -C .benchmark-deps/bioptim apply \
-            "$GITHUB_WORKSPACE/.github/patches/bioptim-fatrop-c-compile-plugin-case.patch"
-          git -C .benchmark-deps/bioptim apply \
-            "$GITHUB_WORKSPACE/.github/patches/bioptim-fatrop-scaled-gaps.patch"
-
-      - name: Checkout the pinned libMad PARDISO runtime
+      - name: Checkout the pinned libMad runtime
         if: matrix.solver == 'madnlp'
         uses: actions/checkout@v6
         with:
           repository: ${{ env.LIBMAD_REPOSITORY }}
-          ref: ${{ env.LIBMAD_PARDISO_COMMIT }}
+          ref: ${{ env.LIBMAD_COMMIT }}
           path: .benchmark-deps/libMad
 
       - name: Set up the Linux benchmark environment
@@ -1171,7 +1170,7 @@ jobs:
         uses: actions/cache/restore@v6
         with:
           path: ${{ env.CONDA }}/envs/${{ env.CONDA_ENV_NAME }}
-          key: numerical-stack-${{ env.NUMERICAL_STACK_CACHE_VERSION }}-${{ inputs.runner_label }}-${{ runner.arch }}-madnlp-${{ env.CASADI_MADNLP_COMMIT }}-${{ env.LIBMAD_PARDISO_COMMIT }}-${{ hashFiles('.github/cycling-benchmark-linux-environment.yml', '.github/scripts/install_biorbd_casadi_linux.sh', '.github/scripts/install_casadi_madnlp_linux.sh') }}
+          key: numerical-stack-${{ env.NUMERICAL_STACK_CACHE_VERSION }}-${{ inputs.runner_label }}-${{ runner.arch }}-madnlp-mumps-${{ env.CASADI_MADNLP_COMMIT }}-${{ env.LIBMAD_COMMIT }}-${{ hashFiles('.github/cycling-benchmark-linux-environment.yml', '.github/scripts/install_biorbd_casadi_linux.sh', '.github/scripts/install_casadi_madnlp_linux.sh') }}
 
       - name: Install the benchmark dependencies
         if: |
@@ -1194,9 +1193,6 @@ jobs:
           fi
           echo "BENCHMARK_THREADS=$available_cores" >> "$GITHUB_ENV"
           echo "CMAKE_BUILD_PARALLEL_LEVEL=$available_cores" >> "$GITHUB_ENV"
-          if [[ "${{ matrix.solver }}" == "madnlp" && "${{ matrix.backend }}" == "pardiso_mkl" ]]; then
-            echo "MKL_NUM_THREADS=$available_cores" >> "$GITHUB_ENV"
-          fi
           lscpu
           grep '^Cpus_allowed_list' /proc/self/status || true
 
@@ -1205,49 +1201,49 @@ jobs:
         id: madnlp-cache
         uses: actions/cache@v6
         with:
-          path: .cache/madnlp-pardiso
-          key: libmad-pardiso-${{ inputs.runner_label }}-${{ runner.arch }}-julia-${{ env.JULIA_VERSION }}-${{ env.LIBMAD_PARDISO_COMMIT }}-${{ env.JULIAC_COMMIT }}
+          path: .cache/madnlp-mumps
+          key: libmad-mumps-${{ inputs.runner_label }}-${{ runner.arch }}-julia-${{ env.JULIA_VERSION }}-${{ env.LIBMAD_COMMIT }}-${{ env.JULIAC_COMMIT }}
 
       - name: Verify the MadNLP host runtime
         if: matrix.solver == 'madnlp'
-        run: bash .github/scripts/check_libmad_pardiso_host_linux.sh
+        run: bash .github/scripts/check_libmad_host_linux.sh
 
-      - name: Install Julia for the MadNLP PARDISO runtime
+      - name: Install Julia for the MadNLP MUMPS runtime
         if: matrix.solver == 'madnlp' && steps.madnlp-cache.outputs.cache-hit != 'true'
         uses: julia-actions/install-juliaup@05d98a2ef433ca0723a8221e38c4723ea92b0c5f # v3.1.4
         with:
           channel: ${{ env.JULIA_VERSION }}
 
-      - name: Build the MadNLP PARDISO runtime
+      - name: Build the MadNLP MUMPS runtime
         if: matrix.solver == 'madnlp' && steps.madnlp-cache.outputs.cache-hit != 'true'
         run: |
-          bash .github/scripts/install_libmad_pardiso_linux.sh \
+          bash .github/scripts/install_libmad_mumps_linux.sh \
             .benchmark-deps/libMad \
-            .cache/madnlp-pardiso \
+            .cache/madnlp-mumps \
             "$JULIAC_COMMIT"
 
       - name: Save the certified MadNLP runtime
         if: matrix.solver == 'madnlp' && steps.madnlp-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@v6
         with:
-          path: .cache/madnlp-pardiso
-          key: libmad-pardiso-${{ inputs.runner_label }}-${{ runner.arch }}-julia-${{ env.JULIA_VERSION }}-${{ env.LIBMAD_PARDISO_COMMIT }}-${{ env.JULIAC_COMMIT }}
+          path: .cache/madnlp-mumps
+          key: libmad-mumps-${{ inputs.runner_label }}-${{ runner.arch }}-julia-${{ env.JULIA_VERSION }}-${{ env.LIBMAD_COMMIT }}-${{ env.JULIAC_COMMIT }}
 
       - name: Configure the MadNLP runtime
         if: matrix.solver == 'madnlp'
         run: |
-          test -f .cache/madnlp-pardiso/lib/libMad.so
-          echo "LD_LIBRARY_PATH=$GITHUB_WORKSPACE/.cache/madnlp-pardiso/lib:$GITHUB_WORKSPACE/.cache/madnlp-pardiso/share/julia/lib:${LD_LIBRARY_PATH:-}" \
+          test -f .cache/madnlp-mumps/lib/libMad.so
+          echo "LD_LIBRARY_PATH=$GITHUB_WORKSPACE/.cache/madnlp-mumps/lib:$GITHUB_WORKSPACE/.cache/madnlp-mumps/share/julia/lib:${LD_LIBRARY_PATH:-}" \
             >> "$GITHUB_ENV"
-          echo "LIBMAD_BENCHMARK_COMMIT=$LIBMAD_PARDISO_COMMIT" >> "$GITHUB_ENV"
+          echo "LIBMAD_BENCHMARK_COMMIT=$LIBMAD_COMMIT" >> "$GITHUB_ENV"
 
-      - name: Install official CasADi with IPOPT and Fatrop
+      - name: Install official CasADi with IPOPT
         if: matrix.solver != 'madnlp' && steps.benchmark-official-stack-cache.outputs.cache-hit != 'true'
         run: python -m pip install --no-deps "casadi==$CASADI_VERSION"
 
       - name: Build CasADi with the libMad ABI
         if: matrix.solver == 'madnlp' && steps.benchmark-madnlp-stack-cache.outputs.cache-hit != 'true'
-        run: bash .github/scripts/install_casadi_madnlp_linux.sh .cache/madnlp-pardiso
+        run: bash .github/scripts/install_casadi_madnlp_linux.sh .cache/madnlp-mumps
 
       - name: Install biorbd and Bioptim
         run: |
@@ -1273,7 +1269,8 @@ jobs:
           BENCHMARK_SOLVER: ${{ matrix.solver }}
           BENCHMARK_BACKEND: ${{ matrix.backend }}
         run: |
-          python - <<'PY'
+          set -o pipefail
+          python - <<'PY' 2>&1 | tee solver-runtime-smoke.log
           import math
           import os
           from types import SimpleNamespace
@@ -1296,24 +1293,12 @@ jobs:
               assert available, solver
           if target == "madnlp":
               assert hasattr(bioptim.Solver, "MADNLP")
-          elif target == "fatrop":
-              assert hasattr(bioptim.Solver, "FATROP")
 
-          x = cas.MX.sym("x")
+          x = cas.SX.sym("x")
           smoke_target = target
           plugin_options = {"print_time": False}
           if smoke_target == "ipopt":
               plugin_options["ipopt"] = {"print_level": 0, "max_iter": 50}
-          elif smoke_target == "fatrop":
-              plugin_options["structure_detection"] = "auto"
-              plugin_options["equality"] = [True]
-              plugin_options["fatrop"] = {
-                  "print_level": 0,
-                  "max_iter": 50,
-                  "tol": 1e-8,
-                  "constr_viol_tol": 1e-8,
-                  "acceptable_tol": 1e-8,
-              }
           elif smoke_target == "madnlp":
               from cocofest.optimization.solver_backends import (
                   MADNLP_QUIET_PRINT_LEVEL,
@@ -1332,10 +1317,7 @@ jobs:
               assert plugin_options["madnlp"]["print_level"] == (
                   MADNLP_QUIET_PRINT_LEVEL
               )
-              expected_linear_solver = {
-                  "pardiso_mkl": "PardisoMKLSolver",
-                  "mumps": "mumps",
-              }[backend]
+              expected_linear_solver = {"mumps": "MumpsSolver"}[backend]
               print(
                   "MadNLP linear solver option: "
                   f"{plugin_options['madnlp']['linear_solver']}"
@@ -1359,6 +1341,13 @@ jobs:
           assert smoke_error < smoke_tolerance
           print(f"{smoke_target} minimal solve: {smoke.stats()}")
           PY
+          if grep -Fq \
+            "libMAD WARNING: option linear_solver is of unknown type" \
+            solver-runtime-smoke.log
+          then
+            echo "libMad rejected the requested linear_solver type." >&2
+            exit 1
+          fi
           python -m pytest -q \
             tests/shard1/test_solver_backends.py \
             tests/shard1/test_biorbd_backend_conversion.py \
@@ -1372,7 +1361,7 @@ jobs:
 
       - name: Prepare sequential case directories
         run: |
-          mkdir -p benchmark-results benchmark-probes benchmark-graph-screen
+          mkdir -p benchmark-results
           if ! [[ "$BENCHMARK_RHOS" =~ ^[1-9][0-9]*$ ]]; then
             echo "BENCHMARK_RHOS must be a strictly positive integer." >&2
             exit 1
@@ -1421,144 +1410,6 @@ jobs:
           if-no-files-found: warn
           retention-days: 30
 
-      - name: Screen IPOPT MX full over 30 RHO
-        if: matrix.solver == 'ipopt'
-        run: bash .github/scripts/run_cycling_benchmark_case.sh ipopt-mx ipopt full mumps collocation benchmark-graph-screen 30 false mx
-      - name: Checkpoint IPOPT MX full
-        if: ${{ always() && matrix.solver == 'ipopt' }}
-        continue-on-error: true
-        uses: actions/upload-artifact@v7
-        with:
-          name: cycling-graph-screen-ipopt-mx-full-${{ github.run_id }}
-          path: benchmark-graph-screen/ipopt-mx-full/
-          if-no-files-found: warn
-          retention-days: 30
-
-      - name: Screen IPOPT MX reduced over 30 RHO
-        if: matrix.solver == 'ipopt'
-        run: bash .github/scripts/run_cycling_benchmark_case.sh ipopt-mx ipopt reduced mumps collocation benchmark-graph-screen 30 false mx
-      - name: Checkpoint IPOPT MX reduced
-        if: ${{ always() && matrix.solver == 'ipopt' }}
-        continue-on-error: true
-        uses: actions/upload-artifact@v7
-        with:
-          name: cycling-graph-screen-ipopt-mx-reduced-${{ github.run_id }}
-          path: benchmark-graph-screen/ipopt-mx-reduced/
-          if-no-files-found: warn
-          retention-days: 30
-
-      - name: Run Fatrop collocation full
-        if: matrix.case_slug == 'fatrop'
-        run: bash .github/scripts/run_cycling_benchmark_case.sh fatrop-collocation fatrop full structured collocation benchmark-results "$BENCHMARK_CYCLES" "${{ inputs.compile_nlp_evaluators }}" mx full
-      - name: Checkpoint Fatrop collocation full
-        if: ${{ always() && matrix.case_slug == 'fatrop' }}
-        continue-on-error: true
-        uses: actions/upload-artifact@v7
-        with:
-          name: cycling-fatigue-linux-fatrop-collocation-full-${{ github.run_id }}
-          path: benchmark-results/fatrop-collocation-full/
-          if-no-files-found: warn
-          retention-days: 30
-
-      - name: Run Fatrop collocation reduced
-        if: matrix.case_slug == 'fatrop'
-        run: bash .github/scripts/run_cycling_benchmark_case.sh fatrop-collocation fatrop reduced structured collocation benchmark-results "$BENCHMARK_CYCLES" "${{ inputs.compile_nlp_evaluators }}" mx full
-      - name: Checkpoint Fatrop collocation reduced
-        if: ${{ always() && matrix.case_slug == 'fatrop' }}
-        continue-on-error: true
-        uses: actions/upload-artifact@v7
-        with:
-          name: cycling-fatigue-linux-fatrop-collocation-reduced-${{ github.run_id }}
-          path: benchmark-results/fatrop-collocation-reduced/
-          if-no-files-found: warn
-          retention-days: 30
-
-      - name: Compare Fatrop interpreted and compiled evaluators over 5 RHO
-        if: matrix.case_slug == 'fatrop' && inputs.compile_nlp_evaluators
-        run: |
-          bash .github/scripts/run_cycling_benchmark_case.sh fatrop-interpreted fatrop full structured collocation benchmark-compile-ablation 5 false mx full
-          bash .github/scripts/run_cycling_benchmark_case.sh fatrop-compiled fatrop full structured collocation benchmark-compile-ablation 5 true mx full
-      - name: Checkpoint Fatrop compilation ablation
-        if: ${{ always() && matrix.case_slug == 'fatrop' && inputs.compile_nlp_evaluators }}
-        continue-on-error: true
-        uses: actions/upload-artifact@v7
-        with:
-          name: cycling-compile-ablation-fatrop-${{ github.run_id }}
-          path: benchmark-compile-ablation/
-          if-no-files-found: warn
-          retention-days: 30
-
-      - name: Compare Fatrop state scaling over 5 RHO
-        if: matrix.case_slug == 'fatrop'
-        run: |
-          bash .github/scripts/run_cycling_benchmark_case.sh fatrop-unscaled fatrop full structured collocation benchmark-scaling-ablation 5 false mx none
-          bash .github/scripts/run_cycling_benchmark_case.sh fatrop-scaled fatrop full structured collocation benchmark-scaling-ablation 5 false mx full
-          bash .github/scripts/run_cycling_benchmark_case.sh fatrop-unscaled fatrop reduced structured collocation benchmark-scaling-ablation 5 false mx none
-          bash .github/scripts/run_cycling_benchmark_case.sh fatrop-scaled fatrop reduced structured collocation benchmark-scaling-ablation 5 false mx full
-      - name: Checkpoint Fatrop state-scaling ablation
-        if: ${{ always() && matrix.case_slug == 'fatrop' }}
-        continue-on-error: true
-        uses: actions/upload-artifact@v7
-        with:
-          name: cycling-scaling-ablation-fatrop-${{ github.run_id }}
-          path: benchmark-scaling-ablation/
-          if-no-files-found: warn
-          retention-days: 30
-
-      - name: Screen Fatrop collocation SX reduced over 1 RHO
-        if: matrix.case_slug == 'fatrop'
-        continue-on-error: true
-        run: timeout --signal=TERM --kill-after=30s 10m bash .github/scripts/run_cycling_benchmark_case.sh fatrop-collocation-sx fatrop reduced structured collocation benchmark-graph-screen 1 false sx
-      - name: Checkpoint Fatrop collocation SX reduced
-        if: ${{ always() && matrix.case_slug == 'fatrop' }}
-        continue-on-error: true
-        uses: actions/upload-artifact@v7
-        with:
-          name: cycling-graph-screen-fatrop-collocation-sx-reduced-${{ github.run_id }}
-          path: benchmark-graph-screen/fatrop-collocation-sx-reduced/
-          if-no-files-found: warn
-          retention-days: 30
-
-      - name: Screen Fatrop collocation SX full over 1 RHO
-        if: matrix.case_slug == 'fatrop'
-        continue-on-error: true
-        run: timeout --signal=TERM --kill-after=30s 10m bash .github/scripts/run_cycling_benchmark_case.sh fatrop-collocation-sx fatrop full structured collocation benchmark-graph-screen 1 false sx
-      - name: Checkpoint Fatrop collocation SX full
-        if: ${{ always() && matrix.case_slug == 'fatrop' }}
-        continue-on-error: true
-        uses: actions/upload-artifact@v7
-        with:
-          name: cycling-graph-screen-fatrop-collocation-sx-full-${{ github.run_id }}
-          path: benchmark-graph-screen/fatrop-collocation-sx-full/
-          if-no-files-found: warn
-          retention-days: 30
-
-      - name: Run MadNLP PARDISO full
-        if: matrix.solver == 'madnlp'
-        run: bash .github/scripts/run_cycling_benchmark_case.sh madnlp-pardiso madnlp full pardiso_mkl collocation benchmark-results "$BENCHMARK_CYCLES" false
-      - name: Checkpoint MadNLP PARDISO full
-        if: ${{ always() && matrix.solver == 'madnlp' }}
-        continue-on-error: true
-        uses: actions/upload-artifact@v7
-        with:
-          name: cycling-fatigue-linux-madnlp-pardiso-full-${{ github.run_id }}
-          path: benchmark-results/madnlp-pardiso-full/
-          if-no-files-found: warn
-          retention-days: 30
-
-      - name: Run MadNLP PARDISO reduced
-        if: matrix.solver == 'madnlp'
-        run: bash .github/scripts/run_cycling_benchmark_case.sh madnlp-pardiso madnlp reduced pardiso_mkl collocation benchmark-results "$BENCHMARK_CYCLES" false
-      - name: Checkpoint MadNLP PARDISO reduced
-        if: ${{ always() && matrix.solver == 'madnlp' }}
-        continue-on-error: true
-        uses: actions/upload-artifact@v7
-        with:
-          name: cycling-fatigue-linux-madnlp-pardiso-reduced-${{ github.run_id }}
-          path: benchmark-results/madnlp-pardiso-reduced/
-          if-no-files-found: warn
-          retention-days: 30
-
       - name: Run MadNLP MUMPS full
         if: matrix.solver == 'madnlp'
         run: bash .github/scripts/run_cycling_benchmark_case.sh madnlp-mumps madnlp full mumps collocation benchmark-results "$BENCHMARK_CYCLES" false
@@ -1582,32 +1433,6 @@ jobs:
         with:
           name: cycling-fatigue-linux-madnlp-mumps-reduced-${{ github.run_id }}
           path: benchmark-results/madnlp-mumps-reduced/
-          if-no-files-found: warn
-          retention-days: 30
-
-      - name: Screen MadNLP MUMPS MX full over 30 RHO
-        if: matrix.solver == 'madnlp'
-        run: bash .github/scripts/run_cycling_benchmark_case.sh madnlp-mumps-mx madnlp full mumps collocation benchmark-graph-screen 30 false mx
-      - name: Checkpoint MadNLP MUMPS MX full
-        if: ${{ always() && matrix.solver == 'madnlp' }}
-        continue-on-error: true
-        uses: actions/upload-artifact@v7
-        with:
-          name: cycling-graph-screen-madnlp-mumps-mx-full-${{ github.run_id }}
-          path: benchmark-graph-screen/madnlp-mumps-mx-full/
-          if-no-files-found: warn
-          retention-days: 30
-
-      - name: Screen MadNLP MUMPS MX reduced over 30 RHO
-        if: matrix.solver == 'madnlp'
-        run: bash .github/scripts/run_cycling_benchmark_case.sh madnlp-mumps-mx madnlp reduced mumps collocation benchmark-graph-screen 30 false mx
-      - name: Checkpoint MadNLP MUMPS MX reduced
-        if: ${{ always() && matrix.solver == 'madnlp' }}
-        continue-on-error: true
-        uses: actions/upload-artifact@v7
-        with:
-          name: cycling-graph-screen-madnlp-mumps-mx-reduced-${{ github.run_id }}
-          path: benchmark-graph-screen/madnlp-mumps-mx-reduced/
           if-no-files-found: warn
           retention-days: 30
 
@@ -1651,8 +1476,7 @@ jobs:
           fi
           case "$BENCHMARK_SOLVER" in
             ipopt) expected=2 ;;
-            fatrop) expected=2 ;;
-            madnlp) expected=4 ;;
+            madnlp) expected=2 ;;
             *) echo "Unexpected benchmark solver: $BENCHMARK_SOLVER" >&2; exit 1 ;;
           esac
           mapfile -t results < <(find benchmark-results -name result.json -type f | sort)
@@ -1662,8 +1486,11 @@ jobs:
           fi
           for result in "${results[@]}"; do
             jq -e '
-              .results[0] |
-              (.attempted_windows > 0 and .error == null)
+              (.configurations | to_entries | all(.value.use_sx == true)) and
+              (
+                .results[0] |
+                (.attempted_windows > 0 and .error == null)
+              )
             ' "$result"
             if [[ "$COMPILE_NLP_EVALUATORS" == "true" ]]; then
               jq -e '
@@ -1725,41 +1552,6 @@ jobs:
                       f"Compiled/interpreted mismatch for {field}: {left} != {right}"
                   )
           PY
-          fi
-          if [[ "$BENCHMARK_SOLVER" == "fatrop" ]]; then
-            for case_path in \
-              benchmark-scaling-ablation/fatrop-unscaled-full/result.json \
-              benchmark-scaling-ablation/fatrop-scaled-full/result.json \
-              benchmark-scaling-ablation/fatrop-unscaled-reduced/result.json \
-              benchmark-scaling-ablation/fatrop-scaled-reduced/result.json
-            do
-              test -f "$case_path"
-            done
-            for case_path in \
-              benchmark-scaling-ablation/fatrop-scaled-full/result.json \
-              benchmark-scaling-ablation/fatrop-unscaled-reduced/result.json \
-              benchmark-scaling-ablation/fatrop-scaled-reduced/result.json
-            do
-              jq -e '
-                .results[0] |
-                (.attempted_windows > 0 and .error == null)
-              ' "$case_path"
-            done
-          fi
-          if [[ "$BENCHMARK_SOLVER" != "fatrop" ]]; then
-            mapfile -t graph_screens < <(
-              find benchmark-graph-screen -name result.json -type f | sort
-            )
-            if [[ "${#graph_screens[@]}" -ne 2 ]]; then
-              echo "${BENCHMARK_SOLVER}: expected 2 graph-screen JSON files, found ${#graph_screens[@]}." >&2
-              exit 1
-            fi
-            for result in "${graph_screens[@]}"; do
-              jq -e '
-                .results[0] |
-                (.attempted_windows > 0 and .error == null)
-              ' "$result"
-            done
           fi
 
   screen-report:
@@ -1841,26 +1633,12 @@ jobs:
           path: benchmark-acados-all
           merge-multiple: true
 
-      - name: Download the SX graph-mode screens
-        uses: actions/download-artifact@v8
-        continue-on-error: true
-        with:
-          pattern: cycling-graph-screen-*-${{ github.run_id }}
-          path: benchmark-graph-screen-all
-
       - name: Download the compilation ablations
         uses: actions/download-artifact@v8
         continue-on-error: true
         with:
           pattern: cycling-compile-ablation-*-${{ github.run_id }}
           path: benchmark-compile-ablation-all
-
-      - name: Download the Fatrop scaling ablation
-        uses: actions/download-artifact@v8
-        continue-on-error: true
-        with:
-          pattern: cycling-scaling-ablation-fatrop-${{ github.run_id }}
-          path: benchmark-scaling-ablation-all
 
       - name: Build the comparison report
         run: |
@@ -1879,7 +1657,7 @@ jobs:
           fi
           python .github/scripts/summarize_cycling_benchmark.py \
             --output-dir benchmark-report \
-            --expected-cases ipopt/full,fatrop-collocation/full,madnlp-pardiso/full,madnlp-mumps/full,acados/full,ipopt/reduced,fatrop-collocation/reduced,madnlp-pardiso/reduced,madnlp-mumps/reduced,acados/reduced \
+            --expected-cases ipopt/full,madnlp-mumps/full,acados/full,ipopt/reduced,madnlp-mumps/reduced,acados/reduced \
             "${result_files[@]}"
           cat benchmark-report/benchmark-comparison.md >> "$GITHUB_STEP_SUMMARY"
 
@@ -1892,8 +1670,6 @@ jobs:
             benchmark-report/
             benchmark-results-all/
             benchmark-acados-all/
-            benchmark-graph-screen-all/
             benchmark-compile-ablation-all/
-            benchmark-scaling-ablation-all/
           if-no-files-found: warn
           retention-days: 30
