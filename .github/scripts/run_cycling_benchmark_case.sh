@@ -82,11 +82,12 @@ elif [[ "$solver" == "madnlp" ]]; then
 fi
 if [[ "$mechanics" == "reduced" ]]; then
   solver_options+=(--mechanical-formulation reduced)
-else
+elif [[ "$ode_solver" != "collocation" ]]; then
   # A one-cycle horizon has no future tail to shift. The exact terminal state
   # therefore replaces node 0 while nodes 1..N retain the previous cycle's
-  # shape, which can create a large full-dynamics defect. Repair that primal
-  # guess before every RHO without modifying the OCP itself.
+  # shape, which can create a large full-dynamics defect. The current phase-I
+  # projector can repair shooting grids, but intentionally rejects direct
+  # collocation because its internal state nodes need a dedicated projection.
   solver_options+=(
     --shared-transfer-phase-one
     --acados-transfer-phase-one-mode all

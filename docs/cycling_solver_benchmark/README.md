@@ -1083,29 +1083,36 @@ est rejeté car il dépasse les bornes de cadence. L’écran 5 RHO contient don
 des variantes SQP et RTI `phase-one`, qui réparent le guess complet avant la
 résolution sans changer les équations, les bornes ni l’objectif de l’OCP.
 
-Le premier écran de cette stratégie (`30561812466`) a révélé deux défauts
-d’orchestration avant de pouvoir conclure sur la méthode :
+Le premier écran de cette stratégie (`30561812466`) a révélé un défaut
+d’orchestration : le lanceur full transmettait l’alias du script bas niveau
+`--transfer-phase-one` au comparateur, qui attend
+`--shared-transfer-phase-one`. IPOPT, MadNLP et FATROP full s’arrêtaient donc
+avant le montage du NLP. Le lanceur utilise maintenant l’option partagée
+correcte.
 
-- le lanceur full transmettait l’alias du script bas niveau
-  `--transfer-phase-one` au comparateur, qui attend
-  `--shared-transfer-phase-one`; IPOPT, MadNLP et FATROP full s’arrêtaient donc
-  avant le montage du NLP;
-- la condition de phase I testait seulement la présence de `_sol`. Or `_sol`
-  contient déjà le seed certifié avant le RHO 0. La projection modifiait alors
-  le seed commun avant la première résolution, jusqu’à `26.8` unités sur les
-  états Ding reduced et `35.6` en full.
+Le callback de transfert est post-résolution : `cycle_idx=1` suit le RHO 1 et
+prépare le RHO 2. La trace `transfer_phase_one` imprimée avant le résumé
+`window[0]` ne modifie donc pas le seed initial. Dans le run corrigé
+`30563108224`, la phase I réduit bien le défaut FES scaled du guess reduced de
+`1.0` à environ `0.218`, mais le QP du RHO suivant retourne encore
+`ACADOS_MINSTEP`. Le mécanisme agit au bon endroit; sa projection actuelle
+n’est simplement pas assez proche de la variété dynamique et des bornes pour
+restaurer la convergence.
 
-Le lanceur utilise maintenant l’option partagée correcte et la phase I de
-transfert exige explicitement `cycle_idx > 0`. Le seed certifié reste donc
-identique pour tous les solveurs au premier RHO; la projection n’intervient
-qu’après une véritable translation de l’horizon.
+La phase I actuelle exige un état par extrémité de tir. Elle est donc
+compatible avec la transcription ACADOS, mais refuse explicitement la
+collocation directe d’IPOPT, MadNLP et FATROP, qui contient des états internes
+supplémentaires. Le run `30563108224` a confirmé cette garde avant le premier
+solve MadNLP full. Le benchmark collocation n’active plus cette projection;
+une version dédiée devra projeter à la fois les extrémités et les points de
+Radau.
 
-Le même mécanisme est activé pour les cas NLP full. Dans le run strict
-`30560155975`, MadNLP résout les RHO 1, 3 et 5, mais échoue aux RHO 2 et 4;
-son préfixe continu reste donc limité à un cycle. Ce patron alterné est
-compatible avec un guess cyclique défectueux, pas avec une arrivée monotone de
-la fatigue. La phase de faisabilité est comptée dans le mur-à-mur, tandis que
-le temps natif du solveur reste mesuré séparément.
+Dans le run strict sans cette projection (`30560155975`), MadNLP résout les
+RHO 1, 3 et 5, mais échoue aux RHO 2 et 4; son préfixe continu reste donc
+limité à un cycle. Ce patron alterné est compatible avec un guess cyclique
+défectueux, pas avec une arrivée monotone de la fatigue. Pour ACADOS, la phase
+de faisabilité est comptée dans le mur-à-mur, tandis que le temps natif du
+solveur reste mesuré séparément.
 
 À l’inverse, les deux solveurs reduced qui ne dépendent pas du même algorithme
 convergent sur les cinq RHO stricts :

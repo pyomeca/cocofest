@@ -11193,7 +11193,7 @@ def _should_apply_transfer_phase_one(
     previous_solution,
     enabled: bool,
 ) -> bool:
-    """Return whether phase I is repairing a genuine inter-RHO transfer."""
+    """Return whether the post-window callback should repair the next RHO guess."""
 
     return bool(
         cycle_idx > 0 and continue_solving and previous_solution is not None and enabled
@@ -13436,10 +13436,10 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
                     f"max_expansion={homotopy_summary['max_expansion']:.6g} "
                     f"worst_key={worst_key}"
                 )
-        # The warmup seed is already stored in ``_sol`` before window 0, but
-        # transfer phase I is only meant to repair a trajectory after an RHO
-        # shift. Applying it to the certified seed changes the common initial
-        # condition before the first solve and invalidates solver comparisons.
+        # ``update_functions`` is called after a completed solve: cycle_idx=1
+        # follows window 0 and prepares window 1. Keep the explicit positive
+        # index guard so this projection cannot be reused from a pre-window
+        # callback and accidentally alter the certified initial seed.
         if _should_apply_transfer_phase_one(
             cycle_idx,
             continue_solving=continue_solving,

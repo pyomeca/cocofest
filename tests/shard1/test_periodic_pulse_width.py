@@ -3971,6 +3971,7 @@ def test_github_acados_runner_uses_reference_and_option_profiles_sequentially():
     assert 'mktemp -d "$case_dir/codegen.XXXXXX"' in benchmark_runner
     assert 'pushd "$codegen_dir"' in benchmark_runner
     assert "--ipopt-enforce-start-constraints" in benchmark_runner
+    assert 'elif [[ "$ode_solver" != "collocation" ]]' in benchmark_runner
     assert "--shared-transfer-phase-one" in benchmark_runner
     assert "\n    --transfer-phase-one\n" not in benchmark_runner
     assert '--reduced-cycling-profile "$workspace/benchmark-seed/' in benchmark_runner
@@ -7121,7 +7122,7 @@ def test_shared_transfer_rollout_cli_is_available_to_ipopt():
     )
 
 
-def test_transfer_phase_one_preserves_the_certified_first_rho_seed():
+def test_transfer_phase_one_only_runs_from_a_completed_rho_callback():
     seed_solution = object()
 
     assert (
