@@ -1083,6 +1083,23 @@ est rejeté car il dépasse les bornes de cadence. L’écran 5 RHO contient don
 des variantes SQP et RTI `phase-one`, qui réparent le guess complet avant la
 résolution sans changer les équations, les bornes ni l’objectif de l’OCP.
 
+Le premier écran de cette stratégie (`30561812466`) a révélé deux défauts
+d’orchestration avant de pouvoir conclure sur la méthode :
+
+- le lanceur full transmettait l’alias du script bas niveau
+  `--transfer-phase-one` au comparateur, qui attend
+  `--shared-transfer-phase-one`; IPOPT, MadNLP et FATROP full s’arrêtaient donc
+  avant le montage du NLP;
+- la condition de phase I testait seulement la présence de `_sol`. Or `_sol`
+  contient déjà le seed certifié avant le RHO 0. La projection modifiait alors
+  le seed commun avant la première résolution, jusqu’à `26.8` unités sur les
+  états Ding reduced et `35.6` en full.
+
+Le lanceur utilise maintenant l’option partagée correcte et la phase I de
+transfert exige explicitement `cycle_idx > 0`. Le seed certifié reste donc
+identique pour tous les solveurs au premier RHO; la projection n’intervient
+qu’après une véritable translation de l’horizon.
+
 Le même mécanisme est activé pour les cas NLP full. Dans le run strict
 `30560155975`, MadNLP résout les RHO 1, 3 et 5, mais échoue aux RHO 2 et 4;
 son préfixe continu reste donc limité à un cycle. Ce patron alterné est
@@ -1103,6 +1120,15 @@ mais ne valide pas encore son équivalence au full : IPOPT n’a pas terminé et
 le full strict n’a pas de préfixe comparable. Le résumé
 `state_boundary_jumps`, calculé mais omis du premier JSON agrégé, est désormais
 propagé avec les deux côtés de chaque couture.
+
+Après propagation de ce résumé, le run intermédiaire `30561812466` confirme
+également cinq coutures strictes pour IPOPT et FATROP reduced : tous les sauts
+de `theta`, `omega` et des 20 états Ding sont exactement nuls à la précision
+exportée. Les deux solveurs indépendants donnent respectivement des coûts
+`19.86837` et `19.86729` (écart `0.0054 %`) et des AUC de fatigue `0.1635768`
+et `0.1635703` (écart `0.0040 %`). Ce contrôle croisé valide la cohérence
+numérique du reduced à cinq RHO, mais toujours pas son équivalence mécanique
+au full.
 
 L’analyse de ces deux écrans a finalement localisé une erreur en amont dans
 l’interface Bioptim–ACADOS : les fonctions de pénalité sont construites avec

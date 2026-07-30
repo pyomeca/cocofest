@@ -7116,6 +7116,38 @@ def test_shared_transfer_rollout_cli_is_available_to_ipopt():
     )
 
 
+def test_transfer_phase_one_preserves_the_certified_first_rho_seed():
+    seed_solution = object()
+
+    assert (
+        periodic_example._should_apply_transfer_phase_one(
+            0,
+            continue_solving=True,
+            previous_solution=seed_solution,
+            enabled=True,
+        )
+        is False
+    )
+    assert (
+        periodic_example._should_apply_transfer_phase_one(
+            1,
+            continue_solving=True,
+            previous_solution=seed_solution,
+            enabled=True,
+        )
+        is True
+    )
+    assert (
+        periodic_example._should_apply_transfer_phase_one(
+            1,
+            continue_solving=False,
+            previous_solution=seed_solution,
+            enabled=True,
+        )
+        is False
+    )
+
+
 def test_periodic_collocation_ipopt_profile_is_available():
     args = comparison_example.build_cli().parse_args(
         ["--ipopt-profile", "periodic-collocation"]

@@ -11186,6 +11186,20 @@ def get_one_cycle_acados_continuation_source(
     return _load_warmup_cache(cache_path)
 
 
+def _should_apply_transfer_phase_one(
+    cycle_idx: int,
+    *,
+    continue_solving: bool,
+    previous_solution,
+    enabled: bool,
+) -> bool:
+    """Return whether phase I is repairing a genuine inter-RHO transfer."""
+
+    return bool(
+        cycle_idx > 0 and continue_solving and previous_solution is not None and enabled
+    )
+
+
 def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
     if nlp_c_compile_enabled(args):
         patch_bioptim_compiled_nlp_solver_names()
@@ -13422,7 +13436,16 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
                     f"max_expansion={homotopy_summary['max_expansion']:.6g} "
                     f"worst_key={worst_key}"
                 )
-        if continue_solving and _sol is not None and args.acados_transfer_phase_one:
+        # The warmup seed is already stored in ``_sol`` before window 0, but
+        # transfer phase I is only meant to repair a trajectory after an RHO
+        # shift. Applying it to the certified seed changes the common initial
+        # condition before the first solve and invalidates solver comparisons.
+        if _should_apply_transfer_phase_one(
+            cycle_idx,
+            continue_solving=continue_solving,
+            previous_solution=_sol,
+            enabled=args.acados_transfer_phase_one,
+        ):
             transfer_phase_one_blocks = (
                 ("q", "qdot")
                 if args.acados_transfer_phase_one_mode == "mechanical"
