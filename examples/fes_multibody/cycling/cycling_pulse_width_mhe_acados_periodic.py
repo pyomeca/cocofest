@@ -1705,6 +1705,24 @@ def build_argument_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--acados-transfer-bound-homotopy-min-fraction-step",
+        type=float,
+        default=0.0,
+        help=(
+            "Minimum interpolation step allowed when a failed transfer-bound "
+            "homotopy stage is bisected. Zero disables adaptive refinement."
+        ),
+    )
+    parser.add_argument(
+        "--acados-transfer-bound-homotopy-max-refinements",
+        type=int,
+        default=0,
+        help=(
+            "Maximum number of adaptive bisections across one transfer-bound "
+            "homotopy. Zero disables adaptive refinement."
+        ),
+    )
+    parser.add_argument(
         "--acados-transfer-sqp-restarts",
         type=int,
         default=0,
@@ -4525,7 +4543,9 @@ def run_acados_control_homotopy(
                 )
                 residuals = diagnostics.get("residuals")
                 summary = {
+                    "sequence_index": len(summaries),
                     "stage": stage_index,
+                    "queue_index": stage_index,
                     "attempt": attempt,
                     "kind": kind,
                     "radius": radius,
@@ -8625,6 +8645,8 @@ def run_acados_transfer_bound_homotopy(
     stage_iterations: int,
     solver_tolerance: float | None = None,
     max_restarts: int = 1,
+    minimum_fraction_step: float = 0.0,
+    max_refinements: int = 0,
     echo: bool = True,
     solve_stage=None,
 ) -> dict:
@@ -8663,8 +8685,14 @@ def run_acados_transfer_bound_homotopy(
     accepted_controls = snapshot_container(periodic_nmpc.nlp[0].u_init)
     summaries = []
     completed = False
+    scheduled_fractions = [float(fraction) for fraction in fractions]
+    accepted_fraction = None
+    refinement_count = 0
+    stage_index = 0
+    termination_reason = "not_started"
     try:
-        for stage_index, fraction in enumerate(fractions):
+        while stage_index < len(scheduled_fractions):
+            fraction = scheduled_fractions[stage_index]
             apply_transfer_state_bound_fraction(
                 periodic_nmpc, original_bounds, relaxed_bounds, fraction
             )
@@ -8718,6 +8746,8 @@ def run_acados_transfer_bound_homotopy(
                     or (
                         intermediate_stage
                         and _status_is_success(solution.status)
+                        and residuals is None
+                        and final_history_residuals is None
                     )
                 )
                 retryable = bool(
@@ -8786,10 +8816,123 @@ def run_acados_transfer_bound_homotopy(
                 reset_acados_solver_memory(periodic_nmpc)
 
             if not stage_accepted:
-                break
+                fraction_step = (
+                    np.inf
+                    if accepted_fraction is None
+                    else fraction - accepted_fraction
+                )
+                can_refine = bool(
+                    accepted_fraction is not None
+                    and refinement_count < max_refinements
+                    and fraction_step > minimum_fraction_step
+                    and fraction_step > np.finfo(float).eps
+                )
+                if can_refine:
+                    refined_fraction = 0.5 * (accepted_fraction + fraction)
+                    if (
+                        refined_fraction - accepted_fraction
+                        < minimum_fraction_step
+                    ):
+                        can_refine = False
+                if not can_refine:
+                    if accepted_fraction is None:
+                        termination_reason = "initial_stage_failed"
+                    elif refinement_count >= max_refinements:
+                        termination_reason = "maximum_refinements_reached"
+                    else:
+                        termination_reason = "minimum_fraction_step_reached"
+                    break
+                apply_transfer_state_bound_fraction(
+                    periodic_nmpc,
+                    original_bounds,
+                    relaxed_bounds,
+                    accepted_fraction,
+                )
+                pre_rollback_state_distance = max(
+                    (
+                        float(
+                            np.max(
+                                np.abs(
+                                    periodic_nmpc.nlp[0].x_init[key].init - values
+                                )
+                            )
+                        )
+                        for key, values in accepted_states.items()
+                    ),
+                    default=0.0,
+                )
+                pre_rollback_control_distance = max(
+                    (
+                        float(
+                            np.max(
+                                np.abs(
+                                    periodic_nmpc.nlp[0].u_init[key].init - values
+                                )
+                            )
+                        )
+                        for key, values in accepted_controls.items()
+                    ),
+                    default=0.0,
+                )
+                for key, values in accepted_states.items():
+                    periodic_nmpc.nlp[0].x_init[key].init[:, :] = values
+                for key, values in accepted_controls.items():
+                    periodic_nmpc.nlp[0].u_init[key].init[:, :] = values
+                rollback_state_error = max(
+                    (
+                        float(
+                            np.max(
+                                np.abs(
+                                    periodic_nmpc.nlp[0].x_init[key].init - values
+                                )
+                            )
+                        )
+                        for key, values in accepted_states.items()
+                    ),
+                    default=0.0,
+                )
+                rollback_control_error = max(
+                    (
+                        float(
+                            np.max(
+                                np.abs(
+                                    periodic_nmpc.nlp[0].u_init[key].init - values
+                                )
+                            )
+                        )
+                        for key, values in accepted_controls.items()
+                    ),
+                    default=0.0,
+                )
+                summaries[-1]["refinement_inserted_fraction"] = refined_fraction
+                summaries[-1]["pre_rollback_state_distance"] = (
+                    pre_rollback_state_distance
+                )
+                summaries[-1]["pre_rollback_control_distance"] = (
+                    pre_rollback_control_distance
+                )
+                summaries[-1]["rollback_state_error"] = rollback_state_error
+                summaries[-1]["rollback_control_error"] = rollback_control_error
+                scheduled_fractions.insert(stage_index, refined_fraction)
+                refinement_count += 1
+                if echo:
+                    print(
+                        "acados_transfer_bound_homotopy_refinement: "
+                        f"accepted_fraction={accepted_fraction:.6g} "
+                        f"failed_fraction={fraction:.6g} "
+                        f"inserted_fraction={refined_fraction:.6g} "
+                        f"count={refinement_count}/{max_refinements}"
+                    )
+                continue
+            accepted_fraction = fraction
+            stage_index += 1
         completed = bool(
-            summaries and summaries[-1]["accepted"] and np.isclose(fractions[-1], 1.0)
+            summaries
+            and summaries[-1]["accepted"]
+            and np.isclose(accepted_fraction, 1.0)
         )
+        if completed:
+            termination_reason = "physical_fraction_accepted"
     finally:
         for key, values in accepted_states.items():
             periodic_nmpc.nlp[0].x_init[key].init[:, :] = values
@@ -8809,6 +8952,12 @@ def run_acados_transfer_bound_homotopy(
     return {
         "completed": completed,
         "stages": summaries,
+        "scheduled_fractions": scheduled_fractions,
+        "refinement_count": refinement_count,
+        "last_accepted_fraction": accepted_fraction,
+        "termination_reason": termination_reason,
+        "minimum_fraction_step": minimum_fraction_step,
+        "max_refinements": max_refinements,
         "expansion_by_key": expansion_by_key,
         "max_expansion": max(expansion_by_key.values(), default=0.0),
     }
@@ -11696,6 +11845,14 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
         raise ValueError(
             "--acados-transfer-bound-homotopy-solver-tolerance must be strictly positive."
         )
+    if args.acados_transfer_bound_homotopy_min_fraction_step < 0:
+        raise ValueError(
+            "--acados-transfer-bound-homotopy-min-fraction-step must be non-negative."
+        )
+    if args.acados_transfer_bound_homotopy_max_refinements < 0:
+        raise ValueError(
+            "--acados-transfer-bound-homotopy-max-refinements must be non-negative."
+        )
     if args.acados_transfer_sqp_restarts < 0:
         raise ValueError("--acados-transfer-sqp-restarts must be non-negative.")
     if args.acados_transfer_sqp_restart_iterations < 1:
@@ -12630,6 +12787,14 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
                 print(
                     "acados_transfer_bound_homotopy_solver_tolerance: "
                     f"{args.acados_transfer_bound_homotopy_solver_tolerance}"
+                )
+                print(
+                    "acados_transfer_bound_homotopy_min_fraction_step: "
+                    f"{args.acados_transfer_bound_homotopy_min_fraction_step}"
+                )
+                print(
+                    "acados_transfer_bound_homotopy_max_refinements: "
+                    f"{args.acados_transfer_bound_homotopy_max_refinements}"
                 )
             print(f"acados_transfer_sqp_restarts: {args.acados_transfer_sqp_restarts}")
             if args.acados_transfer_sqp_restarts:
@@ -13735,6 +13900,12 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
                 convergence_tolerance=(args.acados_transfer_bound_homotopy_tolerance),
                 stage_iterations=args.acados_transfer_bound_homotopy_iterations,
                 solver_tolerance=(args.acados_transfer_bound_homotopy_solver_tolerance),
+                minimum_fraction_step=(
+                    args.acados_transfer_bound_homotopy_min_fraction_step
+                ),
+                max_refinements=(
+                    args.acados_transfer_bound_homotopy_max_refinements
+                ),
                 echo=echo,
             )
             homotopy_summary["window"] = cycle_idx
@@ -13750,6 +13921,9 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
                     "acados_transfer_bound_homotopy_summary: "
                     f"completed={homotopy_summary['completed']} "
                     f"stages={len(homotopy_summary['stages'])} "
+                    f"refinements={homotopy_summary['refinement_count']} "
+                    f"last_fraction={homotopy_summary['last_accepted_fraction']} "
+                    f"termination={homotopy_summary['termination_reason']} "
                     f"max_expansion={homotopy_summary['max_expansion']:.6g} "
                     f"worst_key={worst_key}"
                 )

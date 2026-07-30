@@ -695,6 +695,8 @@ jobs:
                 --acados-transfer-bound-homotopy-iterations 20
                 --acados-transfer-bound-homotopy-tolerance 1e-4
                 --acados-transfer-bound-homotopy-solver-tolerance 1e-4
+                --acados-transfer-bound-homotopy-min-fraction-step 0.001953125
+                --acados-transfer-bound-homotopy-max-refinements 16
               )
             fi
             if [[ "$variant" == "sqp-irk-active-set-guard" ]]; then
@@ -848,7 +850,7 @@ jobs:
         if: always()
         run: |
           output="acados-smoke-results/acados-option-screen.csv"
-          echo "case,nlp_solver,search_direction,integrator,sim_steps,newton_iter,reset_solver,qp_warm_start,anderson,anderson_threshold,byrd_slack_factor,transfer_bound_homotopy,active_set_guard_radius_s,active_set_guard_margin_nodes,active_set_threshold_above_pd0_s,all_node_contact,all_node_contact_position,solver_success,physical_success,success,mechanical_audit_passed,nlp_validated_cycles,physically_validated_cycles,validated_cycles,attempted_rho,solve_hot_median_s,effective_hot_median_s,effective_hot_p90_s,restoration_total_s,executed_fatigue_objective,minimum_capacity_ratio,first_failed_rho" > "$output"
+          echo "case,nlp_solver,search_direction,integrator,sim_steps,newton_iter,reset_solver,qp_warm_start,anderson,anderson_threshold,byrd_slack_factor,transfer_bound_homotopy,homotopy_min_fraction_step,homotopy_max_refinements,active_set_guard_radius_s,active_set_guard_margin_nodes,active_set_threshold_above_pd0_s,all_node_contact,all_node_contact_position,solver_success,physical_success,success,mechanical_audit_passed,nlp_validated_cycles,physically_validated_cycles,validated_cycles,attempted_rho,solve_hot_median_s,effective_hot_median_s,effective_hot_p90_s,restoration_total_s,executed_fatigue_objective,minimum_capacity_ratio,first_failed_rho" > "$output"
           while IFS= read -r result; do
             case_name="$(basename "$(dirname "$result")")"
             jq -r --arg case "$case_name" '
@@ -867,6 +869,8 @@ jobs:
                 $config.acados_anderson_activation_threshold,
                 $config.acados_byrd_omojokon_slack_relaxation_factor,
                 $config.acados_transfer_bound_homotopy,
+                $config.acados_transfer_bound_homotopy_min_fraction_step,
+                $config.acados_transfer_bound_homotopy_max_refinements,
                 $config.acados_transfer_active_set_guard_radius,
                 $config.acados_transfer_active_set_guard_margin,
                 $config.acados_transfer_active_set_threshold,

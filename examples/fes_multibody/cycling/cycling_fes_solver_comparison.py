@@ -121,6 +121,8 @@ BENCHMARK_CONFIGURATION_FIELDS = (
     "acados_transfer_bound_homotopy_iterations",
     "acados_transfer_bound_homotopy_tolerance",
     "acados_transfer_bound_homotopy_solver_tolerance",
+    "acados_transfer_bound_homotopy_min_fraction_step",
+    "acados_transfer_bound_homotopy_max_refinements",
     "acados_transfer_mechanical_restoration",
     "acados_transfer_sqp_restarts",
     "acados_transfer_active_set_guard_radius",
@@ -2791,6 +2793,8 @@ def main(
     acados_transfer_bound_homotopy_iterations: int = 30,
     acados_transfer_bound_homotopy_tolerance: float = 1e-4,
     acados_transfer_bound_homotopy_solver_tolerance: float | None = None,
+    acados_transfer_bound_homotopy_min_fraction_step: float = 0.0,
+    acados_transfer_bound_homotopy_max_refinements: int = 0,
     shared_initial_phase_one: bool = False,
     shared_transfer_rollout_substeps: int = 5,
     shared_transfer_rollout_max_bound_violation: float = 1.0,
@@ -3302,6 +3306,12 @@ def main(
     )
     acados_args.acados_transfer_bound_homotopy_solver_tolerance = (
         acados_transfer_bound_homotopy_solver_tolerance
+    )
+    acados_args.acados_transfer_bound_homotopy_min_fraction_step = (
+        acados_transfer_bound_homotopy_min_fraction_step
+    )
+    acados_args.acados_transfer_bound_homotopy_max_refinements = (
+        acados_transfer_bound_homotopy_max_refinements
     )
 
     fatrop_args = _nlp_solver_config(
@@ -3948,6 +3958,16 @@ def build_cli() -> argparse.ArgumentParser:
         "--acados-transfer-bound-homotopy-solver-tolerance",
         type=float,
         default=None,
+    )
+    parser.add_argument(
+        "--acados-transfer-bound-homotopy-min-fraction-step",
+        type=float,
+        default=0.0,
+    )
+    parser.add_argument(
+        "--acados-transfer-bound-homotopy-max-refinements",
+        type=int,
+        default=0,
     )
     parser.add_argument(
         "--shared-initial-phase-one",
@@ -4792,6 +4812,12 @@ if __name__ == "__main__":
         ),
         acados_transfer_bound_homotopy_solver_tolerance=(
             args.acados_transfer_bound_homotopy_solver_tolerance
+        ),
+        acados_transfer_bound_homotopy_min_fraction_step=(
+            args.acados_transfer_bound_homotopy_min_fraction_step
+        ),
+        acados_transfer_bound_homotopy_max_refinements=(
+            args.acados_transfer_bound_homotopy_max_refinements
         ),
         shared_initial_phase_one=args.shared_initial_phase_one,
         shared_transfer_rollout_substeps=args.shared_transfer_rollout_substeps,

@@ -1278,6 +1278,27 @@ avec le saut direct. Cette grille est volontairement prudente pour le prochain
 palier; elle pourra ensuite être raccourcie en mesurant le plus grand pas qui
 conserve la faisabilité.
 
+Le screen suivant
+[`30586923568`](https://github.com/mickaelbegon/cocofest/actions/runs/30586923568)
+montre à la fois le progrès et la limite d’une grille fixe. Les transferts vers
+les RHO 4 et 5 atteignent les bornes physiques `λ=1` avec les quatre résidus
+sous `1e-4`. Le transfert critique vers le RHO 2 accepte `λ=0`, mais échoue
+dès `λ=0.125` avec `r_eq=8.79e-3`; celui vers le RHO 3 progresse jusqu’à
+`λ=0.75` avant d’échouer à `λ=0.875`. Les solutions isolées ultérieures ne
+réparent évidemment pas le préfixe strict, qui reste limité à un RHO.
+
+La prochaine variante conserve les fractions ci-dessus comme ancres, mais
+ajoute un backtracking local. Lorsqu’une cible échoue, l’itéré fautif est
+abandonné, le dernier primal accepté est restauré, puis l’intervalle en
+`λ` est bisecté avant de retenter la même ancre. Le pas minimal est
+`0.001953125 = 0.125/64` et le nombre total de raffinements est limité à 16
+par transfert. Le JSON publie la grille réellement tentée, le dernier
+`λ` accepté, le nombre de raffinements, les erreurs de rollback et la raison
+d’arrêt. Cette stratégie vise la robustesse; son temps de restauration doit
+être compté séparément. Sur le screen fixe, il totalisait déjà `9.71 s` pour
+quatre transferts, bien au-delà de la cible temps réel, même si les SQP
+nominaux réussis restaient entre `0.04` et `0.14 s`.
+
 Enfin, le guess terminal ACADOS est bien envoyé en coordonnées scalées,
 $x_N^{ACADOS}=x_N^{physique}/s_x$, comme les stages précédents. Le commit
 Bioptim `733e442c7b429e20a67a7cf4c2b69694c54513b3` ajoute un test qui
