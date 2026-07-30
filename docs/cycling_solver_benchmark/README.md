@@ -2464,6 +2464,13 @@ Deux corrections sont maintenant actives :
 2. la contrainte full calcule la cadence physique au début et aux trois stages
    Radau de chaque intervalle, puis séparément au terminal.
 
+Les pseudo-stages créés par Bioptim en tir direct ne sont pas des variables de
+décision. Ils sont donc volontairement exclus de cette fonction : IPOPT et
+MadNLP/collocation contraignent les stages Radau, tandis qu'ACADOS/RK contraint
+les nœuds de tir et le terminal sans introduire de symbole CasADi libre. Les
+stages internes de l'intégrateur ACADOS devront être contrôlés séparément par
+rollout ou par une contrainte path native.
+
 Le premier test IPOPT local apparié converge avec ces contraintes. Son coût
 de fenêtre vaut `3.7194043`, contre `3.7194409` pour reduced dans le run Linux,
 soit un écart relatif d'environ `9.8e-6`. Avant la correction des stages, le

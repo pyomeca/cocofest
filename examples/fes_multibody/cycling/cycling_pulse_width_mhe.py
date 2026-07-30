@@ -2003,9 +2003,10 @@ def physical_crank_velocity_all_collocation_points_constraint(
     from casadi import vertcat
 
     q_points = [controller.states["q"].cx_start]
-    q_points.extend(controller.states["q"].cx_intermediates_list)
     qdot_points = [controller.states["qdot"].cx_start]
-    qdot_points.extend(controller.states["qdot"].cx_intermediates_list)
+    if controller.get_nlp.dynamics_type.ode_solver.is_direct_collocation:
+        q_points.extend(controller.states["q"].cx_intermediates_list)
+        qdot_points.extend(controller.states["qdot"].cx_intermediates_list)
     return vertcat(
         *[
             _physical_crank_velocity(

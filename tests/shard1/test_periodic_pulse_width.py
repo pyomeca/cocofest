@@ -4903,6 +4903,11 @@ def test_physical_crank_velocity_includes_all_collocation_points():
 
     controller = SimpleNamespace(
         model=SimpleNamespace(bio_model=FakeBioModel()),
+        get_nlp=SimpleNamespace(
+            dynamics_type=SimpleNamespace(
+                ode_solver=SimpleNamespace(is_direct_collocation=True)
+            )
+        ),
         states={
             "q": SimpleNamespace(
                 cx_start=np.zeros(3),
@@ -4924,6 +4929,56 @@ def test_physical_crank_velocity_includes_all_collocation_points():
     )
 
     np.testing.assert_allclose(np.asarray(omega).reshape(-1), [-5.0, -7.0, -9.0])
+
+
+def test_physical_crank_velocity_ignores_pseudo_stages_in_direct_shooting():
+    class FakeBioModel:
+        @staticmethod
+        def marker_index(name):
+            return {"hand": 0, "global_wheel_center": 1}[name]
+
+        @staticmethod
+        def marker(index):
+            values = (
+                np.array([1.0, 0.0, 0.0])
+                if index == 0
+                else np.array([0.0, 0.0, 0.0])
+            )
+            return lambda q, parameters: values
+
+        @staticmethod
+        def marker_velocity(index):
+            if index == 0:
+                return lambda q, qdot, parameters: np.array(
+                    [0.0, qdot[0], 0.0]
+                )
+            return lambda q, qdot, parameters: np.zeros(3)
+
+    controller = SimpleNamespace(
+        model=SimpleNamespace(bio_model=FakeBioModel()),
+        get_nlp=SimpleNamespace(
+            dynamics_type=SimpleNamespace(
+                ode_solver=SimpleNamespace(is_direct_collocation=False)
+            )
+        ),
+        states={
+            "q": SimpleNamespace(
+                cx_start=np.zeros(3),
+                cx_intermediates_list=[np.full(3, np.nan)],
+            ),
+            "qdot": SimpleNamespace(
+                cx_start=np.array([-5.0, 0.0, 0.0]),
+                cx_intermediates_list=[np.full(3, np.nan)],
+            ),
+        },
+        parameters=SimpleNamespace(cx=np.array([])),
+    )
+
+    omega = mhe_example.physical_crank_velocity_all_collocation_points_constraint(
+        controller
+    )
+
+    np.testing.assert_allclose(np.asarray(omega).reshape(-1), [-5.0])
 
 
 def test_mechanical_audit_rejects_collocation_only_cadence_violation():
@@ -4948,6 +5003,10 @@ def test_mechanical_audit_rejects_collocation_only_cadence_violation():
     )
 
     assert audit["maximum_physical_crank_velocity_bound_violation_rad_s"] == 0.0
+    assert (
+        audit["maximum_shooting_node_crank_velocity_bound_violation_rad_s"]
+        == 0.0
+    )
     assert audit["maximum_all_node_crank_velocity_bound_violation_rad_s"] > 0.7
     assert audit["passes_physical_crank_velocity_bounds"] is False
     assert audit["passes_tolerance"] is False

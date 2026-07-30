@@ -6654,6 +6654,9 @@ def audit_mechanical_trajectory(
             "maximum_physical_crank_velocity_bound_violation_rad_s": (
                 omega_violation
             ),
+            "maximum_shooting_node_crank_velocity_bound_violation_rad_s": (
+                omega_violation
+            ),
             "maximum_all_node_crank_velocity_bound_violation_rad_s": (
                 all_node_omega_violation
             ),
