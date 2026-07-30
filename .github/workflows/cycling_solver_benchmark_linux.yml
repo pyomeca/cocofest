@@ -537,7 +537,8 @@ jobs:
           print(f"acados_template: {acados_template.__file__}")
           PY
           python -m pytest -q \
-            .benchmark-deps/bioptim/tests/shard1/test_acados_interface.py::test_acados_update_solver_sets_terminal_guess_in_scaled_units \
+            .benchmark-deps/bioptim/tests/shard1/test_acados_interface.py::test_acados_update_solver_sets_terminal_guess_in_scaled_units
+          python -m pytest -q \
             tests/shard1/test_reduced_cycling.py \
             tests/shard1/test_periodic_pulse_width.py::test_acados_example_defaults_to_the_assisted_periodic_profile \
             tests/shard1/test_periodic_pulse_width.py::test_common_target_seed_enables_the_robust_acados_reference_preparation \
