@@ -973,8 +973,22 @@ Deux ablations full sont ajoutées à l’écran suivant :
 - SQP/IRK avec position et vitesse de contact à tous les nœuds;
 - SQP-RTI/IRK avec les mêmes contraintes.
 
-Elles testent directement l’hypothèse de drift holonome avant d’envisager une
-relaxation, une pénalisation de Baumgarte ou un second OCP de faisabilité.
+Le run `30550630318` montre que les deux échouent au premier QP avec
+`ACADOS_MINSTEP`. Le SQP expose un résidu d’inégalité `17.13`, alors que le
+seed passe l’audit mécanique avant le solve. Imposer simultanément
+$c(q_k)=0$ et $J(q_k)\dot q_k=0$ à tous les nœuds est trop redondant avec la
+dynamique contrainte au niveau accélération et dégrade vraisemblablement le
+rang du QP.
+
+L’écran suivant teste donc la stabilisation minimale :
+
+$$
+c(q_k)=0\quad\text{à tous les nœuds},\qquad
+J(q_0)\dot q_0=0\quad\text{au nœud initial seulement}.
+$$
+
+Cette variante sépare position et vitesse, avant d’envisager une pénalisation
+de Baumgarte, une contrainte adoucie ou un second OCP de faisabilité.
 
 La première stratégie testée est la voie native
 `SQP_WITH_FEASIBLE_QP` :

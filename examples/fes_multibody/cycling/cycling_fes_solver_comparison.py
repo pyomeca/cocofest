@@ -59,6 +59,7 @@ BENCHMARK_CONFIGURATION_FIELDS = (
     "mechanical_formulation",
     "mechanical_equivalence_audit",
     "full_contact_constraints_all_nodes",
+    "full_contact_position_all_nodes",
     "torque_application",
     "ode_solver",
     "collocation_degree",
@@ -2458,6 +2459,7 @@ def main(
     reduced_cycling_profile: str | Path | None = None,
     experimental_reduced_acados: bool = False,
     full_contact_constraints_all_nodes: bool = False,
+    full_contact_position_all_nodes: bool = False,
     n_threads: int | None = None,
     compact_rho_output: bool = False,
     resistive_torque: float = DEFAULT_CRANK_TORQUE_NM,
@@ -3191,6 +3193,9 @@ def main(
         solver_configuration.full_contact_constraints_all_nodes = bool(
             full_contact_constraints_all_nodes
         )
+        solver_configuration.full_contact_position_all_nodes = bool(
+            full_contact_position_all_nodes
+        )
         solver_configuration.reduced_cycling_profile = (
             None
             if reduced_cycling_profile is None
@@ -3304,6 +3309,14 @@ def build_cli() -> argparse.ArgumentParser:
         help=(
             "For full mechanics, constrain wheel-centre position and velocity "
             "at every shooting node to prevent contact-manifold drift."
+        ),
+    )
+    parser.add_argument(
+        "--full-contact-position-all-nodes",
+        action="store_true",
+        help=(
+            "For full mechanics, constrain wheel-centre position at every "
+            "node and velocity only at the initial node."
         ),
     )
     parser.add_argument(
@@ -4260,6 +4273,9 @@ if __name__ == "__main__":
         experimental_reduced_acados=args.experimental_reduced_acados,
         full_contact_constraints_all_nodes=(
             args.full_contact_constraints_all_nodes
+        ),
+        full_contact_position_all_nodes=(
+            args.full_contact_position_all_nodes
         ),
         n_threads=args.n_threads,
         compact_rho_output=args.compact_rho_output,

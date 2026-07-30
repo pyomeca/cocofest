@@ -74,6 +74,27 @@ def test_full_contact_stabilization_constrains_every_shooting_node(monkeypatch):
     assert captured[1][1]["second_marker"] == "global_wheel_center"
 
 
+def test_full_contact_position_stabilization_keeps_velocity_at_start(monkeypatch):
+    captured = []
+
+    class FakeConstraintList:
+        def add(self, constraint, **kwargs):
+            captured.append((constraint, kwargs))
+
+    monkeypatch.setattr(mhe_example, "ConstraintList", FakeConstraintList)
+    model = SimpleNamespace(marker_index=lambda name: 7)
+
+    mhe_example.set_constraints(
+        model,
+        enforce_start_constraints=False,
+        enforce_contact_position_all_nodes=True,
+    )
+
+    assert len(captured) == 2
+    assert captured[0][1]["node"] == Node.START
+    assert captured[1][1]["node"] == Node.ALL
+
+
 def test_updating_full_model_preserves_every_force_relationship(monkeypatch):
     captured = {}
 
@@ -3224,6 +3245,14 @@ def test_full_contact_stabilization_is_opt_in_on_both_clis():
     assert comparison_parser.parse_args(
         ["--full-contact-constraints-all-nodes"]
     ).full_contact_constraints_all_nodes
+    assert not periodic_parser.parse_args([]).full_contact_position_all_nodes
+    assert not comparison_parser.parse_args([]).full_contact_position_all_nodes
+    assert periodic_parser.parse_args(
+        ["--full-contact-position-all-nodes"]
+    ).full_contact_position_all_nodes
+    assert comparison_parser.parse_args(
+        ["--full-contact-position-all-nodes"]
+    ).full_contact_position_all_nodes
 
 
 def test_common_primal_threshold_is_independent_of_nlp_solver_tolerance():

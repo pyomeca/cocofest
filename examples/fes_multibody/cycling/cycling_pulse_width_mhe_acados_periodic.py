@@ -2459,6 +2459,14 @@ def build_argument_parser() -> argparse.ArgumentParser:
             "constraints at every shooting node to suppress holonomic drift."
         ),
     )
+    parser.add_argument(
+        "--full-contact-position-all-nodes",
+        action="store_true",
+        help=(
+            "For full mechanics, impose wheel-centre position at every "
+            "shooting node but its velocity only at the first node."
+        ),
+    )
     parser.set_defaults(use_sx=True, enforce_start_constraints=False)
     return parser
 
@@ -11680,6 +11688,9 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
         "enforce_start_constraints": args.enforce_start_constraints,
         "enforce_contact_constraints_all_nodes": bool(
             args.full_contact_constraints_all_nodes
+        ),
+        "enforce_contact_position_all_nodes": bool(
+            args.full_contact_position_all_nodes
         ),
         "enforce_physical_crank_velocity_bounds": bool(
             build_mechanical_audit_profile
