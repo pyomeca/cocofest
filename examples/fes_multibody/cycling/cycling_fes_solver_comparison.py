@@ -336,12 +336,42 @@ def _validated_cycle_count(result: dict) -> int:
 
 
 def _physically_validated_cycle_count(result: dict) -> int:
-    """Return only cycles that retain the final external physical certificate."""
+    """Return the longest NLP-valid prefix that retains the physical certificate."""
 
     nlp_validated_cycles = _validated_cycle_count(result)
-    if result.get("physical_success") is False:
+    if nlp_validated_cycles <= 0:
         return 0
-    return nlp_validated_cycles
+
+    mechanical_audit = result.get("mechanical_equivalence_audit") or {}
+    if (
+        mechanical_audit.get("available") is True
+        and mechanical_audit.get("passes_tolerance") is False
+    ):
+        return 0
+
+    diagnostics = result.get("physical_crank_diagnostics")
+    if diagnostics is None:
+        return 0 if result.get("physical_success") is False else nlp_validated_cycles
+
+    absolute_tolerance = diagnostics.get("absolute_cycle_tolerance")
+    progress_tolerance = diagnostics.get("cycle_progress_tolerance")
+    if absolute_tolerance is None or progress_tolerance is None:
+        return 0 if result.get("physical_success") is False else nlp_validated_cycles
+
+    physical_prefix = 0
+    for cycle_count in range(1, nlp_validated_cycles + 1):
+        metrics = _cycle_boundary_wheel_angle_metrics(result, cycle_count)
+        absolute_error = metrics["maximum_absolute_error_rad"]
+        progress_error = metrics["maximum_cycle_progress_error_rad"]
+        if (
+            absolute_error is None
+            or progress_error is None
+            or absolute_error > float(absolute_tolerance)
+            or progress_error > float(progress_tolerance)
+        ):
+            break
+        physical_prefix = cycle_count
+    return physical_prefix
 
 
 def _configured_state_node_stride(result: dict) -> int:

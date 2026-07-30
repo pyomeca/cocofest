@@ -2338,6 +2338,36 @@ def test_benchmark_excludes_nlp_cycles_after_external_physical_failure():
     assert performance["validated_cycles"] == 0
 
 
+def test_benchmark_keeps_the_physical_prefix_before_a_later_angle_failure():
+    result = _benchmark_result([0, 0, 0], solver_success=True, success=False)
+    result.update(
+        physical_success=False,
+        physical_crank_angle_trace=np.array(
+            [
+                0.0,
+                -np.pi,
+                -2 * np.pi,
+                -2.5 * np.pi,
+                -3 * np.pi,
+                -3.5 * np.pi,
+                -4 * np.pi,
+            ]
+        ),
+        physical_crank_absolute_reference=0.0,
+        physical_crank_diagnostics={
+            "absolute_cycle_tolerance": 0.00201,
+            "cycle_progress_tolerance": 0.00402,
+        },
+        mechanical_equivalence_audit={
+            "available": True,
+            "passes_tolerance": True,
+        },
+    )
+
+    assert comparison_example._validated_cycle_count(result) == 3
+    assert comparison_example._physically_validated_cycle_count(result) == 1
+
+
 def test_rho_boundary_jump_summary_keeps_both_sides_of_every_seam():
     class CycleSolution:
         def __init__(self, theta, omega, capacity):

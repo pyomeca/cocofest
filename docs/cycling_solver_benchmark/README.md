@@ -1057,6 +1057,15 @@ exporte donc désormais séparément `solver_success`, `physical_success`,
 `success` et `mechanical_audit_passed`. La campagne 30 RHO ne doit jamais
 sélectionner une variante sur le seul statut natif ACADOS.
 
+Le compteur `physically_validated_cycles` est un préfixe, pas un verdict
+global recopié sur tous les RHO. Il part du préfixe NLP convergé et s’arrête au
+premier cycle qui dépasse soit la tolérance angulaire absolue, soit la
+tolérance de progression entre deux tours. Une non-convergence tardive ne peut
+donc plus annuler rétroactivement des cycles antérieurs certifiés. Le run
+`30564583487` a exposé ce cas avec IPOPT full : le premier RHO respecte sa
+cible, puis le second échoue avant que les RHO isolés suivants ne
+reconvergent.
+
 Deux ablations full sont ajoutées à l’écran suivant :
 
 - SQP/IRK avec position et vitesse de contact à tous les nœuds;
