@@ -953,6 +953,16 @@ seront intégrés au bilan d’endurance qu’après validation numérique et ph
 des deux formulations. Les métriques MX antérieures restent seulement des
 diagnostics historiques.
 
+Le run `30563108224` confirme précisément la limite full, même avec scaling
+`none` : les lignes `3120:3152` sont détectées comme dépendant d’un état de
+l’intervalle précédent et la structure annoncée se termine par
+`ng=[...,112,1]`. CasADi refuse donc $A$ avant le premier appel à FATROP. Ce
+cas reste dans chaque palier comme contrôle négatif explicite; la CI accepte
+uniquement cette signature exacte avec `attempted_windows=0`. Toute autre
+erreur full, ou toute erreur reduced, demeure une erreur d’infrastructure.
+FATROP reduced doit toujours fournir ses RHO physiques et la preuve d’une
+unique bibliothèque C réutilisée.
+
 ### 7.4 ACADOS
 
 ACADOS résout une suite de QP :

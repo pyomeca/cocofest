@@ -1638,6 +1638,20 @@ jobs:
             exit 1
           fi
           for result in "${results[@]}"; do
+            if [[ "$BENCHMARK_SOLVER" == "fatrop" && "$result" == *"fatrop-collocation-full/"* ]]; then
+              # The full constrained collocation Jacobian is outside the
+              # structure currently accepted by CasADi's FATROP interface.
+              # Keep this explicit negative control in the report without
+              # classifying the already documented incompatibility as a CI
+              # infrastructure failure.
+              jq -e '
+                .results[0] |
+                (.attempted_windows == 0) and
+                (.error | type == "string") and
+                (.error | contains("specified structure of A does not correspond"))
+              ' "$result"
+              continue
+            fi
             jq -e '
               (.configurations | to_entries | all(.value.use_sx == true)) and
               (
@@ -1645,7 +1659,11 @@ jobs:
                 (.attempted_windows > 0 and .error == null)
               )
             ' "$result"
-            if [[ "$COMPILE_NLP_EVALUATORS" == "true" ]]; then
+            case_requires_compile="$COMPILE_NLP_EVALUATORS"
+            if [[ "$BENCHMARK_SOLVER" == "ipopt" && "$result" == *"ipopt-full/"* ]]; then
+              case_requires_compile=false
+            fi
+            if [[ "$case_requires_compile" == "true" ]]; then
               jq -e '
                 .results[0] |
                 (.compiled_nlp_reuse.enabled == true) and

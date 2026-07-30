@@ -3881,6 +3881,9 @@ def test_github_acados_runner_uses_reference_and_option_profiles_sequentially():
         'benchmark-results "$BENCHMARK_CYCLES" false'
         in workflow
     )
+    assert "specified structure of A does not correspond" in workflow
+    assert 'case_requires_compile="$COMPILE_NLP_EVALUATORS"' in workflow
+    assert 'case_requires_compile=false' in workflow
     assert ".compiled_nlp_reuse.compiled_library_build_count == 1" in workflow
     assert ".compiled_nlp_reuse.graph_rebuild_detected == false" in workflow
     assert ".compiled_nlp_reuse.runtime_bounds_changed == true" in workflow
