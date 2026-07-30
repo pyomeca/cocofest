@@ -565,6 +565,7 @@ jobs:
           done
           mkdir -p acados-smoke-results
           : > acados-smoke-results/expected-cases.txt
+          : > acados-smoke-results/reference-cases.txt
           acados_extended=false
           if (( ACADOS_SMOKE_RHOS > 5 || ACADOS_OPTION_RHOS > 5 )); then
             acados_extended=true
@@ -753,6 +754,10 @@ jobs:
           }
 
           if [[ "$acados_extended" == "false" ]]; then
+            printf '%s\n' \
+              sqp-irk-reference-full \
+              sqp-irk-reference-reduced \
+              > acados-smoke-results/reference-cases.txt
             for mechanics in full reduced; do
               run_case sqp-irk-reference "$mechanics" "$ACADOS_SMOKE_RHOS" SQP IRK 5 5
               run_case sqp-irk-reset-memory "$mechanics" "$ACADOS_OPTION_RHOS" SQP IRK 5 5
@@ -775,6 +780,10 @@ jobs:
           else
             # Only candidates that passed the five-RHO physical screen are
             # rebuilt for 30/100 RHO. Keep the reference to quantify the gain.
+            printf '%s\n' \
+              sqp-irk-contact-position-full \
+              sqp-irk-reference-reduced \
+              > acados-smoke-results/reference-cases.txt
             run_case sqp-irk-reference reduced "$ACADOS_SMOKE_RHOS" SQP IRK 5 5
             run_case sqp-irk-fixed reduced "$ACADOS_OPTION_RHOS" SQP IRK 5 5
             run_case sqp-irk-anderson reduced "$ACADOS_OPTION_RHOS" SQP IRK 5 5
@@ -891,8 +900,13 @@ jobs:
             ' "$result"
           done
           extended_campaign="$(cat acados-smoke-results/extended-campaign.txt)"
-          for mechanics in full reduced; do
-            result="acados-smoke-results/sqp-irk-reference-${mechanics}/result.json"
+          mapfile -t reference_cases < acados-smoke-results/reference-cases.txt
+          if [[ "${#reference_cases[@]}" -ne 2 ]]; then
+            echo "ACADOS: expected exactly two reference cases, found ${#reference_cases[@]}." >&2
+            exit 1
+          fi
+          for case_name in "${reference_cases[@]}"; do
+            result="acados-smoke-results/${case_name}/result.json"
             jq -e --arg extended "$extended_campaign" '
               (.configurations.acados.use_sx == true) and
               (

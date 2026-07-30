@@ -1863,6 +1863,11 @@ cinq. Le gate vérifie désormais la présence de tous les cas, l’usage de SX,
 un `n_windows > 5` réellement transmis et l’absence d’erreur
 d’infrastructure sur les références full/reduced; une non-convergence ACADOS
 reste dans le rapport sans rendre le workflow rouge.
+Le run de vérification `30568985981` a ensuite révélé un second défaut purement
+CI : le cas full retenu après le screen porte le nom
+`sqp-irk-contact-position-full`, pas `sqp-irk-reference-full`. Les deux cas de
+référence sont désormais consignés dans `reference-cases.txt`; le gate lit ce
+manifeste au lieu de reconstruire leurs noms.
 
 Pour mesurer la compilation, relancer sur le même type de runner avec :
 

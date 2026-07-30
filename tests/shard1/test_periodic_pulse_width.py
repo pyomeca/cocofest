@@ -3977,6 +3977,10 @@ def test_github_acados_runner_uses_reference_and_option_profiles_sequentially():
     assert "cycling-acados-smoke-${{ github.run_id }}" in workflow
     assert 'echo "${variant}-${mechanics}" >> acados-smoke-results/expected-cases.txt' in workflow
     assert "mapfile -t expected_cases < acados-smoke-results/expected-cases.txt" in workflow
+    assert "mapfile -t reference_cases < acados-smoke-results/reference-cases.txt" in workflow
+    assert "sqp-irk-contact-position-full" in workflow
+    assert 'result="acados-smoke-results/${case_name}/result.json"' in workflow
+    assert "sqp-irk-reference-${mechanics}/result.json" not in workflow
     assert 'expected ${#expected_cases[@]} JSON files' in workflow
     assert "expected 12 JSON files" not in workflow
     assert ".configurations.acados.n_windows > 5" in workflow
