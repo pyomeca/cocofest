@@ -73,7 +73,7 @@ env:
   BIOPTIM_REPOSITORY: mickaelbegon/BiorbdOptim
   # Dedicated multi-solver integration branch:
   # codex/cocofest-acados-v055-exploration
-  BIOPTIM_PRODUCTION_COMMIT: 036b9155b7c32c0b94d90a98bbdd4231b9203457
+  BIOPTIM_PRODUCTION_COMMIT: 733e442c7b429e20a67a7cf4c2b69694c54513b3
   BIOPTIM_ALPAQA_COMMIT: d84e7e43534360fc048e0be26a3bd69a2abc2d77
   ACADOS_COMMIT: 59d93e17d2985fdd73fc58b8a83ed8f83a024171
   ACADOS_INSTALL_SCRIPT_BLOB: 5ac8064ab613251e62560b5de8cbbb9550f5c5d0
@@ -848,7 +848,7 @@ jobs:
         if: always()
         run: |
           output="acados-smoke-results/acados-option-screen.csv"
-          echo "case,nlp_solver,search_direction,integrator,sim_steps,newton_iter,reset_solver,qp_warm_start,anderson,anderson_threshold,byrd_slack_factor,transfer_bound_homotopy,all_node_contact,all_node_contact_position,solver_success,physical_success,success,mechanical_audit_passed,nlp_validated_cycles,physically_validated_cycles,validated_cycles,attempted_rho,solve_hot_median_s,effective_hot_median_s,effective_hot_p90_s,restoration_total_s,executed_fatigue_objective,minimum_capacity_ratio,first_failed_rho" > "$output"
+          echo "case,nlp_solver,search_direction,integrator,sim_steps,newton_iter,reset_solver,qp_warm_start,anderson,anderson_threshold,byrd_slack_factor,transfer_bound_homotopy,active_set_guard_radius_s,active_set_guard_margin_nodes,active_set_threshold_above_pd0_s,all_node_contact,all_node_contact_position,solver_success,physical_success,success,mechanical_audit_passed,nlp_validated_cycles,physically_validated_cycles,validated_cycles,attempted_rho,solve_hot_median_s,effective_hot_median_s,effective_hot_p90_s,restoration_total_s,executed_fatigue_objective,minimum_capacity_ratio,first_failed_rho" > "$output"
           while IFS= read -r result; do
             case_name="$(basename "$(dirname "$result")")"
             jq -r --arg case "$case_name" '
@@ -867,6 +867,9 @@ jobs:
                 $config.acados_anderson_activation_threshold,
                 $config.acados_byrd_omojokon_slack_relaxation_factor,
                 $config.acados_transfer_bound_homotopy,
+                $config.acados_transfer_active_set_guard_radius,
+                $config.acados_transfer_active_set_guard_margin,
+                $config.acados_transfer_active_set_threshold,
                 $config.full_contact_constraints_all_nodes,
                 $config.full_contact_position_all_nodes,
                 .solver_success,

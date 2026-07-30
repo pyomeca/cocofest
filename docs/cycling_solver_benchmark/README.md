@@ -59,11 +59,11 @@ provenance humaine.
 
 | Composant | Version Bioptim réellement utilisée |
 |---|---|
-| Construction et certification des seeds | `036b9155b7c32c0b94d90a98bbdd4231b9203457` |
-| IPOPT full/reduced | `036b9155b7c32c0b94d90a98bbdd4231b9203457` |
-| MadNLP/MUMPS full/reduced | `036b9155b7c32c0b94d90a98bbdd4231b9203457` |
-| FATROP/collocation full/reduced | `036b9155b7c32c0b94d90a98bbdd4231b9203457` |
-| ACADOS full/reduced et variantes | `036b9155b7c32c0b94d90a98bbdd4231b9203457` |
+| Construction et certification des seeds | `733e442c7b429e20a67a7cf4c2b69694c54513b3` |
+| IPOPT full/reduced | `733e442c7b429e20a67a7cf4c2b69694c54513b3` |
+| MadNLP/MUMPS full/reduced | `733e442c7b429e20a67a7cf4c2b69694c54513b3` |
+| FATROP/collocation full/reduced | `733e442c7b429e20a67a7cf4c2b69694c54513b3` |
+| ACADOS full/reduced et variantes | `733e442c7b429e20a67a7cf4c2b69694c54513b3` |
 
 Ce commit appartient à la branche dédiée
 `codex/cocofest-acados-v055-exploration`. Il part exactement de
@@ -1221,13 +1221,18 @@ peuvent s’ouvrir jusqu’à `500 µs`, toujours tronqués aux bornes physiques
 `[pd0, 600 µs]`. Cela évite qu’un changement légitime de branche soit bloqué
 par la continuation, sans supprimer la stabilisation sur tout le cycle. Les
 logs et le JSON publient, muscle par muscle, les transitions détectées et les
-nœuds réellement ouverts. Cette variante reste distincte de la référence :
-elle corrige une restriction artificielle des contrôles, mais ne peut pas
-réparer à elle seule une trajectoire d’états dynamiquement infaisable.
+nœuds réellement ouverts; le CSV d’écran publie aussi le rayon, la marge et
+le seuil. Cette variante reste distincte de la référence : le trust et le
+garde sont des bornes du solve final, donc ce sous-problème dépend encore du
+patron transféré et n’est pas strictement le même OCP que le NLP physique avec
+`[pd0, 600 µs]` partout. Si le garde restaure RHO 2, il devra être utilisé
+comme phase de faisabilité, puis toutes les bornes physiques seront rétablies
+avant un SQP final d’optimalité. Le garde ne peut pas réparer à lui seul une
+trajectoire d’états dynamiquement infaisable.
 
 Enfin, le guess terminal ACADOS est bien envoyé en coordonnées scalées,
 $x_N^{ACADOS}=x_N^{physique}/s_x$, comme les stages précédents. Le commit
-Bioptim `036b9155b7c32c0b94d90a98bbdd4231b9203457` ajoute un test qui
+Bioptim `733e442c7b429e20a67a7cf4c2b69694c54513b3` ajoute un test qui
 espionne explicitement les appels `set(0, "x", ...)` et `set(N, "x", ...)`;
 le workflow Linux exécute ce test avant les variantes ACADOS.
 

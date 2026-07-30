@@ -4243,7 +4243,7 @@ def test_github_acados_runner_uses_reference_and_option_profiles_sequentially():
     assert "prepare-acados-stack:" in workflow
     assert (
         "BIOPTIM_PRODUCTION_COMMIT: "
-        "036b9155b7c32c0b94d90a98bbdd4231b9203457"
+        "733e442c7b429e20a67a7cf4c2b69694c54513b3"
     ) in workflow
     assert "ACADOS_COMMIT: 59d93e17d2985fdd73fc58b8a83ed8f83a024171" in workflow
     assert "ACADOS_INSTALL_SCRIPT_BLOB: 5ac8064ab613251e62560b5de8cbbb9550f5c5d0" in workflow
