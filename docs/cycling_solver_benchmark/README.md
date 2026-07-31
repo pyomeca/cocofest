@@ -171,24 +171,24 @@ une modification ultérieure du README.
 
 Pour chaque muscle $m$, le modèle de Ding avec fatigue utilise cinq états :
 
-$$
+```math
 x_m =
 \begin{bmatrix}
 C_{N,m} & F_m & A_m & \tau_{1,m} & K_{\mathrm M,m}
 \end{bmatrix}^{\mathsf T}.
-$$
+```
 
 Ils représentent respectivement le complexe calcium-troponine, la force, la
 capacité de production de force et deux paramètres dynamiques qui évoluent avec
 la fatigue. Avec quatre muscles,
 
-$$
+```math
 n_{\mathrm{Ding}} = 4 \times 5 = 20.
-$$
+```
 
 La dynamique de force peut être écrite sous la forme :
 
-$$
+```math
 \dot F_m =
 \left[
 A_m^\mathrm{eff}(PW_m)
@@ -198,7 +198,7 @@ A_m^\mathrm{eff}(PW_m)
 {\tau_{1,m}+\tau_2\frac{C_{N,m}}{K_{\mathrm M,m}+C_{N,m}}}
 \right]
 \left(f_{\ell,m} f_{v,m}+f_{\mathrm{passif},m}\right),
-$$
+```
 
 Dans cette implémentation, le terme dit « passif » multiplie donc la dynamique
 de force; il ne correspond pas à une tension passive positive simplement
@@ -210,36 +210,36 @@ effet comme physiologique.
 
 où l’effet de la largeur d’impulsion est
 
-$$
+```math
 A_m^\mathrm{eff}(PW_m)
 =
 A_m\left[
 1-\exp\left(-\frac{PW_m-pd0_m}{pdt_m}\right)
 \right].
-$$
+```
 
 Les trois états lents de fatigue suivent :
 
-$$
+```math
 \dot A_m
 =
 -\frac{A_m-A_{\mathrm{scale},m}}{\tau_{\mathrm{fat},m}}
 +\alpha_{A,m}F_m,
-$$
+```
 
-$$
+```math
 \dot \tau_{1,m}
 =
 -\frac{\tau_{1,m}-\tau_{1,\mathrm{rest},m}}{\tau_{\mathrm{fat},m}}
 +\alpha_{\tau_1,m}F_m,
-$$
+```
 
-$$
+```math
 \dot K_{\mathrm M,m}
 =
 -\frac{K_{\mathrm M,m}-K_{\mathrm M,\mathrm{rest},m}}{\tau_{\mathrm{fat},m}}
 +\alpha_{K_m,m}F_m.
-$$
+```
 
 Dans les paramètres courants, $\alpha_A<0$, tandis que
 $\alpha_{\tau_1}>0$ et $\alpha_{K_m}>0$.
@@ -269,25 +269,25 @@ encore le faire.
 
 Chaque muscle possède 30 commandes de largeur d’impulsion par cycle :
 
-$$
+```math
 u_k =
 \begin{bmatrix}
 PW_{1,k} & PW_{2,k} & PW_{3,k} & PW_{4,k}
 \end{bmatrix}^{\mathsf T},
 \qquad k=0,\ldots,29.
-$$
+```
 
 Les bornes physiques sont
 
-$$
+```math
 pd0_m \le PW_{m,k} \le 600\ \mu\mathrm{s}.
-$$
+```
 
 Pour les paramètres Ding courants,
 
-$$
+```math
 pd0 \simeq 131.405\ \mu\mathrm{s}.
-$$
+```
 
 `pd0` est le vrai zéro de recrutement du modèle. Une commande inactive doit
 être fixée à `pd0`, et non à une largeur d’impulsion numérique nulle. Les seeds
@@ -298,7 +298,7 @@ correction produit un warning.
 
 L’objectif continu quadratique est
 
-$$
+```math
 J =
 10\,000
 \int_0^T
@@ -307,17 +307,17 @@ J =
 1-\frac{A_m(t)}{A_{\mathrm{scale},m}}
 \right)^2
 \,dt,
-$$
+```
 
 où le poids de fatigue actif vaut $10\,000$. Les autres composantes de coût
 sont désactivées dans le benchmark :
 
-$$
+```math
 w_{\mathrm{force}} =
 w_{\mathrm{contrôle}} =
 w_{\mathrm{angle\ terminal}} =
 w_{\dot q} = 0.
-$$
+```
 
 Le solveur minimise donc la fatigue, pas la force, la charge électrique ou la
 régularité des stimulations. Cette absence de régularisation autorise plusieurs
@@ -330,14 +330,14 @@ Deux métriques doivent être distinguées :
    cycles réellement exécutés;
 2. `fatigue_auc_cycles`, définie par
 
-   $$
+   ```math
    \mathrm{AUC}_{\mathrm{fatigue}}
    =
    \int
    \sum_m
    \left(1-\frac{A_m}{A_{\mathrm{scale},m}}\right)
    d(\mathrm{cycle}).
-   $$
+   ```
 
 Le coût quadratique amplifie les muscles fortement fatigués. Un rapport de
 coût de 6 ou 7 ne signifie donc pas nécessairement une AUC 6 ou 7 fois plus
@@ -348,21 +348,21 @@ grande.
 Le terme RHO désigne ici une résolution de l’OCP dans la séquence à horizon
 glissant. Pour un cycle par OCP, la résolution $r$ optimise
 
-$$
+```math
 \mathcal P_r:
 \quad
 \min_{z_r} f(z_r;p_r)
-$$
+```
 
 sous
 
-$$
+```math
 g(z_r;p_r)=0,
 \qquad
 \underline g_r \le h(z_r;p_r)\le\overline g_r,
 \qquad
 \underline z_r\le z_r\le\overline z_r.
-$$
+```
 
 Le vecteur $p_r$ regroupe les informations qui changent sans modifier le
 graphe symbolique :
@@ -375,20 +375,20 @@ graphe symbolique :
 
 La cible terminale est absolue :
 
-$$
+```math
 \theta_{\mathrm{cible}}(r)
 =
 \theta_0+r\Delta\theta,
 \qquad
 \Delta\theta=-2\pi,
-$$
+```
 
 avec
 
-$$
+```math
 \left|\theta(T)-\theta_{\mathrm{cible}}(r)\right|
 \le 0.002\ \mathrm{rad}.
-$$
+```
 
 Cette définition empêche un drift de même signe d’un cycle au suivant. Une
 cible définie à partir du terminal précédent aurait autorisé une accumulation
@@ -403,14 +403,14 @@ seuil de `0.002 rad`.
 
 Le warm-start primal s’écrit schématiquement :
 
-$$
+```math
 z_{r+1}^{(0)}
 =
 \Pi_{\mathcal B_{r+1}}
 \left(
 \mathcal S z_r^\star
 \right),
-$$
+```
 
 où $\mathcal S$ décale la trajectoire d’un cycle et
 $\Pi_{\mathcal B_{r+1}}$ la projette dans les nouvelles bornes. Les états de
@@ -437,40 +437,40 @@ invalide.
 
 La mécanique complète possède trois coordonnées généralisées :
 
-$$
+```math
 q\in\mathbb R^3,
 \qquad
 \dot q\in\mathbb R^3.
-$$
+```
 
 Avec les 20 états musculaires :
 
-$$
+```math
 n_x^{\mathrm{full}}=20+3+3=26.
-$$
+```
 
 Les équations contraintes sont :
 
-$$
+```math
 M(q)\ddot q+h(q,\dot q)
 =
 \tau_{\mathrm{muscles}}(q,\dot q,F)
 +\tau_{\mathrm{ext}}
 +J_c(q)^{\mathsf T}\lambda,
-$$
+```
 
-$$
+```math
 J_c(q)\ddot q+\dot J_c(q,\dot q)\dot q=0.
-$$
+```
 
 La seconde équation impose une accélération de contact nulle. Elle n’impose
 pas à elle seule :
 
-$$
+```math
 c(q)=0,
 \qquad
 J_c(q)\dot q=0.
-$$
+```
 
 Ces deux conditions doivent être vraies au départ. Sinon, une erreur de
 position ou de vitesse de contact peut être propagée par une dynamique
@@ -490,19 +490,19 @@ Les deux contraintes holonomes réduisent les trois coordonnées mécaniques à
 un degré de liberté. La formulation réduite utilise l’angle physique non
 enroulé du pédalier $\theta$ et sa vitesse $\omega$ :
 
-$$
+```math
 x_{\mathrm{mécanique}}^{\mathrm{reduced}}
 =
 \begin{bmatrix}\theta & \omega\end{bmatrix}^{\mathsf T},
 \qquad
 n_x^{\mathrm{reduced}}=20+2=22.
-$$
+```
 
 Elle n’impose pas une vitesse constante :
 
-$$
+```math
 \dot\theta=\omega.
-$$
+```
 
 ### 4.1 Construction de la variété
 
@@ -514,7 +514,7 @@ Pour chaque angle $\theta$, trois équations déterminent $q(\theta)$ :
 
 La solution périodique est représentée par
 
-$$
+```math
 q(\theta)
 =
 w\,s(\theta)+
@@ -522,35 +522,35 @@ w\,s(\theta)+
 \left(
 a_k\cos(k\theta)+b_k\sin(k\theta)
 \right),
-$$
+```
 
 où $w\,s(\theta)$ porte l’enroulement non périodique de la coordonnée du
 pédalier. Les dérivées sont analytiques :
 
-$$
+```math
 \dot q = T(\theta)\omega,
 \qquad
 T(\theta)=\frac{dq}{d\theta},
-$$
+```
 
-$$
+```math
 \ddot q
 =
 T(\theta)\dot\omega
 +\frac{d^2q}{d\theta^2}\omega^2.
-$$
+```
 
 ### 4.2 Projection dynamique
 
 La projection tangentielle donne
 
-$$
+```math
 M_{\mathrm{eff}}(\theta)=T^{\mathsf T}M(q(\theta))T,
-$$
+```
 
 et
 
-$$
+```math
 \dot\omega
 =
 \frac{
@@ -561,7 +561,7 @@ $$
 }{
 M_{\mathrm{eff}}(\theta)
 }.
-$$
+```
 
 Les coefficients périodiques suivants sont tabulés puis ajustés par séries de
 Fourier :
@@ -672,9 +672,9 @@ Un second défaut a été corrigé dans la construction du warm-start de
 collocation. Radau degré 3 n’utilise pas quatre temps uniformes dans chaque
 intervalle, mais
 
-$$
+```math
 \tau=[0,\ 0.1550510257,\ 0.6449489743,\ 1].
-$$
+```
 
 L’IK et ses dérivées sont maintenant évalués sur ces temps physiques, y
 compris les temps dupliqués entre le point Radau $\tau=1$ et le nœud de tir
@@ -688,9 +688,9 @@ Dans la formulation complète, `q[2]` est une rotation articulaire relative.
 Dans la formulation réduite, $\theta$ est l’angle physique du vecteur
 centre-main. Le long de la variété :
 
-$$
+```math
 \frac{dq_2}{d\theta}\in[0.591,\ 1.452].
-$$
+```
 
 Borner `qdot[2]` et $\omega$ avec le même intervalle numérique ne borne donc
 pas la même cadence physique. Pour la plage courante
@@ -728,9 +728,9 @@ communs, les maxima sont respectivement proches de `570/594 µs` contre
 
 La non-linéarité
 
-$$
+```math
 1-\exp\left(-\frac{PW-pd0}{pdt}\right)
-$$
+```
 
 rend les pics de PW beaucoup plus importants que ne le suggère une simple
 comparaison des moyennes. La différence de recrutement se transforme
@@ -800,21 +800,21 @@ Le benchmark NLP utilise $N=30$ intervalles et une collocation Radau de
 degré $d=3$. Pour un état de taille $n_x$, le nombre approximatif de
 variables d’état stockées est
 
-$$
+```math
 n_x\left[1+N(d+1)\right].
-$$
+```
 
 En ajoutant $4N=120$ commandes :
 
-$$
+```math
 n_z^{\mathrm{full}}
 \approx 26(121)+120=3266,
-$$
+```
 
-$$
+```math
 n_z^{\mathrm{reduced}}
 \approx 22(121)+120=2782.
-$$
+```
 
 La réduction du nombre de variables est donc d’environ 15 %, insuffisante pour
 expliquer seule le gain de temps proche de 2. Le principal gain vient de la
@@ -822,17 +822,17 @@ réduction de la complexité des dérivées mécaniques.
 
 Pour chaque intervalle, les équations de collocation ont la forme
 
-$$
+```math
 X_{k,j}
 =
 X_k+h\sum_{r=1}^{d}a_{jr}f(X_{k,r},U_k),
-$$
+```
 
-$$
+```math
 X_{k+1}
 =
 X_k+h\sum_{r=1}^{d}b_r f(X_{k,r},U_k).
-$$
+```
 
 Le classement temporel des variables place les blocs
 $(X_k,U_k,X_{k,1},\ldots)$ de manière à préserver la structure par étage.
@@ -845,7 +845,7 @@ native par étage.
 Une itération de Newton ou de point intérieur conduit schématiquement au
 système KKT :
 
-$$
+```math
 \begin{bmatrix}
 H_L+D & J_g^{\mathsf T}\\
 J_g & 0
@@ -860,7 +860,7 @@ J_g & 0
 r_{\mathrm{dual}}\\
 r_{\mathrm{primal}}
 \end{bmatrix},
-$$
+```
 
 où $H_L$ est le Hessien du Lagrangien, $J_g$ le Jacobien des contraintes
 et $D$ la contribution de barrière ou de régularisation.
@@ -934,15 +934,15 @@ l’audit indépendant.
 Les anciens tests ont porté sur le commit Bioptim épinglé et le correctif
 minimal de la branche `codex/fatrop-scaling-audit`. Chaque gap
 
-$$
+```math
 S z_{k+1}-\Phi(Sz_k,u_k)=0
-$$
+```
 
 en
 
-$$
+```math
 z_{k+1}-S^{-1}\Phi(Sz_k,u_k)=0,
-$$
+```
 
 de sorte que le Jacobien par rapport à $z_{k+1}$ reste exactement
 l’identité. La même transformation est appliquée aux helpers de collocation
@@ -974,11 +974,11 @@ unique bibliothèque C réutilisée.
 
 ACADOS résout une suite de QP :
 
-$$
+```math
 \min_{\Delta z}
 \frac12\Delta z^{\mathsf T}H_{\mathrm{GN}}\Delta z
 +g^{\mathsf T}\Delta z
-$$
+```
 
 sous la linéarisation des dynamiques et des contraintes. La référence utilise :
 
@@ -1027,11 +1027,11 @@ reduced et les candidats ayant passé l’écran physique court
 de contact certifiées. Un manifeste `expected-cases.txt` accompagne
 l’artefact. Dans ce mode, la CI exige pour chaque cas :
 
-$$
+```math
 \texttt{success}=\texttt{physical\_success}=\mathrm{true},
 \qquad
 N_{\mathrm{validated}}=N_{\mathrm{requested}}.
-$$
+```
 
 Un statut solveur seul ne peut donc pas faire passer une campagne 30 ou
 100 RHO.
@@ -1089,11 +1089,11 @@ La branche Bioptim dédiée exporte maintenant les contraintes non linéaires
 `Node.START`. Le full ACADOS reprend donc l’ancrage minimal de la référence de
 Kevin :
 
-$$
+```math
 c(q_0)=0,
 \qquad
 J_c(q_0)\dot q_0=0.
-$$
+```
 
 La dynamique contrainte impose ensuite l’accélération de contact nulle sans
 dupliquer position et vitesse comme égalités à tous les nœuds. Cette
@@ -1260,10 +1260,10 @@ reduced, le rollout IRK sort `omega` de sa borne de `5.7308 rad/s` et la
 relaxation nécessaire atteint `6.1282 rad/s`. Le premier palier, avec bornes
 entièrement relâchées, converge avec
 
-$$
+```math
 \left(r_\mathrm{stat},r_\mathrm{eq},r_\mathrm{ineq},r_\mathrm{comp}\right)
 =\left(5.17\,10^{-5},1.25\,10^{-6},4.80\,10^{-11},2.49\,10^{-6}\right).
-$$
+```
 
 Le problème transféré est donc restaurable. C’est le resserrement direct
 `0 → 1` qui échoue : le meilleur résidu d’égalité du palier physique reste à
@@ -1376,9 +1376,9 @@ et Hessien. Elles ne compilent pas le solveur non linéaire lui-même.
 Le graphe reste constant durant les RHO. Les données mobiles sont fournies
 numériquement :
 
-$$
+```math
 x_0,\quad l_x,\quad u_x,\quad l_g,\quad u_g.
-$$
+```
 
 Un mode correctement persistant doit exporter :
 
@@ -1460,9 +1460,9 @@ Un RHO est valide seulement si :
 
 Le seuil physique commun est
 
-$$
+```math
 \varepsilon_{\mathrm{phys}}=10^{-5}.
-$$
+```
 
 Les tolérances internes peuvent différer :
 
@@ -1498,12 +1498,12 @@ Le benchmark distingue :
 
 Les mesures principales après construction sont :
 
-$$
+```math
 t_{\mathrm{hot,med}}
 =
 \operatorname{médiane}
 \{t_r:r\ge2,\ r\ \mathrm{valide}\},
-$$
+```
 
 et le P90 chaud, qui expose les queues de latence.
 
@@ -1657,9 +1657,9 @@ Le full possède 26 états : trois positions, trois vitesses et vingt états
 Ding. Avec 30 intervalles et une collocation Radau de degré 3, les défauts de
 collocation occupent les 3120 premières composantes,
 
-$$
+```math
 30\ \text{intervalles}\times 26\ \text{états}\times(3+1)=3120.
-$$
+```
 
 Les deux composantes de vitesse du centre de pédalier viennent ensuite, puis
 les deux composantes de position. L’index `3122`, qui domine les échecs IPOPT
@@ -2040,9 +2040,9 @@ la collocation.
 
 La puissance mécanique externe est
 
-$$
+```math
 P_{\mathrm{ext}}=\tau_{\mathrm{ext}}\dot\theta.
-$$
+```
 
 Le pédalier tourne dans le sens négatif. Un couple signé négatif fournit donc
 une puissance positive et assiste le mouvement; un couple signé positif est
@@ -2674,12 +2674,12 @@ son coût de fatigue `18.355570` aux trois références NLP proches de `19.24`.
 
 Premièrement, le calcium de Ding est raide par rapport au pas :
 
-$$
+```math
 \tau_c = 0.011\ \mathrm{s},
 \qquad
 \Delta t = \frac{1}{30}\ \mathrm{s}
 \approx 3.03\,\tau_c.
-$$
+```
 
 Pour le régime périodique testé, la valeur analytique vaut
 `Cn = 0.162982158353`. L’IRK ACADOS, quatre étages de Gauss-Legendre et cinq
@@ -2702,19 +2702,19 @@ dans les critères de succès.
 Deuxièmement, ACADOS borne `omega` aux nœuds de tir, pas aux étages internes
 IRK. Un intervalle accepté présente
 
-$$
+```math
 \frac{\Delta\theta}{\Delta t}
 =
 \frac{-0.321984}{1/30}
 =
 -9.65952\ \mathrm{rad/s},
-$$
+```
 
 alors que la borne basse commune est
 
-$$
+```math
 -2\pi - 3 = -9.28319\ \mathrm{rad/s}.
-$$
+```
 
 La vitesse moyenne sort donc de la borne de `0.37634 rad/s`. Par le théorème
 de la moyenne, au moins un point interne la viole nécessairement, même si
@@ -2874,17 +2874,17 @@ fois en full et en reduced, avec :
 La différence mécanique est uniquement la suivante. La formulation full
 optimise les six états mécaniques
 
-$$
+```math
 x_\mathrm{mec}^{\mathrm{full}}
 =
 \begin{bmatrix}
 q_1&q_2&q_3&\dot q_1&\dot q_2&\dot q_3
 \end{bmatrix}^{\mathsf T},
-$$
+```
 
 alors que la formulation reduced optimise
 
-$$
+```math
 x_\mathrm{mec}^{\mathrm{red}}
 =
 \begin{bmatrix}
@@ -2894,12 +2894,12 @@ x_\mathrm{mec}^{\mathrm{red}}
 q=\Phi(\theta),
 \qquad
 \dot q=T(\theta)\,\omega.
-$$
+```
 
 La dynamique mécanique reduced est obtenue par projection tangentielle,
 sans imposer une cadence constante :
 
-$$
+```math
 T^{\mathsf T}M(\Phi)T\,\dot\omega
 =
 T^{\mathsf T}
@@ -2909,7 +2909,7 @@ T^{\mathsf T}
 -h(\Phi,T\omega)
 -M(\Phi)\dot T\,\omega
 \right).
-$$
+```
 
 Les résultats cumulés sont :
 
@@ -3376,10 +3376,10 @@ cas `dual preserve`, désormais réfuté, par une homotopie de la borne angulair
 terminale. La configuration Byrd–Omojokun, cadence poids `1`, dual `reset` et
 IRK reste inchangée; seule la séquence
 
-$$
+```math
 0.01\ \mathrm{rad}\;\longrightarrow\;0.005\ \mathrm{rad}
 \;\longrightarrow\;0.002\ \mathrm{rad}
-$$
+```
 
 est exécutée avant chaque RHO nominal. Ce choix répond directement au constat
 que le seed certifié est parfois à `1e-8–5e-8 rad` de la face stricte. Le gate
@@ -3454,7 +3454,7 @@ La limite automatique de RSS vaut `12.5 GiB` sur un runner de `16 GiB` et
 le groupe de processus MadNLP/Julia et conserve les logs et checkpoints de
 chaque taille. Un cas n'est déclaré réussi que si :
 
-$$
+```math
 \text{statut solveur valide}
 \;\land\;
 \text{faisabilité primale}
@@ -3462,7 +3462,7 @@ $$
 \text{audit physique}
 \;\land\;
 N_\mathrm{cycles\ certifiés}=N_\mathrm{cycles\ demandés}.
-$$
+```
 
 Le comptage single-shot a été corrigé en conséquence : un OCP de 30 cycles
 réussi exporte et certifie 30 cycles, et non une seule fenêtre de solveur.
@@ -3602,9 +3602,9 @@ Le relevé reduced→full est géométriquement exact sur le seed final
 certifie pas la dynamique : une trajectoire peut satisfaire la variété de
 contact tout en ayant un grand défaut de tir
 
-$$
+```math
 d_k=x_{k+1}-\Phi_h(x_k,u_k).
-$$
+```
 
 Dans cette baseline, `--full-contact-position-tolerance 2e-5` est configuré,
 mais aucune des options `--full-contact-position-terminal` ou
@@ -3684,15 +3684,15 @@ vaut `-17.89513 rad`, tandis que la borne erronée est centrée vers
 `-11.61355 rad`. Après chargement du préfixe, la fonction de recentrage
 reconstruisait toujours la cible comme
 
-$$
+```math
 q_N=q_0-2\pi,
-$$
+```
 
 même lorsque l'OCP single-shot contient deux cycles. Elle utilise maintenant
 
-$$
+```math
 q_N=q_0-N_\mathrm{cycles}\,2\pi.
-$$
+```
 
 Cette correction ramène localement l'écart full de `6.2804 rad` à
 `4.29e-4 rad`. Ce reliquat vient de la conversion conservatrice du slack
@@ -3874,13 +3874,13 @@ angulaire reconstruite vaut `0.002473 rad`, au-dessus de la tolérance
 `0.002010 rad`, bien que le dernier palier ait effectivement replacé la borne
 de la coordonnée `q[2]` à `0.002 rad`. Ce décalage est explicable :
 
-$$
+```math
 \theta_\mathrm{phys}(q_N)-\theta_\mathrm{phys}(q_0)+2\pi
 =
 \underbrace{q_{N,\mathrm{roue}}-q_{0,\mathrm{roue}}+2\pi}_{\text{borné dans le NLP}}
 +
 \underbrace{\Delta\Pi_N-\Delta\Pi_0}_{\text{projection sur la variété de contact}}.
-$$
+```
 
 L'homotopie pousse le premier terme près de la face `+0.002 rad`; la
 variation de la projection géométrique ajoute environ `0.00047 rad`. L'audit
@@ -3913,11 +3913,11 @@ sur `q[2]`.
 Dans la formulation full, le slack demandé par la CLI est un angle physique
 `s_theta`. Il est converti de manière conservatrice vers la coordonnée roue :
 
-$$
+```math
 s_q = s_\theta
 \min_{\theta\in[0,2\pi]}
 \left|\frac{\partial q_\mathrm{roue}}{\partial\theta}\right|.
-$$
+```
 
 Cette conversion était utilisée pour la borne nominale, mais pas pour les
 paliers d'homotopie `0.01, 0.005, 0.002`, qui étaient appliqués tels quels à
