@@ -4515,6 +4515,15 @@ def test_github_acados_runner_uses_reference_and_option_profiles_sequentially():
     ).read_text(encoding="utf-8")
     assert 'solver_options+=(--ipopt-c-compile)' in benchmark_runner
     assert 'solver_options+=(--madnlp-c-compile)' in benchmark_runner
+    assert (
+        "initialization_options=(--no-optional-nlp-periodic-ipopt-hot-start)"
+        in benchmark_runner
+    )
+    assert (
+        "initialization_options=(--optional-nlp-periodic-ipopt-hot-start)"
+        in benchmark_runner
+    )
+    assert '"${initialization_options[@]}"' in benchmark_runner
     assert '--fatrop-state-scaling "$fatrop_state_scaling"' in benchmark_runner
     assert 'collocation_degree="${11:-3}"' in benchmark_runner
     assert "BENCHMARK_MAX_ITER=5000 bash" not in workflow

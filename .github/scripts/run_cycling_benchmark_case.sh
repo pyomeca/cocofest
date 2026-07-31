@@ -21,6 +21,7 @@ workspace="${GITHUB_WORKSPACE:?GITHUB_WORKSPACE is required}"
 case_dir="${workspace}/${case_root}/${case_slug}-${mechanics}"
 result="$case_dir/result.json"
 solver_options=()
+initialization_options=(--no-optional-nlp-periodic-ipopt-hot-start)
 solver_tolerance=1e-6
 
 if ! [[ "$collocation_degree" =~ ^[2-9]$ ]]; then
@@ -76,6 +77,12 @@ elif [[ "$solver" == "fatrop" ]]; then
   fi
 elif [[ "$solver" == "madnlp" ]]; then
   solver_tolerance=1e-8
+  # The common seed is intentionally solver-independent, but the non-convex
+  # one-cycle IPOPT validation can select a PW branch that is difficult for
+  # MadNLP. Refine that same seed once with the target transcription before
+  # timing the compiled MadNLP RHO loop. This setup cost remains reported in
+  # initial_guess_preparation_time_s and does not rebuild the MadNLP graph.
+  initialization_options=(--optional-nlp-periodic-ipopt-hot-start)
   solver_options+=(
     --madnlp-max-iter "$BENCHMARK_MAX_ITER"
     --madnlp-linear-solver "$backend"
@@ -142,7 +149,7 @@ python "$workspace/examples/fes_multibody/cycling/cycling_fes_solver_comparison.
   --legacy-standard-warmup-seed-signed-torque 0.22 \
   --standard-warmup-seed-continuation \
   --common-initial-solution "$workspace/benchmark-seed/common-reduced.npz" \
-  --no-optional-nlp-periodic-ipopt-hot-start \
+  "${initialization_options[@]}" \
   --warmup-ipopt-linear-solver mumps \
   --ipopt-linear-solver mumps \
   --ipopt-disable-historical-initial-guess \
