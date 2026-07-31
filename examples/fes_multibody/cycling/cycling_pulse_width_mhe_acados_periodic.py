@@ -5485,6 +5485,7 @@ def collect_initial_guess_diagnostics(nmpc) -> dict:
         "state_node_stride": None,
         "q_kinematic": None,
         "state_bound_violations": {},
+        "state_bound_violation_details": {},
         "control_bound_violations": {},
         "periodic_fes_rollout": {},
         "full_dynamics_rk4_rollout": {},
@@ -5505,6 +5506,7 @@ def collect_initial_guess_diagnostics(nmpc) -> dict:
         }
 
     state_violations = {}
+    state_violation_details = {}
     for key, values in states.items():
         lower, upper = _trajectory_bounds_for_guess(
             nmpc.nlp[0].x_bounds[key], values.shape[1]
@@ -5513,7 +5515,28 @@ def collect_initial_guess_diagnostics(nmpc) -> dict:
         max_violation = float(np.max(violation)) if violation.size else 0.0
         if max_violation > 1e-9:
             state_violations[key] = max_violation
+            component, node = np.unravel_index(
+                int(np.argmax(violation)), violation.shape
+            )
+            bound_column = 0 if node == 0 else 2 if node == values.shape[1] - 1 else 1
+            state_violation_details[key] = {
+                "component": int(component),
+                "node": int(node),
+                "node_role": (
+                    "initial"
+                    if bound_column == 0
+                    else "terminal"
+                    if bound_column == 2
+                    else "path"
+                ),
+                "is_shooting_node": bool(node in set(shooting_indices.tolist())),
+                "value": float(values[component, node]),
+                "lower": float(lower[component, node]),
+                "upper": float(upper[component, node]),
+                "violation": max_violation,
+            }
     diagnostics["state_bound_violations"] = state_violations
+    diagnostics["state_bound_violation_details"] = state_violation_details
 
     control_violations = {}
     for key, values in controls.items():
@@ -5565,6 +5588,11 @@ def print_initial_guess_diagnostics(nmpc, diagnostics: dict | None = None) -> di
         "initial_guess_state_bound_violations: "
         f"{diagnostics['state_bound_violations'] or 'None'}"
     )
+    if diagnostics.get("state_bound_violation_details"):
+        print(
+            "initial_guess_state_bound_violation_details: "
+            f"{diagnostics['state_bound_violation_details']}"
+        )
     print(
         "initial_guess_control_bound_violations: "
         f"{diagnostics['control_bound_violations'] or 'None'}"
@@ -12172,10 +12200,17 @@ def recenter_absolute_wheel_q_reference_from_initial_guess(
     cycle_shift = float(
         getattr(periodic_nmpc, "absolute_wheel_q_cycle_shift", -2.0 * np.pi)
     )
+    horizon_cycles = int(
+        getattr(periodic_nmpc, "_cocofest_cycles_per_window", 1)
+    )
+    if horizon_cycles < 1:
+        raise RuntimeError("The terminal crank target requires at least one cycle.")
     periodic_nmpc.absolute_wheel_q_reference = (
         initial_wheel_q - cycle_index * cycle_shift
     )
-    periodic_nmpc._cocofest_terminal_wheel_q_center = initial_wheel_q + cycle_shift
+    periodic_nmpc._cocofest_terminal_wheel_q_center = (
+        initial_wheel_q + horizon_cycles * cycle_shift
+    )
     set_terminal_wheel_q_bound_slack(
         periodic_nmpc,
         periodic_nmpc.terminal_state_slack[position_key][wheel_index],

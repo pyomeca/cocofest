@@ -6766,6 +6766,42 @@ def test_absolute_terminal_reference_is_recentered_after_loading_same_formulatio
     np.testing.assert_allclose(q_bounds.max[2, 2], target + 0.002)
 
 
+def test_absolute_terminal_reference_spans_the_complete_single_shot_horizon():
+    theta_bounds = SimpleNamespace(
+        min=np.full((1, 3), -100.0),
+        max=np.full((1, 3), 100.0),
+    )
+    loaded_start = -2.5
+    nmpc = SimpleNamespace(
+        anchor_wheel_q_to_absolute_reference=True,
+        position_state_key="theta",
+        wheel_state_index=0,
+        absolute_wheel_q_reference=0.0,
+        absolute_wheel_q_cycle_shift=-2.0 * np.pi,
+        absolute_wheel_q_cycle_index=0,
+        _cocofest_cycles_per_window=2,
+        terminal_state_slack={"theta": [0.002]},
+        nlp=[
+            SimpleNamespace(
+                x_init={
+                    "theta": SimpleNamespace(
+                        init=np.array([[loaded_start, loaded_start - 4.0 * np.pi]])
+                    )
+                },
+                x_bounds={"theta": theta_bounds},
+            )
+        ],
+        _sync_acados_state_bounds=lambda: None,
+    )
+
+    periodic_example.recenter_absolute_wheel_q_reference_from_initial_guess(nmpc)
+
+    target = loaded_start - 4.0 * np.pi
+    np.testing.assert_allclose(nmpc._cocofest_terminal_wheel_q_center, target)
+    np.testing.assert_allclose(theta_bounds.min[0, 2], target - 0.002)
+    np.testing.assert_allclose(theta_bounds.max[0, 2], target + 0.002)
+
+
 class _BoundComplementaritySolver:
     def get(self, stage, field):
         values = {
@@ -9368,6 +9404,54 @@ def test_detailed_initial_guess_diagnostics_are_solver_independent(monkeypatch):
     assert diagnostics["control_bound_violations"] == {"tau": 1.0}
     assert diagnostics["periodic_fes_rollout"] == fes
     assert diagnostics["full_dynamics_rk4_rollout"] == full
+
+
+def test_initial_guess_diagnostics_locate_terminal_state_bound_violation(monkeypatch):
+    bounds = SimpleNamespace(
+        min=np.array([[-1.0, -2.0, -3.0]]),
+        max=np.array([[1.0, 2.0, 3.0]]),
+    )
+    nmpc = SimpleNamespace(
+        cycle_duration=1.0,
+        cycle_len=2,
+        nlp=[
+            SimpleNamespace(
+                x_init={
+                    "q": SimpleNamespace(init=np.array([[0.0, 0.5, 4.25]])),
+                    "qdot": SimpleNamespace(init=np.zeros((1, 3))),
+                },
+                u_init={"tau": SimpleNamespace(init=np.zeros((1, 2)))},
+                x_bounds={"q": bounds, "qdot": bounds},
+                u_bounds={
+                    "tau": SimpleNamespace(
+                        min=np.array([[-1.0]]), max=np.array([[1.0]])
+                    )
+                },
+            )
+        ],
+    )
+    monkeypatch.setattr(
+        periodic_example, "_periodic_fes_rollout_defect_details", lambda _: {}
+    )
+    monkeypatch.setattr(
+        periodic_example, "_full_dynamics_rollout_defect_details", lambda _: {}
+    )
+
+    diagnostics = periodic_example.collect_initial_guess_diagnostics(nmpc)
+
+    assert diagnostics["state_bound_violations"] == {"q": 1.25}
+    assert diagnostics["state_bound_violation_details"] == {
+        "q": {
+            "component": 0,
+            "node": 2,
+            "node_role": "terminal",
+            "is_shooting_node": True,
+            "value": 4.25,
+            "lower": -3.0,
+            "upper": 3.0,
+            "violation": 1.25,
+        }
+    }
 
 
 def test_collocation_initial_guess_uses_only_shooting_endpoints():
