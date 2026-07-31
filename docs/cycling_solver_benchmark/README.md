@@ -3135,6 +3135,17 @@ utiliser des violations normalisées par les bornes et un retry conditionnel
 depuis le meilleur itéré du `MAXITER`, avec mémoire ACADOS réinitialisée, au
 lieu d'abaisser encore ce seuil absolu.
 
+La première exécution de ce retry,
+[`30601544564`](https://github.com/mickaelbegon/cocofest/actions/runs/30601544564),
+n'est pas un résultat scientifique : le CLI du solveur principal acceptait
+les quatre nouvelles options, mais le wrapper
+`cycling_fes_solver_comparison.py` ne les déclarait pas. Les cinq autres cas
+ont produit leur JSON, puis le contrôle d'intégrité a rendu le job rouge parce
+que le sixième JSON manquait. Le wrapper transmet désormais explicitement
+`store_iterates`, le nombre de retries, leur budget SQP et le seuil de
+faisabilité; deux tests couvrent à la fois le parsing et la propagation
+jusqu'à la configuration ACADOS.
+
 Conclusion : la mécanique reduced est maintenant validée comme approximation
 physiologique de la full sur 100 RHO pour ce régime, avec un écart inférieur
 à `0.10 %` et un gain chaud de `4.46x` sous IPOPT. Le point

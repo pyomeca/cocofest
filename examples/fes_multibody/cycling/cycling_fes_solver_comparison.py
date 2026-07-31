@@ -100,6 +100,10 @@ BENCHMARK_CONFIGURATION_FIELDS = (
     "acados_hessian_approx",
     "acados_nlp_solver_type",
     "acados_search_direction_mode",
+    "acados_store_iterates",
+    "acados_maxiter_retries",
+    "acados_maxiter_retry_iterations",
+    "acados_maxiter_retry_feasibility_tolerance",
     "acados_reset_solver_before_solve",
     "acados_check_reuse_possible",
     "acados_code_reuse_tolerance",
@@ -2845,6 +2849,10 @@ def main(
     acados_qpscaling_scale_objective: str = "OBJECTIVE_GERSHGORIN",
     acados_qpscaling_scale_constraints: str = "INF_NORM",
     acados_ext_qp_res: bool = False,
+    acados_store_iterates: bool = False,
+    acados_maxiter_retries: int = 0,
+    acados_maxiter_retry_iterations: int = 20,
+    acados_maxiter_retry_feasibility_tolerance: float = 2.5e-3,
     acados_reset_solver_before_solve: bool = False,
     acados_check_reuse_possible: bool = False,
     acados_code_reuse_tolerance: float = 1e-12,
@@ -3265,6 +3273,12 @@ def main(
     acados_args.acados_warm_start_first_qp_from_nlp = (
         acados_warm_start_first_qp_from_nlp
     )
+    acados_args.acados_store_iterates = acados_store_iterates
+    acados_args.acados_maxiter_retries = acados_maxiter_retries
+    acados_args.acados_maxiter_retry_iterations = acados_maxiter_retry_iterations
+    acados_args.acados_maxiter_retry_feasibility_tolerance = (
+        acados_maxiter_retry_feasibility_tolerance
+    )
     acados_args.acados_reset_solver_before_solve = acados_reset_solver_before_solve
     acados_args.acados_check_reuse_possible = acados_check_reuse_possible
     acados_args.acados_code_reuse_tolerance = acados_code_reuse_tolerance
@@ -3389,7 +3403,9 @@ def main(
     # The bound homotopy may become primal-feasible before its last SQP
     # iterate. Retain those iterates so the continuation can restart from the
     # certified best primal instead of a later, degraded MAXITER iterate.
-    acados_args.acados_store_iterates = bool(acados_transfer_bound_homotopy)
+    acados_args.acados_store_iterates = bool(
+        acados_store_iterates or acados_transfer_bound_homotopy
+    )
     acados_args.acados_transfer_bound_homotopy_fractions = (
         acados_transfer_bound_homotopy_fractions
     )
@@ -4554,6 +4570,16 @@ def build_cli() -> argparse.ArgumentParser:
         default="INF_NORM",
     )
     parser.add_argument("--acados-ext-qp-res", action="store_true")
+    parser.add_argument("--acados-store-iterates", action="store_true")
+    parser.add_argument("--acados-maxiter-retries", type=int, default=0)
+    parser.add_argument(
+        "--acados-maxiter-retry-iterations", type=int, default=20
+    )
+    parser.add_argument(
+        "--acados-maxiter-retry-feasibility-tolerance",
+        type=float,
+        default=2.5e-3,
+    )
     parser.add_argument("--acados-reset-solver-before-solve", action="store_true")
     parser.add_argument("--acados-check-reuse-possible", action="store_true")
     parser.add_argument("--acados-code-reuse-tolerance", type=float, default=1e-12)
@@ -4887,6 +4913,12 @@ if __name__ == "__main__":
         acados_qpscaling_scale_objective=args.acados_qpscaling_scale_objective,
         acados_qpscaling_scale_constraints=args.acados_qpscaling_scale_constraints,
         acados_ext_qp_res=args.acados_ext_qp_res,
+        acados_store_iterates=args.acados_store_iterates,
+        acados_maxiter_retries=args.acados_maxiter_retries,
+        acados_maxiter_retry_iterations=(args.acados_maxiter_retry_iterations),
+        acados_maxiter_retry_feasibility_tolerance=(
+            args.acados_maxiter_retry_feasibility_tolerance
+        ),
         acados_reset_solver_before_solve=args.acados_reset_solver_before_solve,
         acados_check_reuse_possible=args.acados_check_reuse_possible,
         acados_code_reuse_tolerance=args.acados_code_reuse_tolerance,

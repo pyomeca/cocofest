@@ -8878,6 +8878,51 @@ def test_periodic_collocation_ipopt_profile_is_available():
     assert comparison_args.periodic_ipopt_refinement_ode_solver == "collocation"
 
 
+def test_comparison_cli_accepts_acados_best_iterate_retry_options():
+    args = comparison_example.build_cli().parse_args(
+        [
+            "--acados-store-iterates",
+            "--acados-maxiter-retries",
+            "1",
+            "--acados-maxiter-retry-iterations",
+            "20",
+            "--acados-maxiter-retry-feasibility-tolerance",
+            "0.0025",
+        ]
+    )
+
+    assert args.acados_store_iterates is True
+    assert args.acados_maxiter_retries == 1
+    assert args.acados_maxiter_retry_iterations == 20
+    assert args.acados_maxiter_retry_feasibility_tolerance == pytest.approx(0.0025)
+
+
+def test_comparison_main_forwards_acados_best_iterate_retry_options(monkeypatch):
+    captured = {}
+
+    def fake_run(solver_name, args, **_):
+        captured[solver_name] = args
+        return {}
+
+    monkeypatch.setattr(comparison_example, "_run_benchmark_case", fake_run)
+    monkeypatch.setattr(comparison_example, "print_solver_overview", lambda _: None)
+
+    comparison_example.main(
+        solvers=("acados",),
+        n_windows=1,
+        acados_store_iterates=True,
+        acados_maxiter_retries=1,
+        acados_maxiter_retry_iterations=20,
+        acados_maxiter_retry_feasibility_tolerance=0.0025,
+    )
+
+    args = captured["acados"]
+    assert args.acados_store_iterates is True
+    assert args.acados_maxiter_retries == 1
+    assert args.acados_maxiter_retry_iterations == 20
+    assert args.acados_maxiter_retry_feasibility_tolerance == pytest.approx(0.0025)
+
+
 def test_refinement_initial_guess_expands_shooting_nodes_for_collocation():
     source = {
         "q": SimpleNamespace(init=np.array([[0.0, 1.0, 2.0]])),
