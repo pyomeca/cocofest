@@ -489,7 +489,7 @@ def _full_horizon_command(
     result_path: Path,
     solution_path: Path,
 ) -> list[str]:
-    return [
+    command = [
         args.python,
         str(
             args.workspace
@@ -499,8 +499,19 @@ def _full_horizon_command(
         "madnlp",
         *_common_solver_options(args),
         "--ipopt-no-use-sx",
-        "--ipopt-disable-standard-warmup",
-        "--adopt-common-initial-solution-warmup-cycles",
+    ]
+    if cycles >= 3:
+        # The historical bridge has 60 controls and can initialize at most two
+        # 30-stimulation cycles. Larger horizons consume the certified RHO
+        # chronology directly instead of loading an incompatible warmup.
+        command.extend(
+            [
+                "--ipopt-disable-standard-warmup",
+                "--adopt-common-initial-solution-warmup-cycles",
+            ]
+        )
+    command.extend(
+        [
         "--optional-nlp-periodic-ipopt-hot-start",
         "--periodic-ipopt-refinement-use-sx",
         "--periodic-ipopt-refinement-iterations",
@@ -520,7 +531,9 @@ def _full_horizon_command(
         str(solution_path),
         "--output-json",
         str(result_path),
-    ]
+        ]
+    )
+    return command
 
 
 def _attempt_record(

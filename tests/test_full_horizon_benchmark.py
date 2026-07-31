@@ -243,6 +243,13 @@ def test_rho_and_full_horizon_use_the_intended_solver_contract(tmp_path):
         tmp_path / "full.json",
         tmp_path / "full.npz",
     )
+    one_cycle_full = full_horizon._full_horizon_command(
+        args,
+        1,
+        tmp_path / "one-cycle-prefix.npz",
+        tmp_path / "one-cycle-full.json",
+        tmp_path / "one-cycle-full.npz",
+    )
 
     assert rho[rho.index("--solvers") + 1] == "ipopt"
     assert full[full.index("--solvers") + 1] == "madnlp"
@@ -256,6 +263,10 @@ def test_rho_and_full_horizon_use_the_intended_solver_contract(tmp_path):
     assert "--ipopt-no-use-sx" in full
     assert "--ipopt-disable-standard-warmup" in full
     assert "--adopt-common-initial-solution-warmup-cycles" in full
+    assert "--ipopt-disable-standard-warmup" not in one_cycle_full
+    assert (
+        "--adopt-common-initial-solution-warmup-cycles" not in one_cycle_full
+    )
     assert "--optional-nlp-periodic-ipopt-hot-start" in full
     assert "--periodic-ipopt-refinement-use-sx" in full
     assert full[full.index("--periodic-ipopt-refinement-iterations") + 1] == "2000"

@@ -3331,3 +3331,24 @@ des autres métadonnées. Les valeurs absentes, négatives, booléennes ou non
 entières restent rejetées. Cette correction conserve à la fois l'absence de
 construction redondante et la provenance physique du seed; elle est couverte
 par les tests de CLI, de forwarding et de validation de métadonnées.
+
+Le gate suivant,
+[`30603735576`](https://github.com/mickaelbegon/cocofest/actions/runs/30603735576),
+confirme que ce contrat est franchi, mais montre aussi que supprimer le pont
+standard change numériquement le problème initial même à une taille où il
+était compatible. Le pont IPOPT/SX atteint `inf_pr=4.28e-4` sans converger et
+est appliqué comme seed provisoirement faisable; MadNLP s'arrête ensuite au
+statut natif `5` après `181` itérations, avec la même infaisabilité primale et
+une infaisabilité duale de `22.90`. Les deux chances reproduisent cet échec
+(`1.71–1.73 GiB` de RSS), alors que la campagne antérieure avec le pont
+standard certifiait un cycle.
+
+Le warm-up historique contient exactement `60` contrôles, soit deux cycles à
+30 stimulations. La stratégie suivante est donc appariée à sa validité :
+conserver le pont standard pour les horizons 1 et 2, puis le désactiver et
+adopter explicitement la chronologie RHO à partir de 3 cycles. Cela rétablit
+le témoin un cycle déjà certifié, donne au cas deux cycles son raffinement
+IPOPT/SX à 2000 itérations, et évite l'erreur de dimension à trois cycles.
+Cette règle est un correctif expérimental ciblé, pas encore une solution
+générale; à terme, une seed full construite séquentiellement par RHO devra
+remplacer le warm-up historique de taille fixe.
