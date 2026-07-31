@@ -4250,6 +4250,12 @@ def test_github_acados_runner_uses_reference_and_option_profiles_sequentially():
     )
     assert "acados_option_rhos:" in workflow
     assert "compile_nlp_evaluators:" in workflow
+    assert "refined_collocation_validation:" in workflow
+    assert "refined_collocation_rhos:" in workflow
+    assert "Run IPOPT reduced Radau degree 5" in workflow
+    assert "Run MadNLP MUMPS reduced Radau degree 5" in workflow
+    assert "ipopt-radau5-reduced" in workflow
+    assert "madnlp-mumps-radau5-reduced" in workflow
     assert (
         '"$BENCHMARK_CYCLES" "${{ inputs.compile_nlp_evaluators }}"'
         in workflow
@@ -4401,6 +4407,8 @@ def test_github_acados_runner_uses_reference_and_option_profiles_sequentially():
     assert 'solver_options+=(--ipopt-c-compile)' in benchmark_runner
     assert 'solver_options+=(--madnlp-c-compile)' in benchmark_runner
     assert '--fatrop-state-scaling "$fatrop_state_scaling"' in benchmark_runner
+    assert 'collocation_degree="${11:-3}"' in benchmark_runner
+    assert '--ipopt-collocation-degree "$collocation_degree"' in benchmark_runner
     assert 'case "$graph_mode" in' in benchmark_runner
     assert "The endurance benchmark is SX-only" in benchmark_runner
     assert "libMAD WARNING: option linear_solver is of unknown type" in (

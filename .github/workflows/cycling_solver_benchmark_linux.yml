@@ -54,6 +54,16 @@ on:
         required: true
         default: "5"
         type: string
+      refined_collocation_validation:
+        description: Run reduced IPOPT and MadNLP with Radau degree 5 to audit the stiff calcium transcription
+        required: true
+        default: false
+        type: boolean
+      refined_collocation_rhos:
+        description: RHO count for the optional reduced Radau degree-5 audit
+        required: true
+        default: "5"
+        type: string
 
 permissions:
   actions: read
@@ -1347,6 +1357,7 @@ jobs:
       BENCHMARK_ASSISTANCE: ${{ inputs.crank_assistance_nm }}
       BENCHMARK_Q_SLACK: ${{ inputs.terminal_wheel_q_slack }}
       BENCHMARK_MAX_ITER: ${{ inputs.solver_max_iterations }}
+      REFINED_COLLOCATION_RHOS: ${{ inputs.refined_collocation_rhos }}
       BENCHMARK_SOLVER: ${{ matrix.solver }}
       COCOFEST_BENCHMARK_COMMIT: ${{ github.sha }}
       BIOPTIM_BENCHMARK_COMMIT: ${{ matrix.bioptim_commit }}
@@ -1594,6 +1605,12 @@ jobs:
           fi
           BENCHMARK_CYCLES=$((BENCHMARK_RHOS + BENCHMARK_CYCLES_PER_WINDOW - 1))
           echo "BENCHMARK_CYCLES=$BENCHMARK_CYCLES" >> "$GITHUB_ENV"
+          if [[ "${{ inputs.refined_collocation_validation }}" == "true" ]]; then
+            if ! [[ "$REFINED_COLLOCATION_RHOS" =~ ^[1-9][0-9]*$ ]]; then
+              echo "refined_collocation_rhos must be a strictly positive integer." >&2
+              exit 1
+            fi
+          fi
 
       - name: Run IPOPT full
         if: matrix.solver == 'ipopt'
@@ -1625,6 +1642,19 @@ jobs:
           if-no-files-found: warn
           retention-days: 30
 
+      - name: Run IPOPT reduced Radau degree 5
+        if: ${{ matrix.solver == 'ipopt' && inputs.refined_collocation_validation }}
+        run: bash .github/scripts/run_cycling_benchmark_case.sh ipopt-radau5 ipopt reduced mumps collocation benchmark-results "$REFINED_COLLOCATION_RHOS" false sx none 5
+      - name: Checkpoint IPOPT reduced Radau degree 5
+        if: ${{ always() && matrix.solver == 'ipopt' && inputs.refined_collocation_validation }}
+        continue-on-error: true
+        uses: actions/upload-artifact@v7
+        with:
+          name: cycling-fatigue-linux-ipopt-radau5-reduced-${{ github.run_id }}
+          path: benchmark-results/ipopt-radau5-reduced/
+          if-no-files-found: warn
+          retention-days: 30
+
       - name: Run MadNLP MUMPS full
         if: matrix.solver == 'madnlp'
         run: bash .github/scripts/run_cycling_benchmark_case.sh madnlp-mumps madnlp full mumps collocation benchmark-results "$BENCHMARK_CYCLES" false
@@ -1648,6 +1678,19 @@ jobs:
         with:
           name: cycling-fatigue-linux-madnlp-mumps-reduced-${{ github.run_id }}
           path: benchmark-results/madnlp-mumps-reduced/
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Run MadNLP MUMPS reduced Radau degree 5
+        if: ${{ matrix.solver == 'madnlp' && inputs.refined_collocation_validation }}
+        run: bash .github/scripts/run_cycling_benchmark_case.sh madnlp-mumps-radau5 madnlp reduced mumps collocation benchmark-results "$REFINED_COLLOCATION_RHOS" false sx none 5
+      - name: Checkpoint MadNLP MUMPS reduced Radau degree 5
+        if: ${{ always() && matrix.solver == 'madnlp' && inputs.refined_collocation_validation }}
+        continue-on-error: true
+        uses: actions/upload-artifact@v7
+        with:
+          name: cycling-fatigue-linux-madnlp-mumps-radau5-reduced-${{ github.run_id }}
+          path: benchmark-results/madnlp-mumps-radau5-reduced/
           if-no-files-found: warn
           retention-days: 30
 
@@ -1720,6 +1763,11 @@ jobs:
             fatrop) expected=2 ;;
             *) echo "Unexpected benchmark solver: $BENCHMARK_SOLVER" >&2; exit 1 ;;
           esac
+          if [[ "${{ inputs.refined_collocation_validation }}" == "true" ]] && \
+             [[ "$BENCHMARK_SOLVER" == "ipopt" || "$BENCHMARK_SOLVER" == "madnlp" ]]
+          then
+            expected=$((expected + 1))
+          fi
           mapfile -t results < <(find benchmark-results -name result.json -type f | sort)
           if [[ "${#results[@]}" -ne "$expected" ]]; then
             echo "${BENCHMARK_SOLVER}: expected $expected JSON files, found ${#results[@]}." >&2
@@ -1752,6 +1800,9 @@ jobs:
               case_requires_compile=false
             fi
             if [[ "$BENCHMARK_SOLVER" == "madnlp" && "$result" == *"madnlp-mumps-full/"* ]]; then
+              case_requires_compile=false
+            fi
+            if [[ "$result" == *"-radau5-reduced/"* ]]; then
               case_requires_compile=false
             fi
             if [[ "$case_requires_compile" == "true" ]]; then

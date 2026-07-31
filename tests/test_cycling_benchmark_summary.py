@@ -443,6 +443,29 @@ def test_ipopt_and_madnlp_cases_include_compilation_mode():
     assert summary._entry_base_case(madnlp) == "madnlp-mumps/reduced"
 
 
+def test_refined_collocation_cases_include_radau_degree():
+    ipopt = {
+        "configuration": {
+            "mechanical_formulation": "reduced",
+            "collocation_degree": 5,
+            "ipopt_c_compile": False,
+        },
+        "result": {"solver": "ipopt"},
+    }
+    madnlp = {
+        "configuration": {
+            "mechanical_formulation": "reduced",
+            "collocation_degree": 5,
+            "madnlp_linear_solver": "mumps",
+            "madnlp_c_compile": False,
+        },
+        "result": {"solver": "madnlp"},
+    }
+
+    assert summary._entry_case(ipopt) == "ipopt-radau5/reduced"
+    assert summary._entry_case(madnlp) == "madnlp-mumps-radau5/reduced"
+
+
 def test_fatrop_cases_include_transcription_and_compilation():
     entry = {
         "configuration": {

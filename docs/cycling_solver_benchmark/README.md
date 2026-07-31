@@ -2639,6 +2639,14 @@ Cette différence explique pourquoi ACADOS obtient plus de force avec moins de
 PW surtout pour le Biceps et le Triceps; elle impose une validation NLP à
 maillage ou degré raffiné.
 
+Le workflow accepte donc `refined_collocation_validation=true` et
+`refined_collocation_rhos=N`. Sur les mêmes machines IPOPT et MadNLP, il
+exécute après les références un cas reduced Radau degré 5, interprété pour ne
+pas confondre le coût initial de compilation avec l’ablation scientifique.
+Ces cas sont étiquetés `ipopt-radau5/reduced` et
+`madnlp-mumps-radau5/reduced`; ils ne remplacent pas les références degré 3
+dans les critères de succès.
+
 Deuxièmement, ACADOS borne `omega` aux nœuds de tir, pas aux étages internes
 IRK. Un intervalle accepté présente
 

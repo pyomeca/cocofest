@@ -18,6 +18,7 @@ COMPARABILITY_FIELDS = (
     "torque_application",
     "wheel_qdot_regularization_target",
     "wheel_qdot_bound_margin",
+    "collocation_degree",
     "acados_terminal_wheel_q_slack",
     "cycles_per_window",
     "stimulations_per_cycle",
@@ -83,11 +84,15 @@ def _solver_variant(entry: dict) -> str:
         )
         return f"fatrop-{transcription}{compilation}"
     if solver == "ipopt":
-        return (
+        variant = (
             "ipopt-compiled"
             if configuration.get("ipopt_c_compile") is True
             else "ipopt"
         )
+        degree = configuration.get("collocation_degree")
+        if degree not in (None, 3):
+            variant = variant.replace("ipopt", f"ipopt-radau{degree}", 1)
+        return variant
     if solver != "madnlp":
         return solver
     linear_solver = str(
@@ -99,6 +104,9 @@ def _solver_variant(entry: dict) -> str:
         variant = "madnlp-mumps"
     else:
         variant = solver
+    degree = configuration.get("collocation_degree")
+    if degree not in (None, 3):
+        variant += f"-radau{degree}"
     if configuration.get("madnlp_c_compile") is True:
         variant += "-compiled"
     return variant

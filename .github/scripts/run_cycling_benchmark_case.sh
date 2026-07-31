@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-if [[ "$#" -lt 5 || "$#" -gt 10 ]]; then
-  echo "usage: $0 CASE SOLVER MECHANICS BACKEND ODE [ROOT] [WINDOWS] [COMPILE] [GRAPH] [FATROP_SCALING]" >&2
+if [[ "$#" -lt 5 || "$#" -gt 11 ]]; then
+  echo "usage: $0 CASE SOLVER MECHANICS BACKEND ODE [ROOT] [WINDOWS] [COMPILE] [GRAPH] [FATROP_SCALING] [COLLOCATION_DEGREE]" >&2
   exit 2
 fi
 
@@ -16,11 +16,17 @@ case_windows="${7:-${BENCHMARK_CYCLES:?BENCHMARK_CYCLES is required}}"
 compile_mode="${8:-false}"
 graph_mode="${9:-sx}"
 fatrop_state_scaling="${10:-none}"
+collocation_degree="${11:-3}"
 workspace="${GITHUB_WORKSPACE:?GITHUB_WORKSPACE is required}"
 case_dir="${workspace}/${case_root}/${case_slug}-${mechanics}"
 result="$case_dir/result.json"
 solver_options=()
 solver_tolerance=1e-6
+
+if ! [[ "$collocation_degree" =~ ^[2-9]$ ]]; then
+  echo "COLLOCATION_DEGREE must be an integer between 2 and 9, got '$collocation_degree'." >&2
+  exit 2
+fi
 
 mkdir -p "$case_dir"
 # CasADi emits fixed filenames such as nlp.c/nlp.so in the current directory.
@@ -64,7 +70,7 @@ elif [[ "$solver" == "fatrop" ]]; then
   else
     solver_options+=(
       --ipopt-ode-solver collocation
-      --ipopt-collocation-degree 3
+      --ipopt-collocation-degree "$collocation_degree"
       --ipopt-collocation-method radau
     )
   fi
@@ -78,6 +84,13 @@ elif [[ "$solver" == "madnlp" ]]; then
   if [[ "$compile_mode" == "true" ]]; then
     solver_options+=(--madnlp-c-compile)
   fi
+fi
+if [[ "$solver" != "fatrop" && "$ode_solver" == "collocation" ]]; then
+  solver_options+=(
+    --ipopt-ode-solver collocation
+    --ipopt-collocation-degree "$collocation_degree"
+    --ipopt-collocation-method radau
+  )
 fi
 if [[ "$mechanics" == "reduced" ]]; then
   solver_options+=(--mechanical-formulation reduced)
