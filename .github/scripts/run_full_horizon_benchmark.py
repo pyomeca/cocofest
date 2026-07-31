@@ -823,11 +823,14 @@ def run(args: argparse.Namespace) -> int:
         if attempt["success"]:
             last_success = cycles
             report["largest_successful_cycles"] = cycles
-            report["stop_reason"] = (
-                "requested_ceiling_reached"
-                if cycles == rho_available_cycles
-                else "running"
-            )
+            if cycles == rho_available_cycles:
+                report["stop_reason"] = (
+                    "requested_ceiling_reached"
+                    if rho_available_cycles == args.max_cycles
+                    else "rho_prefix_ceiling_reached"
+                )
+            else:
+                report["stop_reason"] = "running"
             continue
         if attempt["memory_limit_exceeded"]:
             first_memory_failure = cycles
@@ -863,11 +866,14 @@ def run(args: argparse.Namespace) -> int:
 
     report["solver_gap_cycles"] = sorted(set(solver_gap_cycles))
     if first_memory_failure is None:
-        report["stop_reason"] = (
-            "requested_ceiling_reached"
-            if report["largest_successful_cycles"] == rho_available_cycles
-            else "sweep_completed_with_solver_gaps"
-        )
+        if report["largest_successful_cycles"] == rho_available_cycles:
+            report["stop_reason"] = (
+                "requested_ceiling_reached"
+                if rho_available_cycles == args.max_cycles
+                else "rho_prefix_ceiling_reached"
+            )
+        else:
+            report["stop_reason"] = "sweep_completed_with_solver_gaps"
     _write_markdown(markdown_path, report)
     _write_report(report_path, report)
     return 0

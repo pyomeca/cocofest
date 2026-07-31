@@ -1906,7 +1906,9 @@ jobs:
       CASADI_CXX_ABI: "1"
       PYTHONPATH: ${{ github.workspace }}
       COCOFEST_BENCHMARK_COMMIT: ${{ github.sha }}
-      BIOPTIM_BENCHMARK_COMMIT: ${{ env.BIOPTIM_PRODUCTION_COMMIT }}
+      # Job-level env entries cannot reference another env entry. Keep this
+      # literal synchronized with BIOPTIM_PRODUCTION_COMMIT above.
+      BIOPTIM_BENCHMARK_COMMIT: efd59c39777c83f97058f8d6c1ef472f78f9925d
       BIOPTIM_INTEGRATION_BRANCH: codex/cocofest-acados-v055-exploration
     defaults:
       run:
