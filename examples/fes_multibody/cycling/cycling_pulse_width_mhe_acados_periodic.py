@@ -5051,11 +5051,18 @@ def run_acados_terminal_wheel_bound_continuation(
         apply_solution_directly_to_periodic_nmpc_initial_guess(periodic_nmpc, solution)
         accepted_slack = slack
 
-    if accepted_slack is not None:
-        set_terminal_wheel_q_bound_slack(periodic_nmpc, accepted_slack)
-        terminal_slack = getattr(periodic_nmpc, "terminal_state_slack", None)
-        if terminal_slack is not None and "q" in terminal_slack:
-            terminal_slack["q"][2] = accepted_slack
+    target_slack = float(slacks[-1])
+    reached_target = bool(
+        accepted_slack is not None and np.isclose(accepted_slack, target_slack)
+    )
+    # A relaxed stage is never a valid terminal state of the continuation.
+    # Restore the physical target even when an intermediate solve fails, so a
+    # caller can either stop or attempt the nominal strict solve explicitly.
+    set_terminal_wheel_q_bound_slack(periodic_nmpc, target_slack)
+    terminal_slack = getattr(periodic_nmpc, "terminal_state_slack", None)
+    if terminal_slack is not None and "q" in terminal_slack:
+        terminal_slack["q"][2] = target_slack
+    if reached_target:
         periodic_nmpc._cocofest_dual_warm_start_mode = "preserve"
     return summaries
 
@@ -13107,6 +13114,7 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
         raise ValueError(
             "Per-window terminal bound continuation requires homotopy slacks."
         )
+    args.acados_terminal_wheel_q_target_slack = _terminal_wheel_q_target_slack(args)
     if args.terminal_qdot_regularization_weight < 0:
         raise ValueError("--terminal-qdot-regularization-weight must be non-negative.")
     if args.wheel_qdot_bound_margin <= 0:

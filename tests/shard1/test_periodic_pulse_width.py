@@ -3282,6 +3282,67 @@ def test_terminal_wheel_bound_continuation_tightens_accepted_stages(
     assert nmpc._cocofest_terminal_wheel_q_center == -1.0
 
 
+def test_terminal_wheel_bound_continuation_restores_target_after_failure(
+    monkeypatch,
+):
+    class FakeSolver:
+        def set_convergence_tolerance(self, value):
+            self.tolerance = value
+
+    applied_slacks = []
+    nmpc = SimpleNamespace(
+        nlp=[
+            SimpleNamespace(
+                x_bounds={
+                    "q": SimpleNamespace(
+                        min=np.array(
+                            [[0.0, 0.0, 0.0], [0.0, 0.0, 0.0], [0.0, 0.0, -1.2]]
+                        ),
+                        max=np.array(
+                            [[0.0, 0.0, 0.0], [0.0, 0.0, 0.0], [0.0, 0.0, -0.8]]
+                        ),
+                    )
+                }
+            )
+        ]
+    )
+    monkeypatch.setattr(
+        periodic_example,
+        "set_terminal_wheel_q_bound_slack",
+        lambda _nmpc, slack: applied_slacks.append(slack),
+    )
+    monkeypatch.setattr(
+        periodic_example,
+        "set_acados_runtime_max_iterations",
+        lambda _nmpc, _iterations: True,
+    )
+    monkeypatch.setattr(
+        periodic_example,
+        "snapshot_acados_diagnostics",
+        lambda solution: {"residuals": solution.residuals},
+    )
+    failed_solution = SimpleNamespace(
+        status=2,
+        residuals=np.array([1.0, 1e-2, 0.0, 0.0]),
+        solver_time_to_optimize=0.1,
+        real_time_to_optimize=0.2,
+    )
+
+    summaries = periodic_example.run_acados_terminal_wheel_bound_continuation(
+        nmpc,
+        FakeSolver(),
+        slacks=(0.2, 0.1, 0.02),
+        convergence_tolerance=1e-3,
+        stage_iterations=20,
+        echo=False,
+        solve_stage=lambda: failed_solution,
+    )
+
+    assert summaries[-1]["accepted"] is False
+    assert applied_slacks == [0.2, 0.02]
+    assert not hasattr(nmpc, "_cocofest_dual_warm_start_mode")
+
+
 def test_terminal_wheel_bound_is_recentered_before_a_new_continuation():
     sync_calls = []
     bounds = SimpleNamespace(
@@ -5541,6 +5602,10 @@ def test_github_acados_runner_uses_reference_and_option_profiles_sequentially():
     assert "run_case sqp-byrd-rollout-accept-cadence-reg-1-irk full" in workflow
     assert "--acados-terminal-wheel-q-homotopy-slacks 0.01,0.005,0.002" in workflow
     assert "--acados-terminal-wheel-q-homotopy-each-window" in workflow
+    assert (
+        "$config.acados_terminal_wheel_q_homotopy_slacks | "
+        "if . == null then null else tojson end"
+    ) in workflow
     assert "--shared-transfer-rollout-max-bound-violation 12" in workflow
     assert "sqp-byrd-dual-preserve-cadence-reg-1-irk" not in workflow
     assert 'inputs.cycles == \'acados_homotopy\'' in workflow

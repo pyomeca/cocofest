@@ -125,6 +125,7 @@ BENCHMARK_CONFIGURATION_FIELDS = (
     "acados_control_homotopy_window_growth",
     "acados_control_homotopy_window_max_radius",
     "acados_transfer_irk_rollout",
+    "acados_transfer_rollout_max_bound_violation",
     "acados_transfer_phase_one",
     "acados_transfer_bound_homotopy",
     "acados_transfer_bound_homotopy_fractions",

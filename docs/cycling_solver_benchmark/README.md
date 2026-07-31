@@ -3742,12 +3742,41 @@ angulaire ultérieur jusqu'à `0.01239 rad`.
 Ce comportement est maintenant interdit : une continuation qui n'atteint pas
 le dernier palier physique `0.002 rad` arrête la chaîne avant la résolution et
 l'export du RHO suivant. L'audit angulaire utilise également le slack cible
-final, jamais le premier slack relâché. Numériquement, le faible résidu primal
+final, jamais le premier slack relâché. La fonction de continuation restaure
+en outre systématiquement la borne `0.002 rad`, même si son premier palier
+échoue; aucun appel ultérieur ne peut donc hériter silencieusement de
+`0.01 rad`. Numériquement, le faible résidu primal
 du palier échoué confirme l'intérêt éventuel d'une vraie capsule de
 faisabilité qui relâche la stationnarité, suivie d'une capsule d'optimalité;
 répéter trois optimisations complètes à chaque fenêtre est toutefois trop
 coûteux pour l'objectif sous la seconde. Le test rollout systématique est donc
 prioritaire.
+
+Le test causal
+[`30631738550`](https://github.com/mickaelbegon/cocofest/actions/runs/30631738550)
+réfute l'acceptation inconditionnelle du rollout. Au transfert vers le RHO 2,
+le seuil `12` accepte une trajectoire dont la violation dominante est
+`qdot=9.447 rad/s`. Après clipping aux bornes, son défaut RK4 devient
+`q=2.331 rad`, `qdot=8.463 rad/s` et `FES=53.04`; le RHO 2 échoue alors avec
+`ACADOS_QP_FAILURE`, résidu dynamique `0.635` et résidu d'inégalité `8.07`.
+Le RHO 3 échoue de la même manière. Le préfixe NLP tombe donc de 13 à 1 et
+l'audit mécanique global échoue (`0.160 rad` de projection géométrique,
+`0.116 rad/s` de résidu tangent).
+
+Le seuil par défaut `1.0` a ainsi un rôle utile : il accepte les rollouts dont
+la violation est surtout une petite erreur de position, mais rejette ceux dont
+la vitesse sort massivement des bornes. Il ne résout toutefois pas le shift
+suivant, dont le défaut mécanique reste trop élevé. La prochaine stratégie ne
+doit être ni « toujours shift », ni « toujours rollout » : il faut évaluer les
+deux candidats **après** projection et retenir celui qui minimise un défaut
+mécanique normalisé, avec des seuils séparés en rad et rad/s. Une petite
+phase-I mécanique compilée, activée seulement lorsque les deux candidats
+échouent ce gate, est l'alternative la plus pertinente.
+
+Le statut rouge de cette campagne n'est pas scientifique : les quatre JSON
+ont passé le garde-fou final, mais la génération CSV a tenté d'insérer la liste
+`[0.01, 0.005, 0.002]` directement dans une ligne. Cette liste est désormais
+sérialisée en JSON dans une cellule CSV.
 
 Enfin, la mesure exacte de la violation canonique `g(x_0)` doit être ajoutée
 dans l'interface Bioptim générique, après `solver_call_limits()` et avant le

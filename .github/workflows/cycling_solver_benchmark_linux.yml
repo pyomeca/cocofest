@@ -1035,7 +1035,7 @@ jobs:
                 $config.acados_with_anderson_acceleration,
                 $config.acados_anderson_activation_threshold,
                 $config.acados_byrd_omojokon_slack_relaxation_factor,
-                $config.acados_terminal_wheel_q_homotopy_slacks,
+                ($config.acados_terminal_wheel_q_homotopy_slacks | if . == null then null else tojson end),
                 $config.acados_terminal_wheel_q_homotopy_each_window,
                 $config.acados_store_iterates,
                 $config.acados_maxiter_retries,
