@@ -10,7 +10,7 @@ on:
         default: ubuntu-24.04
         type: string
       cycles:
-        description: Number of RHO solves, "screen", "acados", or "full_horizon"
+        description: Number of RHO solves, "screen", "acados", "acados_homotopy", or "full_horizon"
         required: true
         default: "100"
         type: string
@@ -576,6 +576,7 @@ jobs:
           PYTHONPATH: ${{ github.workspace }}
           ACADOS_SMOKE_RHOS: ${{ inputs.acados_smoke_rhos }}
           ACADOS_OPTION_RHOS: ${{ inputs.acados_option_rhos }}
+          ACADOS_HOMOTOPY_ONLY: ${{ inputs.cycles == 'acados_homotopy' }}
           BENCHMARK_ASSISTANCE: ${{ inputs.crank_assistance_nm }}
           BENCHMARK_Q_SLACK: ${{ inputs.terminal_wheel_q_slack }}
           COCOFEST_BENCHMARK_COMMIT: ${{ github.sha }}
@@ -895,7 +896,18 @@ jobs:
             echo "$solver_exit" > "$case_dir/process-exit-code.txt"
           }
 
-          if [[ "$acados_long" == "true" ]]; then
+          if [[ "$ACADOS_HOMOTOPY_ONLY" == "true" ]]; then
+            # Focused causal A/B: one feasible reference seed, then the same
+            # Byrd configuration with and without terminal-bound tightening.
+            # Avoid rebuilding the broad option screen already covered by the
+            # preceding 5/30/100-RHO campaigns.
+            printf '%s\n' \
+              sqp-irk-reference-full \
+              > acados-smoke-results/reference-cases.txt
+            run_case sqp-irk-reference full 1 SQP IRK 5 5
+            run_case sqp-byrd-omojokun-cadence-reg-1-irk full "$ACADOS_SMOKE_RHOS" SQP_WITH_FEASIBLE_QP IRK 5 5
+            run_case sqp-byrd-terminal-homotopy-cadence-reg-1-irk full "$ACADOS_SMOKE_RHOS" SQP_WITH_FEASIBLE_QP IRK 5 5
+          elif [[ "$acados_long" == "true" ]]; then
             printf '%s\n' \
               sqp-irk-reference-full \
               sqp-irk-reference-reduced \
@@ -1395,7 +1407,7 @@ jobs:
 
   benchmark:
     name: ${{ matrix.case_slug }} — sequential full/reduced
-    if: ${{ inputs.cycles != 'screen' && inputs.cycles != 'acados' && inputs.cycles != 'full_horizon' }}
+    if: ${{ inputs.cycles != 'screen' && inputs.cycles != 'acados' && inputs.cycles != 'acados_homotopy' && inputs.cycles != 'full_horizon' }}
     needs: prepare-seed
     runs-on: ${{ inputs.runner_label }}
     timeout-minutes: ${{ matrix.timeout_minutes }}
@@ -2104,7 +2116,7 @@ jobs:
 
   report:
     name: Aggregate Kevin benchmark
-    if: ${{ always() && inputs.cycles != 'screen' && inputs.cycles != 'acados' && inputs.cycles != 'full_horizon' }}
+    if: ${{ always() && inputs.cycles != 'screen' && inputs.cycles != 'acados' && inputs.cycles != 'acados_homotopy' && inputs.cycles != 'full_horizon' }}
     needs: [benchmark, acados-smoke]
     runs-on: ubuntu-24.04
     permissions:

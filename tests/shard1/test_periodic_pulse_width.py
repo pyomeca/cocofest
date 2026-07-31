@@ -5402,6 +5402,18 @@ def test_github_acados_runner_uses_reference_and_option_profiles_sequentially():
     assert "--acados-terminal-wheel-q-homotopy-slacks 0.01,0.005,0.002" in workflow
     assert "--acados-terminal-wheel-q-homotopy-each-window" in workflow
     assert "sqp-byrd-dual-preserve-cadence-reg-1-irk" not in workflow
+    assert 'inputs.cycles == \'acados_homotopy\'' in workflow
+    assert 'if [[ "$ACADOS_HOMOTOPY_ONLY" == "true" ]]; then' in workflow
+    focused_campaign = workflow.split(
+        'if [[ "$ACADOS_HOMOTOPY_ONLY" == "true" ]]; then', maxsplit=1
+    )[1].split('elif [[ "$acados_long" == "true" ]]; then', maxsplit=1)[0]
+    assert focused_campaign.count("run_case ") == 3
+    assert "run_case sqp-irk-reference full 1" in focused_campaign
+    assert "run_case sqp-byrd-omojokun-cadence-reg-1-irk full" in focused_campaign
+    assert (
+        "run_case sqp-byrd-terminal-homotopy-cadence-reg-1-irk full"
+        in focused_campaign
+    )
     assert "--acados-store-iterates" in workflow
     assert "--acados-maxiter-retries 1" in workflow
     assert "--acados-maxiter-retry-iterations 20" in workflow

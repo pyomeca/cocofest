@@ -3388,6 +3388,21 @@ restent aussi exportés séparément dans
 `feasibility_restoration.stages`; ils ne peuvent donc pas être cachés par le
 temps du solve nominal.
 
+La campagne ciblée évite de rejouer l'ancien écran ACADOS complet : elle
+construit une seed de référence sur un RHO, puis exécute uniquement le témoin
+Byrd et l'homotopie sur le même horizon.
+
+```bash
+gh workflow run cycling_solver_benchmark_linux.yml \
+  --repo mickaelbegon/cocofest \
+  --ref codex/acados-pr-refresh \
+  -f cycles=acados_homotopy \
+  -f acados_smoke_rhos=20 \
+  -f acados_option_rhos=20 \
+  -f crank_assistance_nm=0.00 \
+  -f terminal_wheel_q_slack=0.002
+```
+
 Si cette homotopie améliore le primal sans franchir le gate, elle justifiera
 deux capsules compilées : une capsule de faisabilité avec objectif de
 proximité et acceptation purement primale, puis une capsule nominale avec
