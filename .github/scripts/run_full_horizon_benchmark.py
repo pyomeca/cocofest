@@ -500,6 +500,7 @@ def _full_horizon_command(
         *_common_solver_options(args),
         "--ipopt-no-use-sx",
         "--ipopt-disable-standard-warmup",
+        "--adopt-common-initial-solution-warmup-cycles",
         "--optional-nlp-periodic-ipopt-hot-start",
         "--periodic-ipopt-refinement-use-sx",
         "--periodic-ipopt-refinement-iterations",

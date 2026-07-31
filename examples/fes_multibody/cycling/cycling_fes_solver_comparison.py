@@ -2564,6 +2564,9 @@ def solver_overview_rows(results: dict[str, dict]) -> list[dict]:
                 ),
                 "nlp_solver_stats": result.get("nlp_solver_stats") or [],
                 "compiled_nlp_reuse": result.get("compiled_nlp_reuse"),
+                "acados_maxiter_retry_summaries": (
+                    result.get("acados_maxiter_retry_summaries") or []
+                ),
                 "warm_start": {
                     "initial_guess_audits": result.get("initial_guess_audits") or [],
                     "dual_summaries": result.get("nlp_dual_warm_start_summaries") or [],
@@ -2734,6 +2737,7 @@ def main(
     standard_warmup_seed_continuation: bool = False,
     legacy_standard_warmup_seed_signed_torque: float | None = None,
     common_initial_solution: str | Path | None = None,
+    adopt_common_initial_solution_warmup_cycles: bool = False,
     common_initial_solution_output: str | Path | None = None,
     receding_horizon_solution_output: str | Path | None = None,
     allow_partial_receding_horizon_solution_output: bool = False,
@@ -3220,6 +3224,12 @@ def main(
     )
     ipopt_args.common_initial_solution = common_initial_solution
     acados_args.common_initial_solution = common_initial_solution
+    ipopt_args.adopt_common_initial_solution_warmup_cycles = (
+        adopt_common_initial_solution_warmup_cycles
+    )
+    acados_args.adopt_common_initial_solution_warmup_cycles = (
+        adopt_common_initial_solution_warmup_cycles
+    )
     ipopt_args.common_initial_solution_output = common_initial_solution_output
     acados_args.common_initial_solution_output = common_initial_solution_output
     ipopt_args.receding_horizon_solution_output = receding_horizon_solution_output
@@ -3780,6 +3790,14 @@ def build_cli() -> argparse.ArgumentParser:
         help=(
             "Converged periodic target solution applied identically to every "
             "selected backend."
+        ),
+    )
+    parser.add_argument(
+        "--adopt-common-initial-solution-warmup-cycles",
+        action="store_true",
+        help=(
+            "Preserve the common seed's warmup-cycle chronology when the consumer "
+            "intentionally disables its own redundant standard warmup."
         ),
     )
     parser.add_argument(
@@ -4750,6 +4768,9 @@ if __name__ == "__main__":
             args.legacy_standard_warmup_seed_signed_torque
         ),
         common_initial_solution=args.common_initial_solution,
+        adopt_common_initial_solution_warmup_cycles=(
+            args.adopt_common_initial_solution_warmup_cycles
+        ),
         common_initial_solution_output=args.common_initial_solution_output,
         receding_horizon_solution_output=(args.receding_horizon_solution_output),
         allow_partial_receding_horizon_solution_output=(

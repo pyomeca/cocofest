@@ -255,6 +255,7 @@ def test_rho_and_full_horizon_use_the_intended_solver_contract(tmp_path):
     assert full[full.index("--madnlp-linear-solver") + 1] == "mumps"
     assert "--ipopt-no-use-sx" in full
     assert "--ipopt-disable-standard-warmup" in full
+    assert "--adopt-common-initial-solution-warmup-cycles" in full
     assert "--optional-nlp-periodic-ipopt-hot-start" in full
     assert "--periodic-ipopt-refinement-use-sx" in full
     assert full[full.index("--periodic-ipopt-refinement-iterations") + 1] == "2000"

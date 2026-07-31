@@ -1168,6 +1168,16 @@ def build_argument_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--adopt-common-initial-solution-warmup-cycles",
+        action="store_true",
+        help=(
+            "Adopt warmup_cycles_consumed from the validated common seed before "
+            "checking its metadata. This is intended for a full-horizon consumer "
+            "that deliberately skips the redundant standard warmup while preserving "
+            "the producer trajectory's fatigue chronology."
+        ),
+    )
+    parser.add_argument(
         "--common-initial-solution-output",
         type=Path,
         default=None,
@@ -3408,6 +3418,24 @@ def _validate_common_initial_solution_metadata(
             f"Common initial solution '{seed_path}' uses signed crank torque "
             f"{seed_torque}, expected {expected['constant_crank_torque']}."
         )
+
+
+def _adopt_common_initial_solution_warmup_cycles(
+    seed: "_WarmupSolutionAdapter",
+    args: argparse.Namespace,
+    seed_path: Path,
+) -> int:
+    """Preserve the producer chronology when a consumer skips a redundant warmup."""
+
+    metadata = getattr(seed, "metadata", None)
+    value = None if not metadata else metadata.get("warmup_cycles_consumed")
+    if isinstance(value, bool) or not isinstance(value, (int, np.integer)) or value < 0:
+        raise ValueError(
+            f"Common initial solution '{seed_path}' has invalid "
+            f"warmup_cycles_consumed={value!r}; expected a non-negative integer."
+        )
+    args.warmup_cycles_consumed = int(value)
+    return args.warmup_cycles_consumed
 
 
 def _continuation_cache_signature(args: argparse.Namespace) -> str:
@@ -13589,6 +13617,15 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
     if args.common_initial_solution is not None:
         common_seed_path = _resolve_standard_warmup_seed(args.common_initial_solution)
         common_seed = _load_warmup_cache(common_seed_path)
+        if args.adopt_common_initial_solution_warmup_cycles:
+            adopted_warmup_cycles = _adopt_common_initial_solution_warmup_cycles(
+                common_seed, args, common_seed_path
+            )
+            if echo:
+                print(
+                    "common_initial_solution_warmup_cycles: adopted "
+                    f"({adopted_warmup_cycles})"
+                )
         _validate_common_initial_solution_metadata(common_seed, args, common_seed_path)
         seed_mechanical_formulation = (common_seed.metadata or {}).get(
             "mechanical_formulation"

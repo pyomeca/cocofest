@@ -3160,6 +3160,40 @@ que le sixième JSON manquait. Le wrapper transmet désormais explicitement
 faisabilité; deux tests couvrent à la fois le parsing et la propagation
 jusqu'à la configuration ACADOS.
 
+La relance effective,
+[`30602407146`](https://github.com/mickaelbegon/cocofest/actions/runs/30602407146),
+est verte mais réfute cette première stratégie :
+
+| ACADOS full, cadence poids 1 | Sans retry | Retry du meilleur itéré |
+|---|---:|---:|
+| Solves réussis | `96/100` | `96/100` |
+| Préfixe physique strict | `13` | `13` |
+| Premiers échecs | `14, 16, 18, 20` | `14, 16, 18, 20` |
+| Fatigue du préfixe | `132.646886` | `132.646886` |
+| Médiane chaude solveur | `0.565 s` | `0.563 s` |
+| Mur-à-mur | `144.42 s` | `147.13 s` |
+
+Le retry se déclenche bien quatre fois. Les meilleures faisabilités stockées
+valent respectivement `8.80e-4`, `2.02e-3`, `1.64e-3` et `1.86e-5`, mais les
+20 SQP supplémentaires terminent toutes encore avec `MAXITER`. Une bonne
+faisabilité intermédiaire n'est donc pas un warm-start suffisant : après
+réinitialisation, les duaux, la stationnarité et l'information de branche ne
+sont pas restaurés. Le diagnostic confirme ce mécanisme : la stationnarité du
+meilleur itéré vaut seulement `0.205`, `0.243`, `0.254` et `0.074`, mais
+remonte à environ `395–481` au départ du retry après le reset. Les 20 SQP
+reconstruisent alors un système KKT incohérent et terminent avec une
+stationnarité de `0.311–0.405`.
+
+Augmenter aveuglément le seuil ou le budget serait donc injustifié. La
+prochaine ablation minimale doit restaurer, après le reset QP, l'itéré ACADOS
+complet `(x,u,pi,lam,sl,su)` au même indice, en gardant exactement le budget
+de 20 et les tolérances actuelles. Le candidat devra ensuite être choisi par
+un critère multi-résidu : faisabilité inférieure à `2.5e-3`, puis
+stationnarité minimale. Seulement si ce retry primal-dual échoue, une courte
+phase `FEASIBILITY_QP` ou Byrd–Omojokun avant le SQP nominal deviendra
+pertinente. Aucun itéré presque faisable ne doit être promu : le critère de
+succès reste statut zéro et audit physique complet.
+
 Conclusion : la mécanique reduced est maintenant validée comme approximation
 physiologique de la full sur 100 RHO pour ce régime, avec un écart inférieur
 à `0.10 %` et un gain chaud de `4.46x` sous IPOPT. Le point
@@ -3267,3 +3301,16 @@ avant de concaténer, plutôt que d'augmenter encore les budgets. Une ablation
 monolithique **reduced/MX** doit aussi être exécutée séparément; elle répondra
 à la question de capacité mémoire du modèle réduit sans la confondre avec le
 pont mécanique full.
+
+Le premier gate corrigé,
+[`30603331596`](https://github.com/mickaelbegon/cocofest/actions/runs/30603331596),
+s'est arrêté avant le solveur en `20.0 s`. Il a révélé une seconde erreur de
+contrat, et non une limite MadNLP : le préfixe RHO certifié déclarait
+correctement `warmup_cycles_consumed=1`, alors que le consommateur full, qui
+désactive désormais ce warm-up redondant, attendait `0`. Réécrire le seed à
+`0` aurait effacé sa chronologie de fatigue. Le runner passe donc maintenant
+un mode explicite qui adopte la valeur du seed avant la validation complète
+des autres métadonnées. Les valeurs absentes, négatives, booléennes ou non
+entières restent rejetées. Cette correction conserve à la fois l'absence de
+construction redondante et la provenance physique du seed; elle est couverte
+par les tests de CLI, de forwarding et de validation de métadonnées.

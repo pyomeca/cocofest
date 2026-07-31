@@ -1618,6 +1618,41 @@ def test_common_initial_solution_metadata_rejects_a_different_warmup_cycle(
         )
 
 
+def test_common_initial_solution_can_explicitly_adopt_seed_warmup_chronology(
+    tmp_path,
+):
+    args = SimpleNamespace(warmup_cycles_consumed=0)
+    seed = periodic_example._WarmupSolutionAdapter(
+        {},
+        {},
+        metadata={"warmup_cycles_consumed": 1},
+    )
+
+    adopted = periodic_example._adopt_common_initial_solution_warmup_cycles(
+        seed, args, tmp_path / "rho-prefix.npz"
+    )
+
+    assert adopted == 1
+    assert args.warmup_cycles_consumed == 1
+
+
+@pytest.mark.parametrize("invalid_value", (None, -1, 1.5, True))
+def test_common_initial_solution_rejects_invalid_adopted_warmup_chronology(
+    tmp_path, invalid_value
+):
+    args = SimpleNamespace(warmup_cycles_consumed=0)
+    seed = periodic_example._WarmupSolutionAdapter(
+        {},
+        {},
+        metadata={"warmup_cycles_consumed": invalid_value},
+    )
+
+    with pytest.raises(ValueError, match="warmup_cycles_consumed"):
+        periodic_example._adopt_common_initial_solution_warmup_cycles(
+            seed, args, tmp_path / "rho-prefix.npz"
+        )
+
+
 def test_receding_horizon_solution_is_exported_as_one_multi_cycle_seed(
     tmp_path,
 ):
@@ -4387,6 +4422,9 @@ def test_benchmark_json_summary_contains_comparable_fatigue_metrics(tmp_path):
     result["args"].max_ipopt_iterations = 2000
     result["args"].wheel_qdot_regularization_target = -2.0 * np.pi
     result["args"].wheel_qdot_bound_margin = 3.0
+    result["acados_maxiter_retry_summaries"] = [
+        {"window": 13, "retry_status": 2}
+    ]
 
     output_path = comparison_example.write_benchmark_summary(
         tmp_path / "benchmark.json", {"madnlp": result}
@@ -4432,6 +4470,9 @@ def test_benchmark_json_summary_contains_comparable_fatigue_metrics(tmp_path):
     assert row["windows"][0]["native_status"] == "Solve_Succeeded"
     assert row["nlp_solver_stats"][0]["t_wall_nlp_hess_l"] == 0.75
     assert row["compiled_nlp_reuse"]["compiled_library_build_count"] == 1
+    assert row["acados_maxiter_retry_summaries"] == [
+        {"window": 13, "retry_status": 2}
+    ]
     assert row["state_boundary_jumps"]["boundary_count"] == 1
     assert row["state_boundary_jumps"]["by_state"]["omega"]["jump"] == [[0.0]]
 
