@@ -4367,7 +4367,21 @@ def test_github_acados_runner_uses_reference_and_option_profiles_sequentially():
     assert 'run_case sqp-irk-reference full "$ACADOS_SMOKE_RHOS"' in workflow
     assert "sqp-irk-reference-full" in workflow
     assert 'result="acados-smoke-results/${case_name}/result.json"' in workflow
-    assert "sqp-irk-reference-${mechanics}/result.json" not in workflow
+    assert "select_acados_case()" in workflow
+    assert "sqp-irk-two-stage-${mechanics}/result.json" in workflow
+    assert "sqp-irk-reference-${mechanics}/result.json" in workflow
+    assert workflow.index(
+        "sqp-irk-two-stage-${mechanics}/result.json"
+    ) < workflow.index("sqp-irk-reference-${mechanics}/result.json")
+    assert "run_case sqp-irk-two-stage-adaptive" in workflow
+    assert "--acados-transfer-bound-homotopy-fractions 0,1" in workflow
+    assert "run_case sqp-irk-two-stage-cadence-guard reduced" in workflow
+    assert "--wheel-qdot-bound-margin 2.5" in workflow
+    assert "--transfer-contact-manifold-projection" in workflow
+    assert (
+        "--transfer-contact-manifold-projection-mode position_velocity"
+        in workflow
+    )
     assert 'expected ${#expected_cases[@]} JSON files' in workflow
     assert "expected 12 JSON files" not in workflow
     assert ".configurations.acados.n_windows > 5" in workflow
@@ -5031,6 +5045,99 @@ def test_mechanical_audit_rejects_collocation_only_cadence_violation():
     assert audit["maximum_all_node_crank_velocity_bound_violation_rad_s"] > 0.7
     assert audit["passes_physical_crank_velocity_bounds"] is False
     assert audit["passes_tolerance"] is False
+
+
+def test_mechanical_audit_rejects_hidden_acados_interval_cadence_violation():
+    class FakeKinematics:
+        @staticmethod
+        def lift_generalized_trajectory(theta, omega):
+            return np.asarray(theta, dtype=float), np.asarray(omega, dtype=float)
+
+        @staticmethod
+        def project_generalized_trajectory(q, qdot):
+            return (
+                np.asarray(q, dtype=float),
+                np.asarray(qdot, dtype=float),
+                {
+                    "maximum_configuration_projection_error_rad": 0.0,
+                    "maximum_tangent_velocity_residual_rad_s": 0.0,
+                },
+            )
+
+    _, _, audit = periodic_example.audit_mechanical_trajectory(
+        {
+            "theta": np.array([[0.0, -0.322]]),
+            "omega": np.array([[-6.0, -6.0]]),
+        },
+        SimpleNamespace(kinematics=FakeKinematics()),
+        velocity_tolerance_rad_s=0.1,
+        shooting_interval_duration_s=1.0 / 30.0,
+    )
+
+    assert audit["maximum_all_node_crank_velocity_bound_violation_rad_s"] == 0.0
+    assert audit["interval_average_crank_velocity_available"] is True
+    assert (
+        audit["maximum_interval_average_crank_velocity_bound_violation_rad_s"]
+        > 0.37
+    )
+    assert audit["passes_physical_crank_velocity_bounds"] is False
+    assert audit["passes_tolerance"] is False
+
+
+def test_acados_mechanical_audit_excludes_failed_tail_from_validated_prefix():
+    class FakeKinematics:
+        @staticmethod
+        def lift_generalized_trajectory(theta, omega):
+            return np.asarray(theta, dtype=float), np.asarray(omega, dtype=float)
+
+        @staticmethod
+        def project_generalized_trajectory(q, qdot):
+            return (
+                np.asarray(q, dtype=float),
+                np.asarray(qdot, dtype=float),
+                {
+                    "maximum_configuration_projection_error_rad": 0.0,
+                    "maximum_tangent_velocity_residual_rad_s": 0.0,
+                },
+            )
+
+    summary = {
+        "args": SimpleNamespace(
+            solver="acados",
+            ode_solver="rk4",
+            stimulations_per_cycle=2,
+            cycles_per_window=1,
+            wheel_qdot_regularization_target=-2.0 * np.pi,
+            wheel_qdot_bound_margin=3.0,
+            acados_terminal_wheel_q_slack=0.002,
+            primal_feasibility_threshold=1e-5,
+        ),
+        "mode": "rho",
+        "state_traces": {
+            "theta": np.array([[0.0, -np.pi, -2.0 * np.pi, -20.0]]),
+            "omega": np.full((1, 4), -2.0 * np.pi),
+        },
+        "window_statuses": [0, 4],
+        "window_feasibility": [
+            {"passes_tolerance": True},
+            {"passes_tolerance": False},
+        ],
+        "covered_cycles": 2,
+        "diagnostics": {"is_physical": True, "issues": []},
+        "physical_success": True,
+        "success": True,
+    }
+
+    periodic_example.attach_mechanical_equivalence_audit(
+        summary,
+        SimpleNamespace(kinematics=FakeKinematics()),
+    )
+
+    audit = summary["mechanical_equivalence_audit"]
+    assert audit["audited_validated_cycles"] == 1
+    assert audit["passes_tolerance"] is True
+    assert summary["physical_crank_angle_trace"].shape == (3,)
+    assert summary["physical_success"] is True
 
 
 def test_historical_pulse_width_seed_is_clipped_with_bound_warning(tmp_path):

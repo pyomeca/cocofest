@@ -6535,6 +6535,7 @@ def audit_mechanical_trajectory(
     crank_velocity_target_rad_s: float = DEFAULT_CRANK_QDOT_RAD_S,
     crank_velocity_margin_rad_s: float = 3.0,
     cadence_node_stride: int = 1,
+    shooting_interval_duration_s: float | None = None,
 ) -> tuple[np.ndarray, np.ndarray, dict]:
     """Express either formulation in the same physical crank coordinates."""
 
@@ -6544,6 +6545,16 @@ def audit_mechanical_trajectory(
         raise ValueError("The physical crank-velocity margin must be positive.")
     if cadence_node_stride < 1:
         raise ValueError("cadence_node_stride must be strictly positive.")
+    if (
+        shooting_interval_duration_s is not None
+        and (
+            not np.isfinite(shooting_interval_duration_s)
+            or shooting_interval_duration_s <= 0.0
+        )
+    ):
+        raise ValueError(
+            "shooting_interval_duration_s must be finite and positive."
+        )
     kinematics = reduced_cycling_dynamics.kinematics
     if "theta" in state_traces and "omega" in state_traces:
         theta = np.asarray(state_traces["theta"], dtype=float)
@@ -6594,6 +6605,27 @@ def audit_mechanical_trajectory(
             float(np.max(physical_omega)) - omega_upper,
         )
     )
+    interval_average_omega = np.array([], dtype=float)
+    interval_average_omega_violation = 0.0
+    if shooting_interval_duration_s is not None and projected_theta.shape[1] > 1:
+        # ACADOS enforces state bounds at shooting nodes, not at the internal
+        # Runge--Kutta stages.  The interval-average crank speed is therefore
+        # an independent necessary condition: if Δtheta / Δt is outside the
+        # cadence bounds, at least one internal point necessarily violates
+        # those bounds even when every exported omega node is admissible.
+        interval_average_omega = (
+            np.diff(projected_theta[0]) / float(shooting_interval_duration_s)
+        )
+        interval_average_omega_violation = float(
+            max(
+                0.0,
+                omega_lower - float(np.min(interval_average_omega)),
+                float(np.max(interval_average_omega)) - omega_upper,
+            )
+        )
+    combined_omega_violation = max(
+        all_node_omega_violation, interval_average_omega_violation
+    )
     audit.update(
         {
             "source_formulation": source_formulation,
@@ -6623,17 +6655,33 @@ def audit_mechanical_trajectory(
             "maximum_all_node_crank_velocity_bound_violation_rad_s": (
                 all_node_omega_violation
             ),
+            "interval_average_crank_velocity_available": bool(
+                interval_average_omega.size
+            ),
+            "minimum_interval_average_crank_velocity_rad_s": (
+                float(np.min(interval_average_omega))
+                if interval_average_omega.size
+                else None
+            ),
+            "maximum_interval_average_crank_velocity_rad_s": (
+                float(np.max(interval_average_omega))
+                if interval_average_omega.size
+                else None
+            ),
+            "maximum_interval_average_crank_velocity_bound_violation_rad_s": (
+                interval_average_omega_violation
+            ),
             "passes_configuration_tolerance": (
                 configuration_error <= configuration_tolerance_rad
             ),
             "passes_velocity_tolerance": velocity_error <= velocity_tolerance_rad_s,
             "passes_physical_crank_velocity_bounds": (
-                all_node_omega_violation <= velocity_tolerance_rad_s
+                combined_omega_violation <= velocity_tolerance_rad_s
             ),
             "passes_tolerance": (
                 configuration_error <= configuration_tolerance_rad
                 and velocity_error <= velocity_tolerance_rad_s
-                and all_node_omega_violation <= velocity_tolerance_rad_s
+                and combined_omega_violation <= velocity_tolerance_rad_s
             ),
         }
     )
@@ -6661,8 +6709,48 @@ def attach_mechanical_equivalence_audit(
             if ode_solver in {"collocation", "irk"}
             else 1
         )
+        audit_state_traces = summary.get("state_traces") or {}
+        audited_validated_cycles = None
+        if (
+            str(getattr(args, "solver", "")).lower() == "acados"
+            and summary.get("mode") == "rho"
+        ):
+            # Failed ACADOS iterates may still be returned in cycle_solutions.
+            # Audit only the contiguous accepted prefix; otherwise one failed
+            # tail can make the already validated cycles appear nonphysical.
+            validated_windows = 0
+            window_statuses = summary.get("window_statuses") or []
+            window_feasibility = summary.get("window_feasibility") or []
+            for status, feasibility in zip(
+                window_statuses, window_feasibility, strict=False
+            ):
+                if (
+                    not _status_is_success(status)
+                    or not feasibility.get("passes_tolerance", False)
+                ):
+                    break
+                validated_windows += 1
+            if validated_windows:
+                audited_validated_cycles = (
+                    validated_windows
+                    + int(getattr(args, "cycles_per_window", 1))
+                    - 1
+                )
+                expected_columns = (
+                    audited_validated_cycles
+                    * int(getattr(args, "stimulations_per_cycle", 30))
+                    + 1
+                )
+                if all(
+                    np.asarray(values).shape[-1] >= expected_columns
+                    for values in audit_state_traces.values()
+                ):
+                    audit_state_traces = {
+                        key: np.asarray(values)[..., :expected_columns]
+                        for key, values in audit_state_traces.items()
+                    }
         theta, omega, audit = audit_mechanical_trajectory(
-            summary.get("state_traces") or {},
+            audit_state_traces,
             reduced_cycling_dynamics,
             crank_velocity_target_rad_s=float(
                 getattr(
@@ -6675,6 +6763,14 @@ def attach_mechanical_equivalence_audit(
                 getattr(args, "wheel_qdot_bound_margin", 3.0)
             ),
             cadence_node_stride=cadence_node_stride,
+            shooting_interval_duration_s=(
+                1.0 / int(getattr(args, "stimulations_per_cycle", 30))
+                if (
+                    str(getattr(args, "solver", "")).lower() == "acados"
+                    and cadence_node_stride == 1
+                )
+                else None
+            ),
         )
     except (KeyError, ValueError) as error:
         summary["mechanical_equivalence_audit"] = {
@@ -6685,13 +6781,18 @@ def attach_mechanical_equivalence_audit(
         return summary
 
     audit["available"] = True
+    audit["audited_validated_cycles"] = audited_validated_cycles
     summary["physical_crank_angle_trace"] = theta
     summary["physical_crank_velocity_trace"] = omega
     summary["physical_crank_absolute_reference"] = float(theta[0])
     summary["mechanical_equivalence_audit"] = audit
     summary.setdefault("diagnostics", {})["mechanical_equivalence"] = audit
     physical_crank_diagnostics = None
-    covered_cycles = int(summary.get("covered_cycles") or 0)
+    covered_cycles = int(
+        audited_validated_cycles
+        if audited_validated_cycles is not None
+        else summary.get("covered_cycles") or 0
+    )
     if covered_cycles > 0:
         terminal_slack = float(
             getattr(args, "acados_terminal_wheel_q_slack", 0.0)

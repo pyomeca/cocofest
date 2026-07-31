@@ -2003,10 +2003,11 @@ Les corrections associées sont maintenant :
 1. autoriser un seed `enforce_start_constraints=True` pour un consommateur
    moins strict configuré à `False`, tout en refusant le sens inverse;
 2. réévaluer $g(x)$ pour l’audit des solutions compilées IPOPT;
-3. exécuter MadNLP interprété tant que Bioptim ne valide pas sa compilation;
+3. exécuter historiquement MadNLP interprété; la validation compilée actuelle
+   est décrite à la section 8 et ne réécrit pas ce run diagnostique;
 4. recaler la référence angulaire absolue après tout chargement de seed,
    y compris sans changement de formulation mécanique;
-4. corriger la détection de structure Fatrop full en SX avant toute nouvelle
+5. corriger la détection de structure Fatrop full en SX avant toute nouvelle
    ablation de scaling.
 
 Le run a aussi confirmé que la compilation IPOPT coûte cher au premier appel
@@ -2583,3 +2584,100 @@ La formulation reduced conserve un gain important : médiane solveur environ
 `6.23x` plus courte pour IPOPT et `3.56x` pour MadNLP. Le palier 100 RHO doit
 encore vérifier que l’écart de fatigue reste inférieur à `0.5 %` et qu’aucune
 nouvelle bifurcation tardive ne se développe.
+
+### 19.3 Gate commun 5 RHO, compilation MadNLP et audit ACADOS continu
+
+Le run
+[`30592226411`](https://github.com/mickaelbegon/cocofest/actions/runs/30592226411)
+est le premier gate où tous les jobs utilisent réellement le même SHA Bioptim
+`efd59c39777c83f97058f8d6c1ef472f78f9925d`. IPOPT et MadNLP/MUMPS
+convergent 5/5 en full et en reduced; FATROP converge 5/5 en reduced, mais sa
+formulation full reste bloquée par la structure de collocation. Les résultats
+reduced sont quasiment identiques :
+
+| Solveur | Fatigue exécutée | AUC | Capacité minimale |
+|---|---:|---:|---:|
+| IPOPT reduced | 19.239254 | 0.163577 | 0.984750 |
+| MadNLP/MUMPS reduced | 19.234884 | 0.163553 | 0.984753 |
+| FATROP reduced | 19.238211 | 0.163570 | 0.984751 |
+
+MadNLP reduced certifie aussi la compilation persistante : une seule
+bibliothèque de `41 775 636` octets est générée, son SHA-256 reste identique
+pendant les cinq RHO, les cinq vecteurs de bornes sont distincts et aucun
+graphe n’est reconstruit. La médiane chaude est `0.864 s`. Le mur-à-mur de
+`95.7 s` reste dominé par la génération et la compilation initiales; ce coût
+doit être amorti sur les campagnes longues.
+
+Le meilleur warm-start ACADOS actuel est
+`sqp-irk-two-stage-reduced`. Il effectue d’abord une restauration par
+homotopie des bornes, puis le SQP de fatigue dans le même OCP compilé. Il
+converge 5/5, alors que toutes les variantes reduced sans cette restauration
+s’arrêtent après le premier RHO. Les solves nominaux sont rapides, médiane
+`0.060 s`, mais les quatre restaurations coûtent `9.45 s` au total. Une
+variante adaptative essaie maintenant directement les fractions `[0, 1]` et
+ne bissecte qu’en cas d’échec, au lieu de payer systématiquement neuf paliers.
+
+Deux différences de transcription empêchent toutefois de comparer directement
+son coût de fatigue `18.355570` aux trois références NLP proches de `19.24`.
+
+Premièrement, le calcium de Ding est raide par rapport au pas :
+
+$$
+\tau_c = 0.011\ \mathrm{s},
+\qquad
+\Delta t = \frac{1}{30}\ \mathrm{s}
+\approx 3.03\,\tau_c.
+$$
+
+Pour le régime périodique testé, la valeur analytique vaut
+`Cn = 0.162982158353`. L’IRK ACADOS, quatre étages de Gauss-Legendre et cinq
+sous-pas, donne `0.162982158637`. La collocation Radau degré 3 utilisée par
+IPOPT et MadNLP donne `0.152573519058`, valeur reproduite exactement en
+réévaluant sa transcription. Elle sous-estime donc ce calcium d’environ
+`6.39 %`. L’ERK ACADOS donne au contraire `0.232903256` et reste exclu.
+Cette différence explique pourquoi ACADOS obtient plus de force avec moins de
+PW surtout pour le Biceps et le Triceps; elle impose une validation NLP à
+maillage ou degré raffiné.
+
+Deuxièmement, ACADOS borne `omega` aux nœuds de tir, pas aux étages internes
+IRK. Un intervalle accepté présente
+
+$$
+\frac{\Delta\theta}{\Delta t}
+=
+\frac{-0.321984}{1/30}
+=
+-9.65952\ \mathrm{rad/s},
+$$
+
+alors que la borne basse commune est
+
+$$
+-2\pi - 3 = -9.28319\ \mathrm{rad/s}.
+$$
+
+La vitesse moyenne sort donc de la borne de `0.37634 rad/s`. Par le théorème
+de la moyenne, au moins un point interne la viole nécessairement, même si
+tous les `omega` exportés sont admissibles. L’audit mécanique calcule
+désormais cette vitesse sécante et rejette une trajectoire ACADOS lorsque la
+violation dépasse `0.1 rad/s`. Une variante conservatrice réduit provisoirement
+la marge nodale de `3.0` à `2.5 rad/s`; elle ne fait pas partie du problème
+commun et est rapportée comme ablation de sécurité.
+
+Ces deux effets agissent en sens opposés sur l’interprétation : l’intégration
+du calcium est plus fidèle avec l’IRK ACADOS, mais son ensemble admissible
+continu est trop large entre les nœuds. La campagne suivante doit donc :
+
+1. tester le warm-start à homotopie adaptative et la garde de cadence;
+2. réintégrer densément chaque intervalle ACADOS accepté;
+3. raffiner la collocation du calcium pour IPOPT et MadNLP;
+4. injecter le patron ACADOS dans ce NLP raffiné;
+5. comparer seulement ensuite fatigue, coût et optimalité.
+
+Le full ACADOS souffre d’un autre défaut de transfert, désormais corrigé dans
+le workflow. Le nouvel angle et la nouvelle vitesse du pédalier étaient fixés
+au premier nœud, mais les vitesses redondantes du bras conservaient parfois
+leur ancienne phase; une couture observée atteignait `0.64 rad/s`, puis HPIPM
+retournait `ACADOS_QP_FAILURE`. Le warm-start full projette maintenant position
+et vitesse sur la variété de contact en préservant exactement les deux états
+du pédalier. Les itérés échoués sont exclus de l’audit du préfixe déjà validé.

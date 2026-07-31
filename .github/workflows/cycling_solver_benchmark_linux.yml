@@ -611,9 +611,15 @@ jobs:
               # The full model needs the homotopy to construct a nearby
               # feasible point, but retaining the final ±1 us radius prevents
               # the SQP from following the physically required PW branch.
+              # Its redundant q/qdot coordinates must also be projected onto
+              # the contact tangent after the cyclic shift. Keeping the old
+              # arm velocity while fixing the new crank velocity created a
+              # 0.64 rad/s first-node seam and ACADOS_QP_FAILURE at RHO 3.
               mechanics_options+=(
                 --acados-control-homotopy-release-final-radius
                 --full-contact-position-tolerance 2e-5
+                --transfer-contact-manifold-projection
+                --transfer-contact-manifold-projection-mode position_velocity
               )
             fi
             if [[ "$nlp_solver" == "SQP_RTI" ]]; then
@@ -691,6 +697,45 @@ jobs:
               solver_options+=(
                 --acados-transfer-bound-homotopy
                 --acados-transfer-bound-homotopy-fractions 0,0.125,0.25,0.375,0.5,0.625,0.75,0.875,1
+                --acados-transfer-bound-homotopy-padding 0.05
+                --acados-transfer-bound-homotopy-iterations 40
+                --acados-transfer-bound-homotopy-tolerance 1e-4
+                --acados-transfer-bound-homotopy-solver-tolerance 1e-4
+                --acados-transfer-bound-homotopy-min-fraction-step 0.001953125
+                --acados-transfer-bound-homotopy-max-refinements 16
+              )
+            fi
+            if [[ "$variant" == "sqp-irk-two-stage-adaptive" ]]; then
+              # Same physical two-stage solve, but try the fully tightened
+              # bounds immediately and bisect only failed continuation steps.
+              # This avoids paying for nine fixed fractions when the shifted
+              # trajectory is already close to feasible.
+              solver_options+=(
+                --acados-transfer-bound-homotopy
+                --acados-transfer-bound-homotopy-fractions 0,1
+                --acados-transfer-bound-homotopy-padding 0.05
+                --acados-transfer-bound-homotopy-iterations 40
+                --acados-transfer-bound-homotopy-tolerance 1e-4
+                --acados-transfer-bound-homotopy-solver-tolerance 1e-4
+                --acados-transfer-bound-homotopy-min-fraction-step 0.001953125
+                --acados-transfer-bound-homotopy-max-refinements 16
+              )
+            fi
+            if [[ "$variant" == "sqp-irk-two-stage-cadence-guard" ]]; then
+              if [[ "$mechanics" != "reduced" ]]; then
+                echo "The conservative cadence guard is screened on reduced mechanics." >&2
+                return 2
+              fi
+              # ACADOS bounds omega only at shooting nodes. Tighten its node
+              # margin by 0.5 rad/s so the IRK interval-average velocity stays
+              # inside the common ±3 rad/s physical envelope without imposing
+              # a constant cadence.
+              mechanics_options+=(
+                --wheel-qdot-bound-margin 2.5
+              )
+              solver_options+=(
+                --acados-transfer-bound-homotopy
+                --acados-transfer-bound-homotopy-fractions 0,1
                 --acados-transfer-bound-homotopy-padding 0.05
                 --acados-transfer-bound-homotopy-iterations 40
                 --acados-transfer-bound-homotopy-tolerance 1e-4
@@ -787,6 +832,7 @@ jobs:
               run_case sqp-irk-fixed "$mechanics" "$ACADOS_OPTION_RHOS" SQP IRK 5 5
               run_case sqp-irk-anderson "$mechanics" "$ACADOS_OPTION_RHOS" SQP IRK 5 5
               run_case sqp-irk-two-stage "$mechanics" "$ACADOS_SMOKE_RHOS" SQP IRK 5 5
+              run_case sqp-irk-two-stage-adaptive "$mechanics" "$ACADOS_SMOKE_RHOS" SQP IRK 5 5
               run_case sqp-feasible-qp-irk "$mechanics" "$ACADOS_SMOKE_RHOS" SQP_WITH_FEASIBLE_QP IRK 5 5
               run_case sqp-feasibility-qp-irk "$mechanics" "$ACADOS_SMOKE_RHOS" SQP_WITH_FEASIBLE_QP IRK 5 5
               run_case sqp-rti-irk "$mechanics" "$ACADOS_OPTION_RHOS" SQP_RTI IRK 5 5
@@ -796,6 +842,7 @@ jobs:
               run_case sqp-rti-irk-phase-one "$mechanics" "$ACADOS_OPTION_RHOS" SQP_RTI IRK 5 5
             done
             run_case sqp-irk-active-set-guard reduced "$ACADOS_SMOKE_RHOS" SQP IRK 5 5
+            run_case sqp-irk-two-stage-cadence-guard reduced "$ACADOS_SMOKE_RHOS" SQP IRK 5 5
             run_case sqp-irk-contact full "$ACADOS_OPTION_RHOS" SQP IRK 5 5
             run_case sqp-rti-irk-contact full "$ACADOS_OPTION_RHOS" SQP_RTI IRK 5 5
             run_case sqp-irk-contact-position full "$ACADOS_OPTION_RHOS" SQP IRK 5 5
@@ -811,6 +858,11 @@ jobs:
               > acados-smoke-results/reference-cases.txt
             run_case sqp-irk-reference full "$ACADOS_SMOKE_RHOS" SQP IRK 5 5
             run_case sqp-irk-reference reduced "$ACADOS_SMOKE_RHOS" SQP IRK 5 5
+            run_case sqp-irk-two-stage full "$ACADOS_SMOKE_RHOS" SQP IRK 5 5
+            run_case sqp-irk-two-stage reduced "$ACADOS_SMOKE_RHOS" SQP IRK 5 5
+            run_case sqp-irk-two-stage-adaptive full "$ACADOS_SMOKE_RHOS" SQP IRK 5 5
+            run_case sqp-irk-two-stage-adaptive reduced "$ACADOS_SMOKE_RHOS" SQP IRK 5 5
+            run_case sqp-irk-two-stage-cadence-guard reduced "$ACADOS_SMOKE_RHOS" SQP IRK 5 5
             run_case sqp-irk-fixed reduced "$ACADOS_OPTION_RHOS" SQP IRK 5 5
             run_case sqp-irk-anderson reduced "$ACADOS_OPTION_RHOS" SQP IRK 5 5
             run_case sqp-rti-irk reduced "$ACADOS_OPTION_RHOS" SQP_RTI IRK 5 5
@@ -1805,10 +1857,24 @@ jobs:
       - name: Build the comparison report
         run: |
           mkdir -p benchmark-results-all benchmark-report
+          select_acados_case() {
+            local mechanics="$1"
+            local candidate
+            for candidate in \
+              "benchmark-acados-all/sqp-irk-two-stage-${mechanics}/result.json" \
+              "benchmark-acados-all/sqp-irk-reference-${mechanics}/result.json"
+            do
+              if [[ -f "$candidate" ]]; then
+                echo "$candidate"
+                return 0
+              fi
+            done
+          }
           mapfile -t result_files < <(
             {
               find benchmark-results-all -name '*.json' -type f
-              find benchmark-acados-all -path '*/sqp-irk-reference-*/result.json' -type f
+              select_acados_case full
+              select_acados_case reduced
             } | sort
           )
           if [[ "${#result_files[@]}" -eq 0 ]]; then
