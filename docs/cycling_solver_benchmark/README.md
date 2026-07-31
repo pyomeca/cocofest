@@ -3971,3 +3971,44 @@ modifier matériellement la solution physiologique. La campagne reste verte
 au sens infrastructure, mais aucun cas ACADOS ne certifie plus de 13 RHO : le
 prochain levier est la qualité du transfert mécanique, pas un slack terminal
 plus large.
+
+### Sélection projetée entre shift cyclique et rollout IRK
+
+La campagne Linux
+[`30637306118`](https://github.com/mickaelbegon/cocofest/actions/runs/30637306118)
+évalue ce levier sans accepter aveuglément le rollout. À chaque transfert, deux
+candidats partent du même RHO résolu :
+
+1. le shift cyclique usuel, puis projection sur les bornes et la variété de
+   contact;
+2. un rollout IRK, soumis aux mêmes projections.
+
+Le rollout n'est retenu que s'il respecte séparément les gardes de borne sur
+`q`, `qdot` et les autres états, les gardes sur les défauts mécaniques scalés,
+et s'il réduit le pire défaut mécanique d'au moins `5 %`. Cette séparation est
+importante : une norme globale permettrait à un grand état musculaire de
+masquer une erreur mécanique pourtant rédhibitoire.
+
+| Cas full/SX, Byrd--Omojokun, IRK | Préfixe NLP | Préfixe physique | Médiane effective | P90 effective | Temps mur-à-mur | Fatigue exécutée | Capacité minimale |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| Shift projeté de référence | 13 | 13 | `0.6624 s` | `1.0609 s` | `180.44 s` | `132.64582` | `0.9629343` |
+| Sélecteur shift/rollout projetés | 13 | 13 | `0.6657 s` | `1.2139 s` | `196.10 s` | `132.64654` | `0.9629341` |
+
+Le sélecteur ne prolonge donc pas le préfixe : les deux cas échouent d'abord
+au RHO 14. Parmi les 12 transferts du préfixe physiquement validé, il conserve
+le shift 11 fois et n'accepte le rollout qu'au transfert vers le RHO 13. Au
+transfert vers le RHO 14, le rollout est correctement rejeté : le pire défaut
+normalisé passe de `3.861` pour le shift à `6.246` pour le rollout, avec une
+violation brute de borne sur `q` de `5.008 rad`.
+
+L'évaluation des deux candidats coûte environ `0.245 s` par transfert dans ce
+prototype. Sur l'exécution complète de 100 tentatives, le temps mur-à-mur
+augmente de `15.66 s` (`8.7 %`) sans gain de convergence; la médiane chaude est
+quasi inchangée mais le P90 augmente de `14.4 %`. Les objectifs de fatigue ne
+diffèrent que de `7.23e-4`, sans signification physiologique ici. Le sélecteur
+reste donc un outil d'audit opt-in : il confirme que le shift est presque
+toujours le meilleur candidat dans le bassin convergé et que le rollout IRK
+actuel ne corrige pas la rupture au RHO 14. Une prochaine itération ne sera
+pertinente que si le rollout est rendu beaucoup moins coûteux ou remplacé par
+une projection qui cible directement les contraintes dynamiques de la
+transcription ACADOS.

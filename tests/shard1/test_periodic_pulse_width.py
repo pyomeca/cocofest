@@ -9836,10 +9836,13 @@ def test_comparison_forwards_solver_neutral_seed_diagnostics(monkeypatch):
         solvers=("ipopt", "madnlp"),
         n_windows=1,
         initial_guess_diagnostics=True,
+        exact_initial_nlp_audit=True,
     )
 
     assert captured["ipopt"].initial_guess_diagnostics is True
     assert captured["madnlp"].initial_guess_diagnostics is True
+    assert captured["ipopt"].exact_initial_nlp_audit is True
+    assert captured["madnlp"].exact_initial_nlp_audit is True
     assert captured["madnlp"].acados_diagnostics is False
 
 

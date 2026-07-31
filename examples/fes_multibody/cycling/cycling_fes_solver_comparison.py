@@ -28,6 +28,7 @@ try:
     from .cycling_pulse_width_mhe_acados_periodic import (
         ACADOS_STATUS_NAMES,
         DEFAULT_CRANK_TORQUE_NM,
+        NLP_SOLVER_NAMES,
         build_argument_parser,
         parse_control_homotopy_radii,
         parse_crank_assistance,
@@ -40,6 +41,7 @@ except ImportError:
     from cycling_pulse_width_mhe_acados_periodic import (
         ACADOS_STATUS_NAMES,
         DEFAULT_CRANK_TORQUE_NM,
+        NLP_SOLVER_NAMES,
         build_argument_parser,
         parse_control_homotopy_radii,
         parse_crank_assistance,
