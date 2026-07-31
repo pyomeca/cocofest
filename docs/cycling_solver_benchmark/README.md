@@ -3058,6 +3058,20 @@ réduction accélère la médiane chaude de `4.46x` et le cas mur-à-mur de
 `2.36x`. FATROP reduced retrouve la fatigue IPOPT reduced à `0.00086 %`,
 ce qui fournit un second contrôle indépendant de l'optimum reduced.
 
+| IPOPT, 100 RHO | Fatigue full | Fatigue reduced | Écart full/reduced | AUC full | AUC reduced | Capacité finale full/reduced |
+|---|---:|---:|---:|---:|---:|---:|
+| Biceps | `3793.7639` | `3789.5310` | `+0.1117 %` | `5.480885` | `5.477255` | `0.9003577 / 0.9003658` |
+| Deltoïde antérieur | `204.6645` | `204.7708` | `-0.0519 %` | `1.428317` | `1.428655` | `0.9843771 / 0.9843514` |
+| Deltoïde postérieur | `87.0216` | `87.0775` | `-0.0641 %` | `0.929778` | `0.930088` | `0.9919500 / 0.9919459` |
+| Triceps | `262.2585` | `262.1180` | `+0.0536 %` | `1.466004` | `1.465333` | `0.9760446 / 0.9759632` |
+
+Le Biceps explique `4.233` unités des `4.212` unités d'écart total; les
+petites compensations des deltoïdes annulent une partie de ce surplus. La
+capacité finale du Biceps ne diffère que de `8.15e-6`. La réduction ne
+« gagne » donc pas artificiellement une grande réserve de fatigue après 100
+cycles : elle sélectionne une solution très voisine avec une mécanique
+beaucoup moins coûteuse à dériver et factoriser.
+
 Le raffinement IPOPT initial de MadNLP déplace bien l'échec reduced du RHO 1
 au RHO 99, mais ne supprime pas la barrière full au RHO 81. Les deux échecs
 atteignent `maxiter=2000`, avec des résidus primaux respectifs de `6.34e-2`
@@ -3200,9 +3214,10 @@ $$
 
 Le comptage single-shot a été corrigé en conséquence : un OCP de 30 cycles
 réussi exporte et certifie 30 cycles, et non une seule fenêtre de solveur.
-Pour chaque taille, le pont IPOPT/MX optionnel part du préfixe RHO relevé sur
-la mécanique full avant MadNLP/MUMPS. Chaque tentative est limitée à 30
-minutes et une erreur de CLI, d'import, de JSON ou le warning
+Pour chaque taille, le pont IPOPT/MX optionnel part du préfixe RHO reduced,
+le relève sur la mécanique full, puis tente de raffiner ce relevé avant
+MadNLP/MUMPS. Chaque tentative est limitée à 30 minutes et une erreur de CLI,
+d'import, de JSON ou le warning
 `linear_solver ... unknown type mumps` rend le job rouge; elle n'est jamais
 interprétée comme une limite scientifique. Ce mode mesure donc le plus grand
 horizon testé qui converge, avec les éventuels trous explicitement listés,
@@ -3218,3 +3233,37 @@ gh workflow run cycling_solver_benchmark_linux.yml \
   -f full_horizon_max_cycles=100 \
   -f full_horizon_memory_limit_gib=auto
 ```
+
+La première campagne complète,
+[`30600222246`](https://github.com/mickaelbegon/cocofest/actions/runs/30600222246),
+sépare nettement limite mémoire et limite numérique :
+
+| Horizon full/MX | Résultat | Itérations MadNLP | Résidu primal final | Pic RSS | Mur-à-mur |
+|---:|---|---:|---:|---:|---:|
+| 1 cycle | certifié | `110` | `1.89e-12` | `1.705 GiB` | `111.6 s` |
+| 2 cycles, chance 1 | échec solveur | `2000` | `1.668` | `2.349 GiB` | `1536.9 s` |
+| 2 cycles, chance 2 | échec solveur | `2000` | `1.668` | `2.352 GiB` | `1586.9 s` |
+| 3 cycles | erreur d'infrastructure avant solve | — | — | `0.180 GiB` | `57.5 s` |
+
+Le RHO reduced/SX construit pourtant les 100 cycles en `196.6 s`, avec un pic
+RSS de seulement `0.383 GiB`. Le full horizon 1 cycle est déjà beaucoup plus
+lent que le RHO full/SX : son raffinement IPOPT coûte `7.8 s`, puis MadNLP
+`39.9 s`, auxquels s'ajoutent la construction MX et la préparation. À deux
+cycles, le raffinement IPOPT limité à 300 itérations échoue avec
+`inf_pr=3.145` et n'est pas appliqué; MadNLP part donc du simple relevé
+reduced→full, atteint 2000 itérations et reste très infaisable. Les deux
+chances identiques reproduisent le même bassin et n'apportent aucune
+robustesse.
+
+La campagne ne donne donc **aucune extrapolation mémoire fiable** vers 16 ou
+128 GiB : la barrière observée est la qualité du warm-start à deux cycles,
+très loin de la limite RSS de `12.5 GiB`. Le cas 3 cycles est une erreur
+indépendante : le warm-up historique contient 60 contrôles, alors que le code
+en exigeait 90. Le runner full horizon ignore désormais ce warm-up à taille
+fixe et donne au raffinement IPOPT/SX le même budget de 2000 itérations que
+MadNLP. Le prochain gate est volontairement limité à trois cycles. S'il ne
+certifie toujours pas deux cycles, il faudra construire une seed full par RHO
+avant de concaténer, plutôt que d'augmenter encore les budgets. Une ablation
+monolithique **reduced/MX** doit aussi être exécutée séparément; elle répondra
+à la question de capacité mémoire du modèle réduit sans la confondre avec le
+pont mécanique full.
