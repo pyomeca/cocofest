@@ -718,15 +718,20 @@ def _run_horizon_attempt(
     rho_seed: Path,
     cycles: int,
     phase: str,
+    chance: int,
     rss_limit_bytes: int,
     mechanical_formulation: str = "full",
 ) -> dict:
+    if chance < 1:
+        raise ValueError("chance must be strictly positive.")
     case_prefix = (
         "full-horizon"
         if mechanical_formulation == "full"
         else "paired-reduced-control"
     )
-    case_dir = args.output_dir / f"{case_prefix}-{cycles:04d}"
+    case_dir = (
+        args.output_dir / f"{case_prefix}-{cycles:04d}" / f"chance-{chance}"
+    )
     seed_path = case_dir / "rho-reduced-prefix.npz"
     result_path = case_dir / "result.json"
     solution_path = case_dir / "full-solution.npz"
@@ -884,6 +889,7 @@ def run(args: argparse.Namespace) -> int:
                 rho_seed=rho_seed_path,
                 cycles=cycles,
                 phase=phase,
+                chance=chance,
                 rss_limit_bytes=rss_limit_bytes,
                 mechanical_formulation=mechanical_formulation,
             )

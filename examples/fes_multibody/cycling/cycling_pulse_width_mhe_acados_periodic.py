@@ -5002,7 +5002,13 @@ def run_acados_terminal_wheel_bound_continuation(
 ) -> list[dict]:
     """Tighten the terminal crank-angle bound around one fixed target."""
 
-    recenter_terminal_wheel_q_bound_slack(periodic_nmpc, slacks[0])
+    wheel_q_slack_scale = float(
+        getattr(periodic_nmpc, "_cocofest_terminal_wheel_q_slack_scale", 1.0)
+    )
+    if not np.isfinite(wheel_q_slack_scale) or wheel_q_slack_scale <= 0.0:
+        raise RuntimeError("The terminal wheel-coordinate slack scale must be positive.")
+    applied_slacks = tuple(float(slack) * wheel_q_slack_scale for slack in slacks)
+    recenter_terminal_wheel_q_bound_slack(periodic_nmpc, applied_slacks[0])
     stage_solver = deepcopy(solver)
     stage_solver.set_convergence_tolerance(convergence_tolerance)
     if solve_stage is None:
@@ -5015,9 +5021,11 @@ def run_acados_terminal_wheel_bound_continuation(
 
     summaries = []
     accepted_slack = None
-    for stage_index, slack in enumerate(slacks):
+    for stage_index, (slack, applied_slack) in enumerate(
+        zip(slacks, applied_slacks, strict=True)
+    ):
         if stage_index:
-            set_terminal_wheel_q_bound_slack(periodic_nmpc, slack)
+            set_terminal_wheel_q_bound_slack(periodic_nmpc, applied_slack)
         if stage_iterations is not None:
             set_acados_runtime_max_iterations(periodic_nmpc, stage_iterations)
         solution = solve_stage()
@@ -5033,6 +5041,7 @@ def run_acados_terminal_wheel_bound_continuation(
         summary = {
             "stage": stage_index,
             "slack": slack,
+            "applied_wheel_q_slack": applied_slack,
             "status": solution.status,
             "accepted": accepted,
             "residuals": (
@@ -5045,7 +5054,9 @@ def run_acados_terminal_wheel_bound_continuation(
         if echo:
             print(
                 "acados_terminal_wheel_bound: "
-                f"stage={stage_index} slack={slack:.6g} status={solution.status} "
+                f"stage={stage_index} slack={slack:.6g} "
+                f"applied_wheel_q_slack={applied_slack:.6g} "
+                f"status={solution.status} "
                 f"accepted={accepted} residuals={_format_array(residuals)}"
             )
         if not accepted:
@@ -5060,10 +5071,11 @@ def run_acados_terminal_wheel_bound_continuation(
     # A relaxed stage is never a valid terminal state of the continuation.
     # Restore the physical target even when an intermediate solve fails, so a
     # caller can either stop or attempt the nominal strict solve explicitly.
-    set_terminal_wheel_q_bound_slack(periodic_nmpc, target_slack)
+    applied_target_slack = float(applied_slacks[-1])
+    set_terminal_wheel_q_bound_slack(periodic_nmpc, applied_target_slack)
     terminal_slack = getattr(periodic_nmpc, "terminal_state_slack", None)
     if terminal_slack is not None and "q" in terminal_slack:
-        terminal_slack["q"][2] = target_slack
+        terminal_slack["q"][2] = applied_target_slack
     if reached_target:
         periodic_nmpc._cocofest_dual_warm_start_mode = "preserve"
     return summaries
@@ -7159,11 +7171,11 @@ def attach_mechanical_equivalence_audit(
                     break
                 validated_windows += 1
             if validated_windows:
-                audited_validated_cycles = (
+                candidate_validated_cycles = (
                     validated_windows + int(getattr(args, "cycles_per_window", 1)) - 1
                 )
                 expected_columns = (
-                    audited_validated_cycles
+                    candidate_validated_cycles
                     * int(getattr(args, "stimulations_per_cycle", 30))
                     + 1
                 )
@@ -7175,6 +7187,7 @@ def attach_mechanical_equivalence_audit(
                         key: np.asarray(values)[..., :expected_columns]
                         for key, values in audit_state_traces.items()
                     }
+                    audited_validated_cycles = candidate_validated_cycles
         theta, omega, audit = audit_mechanical_trajectory(
             audit_state_traces,
             reduced_cycling_dynamics,
@@ -7224,6 +7237,50 @@ def attach_mechanical_equivalence_audit(
         numerical_tolerance = float(
             getattr(args, "primal_feasibility_threshold", 1e-5) or 1e-5
         )
+        # Recompute the direct NLP-coordinate audit on the exact same accepted
+        # prefix as the projected physical audit.  Keeping the original
+        # requested-grid verdict here made a failed ACADOS tail contaminate an
+        # otherwise certified prefix and obscured q-vs-theta comparisons.
+        direct_crank_trace = None
+        if "theta" in audit_state_traces:
+            direct_theta = np.asarray(audit_state_traces["theta"], dtype=float)
+            direct_crank_trace = direct_theta.reshape(
+                (-1, direct_theta.shape[-1])
+            )[0]
+        elif "q" in audit_state_traces:
+            direct_q = np.asarray(audit_state_traces["q"], dtype=float)
+            wheel_index = int(getattr(args, "wheel_state_index", 2))
+            if direct_q.ndim == 2 and direct_q.shape[0] > wheel_index:
+                direct_crank_trace = direct_q[wheel_index]
+        if direct_crank_trace is not None:
+            previous_nlp_diagnostics = summary.get("nlp_crank_diagnostics") or {}
+            absolute_cycle_reference = previous_nlp_diagnostics.get(
+                "absolute_cycle_reference"
+            )
+            if absolute_cycle_reference is None:
+                absolute_cycle_reference = summary.get("absolute_wheel_q_reference")
+            if absolute_cycle_reference is None:
+                absolute_cycle_reference = float(direct_crank_trace[0])
+            nlp_crank_diagnostics = diagnose_wheel_trace(
+                direct_crank_trace,
+                requested_windows=covered_cycles,
+                expected_cycle_shift=-2.0 * np.pi,
+                cycle_progress_tolerance=float(
+                    previous_nlp_diagnostics.get(
+                        "cycle_progress_tolerance",
+                        2.0 * terminal_slack + 2.0 * numerical_tolerance,
+                    )
+                ),
+                absolute_cycle_reference=float(absolute_cycle_reference),
+                absolute_cycle_tolerance=float(
+                    previous_nlp_diagnostics.get(
+                        "absolute_cycle_tolerance",
+                        terminal_slack + numerical_tolerance,
+                    )
+                ),
+            )
+            summary["nlp_crank_diagnostics"] = nlp_crank_diagnostics
+            summary["diagnostics"]["nlp_crank"] = nlp_crank_diagnostics
         physical_crank_diagnostics = diagnose_wheel_trace(
             theta,
             requested_windows=covered_cycles,
@@ -12220,6 +12277,63 @@ def recenter_absolute_wheel_q_reference_from_initial_guess(
     return True
 
 
+def finalize_absolute_wheel_q_initial_guess(
+    periodic_nmpc,
+    *,
+    project_terminal_contact: bool = False,
+) -> dict:
+    """Install the final absolute target, clip the seed, then restore contact."""
+
+    recentered = recenter_absolute_wheel_q_reference_from_initial_guess(periodic_nmpc)
+    position_key = periodic_nmpc.position_state_key
+    wheel_index = periodic_nmpc.wheel_state_index
+    terminal_before = float(
+        np.asarray(periodic_nmpc.nlp[0].x_init[position_key].init, dtype=float)[
+            wheel_index, -1
+        ]
+    )
+    periodic_nmpc._correct_init_guess_to_fit_bounds(corrected_input="states")
+    terminal_after_clip = float(
+        np.asarray(periodic_nmpc.nlp[0].x_init[position_key].init, dtype=float)[
+            wheel_index, -1
+        ]
+    )
+    terminal_wheel_clipped = not np.isclose(
+        terminal_before,
+        terminal_after_clip,
+        rtol=0.0,
+        atol=1e-14,
+    )
+    terminal_contact_projection = None
+    if (
+        project_terminal_contact
+        and position_key == "q"
+        and terminal_wheel_clipped
+    ):
+        terminal_contact_projection = project_full_first_node_initial_guess_to_contact(
+            periodic_nmpc,
+            node=-1,
+            project_velocity=False,
+        )
+        periodic_nmpc._sync_acados_state_bounds()
+    maximum_bound_violation = _maximum_state_initial_guess_bound_violation(
+        periodic_nmpc
+    )
+    if maximum_bound_violation > 1e-10:
+        raise RuntimeError(
+            "Finalizing the terminal crank seed left a state outside its bounds "
+            f"by {maximum_bound_violation:.6g}."
+        )
+    return {
+        "recentered": recentered,
+        "terminal_wheel_before": terminal_before,
+        "terminal_wheel_after_clip": terminal_after_clip,
+        "terminal_wheel_clipped": terminal_wheel_clipped,
+        "terminal_contact_projection": terminal_contact_projection,
+        "maximum_state_bound_violation": maximum_bound_violation,
+    }
+
+
 def recenter_terminal_wheel_q_bound_slack(periodic_nmpc, slack: float) -> dict:
     """Recenter a terminal-angle continuation after the MHE bounds shift."""
 
@@ -13522,6 +13636,7 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
             "Km_": 0.0,
         }
         terminal_position_slack = args.acados_terminal_wheel_q_slack
+        terminal_wheel_q_slack_scale = 1.0
         if (
             position_key == "q"
             and reduced_cycling_dynamics is not None
@@ -13535,7 +13650,12 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
             wheel_tangent = np.abs(
                 reduced_cycling_dynamics.kinematics.tangent(theta_samples)[wheel_index]
             )
-            terminal_position_slack *= float(np.min(wheel_tangent))
+            terminal_wheel_q_slack_scale = float(np.min(wheel_tangent))
+            terminal_position_slack *= terminal_wheel_q_slack_scale
+        # Continuation slacks are expressed on the physical crank angle by
+        # the CLI.  Keep the conversion used for the nominal terminal bound so
+        # every relaxed ACADOS stage is applied in consistent coordinates.
+        nmpc._cocofest_terminal_wheel_q_slack_scale = terminal_wheel_q_slack_scale
         nmpc.terminal_state_slack = {
             position_key: (
                 [terminal_position_slack]
@@ -14195,24 +14315,13 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
         # absolute terminal sequence must start from that effective state;
         # otherwise the first RHO inherits a stale pre-seed target and the
         # anti-drift audit can fail by roughly twice the allowed slack.
-        recenter_absolute_wheel_q_reference_from_initial_guess(nmpc)
-        # The absolute target may be stricter than the source seed, notably
-        # when a physical theta tolerance is mapped conservatively onto the
-        # redundant full q[wheel] coordinate. Clip only after the final target
-        # has been installed; for a reduced->full bridge, restore the contact
-        # manifold at the terminal node while preserving that clipped wheel
-        # coordinate.
-        nmpc._correct_init_guess_to_fit_bounds(corrected_input="states")
-        terminal_contact_projection = None
-        if mechanical_bridge and nmpc.position_state_key == "q":
-            terminal_contact_projection = (
-                project_full_first_node_initial_guess_to_contact(
-                    nmpc,
-                    node=-1,
-                    project_velocity=False,
-                )
-            )
-            nmpc._sync_acados_state_bounds()
+        common_seed_finalization = finalize_absolute_wheel_q_initial_guess(
+            nmpc,
+            project_terminal_contact=mechanical_bridge,
+        )
+        terminal_contact_projection = common_seed_finalization[
+            "terminal_contact_projection"
+        ]
         if echo:
             print(
                 f"common_initial_solution: applied ({common_seed_path}, "
@@ -14311,7 +14420,20 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
                     f"clipped_values={fes_rollout.get('clipped_value_count')} "
                     f"max_clip={fes_rollout.get('max_clip')}"
                 )
+        # Both an explicit horizon seed and a tiled one-cycle trajectory can
+        # overwrite the terminal state installed by the common-seed path.
+        # Reapply the K-cycle absolute target only after the last seed source.
+        horizon_seed_finalization = finalize_absolute_wheel_q_initial_guess(
+            nmpc,
+            project_terminal_contact=True,
+        )
         if echo:
+            print(
+                "acados_horizon_seed_finalization: "
+                f"recentered={horizon_seed_finalization['recentered']} "
+                "terminal_wheel_clipped="
+                f"{horizon_seed_finalization['terminal_wheel_clipped']}"
+            )
             for summary in pulse_width_initial_guess_summary(nmpc):
                 print(
                     "continuation_pulse_width: "

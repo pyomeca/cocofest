@@ -199,6 +199,55 @@ def test_unknown_mumps_warning_accepts_monitored_string_path(tmp_path):
     assert full_horizon._log_has_unknown_mumps_warning(str(log_path))
 
 
+def test_solver_chances_keep_independent_logs_and_results(tmp_path, monkeypatch):
+    observed = {}
+    args = SimpleNamespace(
+        output_dir=tmp_path / "output",
+        workspace=tmp_path,
+        poll_interval_s=0.5,
+        attempt_timeout_s=30.0,
+    )
+    monkeypatch.setattr(
+        full_horizon,
+        "write_rho_seed_prefix",
+        lambda source, destination, cycles: destination.parent.mkdir(
+            parents=True, exist_ok=True
+        ),
+    )
+    monkeypatch.setattr(
+        full_horizon,
+        "_full_horizon_command",
+        lambda *command_args, **command_kwargs: ["solver"],
+    )
+
+    def fake_run_monitored(command, **kwargs):
+        observed["log_path"] = kwargs["log_path"]
+        return full_horizon.MonitoredRun(
+            command=command,
+            return_code=1,
+            peak_rss_bytes=0,
+            elapsed_s=1.0,
+            memory_limit_exceeded=False,
+            timed_out=False,
+            log_path=str(kwargs["log_path"]),
+        )
+
+    monkeypatch.setattr(full_horizon, "run_monitored", fake_run_monitored)
+
+    attempt = full_horizon._run_horizon_attempt(
+        args,
+        rho_seed=tmp_path / "rho.npz",
+        cycles=2,
+        phase="coarse",
+        chance=2,
+        rss_limit_bytes=1024,
+    )
+
+    expected_dir = tmp_path / "output" / "full-horizon-0002" / "chance-2"
+    assert observed["log_path"] == expected_dir / "solver.log"
+    assert attempt["result_path"] == str(expected_dir / "result.json")
+
+
 def test_workflow_has_an_isolated_mx_mumps_full_horizon_mode():
     workflow = (
         Path(__file__).resolve().parents[1]

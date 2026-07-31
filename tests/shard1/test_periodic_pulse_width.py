@@ -3233,6 +3233,7 @@ def test_terminal_wheel_bound_continuation_tightens_accepted_stages(
     applied_slacks = []
     applied_solutions = []
     nmpc = SimpleNamespace(
+        _cocofest_terminal_wheel_q_slack_scale=0.5,
         nlp=[
             SimpleNamespace(
                 x_bounds={
@@ -3288,7 +3289,13 @@ def test_terminal_wheel_bound_continuation_tightens_accepted_stages(
     )
 
     assert [item["accepted"] for item in summaries] == [True, True, True]
-    assert applied_slacks == [0.2, 0.1, 0.02, 0.02]
+    assert applied_slacks == [0.1, 0.05, 0.01, 0.01]
+    assert [item["slack"] for item in summaries] == [0.2, 0.1, 0.02]
+    assert [item["applied_wheel_q_slack"] for item in summaries] == [
+        0.1,
+        0.05,
+        0.01,
+    ]
     assert applied_solutions == [0, 0, 0]
     assert nmpc._cocofest_dual_warm_start_mode == "preserve"
     assert nmpc._cocofest_terminal_wheel_q_center == -1.0
@@ -6400,7 +6407,18 @@ def test_mechanical_audit_rejects_hidden_acados_interval_cadence_violation():
     assert audit["passes_tolerance"] is False
 
 
-def test_acados_mechanical_audit_excludes_failed_tail_from_validated_prefix():
+@pytest.mark.parametrize(
+    ("absolute_offset", "absolute_reference", "expected_nlp_issues"),
+    (
+        (0.0, None, []),
+        (0.01, 0.0, ["wheel_absolute_progress_out_of_bounds"]),
+    ),
+)
+def test_acados_mechanical_audit_excludes_failed_tail_from_validated_prefix(
+    absolute_offset,
+    absolute_reference,
+    expected_nlp_issues,
+):
     class FakeKinematics:
         @staticmethod
         def lift_generalized_trajectory(theta, omega):
@@ -6430,7 +6448,16 @@ def test_acados_mechanical_audit_excludes_failed_tail_from_validated_prefix():
         ),
         "mode": "rho",
         "state_traces": {
-            "theta": np.array([[0.0, -np.pi, -2.0 * np.pi, -20.0]]),
+            "theta": np.array(
+                [
+                    [
+                        absolute_offset,
+                        absolute_offset - np.pi,
+                        absolute_offset - 2.0 * np.pi,
+                        absolute_offset - 20.0,
+                    ]
+                ]
+            ),
             "omega": np.full((1, 4), -2.0 * np.pi),
         },
         "window_statuses": [0, 4],
@@ -6439,7 +6466,13 @@ def test_acados_mechanical_audit_excludes_failed_tail_from_validated_prefix():
             {"passes_tolerance": False},
         ],
         "covered_cycles": 2,
-        "diagnostics": {"is_physical": True, "issues": []},
+        "diagnostics": {
+            "is_physical": True,
+            "issues": [],
+            "absolute_cycle_reference": absolute_reference,
+            "cycle_progress_tolerance": 0.00402,
+            "absolute_cycle_tolerance": 0.00201,
+        },
         "physical_success": True,
         "success": True,
     }
@@ -6453,6 +6486,10 @@ def test_acados_mechanical_audit_excludes_failed_tail_from_validated_prefix():
     assert audit["audited_validated_cycles"] == 1
     assert audit["passes_tolerance"] is True
     assert summary["physical_crank_angle_trace"].shape == (3,)
+    assert summary["nlp_crank_diagnostics"]["issues"] == expected_nlp_issues
+    assert summary["nlp_crank_diagnostics"]["final_angle"] == (
+        absolute_offset - 2.0 * np.pi
+    )
     assert summary["physical_success"] is True
 
 
@@ -6807,6 +6844,68 @@ def test_absolute_terminal_reference_spans_the_complete_single_shot_horizon():
     np.testing.assert_allclose(nmpc._cocofest_terminal_wheel_q_center, target)
     np.testing.assert_allclose(theta_bounds.min[0, 2], target - 0.002)
     np.testing.assert_allclose(theta_bounds.max[0, 2], target + 0.002)
+
+
+def test_final_seed_is_recentered_clipped_and_reprojected_after_last_seed_source(
+    monkeypatch,
+):
+    q_bounds = SimpleNamespace(
+        min=np.full((3, 3), -100.0),
+        max=np.full((3, 3), 100.0),
+    )
+    q_init = SimpleNamespace(
+        init=np.array(
+            [
+                [0.0, 0.0],
+                [0.0, 0.0],
+                [-2.5, -2.5 - 2.0 * np.pi],
+            ]
+        )
+    )
+    projection_calls = []
+    nmpc = SimpleNamespace(
+        anchor_wheel_q_to_absolute_reference=True,
+        position_state_key="q",
+        wheel_state_index=2,
+        absolute_wheel_q_reference=0.0,
+        absolute_wheel_q_cycle_shift=-2.0 * np.pi,
+        absolute_wheel_q_cycle_index=0,
+        _cocofest_cycles_per_window=2,
+        terminal_state_slack={"q": [0.0, 0.0, 0.002]},
+        nlp=[SimpleNamespace(x_init={"q": q_init}, x_bounds={"q": q_bounds})],
+        _sync_acados_state_bounds=lambda: None,
+    )
+
+    def correct_init_guess(*, corrected_input):
+        assert corrected_input == "states"
+        q_init.init[:, -1] = np.minimum(
+            np.maximum(q_init.init[:, -1], q_bounds.min[:, 2]),
+            q_bounds.max[:, 2],
+        )
+
+    nmpc._correct_init_guess_to_fit_bounds = correct_init_guess
+    monkeypatch.setattr(
+        periodic_example,
+        "project_full_first_node_initial_guess_to_contact",
+        lambda _nmpc, **kwargs: projection_calls.append(kwargs)
+        or {
+            "applied": True,
+            "node": -1,
+            "q_max_change": 0.0,
+            "preserved_wheel_q": True,
+        },
+    )
+
+    summary = periodic_example.finalize_absolute_wheel_q_initial_guess(
+        nmpc,
+        project_terminal_contact=True,
+    )
+
+    target = -2.5 - 4.0 * np.pi
+    np.testing.assert_allclose(q_init.init[2, -1], target + 0.002)
+    assert summary["terminal_wheel_clipped"] is True
+    assert summary["maximum_state_bound_violation"] == 0.0
+    assert projection_calls == [{"node": -1, "project_velocity": False}]
 
 
 class _BoundComplementaritySolver:
