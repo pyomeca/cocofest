@@ -4374,7 +4374,7 @@ def test_github_acados_runner_uses_reference_and_option_profiles_sequentially():
         '--common-initial-solution "$GITHUB_WORKSPACE/benchmark-seed-result/common-reduced.npz"'
         in workflow
     )
-    assert '--common-initial-solution "benchmark-seed/common-reduced.npz"' in workflow
+    assert '--common-initial-solution "$common_seed"' in workflow
     assert "--experimental-reduced-acados" in workflow
     assert "--common-initial-solution" in workflow
     assert "run_case sqp-irk-reference" in workflow
@@ -4452,6 +4452,13 @@ def test_github_acados_runner_uses_reference_and_option_profiles_sequentially():
     assert "run_case sqp-irk-two-stage-cadence-reg-1 full" in workflow
     assert "run_case sqp-irk-two-stage-cadence-reg-1 reduced" in workflow
     assert "--acados-wheel-qdot-regularization-weight 1" in workflow
+    assert "reference-full-feasible-seed.npz" in workflow
+    assert "--common-initial-solution-output" in workflow
+    assert '--common-initial-solution "$common_seed"' in workflow
+    assert (
+        "The full cadence-regularized case requires the preceding feasible "
+        "reference seed."
+    ) in workflow
     assert "if (( ACADOS_SMOKE_RHOS > 30 )); then" in workflow
     assert 'echo "$acados_long" > acados-smoke-results/long-campaign.txt' in workflow
     long_campaign = workflow.split(

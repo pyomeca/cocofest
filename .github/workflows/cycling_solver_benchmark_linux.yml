@@ -607,9 +607,27 @@ jobs:
             local case_dir="$GITHUB_WORKSPACE/acados-smoke-results/${variant}-${mechanics}"
             local mechanics_options=()
             local solver_options=()
+            local common_seed="$GITHUB_WORKSPACE/benchmark-seed/common-reduced.npz"
+            local common_seed_options=()
             local stationarity=1e-3
             mkdir -p "$case_dir"
             echo "${variant}-${mechanics}" >> acados-smoke-results/expected-cases.txt
+            if [[ "$variant" == "sqp-irk-reference" && "$mechanics" == "full" ]]; then
+              # Persist the first feasible full-ACADOS RHO. The cadence-
+              # regularized OCP has a different objective but the same
+              # dynamics, bounds and runtime parameters, so this is a much
+              # closer initial primal than the collocation-to-full bridge.
+              common_seed_options+=(
+                --common-initial-solution-output
+                "$GITHUB_WORKSPACE/acados-smoke-results/reference-full-feasible-seed.npz"
+              )
+            elif [[ "$variant" == "sqp-irk-two-stage-cadence-reg-1" && "$mechanics" == "full" ]]; then
+              common_seed="$GITHUB_WORKSPACE/acados-smoke-results/reference-full-feasible-seed.npz"
+              if [[ ! -f "$common_seed" ]]; then
+                echo "The full cadence-regularized case requires the preceding feasible reference seed." >&2
+                return 2
+              fi
+            fi
             if [[ "$integrator" == "ERK" ]]; then
               collocation_type=EXPLICIT_RUNGE_KUTTA
             fi
@@ -799,7 +817,7 @@ jobs:
               --standard-warmup-seed .github/benchmark-seeds/legacy-resistive-0p22-warmup.npz \
               --legacy-standard-warmup-seed-signed-torque 0.22 \
               --standard-warmup-seed-continuation \
-              --common-initial-solution "benchmark-seed/common-reduced.npz" \
+              --common-initial-solution "$common_seed" \
               --warmup-ipopt-linear-solver mumps \
               --ipopt-linear-solver mumps \
               --ipopt-disable-historical-initial-guess \
@@ -826,6 +844,7 @@ jobs:
               --output-json "$case_dir/result.json" \
               "${mechanics_options[@]}" \
               "${solver_options[@]}" \
+              "${common_seed_options[@]}" \
               2>&1 | tee "$case_dir/solver.log"
             local solver_exit="${PIPESTATUS[0]}"
             set -e
