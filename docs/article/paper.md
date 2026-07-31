@@ -1,5 +1,5 @@
 ---
-title: "Cocofest: an Open-Source Python Package for Functional Electrical Stimulation Optimization in Optimal Control"
+title: "Cocofest: an Open-Source Python Package for Optimal Control-Driven Functional Electrical Stimulation"
 
 tags:
   - python
