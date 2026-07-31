@@ -1653,6 +1653,24 @@ def test_reduced_common_seed_is_lifted_exactly_for_full_mechanics():
     )
 
 
+def test_warmup_state_resampling_refines_collocation_grid_and_keeps_endpoints():
+    values = np.vstack(
+        (
+            np.linspace(0.0, 1.0, 121),
+            np.linspace(-2.0, 3.0, 121),
+        )
+    )
+
+    refined = periodic_example._resample_warmup_data(
+        values, target_len=181, has_terminal_node=True
+    )
+
+    assert refined.shape == (2, 181)
+    np.testing.assert_array_equal(refined[:, 0], values[:, 0])
+    np.testing.assert_array_equal(refined[:, -1], values[:, -1])
+    np.testing.assert_allclose(refined[:, 90], [0.5, 0.5])
+
+
 def test_mechanical_equivalence_audit_rejects_off_manifold_full_motion():
     from cocofest.dynamics.reduced_cycling import ReducedCyclingKinematics
 

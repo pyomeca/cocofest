@@ -9845,6 +9845,7 @@ class _WarmupSolutionAdapter:
 def _resample_warmup_data(
     values: np.ndarray, target_len: int, has_terminal_node: bool
 ) -> np.ndarray:
+    values = np.asarray(values, dtype=float)
     current_len = values.shape[1]
     if current_len == target_len:
         return values
@@ -9861,6 +9862,22 @@ def _resample_warmup_data(
         if current_len % target_len == 0:
             stride = current_len // target_len
             return values[:, ::stride][:, :target_len]
+
+    # A refined collocation audit changes the number of internal state points
+    # without changing the physical horizon or its shooting nodes.  Linear
+    # interpolation is appropriate for a primal warm start: it preserves both
+    # endpoints exactly and the refined NLP subsequently restores its own
+    # collocation equations.  Controls retain the legacy piecewise-constant
+    # path above and must never be smoothed across stimulation intervals.
+    if has_terminal_node and current_len > 1 and target_len > 1:
+        source_grid = np.linspace(0.0, 1.0, current_len)
+        target_grid = np.linspace(0.0, 1.0, target_len)
+        resampled = np.vstack(
+            [np.interp(target_grid, source_grid, row) for row in values]
+        )
+        resampled[:, 0] = values[:, 0]
+        resampled[:, -1] = values[:, -1]
+        return resampled
 
     raise ValueError(
         f"Cannot resample warmup data of length {current_len} to target length {target_len} "
