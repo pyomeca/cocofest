@@ -2840,12 +2840,13 @@ candidat d'endurance, tandis que les variantes reduced restent des ablations.
 La campagne 100 RHO ne répète plus tout l'écran ACADOS déjà réfuté. Elle
 conserve six cas : les références full/reduced, l'homotopie adaptative
 reduced pour mesurer la robustesse numérique, la régularisation de poids `1`
-en full/reduced, puis une ablation full qui refuse tout rollout dont la
-violation brute dépasse `0.2`. Ce dernier seuil rejette en pratique tous les
-rollouts observés : c'est donc un test A/B « rollout activé ou désactivé »,
-pas encore un critère universel. Les options RTI, Anderson, IRK léger, contact
-redondant, homotopie fixe et poids `0.1` restent disponibles dans les
-campagnes de 5–30 RHO et dans leurs artefacts séparés.
+en full/reduced, puis un full qui donne une chance additionnelle après
+`MAXITER` depuis le meilleur itéré réellement stocké. Le retry est limité à
+20 SQP, ne relâche aucune contrainte et n'est autorisé que si la meilleure
+faisabilité visitée est inférieure à `2.5e-3`. L'ancienne garde absolue de
+rollout `0.2`, les options RTI, Anderson, IRK léger, contact redondant,
+homotopie fixe et poids `0.1` restent disponibles comme ablations dans les
+campagnes courtes et leurs artefacts séparés.
 
 ### 19.4 Recertification full/reduced sur 100 RHO
 
@@ -2999,8 +3000,71 @@ valide la première étape :
 
 Le coût de préparation augmente volontairement, mais il est payé une fois
 avant la séquence et n'entre pas dans la médiane chaude. L'écart de fatigue
-full/reduced vaut seulement `0.0048 %` sur ce gate. Les validations 30 puis
-100 RHO restent nécessaires.
+full/reduced vaut seulement `0.0048 %` sur ce gate. Les gates 30 et 100 RHO
+ci-dessous déterminent ensuite si ce transfert reste robuste avec la fatigue.
+
+Le gate 30 RHO
+[`30599827365`](https://github.com/mickaelbegon/cocofest/actions/runs/30599827365)
+valide ensuite la robustesse intermédiaire du même transfert :
+
+| Solveur, 30 RHO | IPOPT full | IPOPT reduced | MadNLP full | MadNLP reduced | FATROP reduced |
+|---|---:|---:|---:|---:|---:|
+| Préfixe solveur et physique | `30/30` | `30/30` | `30/30` | `30/30` | `30/30` |
+| Fatigue exécutée | `256.892781` | `256.518977` | `257.165003` | `256.414670` | `256.488100` |
+| AUC de fatigue | `1.521481` | `1.520718` | `1.521559` | `1.520224` | `1.520554` |
+| Minimum $A/A_\mathrm{scale}$ | `0.9641440` | `0.9641870` | `0.9641002` | `0.9641793` | `0.9641831` |
+| Médiane chaude solveur | `5.063 s` | `1.110 s` | `2.925 s` | `0.917 s` | `1.405 s` |
+| Mur-à-mur du cas | `212.64 s` | `164.36 s` | `194.18 s` | `174.11 s` | `195.53 s` |
+
+Sur ce gate, la fatigue full dépasse la reduced de `0.146 %` avec IPOPT et
+de `0.293 %` avec MadNLP. Les AUC ne diffèrent que de `0.050 %` et `0.088 %`.
+La réduction accélère la médiane chaude de `4.56x` avec IPOPT et de `3.19x`
+avec MadNLP. FATROP full reste un échec structurel avant le solve; il ne doit
+pas être inclus dans ces ratios.
+
+La différence est surtout portée par le Biceps. Avec IPOPT, son coût passe de
+`145.5241` en reduced à `145.8920` en full et sa capacité finale de
+`0.9641870` à `0.9641440`. Les trois autres muscles restent chacun à moins de
+`0.02` unité de coût entre les formulations. MadNLP donne la même conclusion :
+le coût Biceps vaut `145.5612` en reduced et `146.3336` en full; les écarts
+des deltoïdes et du Triceps sont inférieurs à `0.023`. Cette localisation et
+la cohérence avec IPOPT indiquent un petit effet mécanique réel ou de
+transcription, pas le large biais physiologique observé avant la correction
+des bornes de cadence aux étages de collocation.
+
+Le gate 100 RHO
+[`30600487081`](https://github.com/mickaelbegon/cocofest/actions/runs/30600487081)
+complète la comparaison d'endurance. Le workflow est vert parce que tous les
+cas et artefacts ont été exécutés correctement; cela ne signifie pas que
+chaque solveur a convergé sur les 100 RHO :
+
+| Solveur, 100 RHO | IPOPT full | IPOPT reduced | MadNLP full | MadNLP reduced | FATROP reduced |
+|---|---:|---:|---:|---:|---:|
+| Solves réussis | `100/100` | `100/100` | `99/100` | `99/100` | `100/100` |
+| Préfixe physique strict | `100` | `100` | `80` | `98` | `100` |
+| Premier RHO en échec | — | — | `81` | `99` | — |
+| Fatigue du préfixe | `4347.708565` | `4343.497299` | `2488.699600` | `4128.757100` | `4343.534710` |
+| AUC du préfixe | `9.304984` | `9.301330` | `6.543290` | `9.003140` | `9.299235` |
+| Minimum $A/A_\mathrm{scale}$ | `0.9003577` | `0.9003658` | `0.9163140` | `0.9019440` | `0.9003607` |
+| Médiane chaude solveur | `4.595 s` | `1.031 s` | `2.600 s` | `0.806 s` | `1.669 s` |
+| Mur-à-mur du cas | `615.39 s` | `260.87 s` | `553.09 s` | `299.55 s` | `351.97 s` |
+
+IPOPT constitue ici la seule comparaison full/reduced appariée sur les 100
+cycles : la full ajoute `0.0970 %` de fatigue et `0.0393 %` d'AUC. La
+réduction accélère la médiane chaude de `4.46x` et le cas mur-à-mur de
+`2.36x`. FATROP reduced retrouve la fatigue IPOPT reduced à `0.00086 %`,
+ce qui fournit un second contrôle indépendant de l'optimum reduced.
+
+Le raffinement IPOPT initial de MadNLP déplace bien l'échec reduced du RHO 1
+au RHO 99, mais ne supprime pas la barrière full au RHO 81. Les deux échecs
+atteignent `maxiter=2000`, avec des résidus primaux respectifs de `6.34e-2`
+et `1.78e-2`; le RHO suivant converge dans les deux cas. Il s'agit donc d'un
+échec local du transfert ou de la branche active, et non d'une preuve
+d'infaisabilité due à la fatigue. Les coûts et fatigues MadNLP ne doivent pas
+servir à comparer full et reduced à 100 RHO, car leurs préfixes physiques
+n'ont pas la même longueur. La prochaine expérience MadNLP pertinente est
+une seconde chance au **même** RHO depuis une primale reconstruite ou
+raffinée, et non un raffinement unique payé seulement avant le RHO 1.
 
 Enfin, ACADOS full avec un poids de cadence `1` résout numériquement
 `96/100` fenêtres dans ce run, mais son préfixe strict s'arrête au RHO 13.
@@ -3022,9 +3086,32 @@ l'artefact incomplet. Cet échec est purement infrastructurel et ne fournit
 aucune donnée scientifique sur la garde; le nom d'option est corrigé avant la
 relance.
 
+La relance corrigée est incluse dans le run
+[`30599827365`](https://github.com/mickaelbegon/cocofest/actions/runs/30599827365).
+Elle montre que la garde absolue `0.2` ne résout pas le problème :
+
+- le cas full cadence-régularisé sans garde et le cas gardé réussissent tous
+  deux `96/100` solves, avec le même préfixe physique strict de `13`;
+- les premiers échecs restent exactement les RHO `14`, `16`, `18` et `20`;
+- leur fatigue exécutée sur le préfixe vaut respectivement `132.646886` et
+  `132.646876`, donc les deux trajectoires sont numériquement confondues;
+- les médianes chaudes valent `0.420 s` et `0.396 s`, différence trop faible
+  pour conclure sur un seul runner.
+
+Le journal confirme que la garde rejette tous les rollouts IRK observés. Avant
+un échec, la violation terminale d'angle vaut environ `0.25–0.31 rad`; après
+un `MAXITER`, le rollout suivant peut présenter près de `9.7 rad/s` de
+violation de cadence. Le seuil mélange toutefois angle, vitesse et états
+musculaires dans une même norme brute. Son échec A/B indique que le rollout
+n'est pas la cause unique : le transfert par extrapolation vers la branche
+active suivante reste lui aussi insuffisant. La prochaine variante doit donc
+utiliser des violations normalisées par les bornes et un retry conditionnel
+depuis le meilleur itéré du `MAXITER`, avec mémoire ACADOS réinitialisée, au
+lieu d'abaisser encore ce seuil absolu.
+
 Conclusion : la mécanique reduced est maintenant validée comme approximation
 physiologique de la full sur 100 RHO pour ce régime, avec un écart inférieur
-à `0.09 %` et un gain chaud supérieur à `4.5x` sous IPOPT. Le point
+à `0.10 %` et un gain chaud de `4.46x` sous IPOPT. Le point
 d'incertitude principal n'est plus la réduction mécanique, mais la robustesse
 des transferts MadNLP et ACADOS sur les branches actives du problème non
 convexe.

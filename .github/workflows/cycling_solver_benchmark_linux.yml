@@ -631,7 +631,7 @@ jobs:
                 --common-initial-solution-output
                 "$GITHUB_WORKSPACE/acados-smoke-results/reference-full-feasible-seed.npz"
               )
-            elif [[ ( "$variant" == "sqp-irk-two-stage-cadence-reg-1" || "$variant" == "sqp-irk-cadence-reg-1-rollout-guard" ) && "$mechanics" == "full" ]]; then
+            elif [[ ( "$variant" == "sqp-irk-two-stage-cadence-reg-1" || "$variant" == "sqp-irk-cadence-reg-1-rollout-guard" || "$variant" == "sqp-irk-cadence-reg-1-best-retry" ) && "$mechanics" == "full" ]]; then
               common_seed="$GITHUB_WORKSPACE/acados-smoke-results/reference-full-feasible-seed.npz"
               if [[ ! -f "$common_seed" ]]; then
                 echo "The full cadence-regularized case requires the preceding feasible reference seed." >&2
@@ -763,7 +763,7 @@ jobs:
                 --acados-wheel-qdot-regularization-weight 0.1
               )
             fi
-            if [[ "$variant" == "sqp-irk-two-stage-cadence-reg-1" || "$variant" == "sqp-irk-cadence-reg-1-rollout-guard" ]]; then
+            if [[ "$variant" == "sqp-irk-two-stage-cadence-reg-1" || "$variant" == "sqp-irk-cadence-reg-1-rollout-guard" || "$variant" == "sqp-irk-cadence-reg-1-best-retry" ]]; then
               solver_options+=(
                 --acados-wheel-qdot-regularization-weight 1
               )
@@ -781,6 +781,23 @@ jobs:
               # than claiming to be a dimensionless universal filter.
               solver_options+=(
                 --shared-transfer-rollout-max-bound-violation 0.2
+              )
+            fi
+            if [[ "$variant" == "sqp-irk-cadence-reg-1-best-retry" ]]; then
+              if [[ "$mechanics" != "full" ]]; then
+                echo "The best-iterate MAXITER retry requires full mechanics." >&2
+                return 2
+              fi
+              # The four MAXITER events in run 30599827365 visited a much
+              # better intermediate feasibility (3.8e-5 to 1.95e-3) than
+              # their final iterate (3.0e-3 to 4.8e-3). Retry once from the
+              # genuinely stored best iterate, after resetting ACADOS memory,
+              # without relaxing any physical bound or constraint.
+              solver_options+=(
+                --acados-store-iterates
+                --acados-maxiter-retries 1
+                --acados-maxiter-retry-iterations 20
+                --acados-maxiter-retry-feasibility-tolerance 0.0025
               )
             fi
             if [[ "$variant" == "sqp-irk-two-stage-adaptive" ]]; then
@@ -885,7 +902,7 @@ jobs:
             run_case sqp-irk-reference reduced "$ACADOS_SMOKE_RHOS" SQP IRK 5 5
             run_case sqp-irk-two-stage-adaptive reduced "$ACADOS_SMOKE_RHOS" SQP IRK 5 5
             run_case sqp-irk-two-stage-cadence-reg-1 full "$ACADOS_SMOKE_RHOS" SQP IRK 5 5
-            run_case sqp-irk-cadence-reg-1-rollout-guard full "$ACADOS_SMOKE_RHOS" SQP IRK 5 5
+            run_case sqp-irk-cadence-reg-1-best-retry full "$ACADOS_SMOKE_RHOS" SQP IRK 5 5
             run_case sqp-irk-two-stage-cadence-reg-1 reduced "$ACADOS_SMOKE_RHOS" SQP IRK 5 5
           elif [[ "$acados_extended" == "false" ]]; then
             printf '%s\n' \
@@ -960,6 +977,7 @@ jobs:
                 "| Preparation (s) | \(.initial_guess_preparation_time_s) |",
                 "| Hot RHO median (s) | \(.hot_wall_time_median_s) |",
                 "| Hot RHO P90 (s) | \(.hot_wall_time_p90_s) |",
+                "| Conditional MAXITER retries | \((.acados_maxiter_retry_summaries // []) | length) |",
                 "| First failed RHO | \(.first_failed_rho) |",
                 "| Stop | \(.stop.label) |"
               ' "$result"
@@ -970,7 +988,7 @@ jobs:
         if: always()
         run: |
           output="acados-smoke-results/acados-option-screen.csv"
-          echo "case,nlp_solver,search_direction,integrator,sim_steps,newton_iter,reset_solver,qp_warm_start,anderson,anderson_threshold,byrd_slack_factor,transfer_bound_homotopy,homotopy_min_fraction_step,homotopy_max_refinements,active_set_guard_radius_s,active_set_guard_margin_nodes,active_set_threshold_above_pd0_s,all_node_contact,all_node_contact_position,solver_success,physical_success,success,mechanical_audit_passed,nlp_validated_cycles,physically_validated_cycles,validated_cycles,attempted_rho,solve_hot_median_s,effective_hot_median_s,effective_hot_p90_s,restoration_total_s,executed_fatigue_objective,minimum_capacity_ratio,first_failed_rho" > "$output"
+          echo "case,nlp_solver,search_direction,integrator,sim_steps,newton_iter,reset_solver,qp_warm_start,anderson,anderson_threshold,byrd_slack_factor,store_iterates,maxiter_retries,maxiter_retry_iterations,maxiter_retry_feasibility_tolerance,maxiter_retry_triggered_windows,transfer_bound_homotopy,homotopy_min_fraction_step,homotopy_max_refinements,active_set_guard_radius_s,active_set_guard_margin_nodes,active_set_threshold_above_pd0_s,all_node_contact,all_node_contact_position,solver_success,physical_success,success,mechanical_audit_passed,nlp_validated_cycles,physically_validated_cycles,validated_cycles,attempted_rho,solve_hot_median_s,effective_hot_median_s,effective_hot_p90_s,restoration_total_s,executed_fatigue_objective,minimum_capacity_ratio,first_failed_rho" > "$output"
           while IFS= read -r result; do
             case_name="$(basename "$(dirname "$result")")"
             jq -r --arg case "$case_name" '
@@ -988,6 +1006,11 @@ jobs:
                 $config.acados_with_anderson_acceleration,
                 $config.acados_anderson_activation_threshold,
                 $config.acados_byrd_omojokon_slack_relaxation_factor,
+                $config.acados_store_iterates,
+                $config.acados_maxiter_retries,
+                $config.acados_maxiter_retry_iterations,
+                $config.acados_maxiter_retry_feasibility_tolerance,
+                ((.acados_maxiter_retry_summaries // []) | length),
                 $config.acados_transfer_bound_homotopy,
                 $config.acados_transfer_bound_homotopy_min_fraction_step,
                 $config.acados_transfer_bound_homotopy_max_refinements,
@@ -2114,7 +2137,7 @@ jobs:
               )
             else
               candidates+=(
-                "benchmark-acados-all/sqp-irk-cadence-reg-1-rollout-guard-full/result.json"
+                "benchmark-acados-all/sqp-irk-cadence-reg-1-best-retry-full/result.json"
               )
             fi
             candidates+=(

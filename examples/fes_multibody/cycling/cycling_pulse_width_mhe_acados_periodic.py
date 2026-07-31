@@ -15,6 +15,7 @@ import re
 import sys
 from sys import platform as sys_platform
 from time import perf_counter
+from types import MethodType
 import warnings
 
 import numpy as np
@@ -1779,6 +1780,31 @@ def build_argument_parser() -> argparse.ArgumentParser:
         help=(
             "Retain every SQP iterate so a restart can select an intermediate "
             "primal. This substantially increases memory use on long MHE runs."
+        ),
+    )
+    parser.add_argument(
+        "--acados-maxiter-retries",
+        type=int,
+        default=0,
+        help=(
+            "Maximum number of conditional retries after ACADOS_MAXITER. Each "
+            "retry starts from the stored iterate with the lowest feasibility "
+            "residual and leaves the physical OCP bounds unchanged."
+        ),
+    )
+    parser.add_argument(
+        "--acados-maxiter-retry-iterations",
+        type=int,
+        default=20,
+        help="Additional SQP iteration budget for each conditional MAXITER retry.",
+    )
+    parser.add_argument(
+        "--acados-maxiter-retry-feasibility-tolerance",
+        type=float,
+        default=2.5e-3,
+        help=(
+            "Largest dynamics, inequality, or complementarity residual allowed "
+            "for the stored iterate used by a conditional MAXITER retry."
         ),
     )
     parser.add_argument(
@@ -4480,7 +4506,10 @@ def reset_acados_solver_memory(periodic_nmpc) -> bool:
 
 
 def apply_acados_capsule_primal_to_initial_guess(
-    periodic_nmpc, iterate_index: int | None = None
+    periodic_nmpc,
+    iterate_index: int | None = None,
+    *,
+    require_stored_iterate: bool = False,
 ) -> dict:
     """Copy the current scaled ACADOS primal, including failed iterates, to Bioptim."""
 
@@ -4498,6 +4527,13 @@ def apply_acados_capsule_primal_to_initial_guess(
             stored_iterate = get_iterate(-1 if iterate_index is None else iterate_index)
         except (IndexError, RuntimeError, TypeError, ValueError) as exc:
             stored_iterate_error = str(exc)
+    if require_stored_iterate and stored_iterate is None:
+        return {
+            "applied": False,
+            "reason": "stored_iterate_unavailable",
+            "iterate_index": iterate_index,
+            "stored_iterate_error": stored_iterate_error,
+        }
 
     nlp = periodic_nmpc.nlp[0]
     first_state_key = next(iter(nlp.x_init.keys()))
@@ -8798,6 +8834,311 @@ def _acados_residual_history_summary(diagnostics: dict) -> dict:
     }
 
 
+def _acados_interface_residual_diagnostics(periodic_nmpc) -> dict:
+    """Snapshot only the native residual data needed by a post-MAXITER retry."""
+
+    interface = getattr(periodic_nmpc, "ocp_solver", None)
+    acados_solver = getattr(interface, "ocp_solver", None)
+    if acados_solver is None:
+        return {}
+    return {
+        field: deepcopy(_safe_acados_stat(acados_solver, field))
+        for field in (
+            "sqp_iter",
+            "time_tot",
+            "residuals",
+            "res_stat_all",
+            "res_eq_all",
+            "res_ineq_all",
+            "res_comp_all",
+        )
+    }
+
+
+def _acados_stat_scalar(value, default: float = 0.0) -> float:
+    """Return a native scalar statistic without relying on ndarray truthiness."""
+
+    if value is None or isinstance(value, dict):
+        return float(default)
+    values = np.asarray(value, dtype=float).reshape(-1)
+    if values.size != 1 or not np.isfinite(values[0]):
+        return float(default)
+    return float(values[0])
+
+
+def _acados_maxiter_retry_candidate(
+    status: int,
+    diagnostics: dict,
+    feasibility_tolerance: float,
+) -> dict:
+    """Select a stored iterate only for a finite, nearly feasible MAXITER exit."""
+
+    if status != 2:
+        return {"eligible": False, "reason": "status_not_maxiter"}
+    history = _acados_residual_history_summary(diagnostics)
+    if not history:
+        return {"eligible": False, "reason": "residual_history_unavailable"}
+    best = np.asarray(history["best"], dtype=float).reshape(-1)
+    final = np.asarray(history["final"], dtype=float).reshape(-1)
+    if best.size < 4 or not np.all(np.isfinite(best[:4])):
+        return {"eligible": False, "reason": "best_residual_nonfinite"}
+    best_feasibility = float(np.max(np.abs(best[1:4])))
+    final_feasibility = (
+        float(np.max(np.abs(final[1:4])))
+        if final.size >= 4 and np.all(np.isfinite(final[:4]))
+        else np.inf
+    )
+    if best_feasibility > feasibility_tolerance:
+        return {
+            "eligible": False,
+            "reason": "best_iterate_not_nearly_feasible",
+            "best_index": history["best_index"],
+            "best_residuals": best,
+            "best_feasibility": best_feasibility,
+            "final_feasibility": final_feasibility,
+        }
+    return {
+        "eligible": True,
+        "reason": None,
+        "best_index": history["best_index"],
+        "best_residuals": best,
+        "best_feasibility": best_feasibility,
+        "final_feasibility": final_feasibility,
+    }
+
+
+def install_acados_conditional_maxiter_retry(
+    periodic_nmpc,
+    *,
+    max_retries: int,
+    retry_iterations: int,
+    feasibility_tolerance: float,
+    nominal_iterations: int,
+    summaries: list,
+    echo: bool = True,
+    residual_diagnostics_function=None,
+    apply_primal_function=None,
+    reset_memory_function=None,
+    set_iterations_function=None,
+) -> bool:
+    """Retry a main RHO solve from its best stored iterate before it is exported.
+
+    The wrapper is armed explicitly by ``update_functions`` and consumes that
+    flag on the next Acados interface solve. Auxiliary continuation solves run
+    while the flag is clear and are therefore never retried here.
+    """
+
+    interface = getattr(periodic_nmpc, "ocp_solver", None)
+    if interface is None:
+        return False
+    if getattr(interface, "_cocofest_maxiter_retry_installed", False):
+        return True
+
+    residual_diagnostics_function = (
+        _acados_interface_residual_diagnostics
+        if residual_diagnostics_function is None
+        else residual_diagnostics_function
+    )
+    apply_primal_function = (
+        apply_acados_capsule_primal_to_initial_guess
+        if apply_primal_function is None
+        else apply_primal_function
+    )
+    reset_memory_function = (
+        reset_acados_solver_memory
+        if reset_memory_function is None
+        else reset_memory_function
+    )
+    set_iterations_function = (
+        set_acados_runtime_max_iterations
+        if set_iterations_function is None
+        else set_iterations_function
+    )
+    original_solve = interface.solve
+    original_get_optimized_value = interface.get_optimized_value
+    interface._cocofest_retry_extra_solver_time_s = 0.0
+    interface._cocofest_retry_extra_iterations = 0
+
+    def get_optimized_value_with_retry_accounting(_interface):
+        output = original_get_optimized_value()
+        if not isinstance(output, dict):
+            return output
+        output["solver_time_to_optimize"] = float(
+            output.get("solver_time_to_optimize", 0.0)
+        ) + float(_interface._cocofest_retry_extra_solver_time_s)
+        output["iter"] = int(output.get("iter", 0)) + int(
+            _interface._cocofest_retry_extra_iterations
+        )
+        return output
+
+    def solve_with_conditional_retry(_interface, *args, **kwargs):
+        armed = bool(
+            getattr(periodic_nmpc, "_cocofest_acados_main_window_retry_armed", False)
+        )
+        periodic_nmpc._cocofest_acados_main_window_retry_armed = False
+        _interface._cocofest_retry_extra_solver_time_s = 0.0
+        _interface._cocofest_retry_extra_iterations = 0
+        first_output = original_solve(*args, **kwargs)
+        if not armed:
+            return first_output
+        if int(getattr(_interface, "status", -1)) != 2:
+            # Keep the summary restricted to actual MAXITER triggers. This
+            # also avoids reading the full residual history after every
+            # successful RHO.
+            return first_output
+
+        window = int(getattr(periodic_nmpc, "total_optimization_run", -1))
+        total_wall_time_s = float(getattr(_interface, "real_time_to_optimize", 0.0))
+        attempt_summaries = []
+        retry_budget_changed = False
+        for attempt in range(max_retries):
+            diagnostics = residual_diagnostics_function(periodic_nmpc)
+            status = int(getattr(_interface, "status", -1))
+            candidate = _acados_maxiter_retry_candidate(
+                status, diagnostics, feasibility_tolerance
+            )
+            attempt_summary = {
+                "attempt": attempt,
+                "trigger_status": status,
+                **candidate,
+            }
+            attempt_summaries.append(attempt_summary)
+            if echo:
+                print(
+                    "acados_maxiter_retry_candidate: "
+                    f"window={window} attempt={attempt} status={status} "
+                    f"eligible={candidate['eligible']} "
+                    f"reason={candidate.get('reason')} "
+                    f"best_index={candidate.get('best_index')} "
+                    f"best_feasibility={candidate.get('best_feasibility')}"
+                )
+            if not candidate["eligible"]:
+                break
+
+            primal_summary = apply_primal_function(
+                periodic_nmpc,
+                iterate_index=candidate["best_index"],
+                require_stored_iterate=True,
+            )
+            attempt_summary["primal"] = primal_summary
+            if not primal_summary["applied"]:
+                attempt_summary["eligible"] = False
+                attempt_summary["reason"] = primal_summary["reason"]
+                break
+
+            attempt_summary["iteration_budget_set"] = set_iterations_function(
+                periodic_nmpc, retry_iterations
+            )
+            if not attempt_summary["iteration_budget_set"]:
+                attempt_summary["eligible"] = False
+                attempt_summary["reason"] = "iteration_budget_update_failed"
+                break
+            retry_budget_changed = True
+            attempt_summary["solver_reset"] = reset_memory_function(periodic_nmpc)
+            if not attempt_summary["solver_reset"]:
+                attempt_summary["eligible"] = False
+                attempt_summary["reason"] = "solver_memory_reset_failed"
+                break
+
+            previous_solver_time_s = _acados_stat_scalar(
+                diagnostics.get("time_tot")
+            )
+            previous_iterations = int(
+                _acados_stat_scalar(diagnostics.get("sqp_iter"))
+            )
+            _interface._cocofest_retry_extra_solver_time_s += previous_solver_time_s
+            _interface._cocofest_retry_extra_iterations += previous_iterations
+            try:
+                retry_output = original_solve(*args, **kwargs)
+            except Exception:
+                if retry_budget_changed:
+                    try:
+                        restored = set_iterations_function(
+                            periodic_nmpc, nominal_iterations
+                        )
+                        if not restored:
+                            try:
+                                warnings.warn(
+                                    "ACADOS retry failed and the nominal SQP "
+                                    "iteration budget could not be restored.",
+                                    RuntimeWarning,
+                                )
+                            except Exception:
+                                pass
+                    except Exception as restore_error:  # noqa: BLE001
+                        try:
+                            warnings.warn(
+                                "ACADOS retry failed and restoring the nominal SQP "
+                                f"iteration budget raised {restore_error!r}.",
+                                RuntimeWarning,
+                            )
+                        except Exception:
+                            pass
+                raise
+            retry_wall_time_s = float(
+                getattr(_interface, "real_time_to_optimize", 0.0)
+            )
+            total_wall_time_s += retry_wall_time_s
+            attempt_summary["retry_status"] = int(
+                getattr(_interface, "status", -1)
+            )
+            attempt_summary["retry_solver_time_s"] = _acados_stat_scalar(
+                residual_diagnostics_function(periodic_nmpc).get("time_tot")
+            )
+            attempt_summary["retry_wall_time_s"] = retry_wall_time_s
+            first_output = retry_output
+            if echo:
+                print(
+                    "acados_maxiter_retry_result: "
+                    f"window={window} attempt={attempt} "
+                    f"status={attempt_summary['retry_status']} "
+                    f"iterations={retry_iterations} "
+                    f"wall_time_s={retry_wall_time_s:.6g}"
+                )
+            if attempt_summary["retry_status"] != 2:
+                break
+
+        iteration_budget_restored = True
+        if retry_budget_changed:
+            iteration_budget_restored = bool(
+                set_iterations_function(periodic_nmpc, nominal_iterations)
+            )
+        _interface.real_time_to_optimize = total_wall_time_s
+        if attempt_summaries:
+            summaries.append(
+                {
+                    "window": window,
+                    "attempts": attempt_summaries,
+                    "final_status": int(getattr(_interface, "status", -1)),
+                    "solver_time_s": (
+                        _acados_stat_scalar(
+                            residual_diagnostics_function(periodic_nmpc).get("time_tot")
+                        )
+                        + float(_interface._cocofest_retry_extra_solver_time_s)
+                    ),
+                    "wall_time_s": total_wall_time_s,
+                    "iteration_budget_restored": iteration_budget_restored,
+                }
+            )
+        if not iteration_budget_restored:
+            raise RuntimeError(
+                "The conditional ACADOS MAXITER retry did not restore the "
+                f"nominal {nominal_iterations}-iteration SQP budget."
+            )
+        if attempt_summaries and any(
+            item.get("retry_status") is not None for item in attempt_summaries
+        ):
+            return _interface.get_optimized_value()
+        return first_output
+
+    interface.get_optimized_value = MethodType(
+        get_optimized_value_with_retry_accounting, interface
+    )
+    interface.solve = MethodType(solve_with_conditional_retry, interface)
+    interface._cocofest_maxiter_retry_installed = True
+    return True
+
+
 def run_acados_transfer_bound_homotopy(
     periodic_nmpc,
     solver,
@@ -12102,6 +12443,27 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
         )
     if args.acados_transfer_sqp_restarts and args.solver != "acados":
         raise ValueError("Transfer SQP restarts are only available with ACADOS.")
+    if args.acados_maxiter_retries < 0:
+        raise ValueError("--acados-maxiter-retries must be non-negative.")
+    if args.acados_maxiter_retry_iterations < 1:
+        raise ValueError(
+            "--acados-maxiter-retry-iterations must be strictly positive."
+        )
+    if (
+        not np.isfinite(args.acados_maxiter_retry_feasibility_tolerance)
+        or args.acados_maxiter_retry_feasibility_tolerance <= 0
+    ):
+        raise ValueError(
+            "--acados-maxiter-retry-feasibility-tolerance must be finite and "
+            "strictly positive."
+        )
+    if args.acados_maxiter_retries and args.solver != "acados":
+        raise ValueError("Conditional MAXITER retries are only available with ACADOS.")
+    if args.acados_maxiter_retries and not args.acados_store_iterates:
+        raise ValueError(
+            "--acados-maxiter-retries requires --acados-store-iterates so the "
+            "retry can use the best intermediate primal."
+        )
     if args.acados_fixed_control_tolerance <= 0:
         raise ValueError("--acados-fixed-control-tolerance must be strictly positive.")
     if args.acados_control_homotopy_tolerance <= 0:
@@ -13033,6 +13395,16 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
                     "acados_transfer_sqp_restart_feasibility_tolerance: "
                     f"{args.acados_transfer_sqp_restart_feasibility_tolerance}"
                 )
+            print(f"acados_maxiter_retries: {args.acados_maxiter_retries}")
+            if args.acados_maxiter_retries:
+                print(
+                    "acados_maxiter_retry_iterations: "
+                    f"{args.acados_maxiter_retry_iterations}"
+                )
+                print(
+                    "acados_maxiter_retry_feasibility_tolerance: "
+                    f"{args.acados_maxiter_retry_feasibility_tolerance}"
+                )
             print(
                 "acados_cyclical_transfer_mode: "
                 f"{args.acados_cyclical_transfer_mode}"
@@ -13622,6 +13994,7 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
     transfer_ding_force_compensation_summaries = []
     transfer_bound_homotopy_summaries = []
     transfer_sqp_restart_summaries = []
+    maxiter_retry_summaries = []
     transfer_active_set_guard_summaries = []
     transfer_contact_projection_summaries = []
     transfer_bound_projection_summaries = []
@@ -14454,6 +14827,21 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
                     f"signature={next_audit['signature']} "
                     f"finite={next_audit['finite']}"
                 )
+        if args.solver == "acados" and args.acados_maxiter_retries:
+            retry_installed = install_acados_conditional_maxiter_retry(
+                _nmpc,
+                max_retries=args.acados_maxiter_retries,
+                retry_iterations=args.acados_maxiter_retry_iterations,
+                feasibility_tolerance=(
+                    args.acados_maxiter_retry_feasibility_tolerance
+                ),
+                nominal_iterations=args.max_acados_iterations,
+                summaries=maxiter_retry_summaries,
+                echo=echo,
+            )
+            _nmpc._cocofest_acados_main_window_retry_armed = bool(
+                continue_solving and retry_installed
+            )
         return continue_solving
 
     solver_first_iter = None
@@ -14921,6 +15309,8 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
         summary["transfer_bound_homotopy_summaries"] = transfer_bound_homotopy_summaries
     if transfer_sqp_restart_summaries:
         summary["transfer_sqp_restart_summaries"] = transfer_sqp_restart_summaries
+    if maxiter_retry_summaries:
+        summary["acados_maxiter_retry_summaries"] = maxiter_retry_summaries
     if transfer_active_set_guard_summaries:
         summary[
             "transfer_active_set_guard_summaries"

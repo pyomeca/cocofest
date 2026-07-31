@@ -2,6 +2,7 @@ import importlib.util
 import numpy as np
 import pytest
 import re
+import warnings
 from casadi import Function, SX
 from pathlib import Path
 from types import SimpleNamespace
@@ -890,6 +891,323 @@ def test_acados_iterate_storage_is_opt_in():
     assert periodic_example._codegen_signature(
         parser.parse_args([])
     ) != periodic_example._codegen_signature(stored_args)
+
+
+def test_acados_conditional_maxiter_retry_options_are_parsed():
+    parser = periodic_example.build_argument_parser()
+    args = parser.parse_args(
+        [
+            "--acados-store-iterates",
+            "--acados-maxiter-retries",
+            "1",
+            "--acados-maxiter-retry-iterations",
+            "20",
+            "--acados-maxiter-retry-feasibility-tolerance",
+            "0.0025",
+        ]
+    )
+
+    assert args.acados_store_iterates is True
+    assert args.acados_maxiter_retries == 1
+    assert args.acados_maxiter_retry_iterations == 20
+    assert args.acados_maxiter_retry_feasibility_tolerance == pytest.approx(0.0025)
+
+
+def test_acados_maxiter_retry_candidate_requires_nearly_feasible_history():
+    diagnostics = {
+        "res_stat_all": np.array([20.0, 0.2, 0.3]),
+        "res_eq_all": np.array([0.4, 0.0019, 0.003]),
+        "res_ineq_all": np.array([0.01, 1e-8, 1e-7]),
+        "res_comp_all": np.array([0.0, 1e-9, 1e-8]),
+    }
+
+    candidate = periodic_example._acados_maxiter_retry_candidate(
+        2, diagnostics, feasibility_tolerance=0.0025
+    )
+    rejected = periodic_example._acados_maxiter_retry_candidate(
+        2, diagnostics, feasibility_tolerance=0.001
+    )
+
+    assert candidate["eligible"] is True
+    assert candidate["best_index"] == 1
+    assert candidate["best_feasibility"] == pytest.approx(0.0019)
+    assert rejected["eligible"] is False
+    assert rejected["reason"] == "best_iterate_not_nearly_feasible"
+    assert periodic_example._acados_maxiter_retry_candidate(
+        0, diagnostics, feasibility_tolerance=0.0025
+    ) == {"eligible": False, "reason": "status_not_maxiter"}
+
+
+def test_conditional_maxiter_retry_ignores_successful_main_solve():
+    class FakeAcadosInterface:
+        status = -1
+        real_time_to_optimize = 0.1
+
+        def solve(self):
+            self.status = 0
+            return self.get_optimized_value()
+
+        def get_optimized_value(self):
+            return {
+                "status": self.status,
+                "solver_time_to_optimize": 0.1,
+                "real_time_to_optimize": self.real_time_to_optimize,
+                "iter": 3,
+            }
+
+    interface = FakeAcadosInterface()
+    nmpc = SimpleNamespace(
+        ocp_solver=interface,
+        total_optimization_run=4,
+        _cocofest_acados_main_window_retry_armed=True,
+    )
+    summaries = []
+
+    periodic_example.install_acados_conditional_maxiter_retry(
+        nmpc,
+        max_retries=1,
+        retry_iterations=20,
+        feasibility_tolerance=0.0025,
+        nominal_iterations=100,
+        summaries=summaries,
+        echo=False,
+        residual_diagnostics_function=lambda current_nmpc: pytest.fail(
+            "A successful solve must not inspect the residual history."
+        ),
+    )
+
+    output = interface.solve()
+
+    assert output["status"] == 0
+    assert summaries == []
+
+
+def test_conditional_maxiter_retry_replaces_solution_and_accounts_full_budget():
+    class FakeAcadosInterface:
+        def __init__(self):
+            self.status = -1
+            self.real_time_to_optimize = 0.0
+            self.solve_index = -1
+            self.statuses = [2, 0]
+            self.solver_times = [1.25, 0.2]
+            self.wall_times = [1.4, 0.25]
+            self.iterations = [100, 7]
+
+        def solve(self):
+            self.solve_index += 1
+            self.status = self.statuses[self.solve_index]
+            self.real_time_to_optimize = self.wall_times[self.solve_index]
+            return self.get_optimized_value()
+
+        def get_optimized_value(self):
+            return {
+                "status": self.status,
+                "solver_time_to_optimize": self.solver_times[self.solve_index],
+                "real_time_to_optimize": self.real_time_to_optimize,
+                "iter": self.iterations[self.solve_index],
+            }
+
+    interface = FakeAcadosInterface()
+    nmpc = SimpleNamespace(
+        ocp_solver=interface,
+        total_optimization_run=13,
+        _cocofest_acados_main_window_retry_armed=True,
+    )
+    summaries = []
+    applied = []
+    resets = []
+    iteration_budgets = []
+
+    def residual_diagnostics(current_nmpc):
+        index = current_nmpc.ocp_solver.solve_index
+        if index == 0:
+            return {
+                "sqp_iter": 100,
+                "time_tot": 1.25,
+                "res_stat_all": np.array([300.0, 0.2, 0.3]),
+                "res_eq_all": np.array([0.4, 0.0019, 0.003]),
+                "res_ineq_all": np.array([0.01, 1e-8, 1e-7]),
+                "res_comp_all": np.array([0.0, 1e-9, 1e-8]),
+            }
+        return {
+            "sqp_iter": 7,
+            "time_tot": 0.2,
+            "res_stat_all": np.array([1e-3]),
+            "res_eq_all": np.array([1e-8]),
+            "res_ineq_all": np.array([1e-9]),
+            "res_comp_all": np.array([1e-10]),
+        }
+
+    def apply_primal(current_nmpc, iterate_index, require_stored_iterate):
+        applied.append((iterate_index, require_stored_iterate))
+        return {
+            "applied": True,
+            "reason": None,
+            "source": "stored_iterate",
+            "iterate_index": iterate_index,
+        }
+
+    installed = periodic_example.install_acados_conditional_maxiter_retry(
+        nmpc,
+        max_retries=1,
+        retry_iterations=20,
+        feasibility_tolerance=0.0025,
+        nominal_iterations=100,
+        summaries=summaries,
+        echo=False,
+        residual_diagnostics_function=residual_diagnostics,
+        apply_primal_function=apply_primal,
+        reset_memory_function=lambda current_nmpc: resets.append(True) or True,
+        set_iterations_function=lambda current_nmpc, value: (
+            iteration_budgets.append(value) or True
+        ),
+    )
+    output = interface.solve()
+
+    assert installed is True
+    assert output["status"] == 0
+    assert output["solver_time_to_optimize"] == pytest.approx(1.45)
+    assert output["real_time_to_optimize"] == pytest.approx(1.65)
+    assert output["iter"] == 107
+    assert applied == [(1, True)]
+    assert resets == [True]
+    assert iteration_budgets == [20, 100]
+    assert summaries[0]["window"] == 13
+    assert summaries[0]["attempts"][0]["trigger_status"] == 2
+    assert summaries[0]["attempts"][0]["retry_status"] == 0
+    assert summaries[0]["final_status"] == 0
+    assert summaries[0]["iteration_budget_restored"] is True
+
+
+def test_conditional_maxiter_retry_fails_if_nominal_budget_is_not_restored():
+    class FakeAcadosInterface:
+        def __init__(self):
+            self.status = -1
+            self.real_time_to_optimize = 0.1
+            self.solve_index = -1
+
+        def solve(self):
+            self.solve_index += 1
+            self.status = (2, 0)[self.solve_index]
+            return self.get_optimized_value()
+
+        def get_optimized_value(self):
+            return {
+                "status": self.status,
+                "solver_time_to_optimize": 0.1,
+                "real_time_to_optimize": self.real_time_to_optimize,
+                "iter": (100, 3)[self.solve_index],
+            }
+
+    interface = FakeAcadosInterface()
+    nmpc = SimpleNamespace(
+        ocp_solver=interface,
+        total_optimization_run=13,
+        _cocofest_acados_main_window_retry_armed=True,
+    )
+
+    def residual_diagnostics(current_nmpc):
+        if current_nmpc.ocp_solver.solve_index == 0:
+            return {
+                "sqp_iter": 100,
+                "time_tot": 0.1,
+                "res_stat_all": np.array([1.0, 0.2]),
+                "res_eq_all": np.array([0.1, 1e-4]),
+                "res_ineq_all": np.array([0.0, 0.0]),
+                "res_comp_all": np.array([0.0, 0.0]),
+            }
+        return {
+            "sqp_iter": 3,
+            "time_tot": 0.1,
+            "res_stat_all": np.array([1e-4]),
+            "res_eq_all": np.array([1e-8]),
+            "res_ineq_all": np.array([0.0]),
+            "res_comp_all": np.array([0.0]),
+        }
+
+    periodic_example.install_acados_conditional_maxiter_retry(
+        nmpc,
+        max_retries=1,
+        retry_iterations=20,
+        feasibility_tolerance=0.0025,
+        nominal_iterations=100,
+        summaries=[],
+        echo=False,
+        residual_diagnostics_function=residual_diagnostics,
+        apply_primal_function=lambda *args, **kwargs: {
+            "applied": True,
+            "reason": None,
+            "source": "stored_iterate",
+        },
+        reset_memory_function=lambda current_nmpc: True,
+        set_iterations_function=lambda current_nmpc, value: value == 20,
+    )
+
+    with pytest.raises(RuntimeError, match="did not restore"):
+        interface.solve()
+
+
+def test_conditional_maxiter_retry_does_not_mask_original_solver_exception():
+    class FakeAcadosInterface:
+        def __init__(self):
+            self.status = -1
+            self.real_time_to_optimize = 0.1
+            self.solve_index = -1
+
+        def solve(self):
+            self.solve_index += 1
+            if self.solve_index == 1:
+                raise ValueError("original retry solve failure")
+            self.status = 2
+            return self.get_optimized_value()
+
+        def get_optimized_value(self):
+            return {
+                "status": self.status,
+                "solver_time_to_optimize": 0.1,
+                "real_time_to_optimize": self.real_time_to_optimize,
+                "iter": 100,
+            }
+
+    interface = FakeAcadosInterface()
+    nmpc = SimpleNamespace(
+        ocp_solver=interface,
+        total_optimization_run=13,
+        _cocofest_acados_main_window_retry_armed=True,
+    )
+    diagnostics = {
+        "sqp_iter": 100,
+        "time_tot": 0.1,
+        "res_stat_all": np.array([1.0, 0.2]),
+        "res_eq_all": np.array([0.1, 1e-4]),
+        "res_ineq_all": np.array([0.0, 0.0]),
+        "res_comp_all": np.array([0.0, 0.0]),
+    }
+
+    periodic_example.install_acados_conditional_maxiter_retry(
+        nmpc,
+        max_retries=1,
+        retry_iterations=20,
+        feasibility_tolerance=0.0025,
+        nominal_iterations=100,
+        summaries=[],
+        echo=False,
+        residual_diagnostics_function=lambda current_nmpc: diagnostics,
+        apply_primal_function=lambda *args, **kwargs: {
+            "applied": True,
+            "reason": None,
+            "source": "stored_iterate",
+        },
+        reset_memory_function=lambda current_nmpc: True,
+        # Simulate a failed restoration. Even with warnings promoted to
+        # exceptions, the original solver exception must remain visible.
+        set_iterations_function=lambda current_nmpc, value: value == 20,
+    )
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        with pytest.raises(ValueError, match="original retry solve failure"):
+            interface.solve()
 
 
 def test_hpipm_tuning_options_are_parsed_and_affect_codegen():
@@ -4606,7 +4924,7 @@ def test_github_acados_runner_uses_reference_and_option_profiles_sequentially():
     assert 'result="acados-smoke-results/${case_name}/result.json"' in workflow
     assert "select_acados_case()" in workflow
     assert "sqp-irk-two-stage-cadence-reg-0p1-reduced/result.json" in workflow
-    assert "sqp-irk-cadence-reg-1-rollout-guard-full/result.json" in workflow
+    assert "sqp-irk-cadence-reg-1-best-retry-full/result.json" in workflow
     assert "sqp-irk-two-stage-cadence-reg-1-${mechanics}/result.json" in workflow
     assert ".results[0].success == true" in workflow
     assert "sqp-irk-two-stage-${mechanics}/result.json" in workflow
@@ -4620,7 +4938,11 @@ def test_github_acados_runner_uses_reference_and_option_profiles_sequentially():
     assert "run_case sqp-irk-two-stage-cadence-reg-0p1 reduced" in workflow
     assert "--acados-wheel-qdot-regularization-weight 0.1" in workflow
     assert "run_case sqp-irk-two-stage-cadence-reg-1 full" in workflow
-    assert "run_case sqp-irk-cadence-reg-1-rollout-guard full" in workflow
+    assert "run_case sqp-irk-cadence-reg-1-best-retry full" in workflow
+    assert "--acados-store-iterates" in workflow
+    assert "--acados-maxiter-retries 1" in workflow
+    assert "--acados-maxiter-retry-iterations 20" in workflow
+    assert "--acados-maxiter-retry-feasibility-tolerance 0.0025" in workflow
     assert "--shared-transfer-rollout-max-bound-violation 0.2" in workflow
     assert "run_case sqp-irk-two-stage-cadence-reg-1 reduced" in workflow
     assert "--acados-wheel-qdot-regularization-weight 1" in workflow
@@ -4639,7 +4961,7 @@ def test_github_acados_runner_uses_reference_and_option_profiles_sequentially():
     assert long_campaign.count("run_case ") == 6
     assert "run_case sqp-irk-two-stage-adaptive reduced" in long_campaign
     assert "run_case sqp-irk-two-stage-cadence-reg-1 full" in long_campaign
-    assert "run_case sqp-irk-cadence-reg-1-rollout-guard full" in long_campaign
+    assert "run_case sqp-irk-cadence-reg-1-best-retry full" in long_campaign
     assert "run_case sqp-irk-two-stage-cadence-reg-1 reduced" in long_campaign
     assert "sqp-irk-two-stage-cadence-reg-0p1" not in long_campaign
     assert "sqp-rti-irk" not in long_campaign
