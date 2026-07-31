@@ -3211,6 +3211,58 @@ un primal projeté différent. Le prochain écran `best-retry` mesure donc
 réellement cette stratégie primal-dual; il ne doit pas être comparé sous le
 même nom à la campagne primal seule sans tenir compte du SHA.
 
+Le run primal-dual
+[`30604174820`](https://github.com/mickaelbegon/cocofest/actions/runs/30604174820),
+au SHA `f718bd13afd9af37b58675696cc791824c4ca2a6`, valide le mécanisme mais
+réfute son efficacité numérique :
+
+| ACADOS full, cadence poids 1 | Sans retry | Retry primal-dual |
+|---|---:|---:|
+| Solves réussis | `96/100` | `96/100` |
+| Préfixe physique strict | `13` | `13` |
+| Premiers échecs | `14, 16, 18, 20` | `14, 16, 18, 20` |
+| Fatigue exécutée sur le préfixe | `132.646886` | `132.646886` |
+| Médiane chaude solveur | `0.555 s` | `0.549 s` |
+| Mur-à-mur | `129.97 s` | `130.55 s` |
+
+Les dimensions restaurées sont cohérentes avec la capsule compilée :
+`x=806`, `u=120`, `pi=780`, `lam=1922`, sans variables algébriques
+`sl/su`. Au RHO 18, la projection aux bornes ne change le primal que de
+`4.55e-13`; la restauration complète est donc acceptée. Le retry commence
+bien au meilleur itéré avec
+`(r_stat,r_dyn)=(0.254,1.644e-3)`, sans le saut de stationnarité vers
+`400–500` observé avec le primal seul. Après 20 SQP, il termine néanmoins à
+`(0.312,2.536e-3)` et retourne encore `MAXITER`. La copie primal-dual corrige
+donc le défaut d'implémentation visé, mais le SQP nominal quitte lui-même le
+bassin presque faisable.
+
+Les trois autres retries sont volontairement annulés parce que la remise du
+primal dans les conteneurs Bioptim induit des corrections numériques de
+`1.82e-12`, `7.73e-12` et `2.00e-11`, supérieures à la garde absolue
+`1e-12`. Ces écarts sont du bruit d'arrondi, mais relâcher cette garde ne
+change pas la conclusion scientifique : le seul retry exactement restauré
+échoue lui aussi. La prochaine ablation ne doit donc pas simplement augmenter
+le budget SQP. Elle doit séparer les objectifs :
+
+1. une courte phase dont la direction cherche explicitement la faisabilité;
+2. seulement après certification du primal, la phase SQP nominale de fatigue.
+
+L'ablation suivante utilise d'abord la voie native ACADOS
+`SQP_WITH_FEASIBLE_QP`, initialisée en `FEASIBILITY_QP` et autorisée à
+basculer automatiquement vers la direction nominale. Elle conserve une seule
+capsule compilée et réutilisée pendant les 100 RHO, le même seed full, le
+poids de cadence `1`, les mêmes bornes et le même budget `100`. Elle est
+isolée du retry et de l'homotopie afin que son effet soit interprétable. La
+garde de projection du retry passe séparément de `1e-12` à `1e-9` pour ne
+plus classer le bruit d'arrondi observé comme une modification physique.
+
+Si la voie native échoue, deux capsules ACADOS pourront ensuite être
+compilées au montage, l'une en restauration et l'autre en `NOMINAL_QP`, puis
+recevoir les mêmes paramètres mobiles et le même primal certifié. Cette
+séparation est préférable à une nouvelle relaxation des contraintes
+physiques, mais elle double approximativement le code de solveur et exige une
+synchronisation stricte des paramètres, bornes et références.
+
 Conclusion : la mécanique reduced est maintenant validée comme approximation
 physiologique de la full sur 100 RHO pour ce régime, avec un écart inférieur
 à `0.10 %` et un gain chaud de `4.46x` sous IPOPT. Le point

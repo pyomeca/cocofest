@@ -311,6 +311,7 @@ def _benchmark_success(
     expected_mode: str,
     expected_cycles: int,
     expected_solver: str,
+    expected_mechanics: str | None = None,
 ) -> bool:
     """Require a solver and physical certificate for the complete horizon."""
 
@@ -318,7 +319,10 @@ def _benchmark_success(
         payload = json.loads(result_path.read_text(encoding="utf-8"))
         result = payload["results"][0]
         configuration = payload["configurations"][expected_solver]
-        expected_mechanics = "full" if expected_mode == "single_shot" else "reduced"
+        if expected_mechanics is None:
+            expected_mechanics = (
+                "full" if expected_mode == "single_shot" else "reduced"
+            )
         expected_use_sx = expected_solver == "ipopt"
         return bool(
             result["success"]
@@ -488,7 +492,11 @@ def _full_horizon_command(
     seed_path: Path,
     result_path: Path,
     solution_path: Path,
+    *,
+    mechanical_formulation: str = "full",
 ) -> list[str]:
+    if mechanical_formulation not in {"full", "reduced"}:
+        raise ValueError("mechanical_formulation must be 'full' or 'reduced'.")
     command = [
         args.python,
         str(
@@ -513,6 +521,11 @@ def _full_horizon_command(
     command.extend(
         [
         "--optional-nlp-periodic-ipopt-hot-start",
+        # Despite its historical name, this flag also prints solver-neutral
+        # initial-guess defects.  Keeping the block/FES/RK4 diagnostics in the
+        # full-horizon artifact is essential when the reduced-to-full bridge
+        # is geometrically accurate but the NLP refinement still diverges.
+        "--acados-diagnostics",
         "--periodic-ipopt-refinement-use-sx",
         "--periodic-ipopt-refinement-iterations",
         str(args.max_iterations),
@@ -522,7 +535,7 @@ def _full_horizon_command(
         "--n-windows",
         str(cycles),
         "--mechanical-formulation",
-        "full",
+        mechanical_formulation,
         "--full-contact-position-tolerance",
         "2e-5",
         "--common-initial-solution",
@@ -541,6 +554,8 @@ def _attempt_record(
     phase: str,
     monitored: MonitoredRun,
     result_path: Path,
+    *,
+    mechanical_formulation: str = "full",
 ) -> dict:
     unknown_mumps_warning = _log_has_unknown_mumps_warning(
         Path(monitored.log_path)
@@ -550,6 +565,7 @@ def _attempt_record(
         expected_mode="single_shot",
         expected_cycles=cycles,
         expected_solver="madnlp",
+        expected_mechanics=mechanical_formulation,
     )
     infrastructure_error = bool(
         not monitored.memory_limit_exceeded
@@ -579,6 +595,7 @@ def _attempt_record(
     )
     return {
         "cycles": cycles,
+        "mechanical_formulation": mechanical_formulation,
         "phase": phase,
         "success": success,
         "failure_kind": failure_kind,
@@ -622,9 +639,34 @@ def _write_markdown(path: Path, report: dict) -> None:
         ),
         f"- Arrêt : `{report['stop_reason']}`",
         "",
+        "## Contrôle apparié reduced/MX",
+        "",
+    ]
+    paired_attempts = report.get("paired_reduced_control_attempts", [])
+    if paired_attempts:
+        paired_last = paired_attempts[-1]
+        lines.extend(
+            [
+                (
+                    f"- Horizon : `{paired_last['cycles']} cycles`; "
+                    f"succès : `{'oui' if paired_last['success'] else 'non'}`; "
+                    f"échec : `{paired_last.get('failure_kind') or '—'}`; "
+                    f"pic RSS : `{paired_last['peak_rss_gib']:.3f} GiB`; "
+                    f"temps : `{paired_last['elapsed_s']:.1f} s`"
+                ),
+                "",
+            ]
+        )
+    else:
+        lines.extend(["- Non exécuté : moins de deux cycles RHO disponibles.", ""])
+    lines.extend(
+        [
+        "## Sweep full/MX",
+        "",
         "| Cycles | Phase | Chance | Succès | Échec | Pic RSS (GiB) | Temps (s) |",
         "|---:|:---|---:|:---:|:---|---:|---:|",
-    ]
+        ]
+    )
     for attempt in report["full_horizon_attempts"]:
         lines.append(
             f"| {attempt['cycles']} | {attempt['phase']} | "
@@ -678,8 +720,14 @@ def _run_horizon_attempt(
     cycles: int,
     phase: str,
     rss_limit_bytes: int,
+    mechanical_formulation: str = "full",
 ) -> dict:
-    case_dir = args.output_dir / f"full-horizon-{cycles:04d}"
+    case_prefix = (
+        "full-horizon"
+        if mechanical_formulation == "full"
+        else "paired-reduced-control"
+    )
+    case_dir = args.output_dir / f"{case_prefix}-{cycles:04d}"
     seed_path = case_dir / "rho-reduced-prefix.npz"
     result_path = case_dir / "result.json"
     solution_path = case_dir / "full-solution.npz"
@@ -687,14 +735,27 @@ def _run_horizon_attempt(
         stale_path.unlink(missing_ok=True)
     write_rho_seed_prefix(rho_seed, seed_path, cycles)
     monitored = run_monitored(
-        _full_horizon_command(args, cycles, seed_path, result_path, solution_path),
+        _full_horizon_command(
+            args,
+            cycles,
+            seed_path,
+            result_path,
+            solution_path,
+            mechanical_formulation=mechanical_formulation,
+        ),
         cwd=args.workspace,
         log_path=case_dir / "solver.log",
         rss_limit_bytes=rss_limit_bytes,
         poll_interval_s=args.poll_interval_s,
         timeout_s=args.attempt_timeout_s,
     )
-    return _attempt_record(cycles, phase, monitored, result_path)
+    return _attempt_record(
+        cycles,
+        phase,
+        monitored,
+        result_path,
+        mechanical_formulation=mechanical_formulation,
+    )
 
 
 def run(args: argparse.Namespace) -> int:
@@ -731,6 +792,7 @@ def run(args: argparse.Namespace) -> int:
         "linear_solver": "mumps",
         "initialization": "independent_reduced_rho_prefix",
         "rho": None,
+        "paired_reduced_control_attempts": [],
         "full_horizon_attempts": [],
         "largest_successful_cycles": 0,
         "stop_reason": "not_started",
@@ -807,7 +869,15 @@ def run(args: argparse.Namespace) -> int:
         _write_markdown(markdown_path, report)
         return 3 if rho_infrastructure_error else 2
 
-    def run_with_two_solver_chances(cycles: int, phase: str) -> dict:
+    def run_with_two_solver_chances(
+        cycles: int,
+        phase: str,
+        *,
+        mechanical_formulation: str = "full",
+        destination: list[dict] | None = None,
+    ) -> dict:
+        if destination is None:
+            destination = report["full_horizon_attempts"]
         last_attempt = None
         for chance in (1, 2):
             attempt = _run_horizon_attempt(
@@ -816,9 +886,10 @@ def run(args: argparse.Namespace) -> int:
                 cycles=cycles,
                 phase=phase,
                 rss_limit_bytes=rss_limit_bytes,
+                mechanical_formulation=mechanical_formulation,
             )
             attempt["chance"] = chance
-            report["full_horizon_attempts"].append(attempt)
+            destination.append(attempt)
             _write_report(report_path, report)
             last_attempt = attempt
             if (
@@ -828,6 +899,14 @@ def run(args: argparse.Namespace) -> int:
             ):
                 break
         return last_attempt
+
+    if rho_available_cycles >= 2:
+        run_with_two_solver_chances(
+            2,
+            "paired_control",
+            mechanical_formulation="reduced",
+            destination=report["paired_reduced_control_attempts"],
+        )
 
     first_memory_failure = None
     last_success = 0

@@ -631,7 +631,7 @@ jobs:
                 --common-initial-solution-output
                 "$GITHUB_WORKSPACE/acados-smoke-results/reference-full-feasible-seed.npz"
               )
-            elif [[ ( "$variant" == "sqp-irk-two-stage-cadence-reg-1" || "$variant" == "sqp-irk-cadence-reg-1-rollout-guard" || "$variant" == "sqp-irk-cadence-reg-1-best-retry" ) && "$mechanics" == "full" ]]; then
+            elif [[ ( "$variant" == "sqp-irk-two-stage-cadence-reg-1" || "$variant" == "sqp-irk-cadence-reg-1-rollout-guard" || "$variant" == "sqp-irk-cadence-reg-1-best-retry" || "$variant" == "sqp-feasibility-qp-cadence-reg-1-irk" ) && "$mechanics" == "full" ]]; then
               common_seed="$GITHUB_WORKSPACE/acados-smoke-results/reference-full-feasible-seed.npz"
               if [[ ! -f "$common_seed" ]]; then
                 echo "The full cadence-regularized case requires the preceding feasible reference seed." >&2
@@ -728,7 +728,7 @@ jobs:
                 --full-contact-position-all-nodes
               )
             fi
-            if [[ "$variant" == "sqp-feasibility-qp-irk" ]]; then
+            if [[ "$variant" == "sqp-feasibility-qp-irk" || "$variant" == "sqp-feasibility-qp-cadence-reg-1-irk" ]]; then
               # Native two-stage path in one precompiled OCP: start with the
               # feasibility QP, then let ACADOS switch to the nominal fatigue
               # direction after restoration.
@@ -763,7 +763,7 @@ jobs:
                 --acados-wheel-qdot-regularization-weight 0.1
               )
             fi
-            if [[ "$variant" == "sqp-irk-two-stage-cadence-reg-1" || "$variant" == "sqp-irk-cadence-reg-1-rollout-guard" || "$variant" == "sqp-irk-cadence-reg-1-best-retry" ]]; then
+            if [[ "$variant" == "sqp-irk-two-stage-cadence-reg-1" || "$variant" == "sqp-irk-cadence-reg-1-rollout-guard" || "$variant" == "sqp-irk-cadence-reg-1-best-retry" || "$variant" == "sqp-feasibility-qp-cadence-reg-1-irk" ]]; then
               solver_options+=(
                 --acados-wheel-qdot-regularization-weight 1
               )
@@ -903,6 +903,7 @@ jobs:
             run_case sqp-irk-two-stage-adaptive reduced "$ACADOS_SMOKE_RHOS" SQP IRK 5 5
             run_case sqp-irk-two-stage-cadence-reg-1 full "$ACADOS_SMOKE_RHOS" SQP IRK 5 5
             run_case sqp-irk-cadence-reg-1-best-retry full "$ACADOS_SMOKE_RHOS" SQP IRK 5 5
+            run_case sqp-feasibility-qp-cadence-reg-1-irk full "$ACADOS_SMOKE_RHOS" SQP_WITH_FEASIBLE_QP IRK 5 5
             run_case sqp-irk-two-stage-cadence-reg-1 reduced "$ACADOS_SMOKE_RHOS" SQP IRK 5 5
           elif [[ "$acados_extended" == "false" ]]; then
             printf '%s\n' \

@@ -72,6 +72,7 @@ OBJECTIVE_TO_WEIGHT_INDEX = {"force": 0, "fatigue": 1, "control": 2}
 DEFAULT_CRANK_ASSISTANCE_NM = 0.2
 DEFAULT_CRANK_QDOT_RAD_S = -float(2 * np.pi)
 DEFAULT_CRANK_TORQUE_NM = -DEFAULT_CRANK_ASSISTANCE_NM
+ACADOS_PRIMAL_DUAL_PROJECTION_TOLERANCE = 1e-9
 DEFAULT_ASSISTED_CONTROL_HOMOTOPY_RADII = (
     1e-8,
     1e-7,
@@ -9255,7 +9256,13 @@ def install_acados_conditional_maxiter_retry(
                 primal_summary
             )
             attempt_summary["bound_projection_max_change"] = projection_max_change
-            if projection_max_change > 1e-12:
+            attempt_summary["bound_projection_tolerance"] = (
+                ACADOS_PRIMAL_DUAL_PROJECTION_TOLERANCE
+            )
+            if (
+                projection_max_change
+                > ACADOS_PRIMAL_DUAL_PROJECTION_TOLERANCE
+            ):
                 attempt_summary["eligible"] = False
                 attempt_summary["reason"] = "stored_primal_requires_bound_projection"
                 break

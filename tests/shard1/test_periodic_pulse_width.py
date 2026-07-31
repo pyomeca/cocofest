@@ -1343,6 +1343,9 @@ def test_conditional_maxiter_retry_rejects_a_projected_stored_primal():
         summaries[0]["attempts"][0]["reason"]
         == "stored_primal_requires_bound_projection"
     )
+    assert summaries[0]["attempts"][0]["bound_projection_tolerance"] == pytest.approx(
+        1e-9
+    )
 
 
 def test_conditional_maxiter_retry_fails_if_nominal_budget_is_not_restored():
@@ -5325,6 +5328,7 @@ def test_github_acados_runner_uses_reference_and_option_profiles_sequentially():
     assert "--acados-wheel-qdot-regularization-weight 0.1" in workflow
     assert "run_case sqp-irk-two-stage-cadence-reg-1 full" in workflow
     assert "run_case sqp-irk-cadence-reg-1-best-retry full" in workflow
+    assert "run_case sqp-feasibility-qp-cadence-reg-1-irk full" in workflow
     assert "--acados-store-iterates" in workflow
     assert "--acados-maxiter-retries 1" in workflow
     assert "--acados-maxiter-retry-iterations 20" in workflow
@@ -5344,10 +5348,11 @@ def test_github_acados_runner_uses_reference_and_option_profiles_sequentially():
     long_campaign = workflow.split(
         'if [[ "$acados_long" == "true" ]]; then', maxsplit=1
     )[1].split('elif [[ "$acados_extended" == "false" ]]; then', maxsplit=1)[0]
-    assert long_campaign.count("run_case ") == 6
+    assert long_campaign.count("run_case ") == 7
     assert "run_case sqp-irk-two-stage-adaptive reduced" in long_campaign
     assert "run_case sqp-irk-two-stage-cadence-reg-1 full" in long_campaign
     assert "run_case sqp-irk-cadence-reg-1-best-retry full" in long_campaign
+    assert "run_case sqp-feasibility-qp-cadence-reg-1-irk full" in long_campaign
     assert "run_case sqp-irk-two-stage-cadence-reg-1 reduced" in long_campaign
     assert "sqp-irk-two-stage-cadence-reg-0p1" not in long_campaign
     assert "sqp-rti-irk" not in long_campaign

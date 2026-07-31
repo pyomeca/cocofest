@@ -250,6 +250,14 @@ def test_rho_and_full_horizon_use_the_intended_solver_contract(tmp_path):
         tmp_path / "one-cycle-full.json",
         tmp_path / "one-cycle-full.npz",
     )
+    paired_reduced = full_horizon._full_horizon_command(
+        args,
+        2,
+        tmp_path / "two-cycle-prefix.npz",
+        tmp_path / "two-cycle-reduced.json",
+        tmp_path / "two-cycle-reduced.npz",
+        mechanical_formulation="reduced",
+    )
 
     assert rho[rho.index("--solvers") + 1] == "ipopt"
     assert full[full.index("--solvers") + 1] == "madnlp"
@@ -259,6 +267,11 @@ def test_rho_and_full_horizon_use_the_intended_solver_contract(tmp_path):
     assert "--ipopt-no-use-sx" not in rho
     assert rho[rho.index("--ipopt-max-iter") + 1] == "2000"
     assert "--single-shot" in full
+    assert (
+        paired_reduced[paired_reduced.index("--mechanical-formulation") + 1]
+        == "reduced"
+    )
+    assert "--ipopt-no-use-sx" in paired_reduced
     assert full[full.index("--madnlp-linear-solver") + 1] == "mumps"
     assert "--ipopt-no-use-sx" in full
     assert "--ipopt-disable-standard-warmup" in full
@@ -268,5 +281,6 @@ def test_rho_and_full_horizon_use_the_intended_solver_contract(tmp_path):
         "--adopt-common-initial-solution-warmup-cycles" not in one_cycle_full
     )
     assert "--optional-nlp-periodic-ipopt-hot-start" in full
+    assert "--acados-diagnostics" in full
     assert "--periodic-ipopt-refinement-use-sx" in full
     assert full[full.index("--periodic-ipopt-refinement-iterations") + 1] == "2000"
