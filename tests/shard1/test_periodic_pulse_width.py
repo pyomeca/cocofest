@@ -2634,6 +2634,19 @@ def test_benchmark_keeps_the_physical_prefix_before_a_later_angle_failure():
     assert comparison_example._physically_validated_cycle_count(result) == 1
 
 
+def test_first_failed_rho_preserves_a_later_solver_failure():
+    windows = [{"rho": rho, "validated": rho < 81} for rho in range(1, 101)]
+
+    assert comparison_example._first_failed_rho(windows, False) == 81
+    assert (
+        comparison_example._first_failed_rho(
+            [{"rho": rho, "validated": True} for rho in range(1, 101)],
+            False,
+        )
+        == 1
+    )
+
+
 def test_rho_boundary_jump_summary_keeps_both_sides_of_every_seam():
     class CycleSolution:
         def __init__(self, theta, omega, capacity):
@@ -4428,6 +4441,11 @@ def test_github_acados_runner_uses_reference_and_option_profiles_sequentially():
     assert "--acados-transfer-active-set-threshold 1e-6" in workflow
     assert "--max-consecutive-failing 2" in workflow
     assert "cycling-acados-smoke-${{ github.run_id }}" in workflow
+    assert workflow.count("name: Save the MadNLP numerical stack") == 2
+    assert (
+        "matrix.solver == 'madnlp' && "
+        "steps.benchmark-madnlp-stack-cache.outputs.cache-hit != 'true'"
+    ) in workflow
     assert 'echo "${variant}-${mechanics}" >> acados-smoke-results/expected-cases.txt' in workflow
     assert "mapfile -t expected_cases < acados-smoke-results/expected-cases.txt" in workflow
     assert "mapfile -t reference_cases < acados-smoke-results/reference-cases.txt" in workflow
@@ -4437,6 +4455,7 @@ def test_github_acados_runner_uses_reference_and_option_profiles_sequentially():
     assert 'result="acados-smoke-results/${case_name}/result.json"' in workflow
     assert "select_acados_case()" in workflow
     assert "sqp-irk-two-stage-cadence-reg-0p1-reduced/result.json" in workflow
+    assert "sqp-irk-cadence-reg-1-rollout-guard-full/result.json" in workflow
     assert "sqp-irk-two-stage-cadence-reg-1-${mechanics}/result.json" in workflow
     assert ".results[0].success == true" in workflow
     assert "sqp-irk-two-stage-${mechanics}/result.json" in workflow
@@ -4450,6 +4469,8 @@ def test_github_acados_runner_uses_reference_and_option_profiles_sequentially():
     assert "run_case sqp-irk-two-stage-cadence-reg-0p1 reduced" in workflow
     assert "--acados-wheel-qdot-regularization-weight 0.1" in workflow
     assert "run_case sqp-irk-two-stage-cadence-reg-1 full" in workflow
+    assert "run_case sqp-irk-cadence-reg-1-rollout-guard full" in workflow
+    assert "--acados-transfer-rollout-max-bound-violation 0.2" in workflow
     assert "run_case sqp-irk-two-stage-cadence-reg-1 reduced" in workflow
     assert "--acados-wheel-qdot-regularization-weight 1" in workflow
     assert "reference-full-feasible-seed.npz" in workflow
@@ -4464,9 +4485,10 @@ def test_github_acados_runner_uses_reference_and_option_profiles_sequentially():
     long_campaign = workflow.split(
         'if [[ "$acados_long" == "true" ]]; then', maxsplit=1
     )[1].split('elif [[ "$acados_extended" == "false" ]]; then', maxsplit=1)[0]
-    assert long_campaign.count("run_case ") == 5
+    assert long_campaign.count("run_case ") == 6
     assert "run_case sqp-irk-two-stage-adaptive reduced" in long_campaign
     assert "run_case sqp-irk-two-stage-cadence-reg-1 full" in long_campaign
+    assert "run_case sqp-irk-cadence-reg-1-rollout-guard full" in long_campaign
     assert "run_case sqp-irk-two-stage-cadence-reg-1 reduced" in long_campaign
     assert "sqp-irk-two-stage-cadence-reg-0p1" not in long_campaign
     assert "sqp-rti-irk" not in long_campaign

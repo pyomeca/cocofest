@@ -621,7 +621,7 @@ jobs:
                 --common-initial-solution-output
                 "$GITHUB_WORKSPACE/acados-smoke-results/reference-full-feasible-seed.npz"
               )
-            elif [[ "$variant" == "sqp-irk-two-stage-cadence-reg-1" && "$mechanics" == "full" ]]; then
+            elif [[ ( "$variant" == "sqp-irk-two-stage-cadence-reg-1" || "$variant" == "sqp-irk-cadence-reg-1-rollout-guard" ) && "$mechanics" == "full" ]]; then
               common_seed="$GITHUB_WORKSPACE/acados-smoke-results/reference-full-feasible-seed.npz"
               if [[ ! -f "$common_seed" ]]; then
                 echo "The full cadence-regularized case requires the preceding feasible reference seed." >&2
@@ -753,9 +753,24 @@ jobs:
                 --acados-wheel-qdot-regularization-weight 0.1
               )
             fi
-            if [[ "$variant" == "sqp-irk-two-stage-cadence-reg-1" ]]; then
+            if [[ "$variant" == "sqp-irk-two-stage-cadence-reg-1" || "$variant" == "sqp-irk-cadence-reg-1-rollout-guard" ]]; then
               solver_options+=(
                 --acados-wheel-qdot-regularization-weight 1
+              )
+            fi
+            if [[ "$variant" == "sqp-irk-cadence-reg-1-rollout-guard" ]]; then
+              if [[ "$mechanics" != "full" ]]; then
+                echo "The guarded full-mechanics rollout requires full mechanics." >&2
+                return 2
+              fi
+              # A/B test the shifted primal against the IRK-rollout transfer.
+              # In the first 100-RHO campaign, the only four ACADOS max-iter
+              # events occurred after accepted rollouts, while all 54 rejected
+              # rollouts converged. The smallest accepted violation was 0.223,
+              # so 0.2 deliberately rejects every observed rollout rather
+              # than claiming to be a dimensionless universal filter.
+              solver_options+=(
+                --acados-transfer-rollout-max-bound-violation 0.2
               )
             fi
             if [[ "$variant" == "sqp-irk-two-stage-adaptive" ]]; then
@@ -860,6 +875,7 @@ jobs:
             run_case sqp-irk-reference reduced "$ACADOS_SMOKE_RHOS" SQP IRK 5 5
             run_case sqp-irk-two-stage-adaptive reduced "$ACADOS_SMOKE_RHOS" SQP IRK 5 5
             run_case sqp-irk-two-stage-cadence-reg-1 full "$ACADOS_SMOKE_RHOS" SQP IRK 5 5
+            run_case sqp-irk-cadence-reg-1-rollout-guard full "$ACADOS_SMOKE_RHOS" SQP IRK 5 5
             run_case sqp-irk-two-stage-cadence-reg-1 reduced "$ACADOS_SMOKE_RHOS" SQP IRK 5 5
           elif [[ "$acados_extended" == "false" ]]; then
             printf '%s\n' \
@@ -1525,6 +1541,13 @@ jobs:
           fi
           python -m pip install --no-deps -e .benchmark-deps/bioptim
 
+      - name: Save the MadNLP numerical stack
+        if: matrix.solver == 'madnlp' && steps.benchmark-madnlp-stack-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v6
+        with:
+          path: ${{ env.CONDA }}/envs/${{ env.CONDA_ENV_NAME }}
+          key: numerical-stack-${{ env.NUMERICAL_STACK_CACHE_VERSION }}-${{ inputs.runner_label }}-${{ runner.arch }}-madnlp-mumps-${{ env.CASADI_MADNLP_COMMIT }}-${{ env.LIBMAD_COMMIT }}-${{ hashFiles('.github/cycling-benchmark-linux-environment.yml', '.github/scripts/install_biorbd_casadi_linux.sh', '.github/scripts/install_casadi_madnlp_linux.sh') }}
+
       - name: Download the validated common continuation seed
         uses: actions/download-artifact@v8
         with:
@@ -1951,6 +1974,10 @@ jobs:
             if [[ "$mechanics" == "reduced" ]]; then
               candidates+=(
                 "benchmark-acados-all/sqp-irk-two-stage-cadence-reg-0p1-reduced/result.json"
+              )
+            else
+              candidates+=(
+                "benchmark-acados-all/sqp-irk-cadence-reg-1-rollout-guard-full/result.json"
               )
             fi
             candidates+=(

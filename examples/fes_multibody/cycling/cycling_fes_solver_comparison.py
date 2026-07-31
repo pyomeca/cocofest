@@ -2331,6 +2331,20 @@ def acados_transfer_restoration_timing(result: dict) -> dict:
     }
 
 
+def _first_failed_rho(
+    window_rows: list[dict], physical_success: bool | None
+) -> int | None:
+    """Keep a later strict-prefix failure when the aggregate physical audit also fails."""
+
+    first_failed_rho = next(
+        (window["rho"] for window in window_rows if not window["validated"]),
+        None,
+    )
+    if first_failed_rho is None and physical_success is False and window_rows:
+        return 1
+    return first_failed_rho
+
+
 def solver_overview_rows(results: dict[str, dict]) -> list[dict]:
     """Build JSON-safe fatigue and timing outcomes for every selected backend."""
 
@@ -2358,12 +2372,9 @@ def solver_overview_rows(results: dict[str, dict]) -> list[dict]:
                 maximum_consecutive_failures = max(
                     maximum_consecutive_failures, consecutive_failures
                 )
-        first_failed_rho = next(
-            (window["rho"] for window in window_rows if not window["validated"]),
-            None,
+        first_failed_rho = _first_failed_rho(
+            window_rows, result.get("physical_success")
         )
-        if result.get("physical_success") is False and window_rows:
-            first_failed_rho = 1
         fatigue = _fatigue_metrics(result, performance["validated_cycles"])
         muscle_fatigue = _executed_fatigue_objective_by_muscle(
             result, performance["validated_cycles"]
