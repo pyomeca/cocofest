@@ -699,11 +699,14 @@ jobs:
                 --acados-search-direction-mode FEASIBILITY_QP
               )
             fi
-            if [[ "$variant" == "sqp-irk-two-stage" || "$variant" == sqp-irk-two-stage-cadence-reg-* ]]; then
+            if [[ "$variant" == "sqp-irk-two-stage" || ( "$mechanics" == "reduced" && "$variant" == sqp-irk-two-stage-cadence-reg-* ) ]]; then
               # Reuse the already compiled SQP OCP. Between RHO solves, first
               # restore a feasible transferred trajectory with relaxed state
               # bounds, tighten those bounds to the physical problem, and only
               # then run the normal fatigue-optimal SQP solve.
+              # Full mechanics deliberately skip this restoration: the
+              # contact-projected reference transfer is robust, whereas the
+              # bound homotopy made its second RHO fail in run 30594236036.
               solver_options+=(
                 --acados-transfer-bound-homotopy
                 --acados-transfer-bound-homotopy-fractions 0,0.125,0.25,0.375,0.5,0.625,0.75,0.875,1
