@@ -3369,6 +3369,32 @@ séparation est préférable à une nouvelle relaxation des contraintes
 physiques, mais elle double approximativement le code de solveur et exige une
 synchronisation stricte des paramètres, bornes et références.
 
+Avant de construire ces deux capsules, le prochain A/B remplace dans la CI le
+cas `dual preserve`, désormais réfuté, par une homotopie de la borne angulaire
+terminale. La configuration Byrd–Omojokun, cadence poids `1`, dual `reset` et
+IRK reste inchangée; seule la séquence
+
+$$
+0.01\ \mathrm{rad}\;\longrightarrow\;0.005\ \mathrm{rad}
+\;\longrightarrow\;0.002\ \mathrm{rad}
+$$
+
+est exécutée avant chaque RHO nominal. Ce choix répond directement au constat
+que le seed certifié est parfois à `1e-8–5e-8 rad` de la face stricte. Le gate
+est `20/20` RHO, résidus primal/dynamique/inégalité inférieurs à `1e-5`, erreur
+angulaire absolue au plus `0.002 rad`, et aucun transfert après un échec. Les
+temps des étapes de restauration sont ajoutés aux temps effectifs par RHO et
+restent aussi exportés séparément dans
+`feasibility_restoration.stages`; ils ne peuvent donc pas être cachés par le
+temps du solve nominal.
+
+Si cette homotopie améliore le primal sans franchir le gate, elle justifiera
+deux capsules compilées : une capsule de faisabilité avec objectif de
+proximité et acceptation purement primale, puis une capsule nominale avec
+l'objectif de fatigue et duals remis à zéro. À l'inverse, recréer la capsule,
+fixer OpenMP à un thread et répéter trois fois reste un contrôle de
+reproductibilité; cela ne constitue pas en soi une stratégie de convergence.
+
 Conclusion : la mécanique reduced est maintenant validée comme approximation
 physiologique de la full sur 100 RHO pour ce régime, avec un écart inférieur
 à `0.10 %` et un gain chaud de `4.46x` sous IPOPT. Le point

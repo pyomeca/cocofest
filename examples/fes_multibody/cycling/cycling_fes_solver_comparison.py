@@ -2351,6 +2351,7 @@ def acados_transfer_restoration_timing(result: dict) -> dict:
             if wall_time_s is None:
                 continue
             stage_row = {
+                "kind": "transfer_bound_homotopy",
                 "source_rho": source_rho,
                 "target_rho": target_rho,
                 "fraction": _finite_float(stage.get("fraction")),
@@ -2362,6 +2363,33 @@ def acados_transfer_restoration_timing(result: dict) -> dict:
             stages.append(stage_row)
             if target_rho is not None:
                 by_rho[target_rho] = by_rho.get(target_rho, 0.0) + wall_time_s
+    terminal_stages = []
+    for stage in result.get("terminal_wheel_bound_summaries") or []:
+        terminal_stages.append((stage, None, 1))
+    for stage in result.get("inter_window_terminal_wheel_bound_summaries") or []:
+        source_rho = stage.get("window")
+        try:
+            target_rho = int(source_rho) + 1
+        except (TypeError, ValueError):
+            target_rho = None
+        terminal_stages.append((stage, source_rho, target_rho))
+    for stage, source_rho, target_rho in terminal_stages:
+        wall_time_s = _finite_float(stage.get("wall_time_s"))
+        if wall_time_s is None:
+            continue
+        stage_row = {
+            "kind": "terminal_wheel_bound_homotopy",
+            "source_rho": source_rho,
+            "target_rho": target_rho,
+            "slack": _finite_float(stage.get("slack")),
+            "attempt": stage.get("attempt"),
+            "accepted": bool(stage.get("accepted")),
+            "wall_time_s": wall_time_s,
+            "solver_time_s": _finite_float(stage.get("solver_time_s")),
+        }
+        stages.append(stage_row)
+        if target_rho is not None:
+            by_rho[target_rho] = by_rho.get(target_rho, 0.0) + wall_time_s
     return {
         "available": bool(stages),
         "total_wall_time_s": sum(row["wall_time_s"] for row in stages),
@@ -2583,6 +2611,12 @@ def solver_overview_rows(results: dict[str, dict]) -> list[dict]:
                 "compiled_nlp_reuse": result.get("compiled_nlp_reuse"),
                 "acados_maxiter_retry_summaries": (
                     result.get("acados_maxiter_retry_summaries") or []
+                ),
+                "terminal_wheel_bound_summaries": (
+                    result.get("terminal_wheel_bound_summaries") or []
+                ),
+                "inter_window_terminal_wheel_bound_summaries": (
+                    result.get("inter_window_terminal_wheel_bound_summaries") or []
                 ),
                 "warm_start": {
                     "initial_guess_audits": result.get("initial_guess_audits") or [],

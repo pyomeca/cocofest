@@ -5398,8 +5398,10 @@ def test_github_acados_runner_uses_reference_and_option_profiles_sequentially():
     assert "run_case sqp-irk-two-stage-cadence-reg-1 full" in workflow
     assert "run_case sqp-irk-cadence-reg-1-best-retry full" in workflow
     assert "run_case sqp-byrd-omojokun-cadence-reg-1-irk full" in workflow
-    assert "run_case sqp-byrd-dual-preserve-cadence-reg-1-irk full" in workflow
-    assert "--acados-dual-warm-start-mode preserve" in workflow
+    assert "run_case sqp-byrd-terminal-homotopy-cadence-reg-1-irk full" in workflow
+    assert "--acados-terminal-wheel-q-homotopy-slacks 0.01,0.005,0.002" in workflow
+    assert "--acados-terminal-wheel-q-homotopy-each-window" in workflow
+    assert "sqp-byrd-dual-preserve-cadence-reg-1-irk" not in workflow
     assert "--acados-store-iterates" in workflow
     assert "--acados-maxiter-retries 1" in workflow
     assert "--acados-maxiter-retry-iterations 20" in workflow
@@ -5425,7 +5427,7 @@ def test_github_acados_runner_uses_reference_and_option_profiles_sequentially():
     assert "run_case sqp-irk-cadence-reg-1-best-retry full" in long_campaign
     assert "run_case sqp-byrd-omojokun-cadence-reg-1-irk full" in long_campaign
     assert (
-        "run_case sqp-byrd-dual-preserve-cadence-reg-1-irk full 20 "
+        "run_case sqp-byrd-terminal-homotopy-cadence-reg-1-irk full 20 "
         "SQP_WITH_FEASIBLE_QP IRK 5 5"
     ) in long_campaign
     assert "run_case sqp-irk-two-stage-cadence-reg-1 reduced" in long_campaign
@@ -5574,14 +5576,42 @@ def test_acados_transfer_restoration_time_is_attributed_to_the_next_rho():
                         },
                     ],
                 }
-            ]
+            ],
+            "terminal_wheel_bound_summaries": [
+                {
+                    "slack": 0.01,
+                    "attempt": 0,
+                    "accepted": True,
+                    "solver_time_s": 0.005,
+                    "wall_time_s": 0.01,
+                }
+            ],
+            "inter_window_terminal_wheel_bound_summaries": [
+                {
+                    "window": 4,
+                    "slack": 0.005,
+                    "attempt": 0,
+                    "accepted": True,
+                    "solver_time_s": 0.04,
+                    "wall_time_s": 0.05,
+                }
+            ],
         }
     )
 
     assert timing["available"] is True
-    assert timing["total_wall_time_s"] == pytest.approx(0.06)
-    assert timing["by_target_rho_wall_time_s"] == {5: pytest.approx(0.06)}
-    assert [stage["target_rho"] for stage in timing["stages"]] == [5, 5]
+    assert timing["total_wall_time_s"] == pytest.approx(0.12)
+    assert timing["by_target_rho_wall_time_s"] == {
+        1: pytest.approx(0.01),
+        5: pytest.approx(0.11),
+    }
+    assert [row["kind"] for row in timing["stages"]] == [
+        "transfer_bound_homotopy",
+        "transfer_bound_homotopy",
+        "terminal_wheel_bound_homotopy",
+        "terminal_wheel_bound_homotopy",
+    ]
+    assert [stage["target_rho"] for stage in timing["stages"]] == [5, 5, 1, 5]
 
 
 def test_single_shot_requires_solver_and_feasibility_success():

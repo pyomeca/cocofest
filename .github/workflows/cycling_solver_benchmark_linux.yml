@@ -631,7 +631,7 @@ jobs:
                 --common-initial-solution-output
                 "$GITHUB_WORKSPACE/acados-smoke-results/reference-full-feasible-seed.npz"
               )
-            elif [[ ( "$variant" == "sqp-irk-two-stage-cadence-reg-1" || "$variant" == "sqp-irk-cadence-reg-1-rollout-guard" || "$variant" == "sqp-irk-cadence-reg-1-best-retry" || "$variant" == "sqp-byrd-omojokun-cadence-reg-1-irk" || "$variant" == "sqp-byrd-dual-preserve-cadence-reg-1-irk" ) && "$mechanics" == "full" ]]; then
+            elif [[ ( "$variant" == "sqp-irk-two-stage-cadence-reg-1" || "$variant" == "sqp-irk-cadence-reg-1-rollout-guard" || "$variant" == "sqp-irk-cadence-reg-1-best-retry" || "$variant" == "sqp-byrd-omojokun-cadence-reg-1-irk" || "$variant" == "sqp-byrd-terminal-homotopy-cadence-reg-1-irk" ) && "$mechanics" == "full" ]]; then
               common_seed="$GITHUB_WORKSPACE/acados-smoke-results/reference-full-feasible-seed.npz"
               if [[ ! -f "$common_seed" ]]; then
                 echo "The full cadence-regularized case requires the preceding feasible reference seed." >&2
@@ -755,16 +755,19 @@ jobs:
                 --acados-wheel-qdot-regularization-weight 0.1
               )
             fi
-            if [[ "$variant" == "sqp-irk-two-stage-cadence-reg-1" || "$variant" == "sqp-irk-cadence-reg-1-rollout-guard" || "$variant" == "sqp-irk-cadence-reg-1-best-retry" || "$variant" == "sqp-byrd-omojokun-cadence-reg-1-irk" || "$variant" == "sqp-byrd-dual-preserve-cadence-reg-1-irk" ]]; then
+            if [[ "$variant" == "sqp-irk-two-stage-cadence-reg-1" || "$variant" == "sqp-irk-cadence-reg-1-rollout-guard" || "$variant" == "sqp-irk-cadence-reg-1-best-retry" || "$variant" == "sqp-byrd-omojokun-cadence-reg-1-irk" || "$variant" == "sqp-byrd-terminal-homotopy-cadence-reg-1-irk" ]]; then
               solver_options+=(
                 --acados-wheel-qdot-regularization-weight 1
               )
             fi
-            if [[ "$variant" == "sqp-byrd-dual-preserve-cadence-reg-1-irk" ]]; then
-              # Preserve multipliers only after a status-zero window whose
-              # primal/dynamics residuals pass. Reset them after every failure.
+            if [[ "$variant" == "sqp-byrd-terminal-homotopy-cadence-reg-1-irk" ]]; then
+              # The certified RHO seed lies within roughly 1e-8 rad of the
+              # strict terminal face. Restore a more interior primal before
+              # tightening the same absolute target; keep dual reset because
+              # preserving certified duals did not extend the strict prefix.
               solver_options+=(
-                --acados-dual-warm-start-mode preserve
+                --acados-terminal-wheel-q-homotopy-slacks 0.01,0.005,0.002
+                --acados-terminal-wheel-q-homotopy-each-window
               )
             fi
             if [[ "$variant" == "sqp-irk-cadence-reg-1-rollout-guard" ]]; then
@@ -903,7 +906,7 @@ jobs:
             run_case sqp-irk-two-stage-cadence-reg-1 full "$ACADOS_SMOKE_RHOS" SQP IRK 5 5
             run_case sqp-irk-cadence-reg-1-best-retry full "$ACADOS_SMOKE_RHOS" SQP IRK 5 5
             run_case sqp-byrd-omojokun-cadence-reg-1-irk full "$ACADOS_SMOKE_RHOS" SQP_WITH_FEASIBLE_QP IRK 5 5
-            run_case sqp-byrd-dual-preserve-cadence-reg-1-irk full 20 SQP_WITH_FEASIBLE_QP IRK 5 5
+            run_case sqp-byrd-terminal-homotopy-cadence-reg-1-irk full 20 SQP_WITH_FEASIBLE_QP IRK 5 5
             run_case sqp-irk-two-stage-cadence-reg-1 reduced "$ACADOS_SMOKE_RHOS" SQP IRK 5 5
           elif [[ "$acados_extended" == "false" ]]; then
             printf '%s\n' \
@@ -988,7 +991,7 @@ jobs:
         if: always()
         run: |
           output="acados-smoke-results/acados-option-screen.csv"
-          echo "case,nlp_solver,search_direction,dual_warm_start_mode,integrator,sim_steps,newton_iter,reset_solver,qp_warm_start,anderson,anderson_threshold,byrd_slack_factor,store_iterates,maxiter_retries,maxiter_retry_iterations,maxiter_retry_feasibility_tolerance,maxiter_retry_triggered_windows,transfer_bound_homotopy,homotopy_min_fraction_step,homotopy_max_refinements,active_set_guard_radius_s,active_set_guard_margin_nodes,active_set_threshold_above_pd0_s,all_node_contact,all_node_contact_position,solver_success,physical_success,success,mechanical_audit_passed,nlp_validated_cycles,physically_validated_cycles,validated_cycles,attempted_rho,solve_hot_median_s,effective_hot_median_s,effective_hot_p90_s,restoration_total_s,executed_fatigue_objective,minimum_capacity_ratio,first_failed_rho" > "$output"
+          echo "case,nlp_solver,search_direction,dual_warm_start_mode,integrator,sim_steps,newton_iter,reset_solver,qp_warm_start,anderson,anderson_threshold,byrd_slack_factor,terminal_q_homotopy_slacks,terminal_q_homotopy_each_window,store_iterates,maxiter_retries,maxiter_retry_iterations,maxiter_retry_feasibility_tolerance,maxiter_retry_triggered_windows,transfer_bound_homotopy,homotopy_min_fraction_step,homotopy_max_refinements,active_set_guard_radius_s,active_set_guard_margin_nodes,active_set_threshold_above_pd0_s,all_node_contact,all_node_contact_position,solver_success,physical_success,success,mechanical_audit_passed,nlp_validated_cycles,physically_validated_cycles,validated_cycles,attempted_rho,solve_hot_median_s,effective_hot_median_s,effective_hot_p90_s,restoration_total_s,executed_fatigue_objective,minimum_capacity_ratio,first_failed_rho" > "$output"
           while IFS= read -r result; do
             case_name="$(basename "$(dirname "$result")")"
             jq -r --arg case "$case_name" '
@@ -1007,6 +1010,8 @@ jobs:
                 $config.acados_with_anderson_acceleration,
                 $config.acados_anderson_activation_threshold,
                 $config.acados_byrd_omojokon_slack_relaxation_factor,
+                $config.acados_terminal_wheel_q_homotopy_slacks,
+                $config.acados_terminal_wheel_q_homotopy_each_window,
                 $config.acados_store_iterates,
                 $config.acados_maxiter_retries,
                 $config.acados_maxiter_retry_iterations,
