@@ -4414,10 +4414,10 @@ def test_github_acados_runner_uses_reference_and_option_profiles_sequentially():
     ) < workflow.index("sqp-irk-reference-${mechanics}/result.json")
     assert "run_case sqp-irk-two-stage-adaptive" in workflow
     assert "--acados-transfer-bound-homotopy-fractions 0,1" in workflow
-    assert "run_case sqp-irk-two-stage-cadence-guard reduced" in workflow
-    assert "--wheel-qdot-bound-margin 2.5" in workflow
+    assert "run_case sqp-irk-two-stage-cadence-guard" not in workflow
     assert "run_case sqp-irk-two-stage-cadence-reg-0p1 reduced" in workflow
     assert "--acados-wheel-qdot-regularization-weight 0.1" in workflow
+    assert "run_case sqp-irk-two-stage-cadence-reg-1 full" in workflow
     assert "run_case sqp-irk-two-stage-cadence-reg-1 reduced" in workflow
     assert "--acados-wheel-qdot-regularization-weight 1" in workflow
     assert "--shared-transfer-contact-projection" in workflow

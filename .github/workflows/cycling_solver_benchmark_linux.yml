@@ -744,29 +744,6 @@ jobs:
                 --acados-transfer-bound-homotopy-max-refinements 16
               )
             fi
-            if [[ "$variant" == "sqp-irk-two-stage-cadence-guard" ]]; then
-              if [[ "$mechanics" != "reduced" ]]; then
-                echo "The conservative cadence guard is screened on reduced mechanics." >&2
-                return 2
-              fi
-              # ACADOS bounds omega only at shooting nodes. Tighten its node
-              # margin by 0.5 rad/s so the IRK interval-average velocity stays
-              # inside the common ±3 rad/s physical envelope without imposing
-              # a constant cadence.
-              mechanics_options+=(
-                --wheel-qdot-bound-margin 2.5
-              )
-              solver_options+=(
-                --acados-transfer-bound-homotopy
-                --acados-transfer-bound-homotopy-fractions 0,1
-                --acados-transfer-bound-homotopy-padding 0.05
-                --acados-transfer-bound-homotopy-iterations 40
-                --acados-transfer-bound-homotopy-tolerance 1e-4
-                --acados-transfer-bound-homotopy-solver-tolerance 1e-4
-                --acados-transfer-bound-homotopy-min-fraction-step 0.001953125
-                --acados-transfer-bound-homotopy-max-refinements 16
-              )
-            fi
             if [[ "$variant" == "sqp-irk-active-set-guard" ]]; then
               if [[ "$mechanics" != "reduced" ]]; then
                 echo "The phase-aligned PW guard is screened on reduced mechanics." >&2
@@ -865,7 +842,6 @@ jobs:
               run_case sqp-rti-irk-phase-one "$mechanics" "$ACADOS_OPTION_RHOS" SQP_RTI IRK 5 5
             done
             run_case sqp-irk-active-set-guard reduced "$ACADOS_SMOKE_RHOS" SQP IRK 5 5
-            run_case sqp-irk-two-stage-cadence-guard reduced "$ACADOS_SMOKE_RHOS" SQP IRK 5 5
             run_case sqp-irk-contact full "$ACADOS_OPTION_RHOS" SQP IRK 5 5
             run_case sqp-rti-irk-contact full "$ACADOS_OPTION_RHOS" SQP_RTI IRK 5 5
             run_case sqp-irk-contact-position full "$ACADOS_OPTION_RHOS" SQP IRK 5 5
@@ -885,8 +861,8 @@ jobs:
             run_case sqp-irk-two-stage reduced "$ACADOS_SMOKE_RHOS" SQP IRK 5 5
             run_case sqp-irk-two-stage-adaptive full "$ACADOS_SMOKE_RHOS" SQP IRK 5 5
             run_case sqp-irk-two-stage-adaptive reduced "$ACADOS_SMOKE_RHOS" SQP IRK 5 5
-            run_case sqp-irk-two-stage-cadence-guard reduced "$ACADOS_SMOKE_RHOS" SQP IRK 5 5
             run_case sqp-irk-two-stage-cadence-reg-0p1 reduced "$ACADOS_SMOKE_RHOS" SQP IRK 5 5
+            run_case sqp-irk-two-stage-cadence-reg-1 full "$ACADOS_SMOKE_RHOS" SQP IRK 5 5
             run_case sqp-irk-two-stage-cadence-reg-1 reduced "$ACADOS_SMOKE_RHOS" SQP IRK 5 5
             run_case sqp-irk-fixed reduced "$ACADOS_OPTION_RHOS" SQP IRK 5 5
             run_case sqp-irk-anderson reduced "$ACADOS_OPTION_RHOS" SQP IRK 5 5
