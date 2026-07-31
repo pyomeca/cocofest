@@ -45,6 +45,7 @@ from cocofest.optimization.receding_horizon_initial_guess import (
     copy_container_values,
     project_initial_guess_to_bounds,
     snapshot_container,
+    snapshot_initial_guess,
 )
 from cocofest.optimization.solver_backends import (
     NLP_SOLVER_NAMES,
@@ -1534,6 +1535,15 @@ def build_argument_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--exact-initial-nlp-audit",
+        action="store_true",
+        help=(
+            "Evaluate the canonical shaked g(x0) and submitted variable bounds "
+            "immediately before every NLP solve. Diagnostic only; its cost is "
+            "reported separately and excluded from solver timing."
+        ),
+    )
+    parser.add_argument(
         "--acados-print-level",
         type=int,
         default=0,
@@ -1889,6 +1899,58 @@ def build_argument_parser() -> argparse.ArgumentParser:
         type=float,
         default=1.0,
         help="Reject the inter-window rollout when a state exceeds its bounds by more than this value.",
+    )
+    parser.add_argument(
+        "--acados-transfer-select-projected-candidate",
+        action="store_true",
+        help=(
+            "Compare the box-projected shifted and ACADOS-IRK rollout seeds, "
+            "then keep the rollout only when its normalized mechanical defects "
+            "pass the separate q/qdot guards. The historical raw mixed-unit "
+            "rollout threshold remains unchanged when this option is absent."
+        ),
+    )
+    parser.add_argument(
+        "--acados-transfer-selector-max-q-bound-violation-rad",
+        type=float,
+        default=1.0,
+        help="Maximum raw angular bound violation accepted before projecting the rollout [rad].",
+    )
+    parser.add_argument(
+        "--acados-transfer-selector-max-qdot-bound-violation-rad-s",
+        type=float,
+        default=12.0,
+        help="Maximum raw angular-velocity bound violation accepted before projection [rad/s].",
+    )
+    parser.add_argument(
+        "--acados-transfer-selector-max-other-scaled-bound-violation",
+        type=float,
+        default=1.0,
+        help=(
+            "Maximum non-mechanical raw bound violation divided by the corresponding "
+            "ACADOS state scaling (dimensionless)."
+        ),
+    )
+    parser.add_argument(
+        "--acados-transfer-selector-max-scaled-q-defect",
+        type=float,
+        default=0.1,
+        help="Maximum projected rollout q dynamics defect divided by the q state scale.",
+    )
+    parser.add_argument(
+        "--acados-transfer-selector-max-scaled-qdot-defect",
+        type=float,
+        default=0.1,
+        help="Maximum projected rollout qdot dynamics defect divided by the qdot state scale.",
+    )
+    parser.add_argument(
+        "--acados-transfer-selector-improvement-ratio",
+        type=float,
+        default=0.95,
+        help=(
+            "Require the rollout mechanical score to be no larger than this fraction "
+            "of the shifted-seed score; must lie in (0, 1]."
+        ),
     )
     parser.add_argument(
         "--warmup-state-comparison-limit",
@@ -6551,6 +6613,28 @@ def snapshot_nlp_solver_stats(nmpc) -> dict:
     }
 
 
+def enable_exact_initial_nlp_audit(nmpc, solver) -> None:
+    """Enable Bioptim's opt-in canonical pre-solve feasibility audit."""
+
+    nmpc.set_ocp_solver(solver)
+    interface = getattr(nmpc, "ocp_solver", None)
+    enable = getattr(interface, "enable_initial_nlp_audit", None)
+    if not callable(enable):
+        raise RuntimeError(
+            "--exact-initial-nlp-audit requires the pinned Bioptim integration "
+            "with canonical initial-NLP diagnostics."
+        )
+    enable()
+
+
+def attach_exact_initial_nlp_audits(summary: dict, nmpc) -> None:
+    """Copy JSON-safe exact g(x0) audits into a benchmark summary."""
+
+    audits = getattr(getattr(nmpc, "ocp_solver", None), "initial_nlp_audits", None)
+    if audits:
+        summary["exact_initial_nlp_audits"] = deepcopy(audits)
+
+
 class CompiledNlpReuseTracker:
     """Audit that moving RHO data reuse one CasADi compiled solver.
 
@@ -9005,6 +9089,7 @@ def rollout_transferred_cycle_acados_irk(
 
     max_bound_violation = 0.0
     max_bound_violation_by_key = {}
+    max_scaled_bound_violation_by_key = {}
     worst_bound_violation = None
     terminal_delta = {}
     state_values = {}
@@ -9016,6 +9101,13 @@ def rollout_transferred_cycle_acados_irk(
         violations = np.maximum(lower - values, 0.0) + np.maximum(values - upper, 0.0)
         key_bound_violation = float(np.max(violations))
         max_bound_violation_by_key[key] = key_bound_violation
+        key_scaling = np.maximum(
+            np.abs(state_scaling[indexes]).reshape((-1, 1)),
+            np.finfo(float).eps,
+        )
+        max_scaled_bound_violation_by_key[key] = float(
+            np.max(violations / key_scaling)
+        )
         if key_bound_violation >= max_bound_violation:
             component, node = np.unravel_index(
                 int(np.argmax(violations)), violations.shape
@@ -9050,6 +9142,7 @@ def rollout_transferred_cycle_acados_irk(
         "start_node": start_node,
         "max_bound_violation": max_bound_violation,
         "max_bound_violation_by_key": max_bound_violation_by_key,
+        "max_scaled_bound_violation_by_key": max_scaled_bound_violation_by_key,
         "worst_bound_violation": worst_bound_violation,
         "terminal_delta": terminal_delta,
         "simulator_built": simulator_built,
@@ -9057,6 +9150,164 @@ def rollout_transferred_cycle_acados_irk(
         "interval_duration": interval_duration,
         "rk4_defects_after": rk4_defects_after,
     }
+
+
+def _restore_initial_guess_snapshot(periodic_nmpc, snapshot: dict) -> None:
+    """Restore a physical initial guess captured by ``snapshot_initial_guess``."""
+
+    nlp = periodic_nmpc.nlp[0]
+    for key, values in snapshot["states"].items():
+        nlp.x_init[key].init[:, :] = values
+    for key, values in snapshot["controls"].items():
+        nlp.u_init[key].init[:, :] = values
+
+
+def _normalized_mechanical_transfer_score(
+    defects: dict,
+    *,
+    max_scaled_q_defect: float,
+    max_scaled_qdot_defect: float,
+) -> tuple[float, dict[str, float]]:
+    """Return a dimensionless q/qdot score using separate admissible defects."""
+
+    scaled = defects.get("scaled_by_block", {}) if defects else {}
+    normalized = {
+        "q": float(scaled.get("q", np.inf)) / max_scaled_q_defect,
+        "qdot": float(scaled.get("qdot", np.inf)) / max_scaled_qdot_defect,
+    }
+    return max(normalized.values()), normalized
+
+
+def select_projected_acados_irk_transfer_candidate(
+    periodic_nmpc,
+    *,
+    max_q_bound_violation_rad: float = 1.0,
+    max_qdot_bound_violation_rad_s: float = 12.0,
+    max_other_scaled_bound_violation: float = 1.0,
+    max_scaled_q_defect: float = 0.1,
+    max_scaled_qdot_defect: float = 0.1,
+    improvement_ratio: float = 0.95,
+) -> dict:
+    """Select the safer projected shift or IRK rollout transfer.
+
+    The raw q and qdot rollout guards retain their physical units. All other
+    bound violations are divided by the corresponding ACADOS state scaling.
+    Candidate quality uses the existing RK4 dynamics diagnostic after box
+    projection. This makes the selector solver-scaling aware, but it remains a
+    proxy for the exact IRK shooting residual and is therefore opt-in.
+    """
+
+    selection_start = perf_counter()
+    shift_projection = project_transferred_initial_guess_to_bounds(periodic_nmpc)
+    shift_snapshot = snapshot_initial_guess(periodic_nmpc)
+    shift_defects = _full_dynamics_rollout_defect_details(periodic_nmpc)
+    shift_score, shift_normalized = _normalized_mechanical_transfer_score(
+        shift_defects,
+        max_scaled_q_defect=max_scaled_q_defect,
+        max_scaled_qdot_defect=max_scaled_qdot_defect,
+    )
+
+    rollout_summary = rollout_transferred_cycle_acados_irk(
+        periodic_nmpc,
+        max_allowed_bound_violation=None,
+    )
+    if not rollout_summary.get("applied", False):
+        _restore_initial_guess_snapshot(periodic_nmpc, shift_snapshot)
+        rollout_summary["candidate_selection"] = {
+            "selected": "shift",
+            "reason": "rollout_unavailable",
+            "shift_projection": shift_projection,
+            "rollout_projection": None,
+            "shift_defects": shift_defects,
+            "rollout_defects": None,
+            "shift_normalized_mechanical_defects": shift_normalized,
+            "rollout_normalized_mechanical_defects": None,
+            "shift_score": shift_score,
+            "rollout_score": None,
+            "selection_time_s": perf_counter() - selection_start,
+        }
+        return rollout_summary
+
+    rollout_projection = project_transferred_initial_guess_to_bounds(periodic_nmpc)
+    rollout_defects = _full_dynamics_rollout_defect_details(periodic_nmpc)
+    rollout_score, rollout_normalized = _normalized_mechanical_transfer_score(
+        rollout_defects,
+        max_scaled_q_defect=max_scaled_q_defect,
+        max_scaled_qdot_defect=max_scaled_qdot_defect,
+    )
+
+    raw_by_key = rollout_summary.get("max_bound_violation_by_key", {})
+    scaled_by_key = rollout_summary.get("max_scaled_bound_violation_by_key", {})
+    position_keys = ("q", "theta")
+    velocity_keys = ("qdot", "omega")
+    q_bound_violation = max(
+        (float(raw_by_key.get(key, 0.0)) for key in position_keys), default=0.0
+    )
+    qdot_bound_violation = max(
+        (float(raw_by_key.get(key, 0.0)) for key in velocity_keys), default=0.0
+    )
+    mechanical_keys = set(position_keys + velocity_keys)
+    other_scaled_bound_violation = max(
+        (
+            float(value)
+            for key, value in scaled_by_key.items()
+            if key not in mechanical_keys
+        ),
+        default=0.0,
+    )
+
+    checks = {
+        "finite_scores": bool(np.isfinite(shift_score) and np.isfinite(rollout_score)),
+        "q_bound_guard": q_bound_violation <= max_q_bound_violation_rad,
+        "qdot_bound_guard": (
+            qdot_bound_violation <= max_qdot_bound_violation_rad_s
+        ),
+        "other_scaled_bound_guard": (
+            other_scaled_bound_violation <= max_other_scaled_bound_violation
+        ),
+        "projected_q_defect_guard": rollout_normalized["q"] <= 1.0,
+        "projected_qdot_defect_guard": rollout_normalized["qdot"] <= 1.0,
+        "mechanical_improvement": (
+            rollout_score <= improvement_ratio * shift_score
+        ),
+    }
+    selected_rollout = all(checks.values())
+    if not selected_rollout:
+        _restore_initial_guess_snapshot(periodic_nmpc, shift_snapshot)
+    failed_checks = [name for name, passed in checks.items() if not passed]
+    selection = {
+        "selected": "rollout" if selected_rollout else "shift",
+        "reason": None if selected_rollout else ",".join(failed_checks),
+        "checks": checks,
+        "limits": {
+            "q_bound_violation_rad": max_q_bound_violation_rad,
+            "qdot_bound_violation_rad_s": max_qdot_bound_violation_rad_s,
+            "other_scaled_bound_violation": max_other_scaled_bound_violation,
+            "scaled_q_defect": max_scaled_q_defect,
+            "scaled_qdot_defect": max_scaled_qdot_defect,
+            "improvement_ratio": improvement_ratio,
+        },
+        "raw_bound_violations": {
+            "q_rad": q_bound_violation,
+            "qdot_rad_s": qdot_bound_violation,
+            "other_scaled": other_scaled_bound_violation,
+        },
+        "shift_projection": shift_projection,
+        "rollout_projection": rollout_projection,
+        "shift_defects": shift_defects,
+        "rollout_defects": rollout_defects,
+        "shift_normalized_mechanical_defects": shift_normalized,
+        "rollout_normalized_mechanical_defects": rollout_normalized,
+        "shift_score": shift_score,
+        "rollout_score": rollout_score,
+        "selection_time_s": perf_counter() - selection_start,
+    }
+    rollout_summary["candidate_selection"] = selection
+    rollout_summary["applied"] = selected_rollout
+    rollout_summary["rk4_defects_after"] = (
+        rollout_defects if selected_rollout else None
+    )
+    return rollout_summary
 
 
 def _copy_state_bounds(
@@ -12841,6 +13092,10 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
         getattr(args, "initial_guess_diagnostics", False)
         or (args.solver == "acados" and args.acados_diagnostics)
     )
+    if args.exact_initial_nlp_audit and args.solver not in NLP_SOLVER_NAMES:
+        raise ValueError(
+            "--exact-initial-nlp-audit is available only for CasADi NLP solvers."
+        )
     args.terminal_wheel_q_reference_mode = "absolute_initial"
     objectives = parse_objectives(args.objective)
     torque_diagnostics = crank_torque_diagnostics(
@@ -13058,6 +13313,44 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
         raise ValueError(
             "--acados-transfer-rollout-max-bound-violation must be non-negative."
         )
+    selector_positive_limits = {
+        "--acados-transfer-selector-max-q-bound-violation-rad": (
+            args.acados_transfer_selector_max_q_bound_violation_rad
+        ),
+        "--acados-transfer-selector-max-qdot-bound-violation-rad-s": (
+            args.acados_transfer_selector_max_qdot_bound_violation_rad_s
+        ),
+        "--acados-transfer-selector-max-other-scaled-bound-violation": (
+            args.acados_transfer_selector_max_other_scaled_bound_violation
+        ),
+        "--acados-transfer-selector-max-scaled-q-defect": (
+            args.acados_transfer_selector_max_scaled_q_defect
+        ),
+        "--acados-transfer-selector-max-scaled-qdot-defect": (
+            args.acados_transfer_selector_max_scaled_qdot_defect
+        ),
+    }
+    for option, value in selector_positive_limits.items():
+        if not np.isfinite(value) or value <= 0.0:
+            raise ValueError(f"{option} must be finite and strictly positive.")
+    if not (
+        np.isfinite(args.acados_transfer_selector_improvement_ratio)
+        and 0.0 < args.acados_transfer_selector_improvement_ratio <= 1.0
+    ):
+        raise ValueError(
+            "--acados-transfer-selector-improvement-ratio must lie in (0, 1]."
+        )
+    if args.acados_transfer_select_projected_candidate:
+        if args.solver != "acados" or not args.acados_transfer_irk_rollout:
+            raise ValueError(
+                "--acados-transfer-select-projected-candidate requires the "
+                "ACADOS IRK transfer rollout."
+            )
+        if args.acados_transfer_bound_homotopy:
+            raise ValueError(
+                "Projected transfer candidate selection cannot be combined with "
+                "the raw-bound transfer homotopy."
+            )
     if (
         not np.isfinite(args.acados_transfer_pulse_width_scale)
         or args.acados_transfer_pulse_width_scale <= 0
@@ -14134,6 +14427,35 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
                 f"{args.acados_transfer_rollout_max_bound_violation}"
             )
             print(
+                "acados_transfer_select_projected_candidate: "
+                f"{args.acados_transfer_select_projected_candidate}"
+            )
+            if args.acados_transfer_select_projected_candidate:
+                print(
+                    "acados_transfer_selector_max_q_bound_violation_rad: "
+                    f"{args.acados_transfer_selector_max_q_bound_violation_rad}"
+                )
+                print(
+                    "acados_transfer_selector_max_qdot_bound_violation_rad_s: "
+                    f"{args.acados_transfer_selector_max_qdot_bound_violation_rad_s}"
+                )
+                print(
+                    "acados_transfer_selector_max_other_scaled_bound_violation: "
+                    f"{args.acados_transfer_selector_max_other_scaled_bound_violation}"
+                )
+                print(
+                    "acados_transfer_selector_max_scaled_q_defect: "
+                    f"{args.acados_transfer_selector_max_scaled_q_defect}"
+                )
+                print(
+                    "acados_transfer_selector_max_scaled_qdot_defect: "
+                    f"{args.acados_transfer_selector_max_scaled_qdot_defect}"
+                )
+                print(
+                    "acados_transfer_selector_improvement_ratio: "
+                    f"{args.acados_transfer_selector_improvement_ratio}"
+                )
+            print(
                 "acados_transfer_pulse_width_scale: "
                 f"{args.acados_transfer_pulse_width_scale}"
             )
@@ -14668,6 +14990,26 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
                     f"bounds=[{item['lower']:.6g}, {item['upper']:.6g}]"
                 )
 
+    # Refinement caches, cycle-boundary seeds, ACADOS caches and phase-I can
+    # all replace or modify the primal trajectory after the common/horizon
+    # seed paths.  Certify the effective trajectory once more immediately
+    # before diagnostics and solver construction.
+    final_seed_finalization = None
+    if getattr(nmpc, "anchor_wheel_q_to_absolute_reference", False):
+        final_seed_finalization = finalize_absolute_wheel_q_initial_guess(
+            nmpc,
+            project_terminal_contact=True,
+        )
+        if echo:
+            print(
+                "effective_initial_seed_finalization: "
+                f"recentered={final_seed_finalization['recentered']} "
+                "terminal_wheel_clipped="
+                f"{final_seed_finalization['terminal_wheel_clipped']} "
+                "maximum_state_bound_violation="
+                f"{final_seed_finalization['maximum_state_bound_violation']:.6g}"
+            )
+
     if args.validate_integrator_maps:
         for row in high_accuracy_integrator_map_diagnostics(nmpc):
             if echo:
@@ -14731,6 +15073,7 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
     nlp_solver_stats = []
     compiled_nlp_tracker = CompiledNlpReuseTracker(nlp_c_compile_enabled(args))
     transfer_rollout_summaries = []
+    transfer_candidate_selection_summaries = []
     transfer_control_scaling_summaries = []
     transfer_qdot_projection_summaries = []
     transfer_mechanical_restoration_summaries = []
@@ -15218,16 +15561,43 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
             and args.solver == "acados"
             and args.acados_transfer_irk_rollout
         ):
-            rollout_summary = rollout_transferred_cycle_acados_irk(
-                _nmpc,
-                max_allowed_bound_violation=(
-                    None
-                    if args.acados_transfer_bound_homotopy
-                    else args.acados_transfer_rollout_max_bound_violation
-                ),
-            )
+            if args.acados_transfer_select_projected_candidate:
+                rollout_summary = select_projected_acados_irk_transfer_candidate(
+                    _nmpc,
+                    max_q_bound_violation_rad=(
+                        args.acados_transfer_selector_max_q_bound_violation_rad
+                    ),
+                    max_qdot_bound_violation_rad_s=(
+                        args.acados_transfer_selector_max_qdot_bound_violation_rad_s
+                    ),
+                    max_other_scaled_bound_violation=(
+                        args.acados_transfer_selector_max_other_scaled_bound_violation
+                    ),
+                    max_scaled_q_defect=(
+                        args.acados_transfer_selector_max_scaled_q_defect
+                    ),
+                    max_scaled_qdot_defect=(
+                        args.acados_transfer_selector_max_scaled_qdot_defect
+                    ),
+                    improvement_ratio=(
+                        args.acados_transfer_selector_improvement_ratio
+                    ),
+                )
+            else:
+                rollout_summary = rollout_transferred_cycle_acados_irk(
+                    _nmpc,
+                    max_allowed_bound_violation=(
+                        None
+                        if args.acados_transfer_bound_homotopy
+                        else args.acados_transfer_rollout_max_bound_violation
+                    ),
+                )
             transfer_rollout_applied = rollout_summary["applied"]
             transfer_rollout_summaries.append(rollout_summary)
+            candidate_selection = rollout_summary.get("candidate_selection")
+            if candidate_selection is not None:
+                candidate_selection = {"window": cycle_idx, **candidate_selection}
+                transfer_candidate_selection_summaries.append(candidate_selection)
             if echo:
                 print(
                     "acados_transfer_irk_rollout: "
@@ -15257,6 +15627,22 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
                         "acados_transfer_irk_rollout_rk4_defects: "
                         f"absolute={rk4_defects.get('absolute_by_block')} "
                         f"scaled={rk4_defects.get('scaled_by_block')}"
+                    )
+                if candidate_selection is not None:
+                    print(
+                        "acados_transfer_candidate_selection: "
+                        f"window={cycle_idx} "
+                        f"selected={candidate_selection['selected']} "
+                        f"reason={candidate_selection['reason']} "
+                        f"scores={candidate_selection['shift_score']}->"
+                        f"{candidate_selection['rollout_score']} "
+                        "normalized_shift="
+                        f"{candidate_selection['shift_normalized_mechanical_defects']} "
+                        "normalized_rollout="
+                        f"{candidate_selection['rollout_normalized_mechanical_defects']} "
+                        "raw_bounds="
+                        f"{candidate_selection['raw_bound_violations']} "
+                        f"selection_time_s={candidate_selection['selection_time_s']:.6g}"
                     )
         if (
             continue_solving
@@ -15739,6 +16125,10 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
             solver.set_only_first_options_has_changed(False)
     else:
         solver = configure_cycle_nlp_solver(args)
+        if args.exact_initial_nlp_audit:
+            enable_exact_initial_nlp_audit(nmpc, solver)
+            if echo:
+                print("exact_initial_nlp_audit: enabled")
 
     control_homotopy_completed_for_seed = False
     if args.solver == "acados" and cycle_boundary_homotopy_schedule is not None:
@@ -15997,6 +16387,7 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
             summary["cycle_boundary_homotopy_summary"] = cycle_boundary_homotopy_summary
         if terminal_wheel_bound_summaries:
             summary["terminal_wheel_bound_summaries"] = terminal_wheel_bound_summaries
+        attach_exact_initial_nlp_audits(summary, nmpc)
         if build_mechanical_audit_profile:
             attach_mechanical_equivalence_audit(summary, reduced_cycling_dynamics)
         return summary
@@ -16044,6 +16435,7 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
         summary["compiled_nlp_reuse"] = compiled_nlp_tracker.summary()
         if cycle_boundary_homotopy_summary is not None:
             summary["cycle_boundary_homotopy_summary"] = cycle_boundary_homotopy_summary
+        attach_exact_initial_nlp_audits(summary, nmpc)
         return summary
     if (
         common_initial_solution_output is not None
@@ -16094,6 +16486,10 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
         summary["compiled_nlp_reuse"] = compiled_nlp_tracker.summary()
     if transfer_rollout_summaries:
         summary["transfer_rollout_summaries"] = transfer_rollout_summaries
+    if transfer_candidate_selection_summaries:
+        summary["transfer_candidate_selection_summaries"] = (
+            transfer_candidate_selection_summaries
+        )
     if transfer_control_scaling_summaries:
         summary[
             "transfer_control_scaling_summaries"
@@ -16170,6 +16566,7 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
     summary["absolute_wheel_q_origin_reference"] = absolute_wheel_q_origin_reference
     summary["absolute_wheel_q_start_cycle_index"] = absolute_wheel_q_start_cycle_index
     summary["native_solver_status"] = _native_solver_status(nmpc)
+    attach_exact_initial_nlp_audits(summary, nmpc)
     if build_mechanical_audit_profile:
         attach_mechanical_equivalence_audit(summary, reduced_cycling_dynamics)
     if args.receding_horizon_solution_output is not None:

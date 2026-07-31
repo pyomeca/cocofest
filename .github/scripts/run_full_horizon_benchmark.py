@@ -525,6 +525,7 @@ def _full_horizon_command(
         # These diagnostics distinguish a geometrically exact reduced-to-full
         # bridge from a dynamically infeasible monolithic transcription.
         "--initial-guess-diagnostics",
+        "--exact-initial-nlp-audit",
         "--periodic-ipopt-refinement-use-sx",
         "--periodic-ipopt-refinement-iterations",
         str(args.max_iterations),

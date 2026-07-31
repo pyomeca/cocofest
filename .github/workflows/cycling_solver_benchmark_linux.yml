@@ -93,7 +93,7 @@ env:
   BIOPTIM_REPOSITORY: mickaelbegon/BiorbdOptim
   # Dedicated multi-solver integration branch:
   # codex/cocofest-acados-v055-exploration
-  BIOPTIM_PRODUCTION_COMMIT: efd59c39777c83f97058f8d6c1ef472f78f9925d
+  BIOPTIM_PRODUCTION_COMMIT: dad96b90d47c36126c1e97ec35f27c499abf4b12
   BIOPTIM_ALPAQA_COMMIT: d84e7e43534360fc048e0be26a3bd69a2abc2d77
   ACADOS_COMMIT: 59d93e17d2985fdd73fc58b8a83ed8f83a024171
   ACADOS_INSTALL_SCRIPT_BLOB: 5ac8064ab613251e62560b5de8cbbb9550f5c5d0
@@ -632,7 +632,7 @@ jobs:
                 --common-initial-solution-output
                 "$GITHUB_WORKSPACE/acados-smoke-results/reference-full-feasible-seed.npz"
               )
-            elif [[ ( "$variant" == "sqp-irk-two-stage-cadence-reg-1" || "$variant" == "sqp-irk-cadence-reg-1-rollout-guard" || "$variant" == "sqp-irk-cadence-reg-1-best-retry" || "$variant" == "sqp-byrd-omojokun-cadence-reg-1-irk" || "$variant" == "sqp-byrd-terminal-homotopy-cadence-reg-1-irk" || "$variant" == "sqp-byrd-rollout-accept-cadence-reg-1-irk" ) && "$mechanics" == "full" ]]; then
+            elif [[ ( "$variant" == "sqp-irk-two-stage-cadence-reg-1" || "$variant" == "sqp-irk-cadence-reg-1-rollout-guard" || "$variant" == "sqp-irk-cadence-reg-1-best-retry" || "$variant" == "sqp-byrd-omojokun-cadence-reg-1-irk" || "$variant" == "sqp-byrd-terminal-homotopy-cadence-reg-1-irk" || "$variant" == "sqp-byrd-rollout-accept-cadence-reg-1-irk" || "$variant" == "sqp-byrd-projected-selector-cadence-reg-1-irk" ) && "$mechanics" == "full" ]]; then
               common_seed="$GITHUB_WORKSPACE/acados-smoke-results/reference-full-feasible-seed.npz"
               if [[ ! -f "$common_seed" ]]; then
                 echo "The full cadence-regularized case requires the preceding feasible reference seed." >&2
@@ -756,7 +756,7 @@ jobs:
                 --acados-wheel-qdot-regularization-weight 0.1
               )
             fi
-            if [[ "$variant" == "sqp-irk-two-stage-cadence-reg-1" || "$variant" == "sqp-irk-cadence-reg-1-rollout-guard" || "$variant" == "sqp-irk-cadence-reg-1-best-retry" || "$variant" == "sqp-byrd-omojokun-cadence-reg-1-irk" || "$variant" == "sqp-byrd-terminal-homotopy-cadence-reg-1-irk" || "$variant" == "sqp-byrd-rollout-accept-cadence-reg-1-irk" ]]; then
+            if [[ "$variant" == "sqp-irk-two-stage-cadence-reg-1" || "$variant" == "sqp-irk-cadence-reg-1-rollout-guard" || "$variant" == "sqp-irk-cadence-reg-1-best-retry" || "$variant" == "sqp-byrd-omojokun-cadence-reg-1-irk" || "$variant" == "sqp-byrd-terminal-homotopy-cadence-reg-1-irk" || "$variant" == "sqp-byrd-rollout-accept-cadence-reg-1-irk" || "$variant" == "sqp-byrd-projected-selector-cadence-reg-1-irk" ]]; then
               solver_options+=(
                 --acados-wheel-qdot-regularization-weight 1
               )
@@ -782,6 +782,15 @@ jobs:
               # it tests whether always rolling out removes that alternation.
               solver_options+=(
                 --shared-transfer-rollout-max-bound-violation 12
+              )
+            fi
+            if [[ "$variant" == "sqp-byrd-projected-selector-cadence-reg-1-irk" ]]; then
+              # Opt-in candidate selector: compare the contact/bound-projected
+              # cyclic shift with the projected IRK rollout. Keep the rollout
+              # only when q and qdot defects pass their dimensionless guards
+              # and improve the shifted seed by at least five percent.
+              solver_options+=(
+                --acados-transfer-select-projected-candidate
               )
             fi
             if [[ "$variant" == "sqp-irk-cadence-reg-1-rollout-guard" ]]; then
@@ -920,6 +929,7 @@ jobs:
             run_case sqp-byrd-omojokun-cadence-reg-1-irk full "$ACADOS_SMOKE_RHOS" SQP_WITH_FEASIBLE_QP IRK 5 5
             run_case sqp-byrd-terminal-homotopy-cadence-reg-1-irk full "$ACADOS_SMOKE_RHOS" SQP_WITH_FEASIBLE_QP IRK 5 5
             run_case sqp-byrd-rollout-accept-cadence-reg-1-irk full "$ACADOS_SMOKE_RHOS" SQP_WITH_FEASIBLE_QP IRK 5 5
+            run_case sqp-byrd-projected-selector-cadence-reg-1-irk full "$ACADOS_SMOKE_RHOS" SQP_WITH_FEASIBLE_QP IRK 5 5
           elif [[ "$acados_long" == "true" ]]; then
             printf '%s\n' \
               sqp-irk-reference-full \
@@ -1444,7 +1454,7 @@ jobs:
             timeout_minutes: 300
             benchmark_rhos: ${{ inputs.cycles }}
             cycles_per_window: ${{ inputs.cycles_per_window }}
-            bioptim_commit: efd59c39777c83f97058f8d6c1ef472f78f9925d
+            bioptim_commit: dad96b90d47c36126c1e97ec35f27c499abf4b12
             integration_branch: codex/cocofest-acados-v055-exploration
             casadi_cxx_abi: 0
           - solver: madnlp
@@ -1454,7 +1464,7 @@ jobs:
             timeout_minutes: 420
             benchmark_rhos: ${{ inputs.cycles }}
             cycles_per_window: ${{ inputs.cycles_per_window }}
-            bioptim_commit: efd59c39777c83f97058f8d6c1ef472f78f9925d
+            bioptim_commit: dad96b90d47c36126c1e97ec35f27c499abf4b12
             integration_branch: codex/cocofest-acados-v055-exploration
             casadi_cxx_abi: 1
           - solver: fatrop
@@ -1464,7 +1474,7 @@ jobs:
             timeout_minutes: 420
             benchmark_rhos: ${{ inputs.cycles }}
             cycles_per_window: ${{ inputs.cycles_per_window }}
-            bioptim_commit: efd59c39777c83f97058f8d6c1ef472f78f9925d
+            bioptim_commit: dad96b90d47c36126c1e97ec35f27c499abf4b12
             integration_branch: codex/cocofest-acados-v055-exploration
             casadi_cxx_abi: 0
     env:
@@ -1970,7 +1980,7 @@ jobs:
       COCOFEST_BENCHMARK_COMMIT: ${{ github.sha }}
       # Job-level env entries cannot reference another env entry. Keep this
       # literal synchronized with BIOPTIM_PRODUCTION_COMMIT above.
-      BIOPTIM_BENCHMARK_COMMIT: efd59c39777c83f97058f8d6c1ef472f78f9925d
+      BIOPTIM_BENCHMARK_COMMIT: dad96b90d47c36126c1e97ec35f27c499abf4b12
       BIOPTIM_INTEGRATION_BRANCH: codex/cocofest-acados-v055-exploration
     defaults:
       run:

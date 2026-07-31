@@ -5506,10 +5506,10 @@ def test_github_acados_runner_uses_reference_and_option_profiles_sequentially():
     assert "inputs.cycles != 'screen' && inputs.cycles != 'acados'" in workflow
     assert "prepare-acados-stack:" in workflow
     assert (
-        "BIOPTIM_PRODUCTION_COMMIT: " "efd59c39777c83f97058f8d6c1ef472f78f9925d"
+        "BIOPTIM_PRODUCTION_COMMIT: " "dad96b90d47c36126c1e97ec35f27c499abf4b12"
     ) in workflow
     assert (
-        workflow.count("bioptim_commit: efd59c39777c83f97058f8d6c1ef472f78f9925d") == 3
+        workflow.count("bioptim_commit: dad96b90d47c36126c1e97ec35f27c499abf4b12") == 3
     )
     assert "a3499cab16d7605b8efa7255cf89f1af6a7c59c9" not in workflow
     assert "ACADOS_COMMIT: 59d93e17d2985fdd73fc58b8a83ed8f83a024171" in workflow
@@ -5538,6 +5538,8 @@ def test_github_acados_runner_uses_reference_and_option_profiles_sequentially():
     assert "--acados-anderson-activation-threshold 0.1" in workflow
     assert "--acados-check-reuse-possible" in workflow
     assert "--acados-byrd-omojokon-slack-relaxation-factor 1.00001" in workflow
+    assert "run_case sqp-byrd-projected-selector-cadence-reg-1-irk" in workflow
+    assert "--acados-transfer-select-projected-candidate" in workflow
     assert "run_case sqp-irk-two-stage" in workflow
     assert (
         "--acados-transfer-bound-homotopy-fractions "
@@ -5632,7 +5634,7 @@ def test_github_acados_runner_uses_reference_and_option_profiles_sequentially():
     focused_campaign = workflow.split(
         'if [[ "$ACADOS_HOMOTOPY_ONLY" == "true" ]]; then', maxsplit=1
     )[1].split('elif [[ "$acados_long" == "true" ]]; then', maxsplit=1)[0]
-    assert focused_campaign.count("run_case ") == 4
+    assert focused_campaign.count("run_case ") == 5
     assert "run_case sqp-irk-reference full 1" in focused_campaign
     assert "run_case sqp-byrd-omojokun-cadence-reg-1-irk full" in focused_campaign
     assert (
@@ -6975,6 +6977,39 @@ def test_control_bounds_summary_preserves_physical_units():
     assert periodic_example._control_bounds_summary(nmpc) == {
         "last_pulse_width_Biceps": {"lower": 0.0001, "upper": 0.0007}
     }
+
+
+def test_exact_initial_nlp_audit_is_enabled_and_attached_without_mutation():
+    audits = [
+        {
+            "solver": "madnlp",
+            "constraints": {"maximum_bound_violation": 0.25},
+            "variables": {"maximum_bound_violation": 0.0},
+            "evaluation_time_s": 0.01,
+        }
+    ]
+
+    class FakeInterface:
+        initial_nlp_audits = audits
+
+        def enable_initial_nlp_audit(self):
+            self.enabled = True
+
+    nmpc = SimpleNamespace(ocp_solver=None)
+
+    def set_ocp_solver(solver):
+        nmpc.ocp_solver = solver
+
+    nmpc.set_ocp_solver = set_ocp_solver
+    interface = FakeInterface()
+
+    periodic_example.enable_exact_initial_nlp_audit(nmpc, interface)
+    summary = {}
+    periodic_example.attach_exact_initial_nlp_audits(summary, nmpc)
+
+    assert interface.enabled is True
+    assert summary["exact_initial_nlp_audits"] == audits
+    assert summary["exact_initial_nlp_audits"] is not audits
 
 
 def test_continuation_source_inherits_requested_acados_tolerances(
@@ -8477,6 +8512,196 @@ def test_acados_irk_transfer_rollout_uses_scaled_variables_and_stage_data():
     assert [field for field, _ in simulator.settings] == ["T", "t0", "T", "t0"]
     np.testing.assert_allclose(simulator.settings[0][1], [0.5])
     np.testing.assert_allclose(simulator.settings[1][1], [1.0])
+    assert summary["max_scaled_bound_violation_by_key"] == {"q": 0.0, "qdot": 0.0}
+
+
+def test_projected_acados_transfer_selector_keeps_mechanically_better_rollout(
+    monkeypatch,
+):
+    q = np.array([[0.0, 0.0]])
+    qdot = np.array([[0.0, 0.0]])
+    nmpc = SimpleNamespace(
+        nlp=[
+            SimpleNamespace(
+                x_init={
+                    "q": SimpleNamespace(init=q),
+                    "qdot": SimpleNamespace(init=qdot),
+                },
+                u_init={"u": SimpleNamespace(init=np.array([[0.0]]))},
+            )
+        ]
+    )
+    monkeypatch.setattr(
+        periodic_example,
+        "project_transferred_initial_guess_to_bounds",
+        lambda _: {"state_max_change": 0.0, "control_max_change": 0.0},
+    )
+
+    def fake_rollout(candidate, max_allowed_bound_violation):
+        assert max_allowed_bound_violation is None
+        candidate.nlp[0].x_init["q"].init[:, :] = 1.0
+        candidate.nlp[0].x_init["qdot"].init[:, :] = 1.0
+        return {
+            "applied": True,
+            "max_bound_violation": 9.7,
+            "max_bound_violation_by_key": {"q": 0.3, "qdot": 9.7, "F_Biceps": 2.0},
+            "max_scaled_bound_violation_by_key": {
+                "q": 0.05,
+                "qdot": 0.8,
+                "F_Biceps": 0.2,
+            },
+        }
+
+    monkeypatch.setattr(
+        periodic_example, "rollout_transferred_cycle_acados_irk", fake_rollout
+    )
+
+    def fake_defects(candidate):
+        is_rollout = bool(candidate.nlp[0].x_init["qdot"].init[0, 0])
+        return {
+            "scaled_by_block": (
+                {"q": 0.05, "qdot": 0.05}
+                if is_rollout
+                else {"q": 0.01, "qdot": 0.4}
+            )
+        }
+
+    monkeypatch.setattr(
+        periodic_example, "_full_dynamics_rollout_defect_details", fake_defects
+    )
+
+    summary = periodic_example.select_projected_acados_irk_transfer_candidate(nmpc)
+
+    assert summary["applied"] is True
+    assert summary["candidate_selection"]["selected"] == "rollout"
+    assert summary["candidate_selection"]["shift_score"] == 4.0
+    assert summary["candidate_selection"]["rollout_score"] == 0.5
+    assert summary["candidate_selection"]["raw_bound_violations"] == {
+        "q_rad": 0.3,
+        "qdot_rad_s": 9.7,
+        "other_scaled": 0.2,
+    }
+    np.testing.assert_allclose(q, 1.0)
+    np.testing.assert_allclose(qdot, 1.0)
+
+
+def test_projected_acados_transfer_selector_restores_shift_when_qdot_guard_fails(
+    monkeypatch,
+):
+    q = np.array([[2.0, 3.0]])
+    qdot = np.array([[4.0, 5.0]])
+    controls = np.array([[6.0]])
+    nmpc = SimpleNamespace(
+        nlp=[
+            SimpleNamespace(
+                x_init={
+                    "q": SimpleNamespace(init=q),
+                    "qdot": SimpleNamespace(init=qdot),
+                },
+                u_init={"u": SimpleNamespace(init=controls)},
+            )
+        ]
+    )
+    monkeypatch.setattr(
+        periodic_example,
+        "project_transferred_initial_guess_to_bounds",
+        lambda _: {"state_max_change": 0.0, "control_max_change": 0.0},
+    )
+
+    def fake_rollout(candidate, max_allowed_bound_violation):
+        candidate.nlp[0].x_init["q"].init[:, :] = 10.0
+        candidate.nlp[0].x_init["qdot"].init[:, :] = 11.0
+        candidate.nlp[0].u_init["u"].init[:, :] = 12.0
+        return {
+            "applied": True,
+            "max_bound_violation": 13.0,
+            "max_bound_violation_by_key": {"q": 0.2, "qdot": 13.0},
+            "max_scaled_bound_violation_by_key": {"q": 0.03, "qdot": 1.0},
+        }
+
+    monkeypatch.setattr(
+        periodic_example, "rollout_transferred_cycle_acados_irk", fake_rollout
+    )
+    monkeypatch.setattr(
+        periodic_example,
+        "_full_dynamics_rollout_defect_details",
+        lambda candidate: {
+            "scaled_by_block": (
+                {"q": 0.01, "qdot": 0.01}
+                if candidate.nlp[0].x_init["q"].init[0, 0] == 10.0
+                else {"q": 0.05, "qdot": 0.5}
+            )
+        },
+    )
+
+    summary = periodic_example.select_projected_acados_irk_transfer_candidate(nmpc)
+
+    assert summary["applied"] is False
+    assert summary["candidate_selection"]["selected"] == "shift"
+    assert summary["candidate_selection"]["checks"]["qdot_bound_guard"] is False
+    assert "qdot_bound_guard" in summary["candidate_selection"]["reason"]
+    np.testing.assert_allclose(q, [[2.0, 3.0]])
+    np.testing.assert_allclose(qdot, [[4.0, 5.0]])
+    np.testing.assert_allclose(controls, [[6.0]])
+
+
+def test_projected_acados_transfer_selector_supports_reduced_theta_omega(
+    monkeypatch,
+):
+    theta = np.zeros((1, 2))
+    omega = np.zeros((1, 2))
+    nmpc = SimpleNamespace(
+        nlp=[
+            SimpleNamespace(
+                x_init={
+                    "theta": SimpleNamespace(init=theta),
+                    "omega": SimpleNamespace(init=omega),
+                },
+                u_init={"u": SimpleNamespace(init=np.zeros((1, 1)))},
+            )
+        ]
+    )
+    monkeypatch.setattr(
+        periodic_example,
+        "project_transferred_initial_guess_to_bounds",
+        lambda _: {"state_max_change": 0.0, "control_max_change": 0.0},
+    )
+
+    def fake_rollout(candidate, max_allowed_bound_violation):
+        candidate.nlp[0].x_init["theta"].init[:, :] = 1.0
+        candidate.nlp[0].x_init["omega"].init[:, :] = 1.0
+        return {
+            "applied": True,
+            "max_bound_violation": 8.0,
+            "max_bound_violation_by_key": {"theta": 0.4, "omega": 8.0},
+            "max_scaled_bound_violation_by_key": {"theta": 0.06, "omega": 0.7},
+        }
+
+    monkeypatch.setattr(
+        periodic_example, "rollout_transferred_cycle_acados_irk", fake_rollout
+    )
+    monkeypatch.setattr(
+        periodic_example,
+        "_full_dynamics_rollout_defect_details",
+        lambda candidate: {
+            "scaled_by_block": (
+                {"q": 0.04, "qdot": 0.04}
+                if candidate.nlp[0].x_init["theta"].init[0, 0]
+                else {"q": 0.02, "qdot": 0.3}
+            )
+        },
+    )
+
+    summary = periodic_example.select_projected_acados_irk_transfer_candidate(nmpc)
+
+    assert summary["applied"] is True
+    assert summary["candidate_selection"]["raw_bound_violations"] == {
+        "q_rad": 0.4,
+        "qdot_rad_s": 8.0,
+        "other_scaled": 0.0,
+    }
+    np.testing.assert_allclose(theta, 1.0)
+    np.testing.assert_allclose(omega, 1.0)
 
 
 def test_acados_irk_transfer_rejects_dimension_mismatch_without_mutating_guess():
@@ -9631,6 +9856,7 @@ def test_shared_transfer_rollout_cli_is_available_to_ipopt():
         [
             "--solver",
             "ipopt",
+            "--exact-initial-nlp-audit",
             "--transfer-full-dynamics-rollout",
             "--transfer-phase-one",
             "--acados-transfer-phase-one-mode",
@@ -9652,6 +9878,7 @@ def test_shared_transfer_rollout_cli_is_available_to_ipopt():
     comparison_args = comparison_example.build_cli().parse_args(
         [
             "--shared-transfer-full-dynamics-rollout",
+            "--exact-initial-nlp-audit",
             "--compact-rho-output",
             "--shared-transfer-phase-one",
             "--acados-transfer-phase-one",
@@ -9693,6 +9920,19 @@ def test_shared_transfer_rollout_cli_is_available_to_ipopt():
             "--shared-initial-phase-one",
             "--shared-transfer-rollout-substeps",
             "7",
+            "--acados-transfer-select-projected-candidate",
+            "--acados-transfer-selector-max-q-bound-violation-rad",
+            "0.8",
+            "--acados-transfer-selector-max-qdot-bound-violation-rad-s",
+            "10",
+            "--acados-transfer-selector-max-other-scaled-bound-violation",
+            "0.9",
+            "--acados-transfer-selector-max-scaled-q-defect",
+            "0.08",
+            "--acados-transfer-selector-max-scaled-qdot-defect",
+            "0.09",
+            "--acados-transfer-selector-improvement-ratio",
+            "0.9",
             "--shared-transfer-ding-force-compensation",
             "--shared-transfer-ding-force-compensation-substeps",
             "6",
@@ -9721,6 +9961,7 @@ def test_shared_transfer_rollout_cli_is_available_to_ipopt():
     )
 
     assert args.acados_transfer_full_dynamics_rollout is True
+    assert args.exact_initial_nlp_audit is True
     assert args.acados_transfer_phase_one is True
     assert args.acados_transfer_phase_one_mode == "mechanical"
     assert args.acados_transfer_phase_one_lookback_nodes == 15
@@ -9730,6 +9971,7 @@ def test_shared_transfer_rollout_cli_is_available_to_ipopt():
     assert args.full_dynamics_phase_one_max_qdot_change == 2
     assert args.full_dynamics_phase_one_max_fes_change == 3
     assert comparison_args.shared_transfer_full_dynamics_rollout is True
+    assert comparison_args.exact_initial_nlp_audit is True
     assert comparison_args.compact_rho_output is True
     assert comparison_args.shared_transfer_phase_one is True
     assert comparison_args.acados_transfer_phase_one is True
@@ -9758,6 +10000,18 @@ def test_shared_transfer_rollout_cli_is_available_to_ipopt():
     assert comparison_args.acados_transfer_bound_homotopy_max_refinements == 16
     assert comparison_args.shared_initial_phase_one is True
     assert comparison_args.shared_transfer_rollout_substeps == 7
+    assert comparison_args.acados_transfer_select_projected_candidate is True
+    assert comparison_args.acados_transfer_selector_max_q_bound_violation_rad == 0.8
+    assert (
+        comparison_args.acados_transfer_selector_max_qdot_bound_violation_rad_s == 10
+    )
+    assert (
+        comparison_args.acados_transfer_selector_max_other_scaled_bound_violation
+        == 0.9
+    )
+    assert comparison_args.acados_transfer_selector_max_scaled_q_defect == 0.08
+    assert comparison_args.acados_transfer_selector_max_scaled_qdot_defect == 0.09
+    assert comparison_args.acados_transfer_selector_improvement_ratio == 0.9
     assert comparison_args.shared_transfer_ding_force_compensation is True
     assert comparison_args.shared_transfer_ding_force_compensation_substeps == 6
     assert comparison_args.acados_transfer_ding_force_compensation is True

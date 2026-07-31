@@ -2952,6 +2952,13 @@ def main(
     shared_initial_phase_one: bool = False,
     shared_transfer_rollout_substeps: int = 5,
     shared_transfer_rollout_max_bound_violation: float = 1.0,
+    acados_transfer_select_projected_candidate: bool = False,
+    acados_transfer_selector_max_q_bound_violation_rad: float = 1.0,
+    acados_transfer_selector_max_qdot_bound_violation_rad_s: float = 12.0,
+    acados_transfer_selector_max_other_scaled_bound_violation: float = 1.0,
+    acados_transfer_selector_max_scaled_q_defect: float = 0.1,
+    acados_transfer_selector_max_scaled_qdot_defect: float = 0.1,
+    acados_transfer_selector_improvement_ratio: float = 0.95,
     shared_transfer_ding_force_compensation: bool = False,
     shared_transfer_ding_force_compensation_substeps: int = 5,
     shared_transfer_ding_force_compensation_iterations: int = 20,
@@ -2975,6 +2982,7 @@ def main(
     periodic_fes_warmup_force_adaptive_steps: int = 10,
     acados_diagnostics: bool = False,
     initial_guess_diagnostics: bool = False,
+    exact_initial_nlp_audit: bool = False,
     periodic_ipopt_refinement: bool = True,
     periodic_ipopt_refinement_iterations: int = 300,
     periodic_ipopt_refinement_use_sx: bool = True,
@@ -3439,6 +3447,27 @@ def main(
         shared_transfer_ding_force_compensation
         or acados_transfer_ding_force_compensation
     )
+    acados_args.acados_transfer_select_projected_candidate = (
+        acados_transfer_select_projected_candidate
+    )
+    acados_args.acados_transfer_selector_max_q_bound_violation_rad = (
+        acados_transfer_selector_max_q_bound_violation_rad
+    )
+    acados_args.acados_transfer_selector_max_qdot_bound_violation_rad_s = (
+        acados_transfer_selector_max_qdot_bound_violation_rad_s
+    )
+    acados_args.acados_transfer_selector_max_other_scaled_bound_violation = (
+        acados_transfer_selector_max_other_scaled_bound_violation
+    )
+    acados_args.acados_transfer_selector_max_scaled_q_defect = (
+        acados_transfer_selector_max_scaled_q_defect
+    )
+    acados_args.acados_transfer_selector_max_scaled_qdot_defect = (
+        acados_transfer_selector_max_scaled_qdot_defect
+    )
+    acados_args.acados_transfer_selector_improvement_ratio = (
+        acados_transfer_selector_improvement_ratio
+    )
     acados_args.acados_transfer_phase_one = bool(
         shared_transfer_phase_one or acados_transfer_phase_one
     )
@@ -3573,6 +3602,10 @@ def main(
     for solver_configuration in solver_args.values():
         solver_configuration.initial_guess_diagnostics = bool(
             initial_guess_diagnostics
+        )
+        solver_configuration.exact_initial_nlp_audit = bool(
+            exact_initial_nlp_audit
+            and solver_configuration.solver in NLP_SOLVER_NAMES
         )
         solver_configuration.mechanical_equivalence_audit = True
         solver_configuration.full_contact_constraints_terminal = bool(
@@ -4181,6 +4214,40 @@ def build_cli() -> argparse.ArgumentParser:
         default=1.0,
     )
     parser.add_argument(
+        "--acados-transfer-select-projected-candidate",
+        action="store_true",
+    )
+    parser.add_argument(
+        "--acados-transfer-selector-max-q-bound-violation-rad",
+        type=float,
+        default=1.0,
+    )
+    parser.add_argument(
+        "--acados-transfer-selector-max-qdot-bound-violation-rad-s",
+        type=float,
+        default=12.0,
+    )
+    parser.add_argument(
+        "--acados-transfer-selector-max-other-scaled-bound-violation",
+        type=float,
+        default=1.0,
+    )
+    parser.add_argument(
+        "--acados-transfer-selector-max-scaled-q-defect",
+        type=float,
+        default=0.1,
+    )
+    parser.add_argument(
+        "--acados-transfer-selector-max-scaled-qdot-defect",
+        type=float,
+        default=0.1,
+    )
+    parser.add_argument(
+        "--acados-transfer-selector-improvement-ratio",
+        type=float,
+        default=0.95,
+    )
+    parser.add_argument(
         "--shared-transfer-ding-force-compensation",
         action="store_true",
         help=(
@@ -4677,6 +4744,14 @@ def build_cli() -> argparse.ArgumentParser:
         action="store_true",
         help="Store solver-neutral primal-seed defect diagnostics for every backend.",
     )
+    parser.add_argument(
+        "--exact-initial-nlp-audit",
+        action="store_true",
+        help=(
+            "Evaluate canonical g(x0) immediately before each CasADi NLP solve; "
+            "disabled for ACADOS and excluded from solver timing."
+        ),
+    )
     parser.add_argument("--disable-periodic-fes-warmup-projection", action="store_true")
     parser.add_argument(
         "--periodic-fes-warmup-projection-weight", type=float, default=1.0
@@ -5076,6 +5151,27 @@ if __name__ == "__main__":
         shared_transfer_rollout_max_bound_violation=(
             args.shared_transfer_rollout_max_bound_violation
         ),
+        acados_transfer_select_projected_candidate=(
+            args.acados_transfer_select_projected_candidate
+        ),
+        acados_transfer_selector_max_q_bound_violation_rad=(
+            args.acados_transfer_selector_max_q_bound_violation_rad
+        ),
+        acados_transfer_selector_max_qdot_bound_violation_rad_s=(
+            args.acados_transfer_selector_max_qdot_bound_violation_rad_s
+        ),
+        acados_transfer_selector_max_other_scaled_bound_violation=(
+            args.acados_transfer_selector_max_other_scaled_bound_violation
+        ),
+        acados_transfer_selector_max_scaled_q_defect=(
+            args.acados_transfer_selector_max_scaled_q_defect
+        ),
+        acados_transfer_selector_max_scaled_qdot_defect=(
+            args.acados_transfer_selector_max_scaled_qdot_defect
+        ),
+        acados_transfer_selector_improvement_ratio=(
+            args.acados_transfer_selector_improvement_ratio
+        ),
         shared_transfer_ding_force_compensation=(
             args.shared_transfer_ding_force_compensation
         ),
@@ -5129,6 +5225,7 @@ if __name__ == "__main__":
         ),
         acados_diagnostics=args.acados_diagnostics,
         initial_guess_diagnostics=args.initial_guess_diagnostics,
+        exact_initial_nlp_audit=args.exact_initial_nlp_audit,
         periodic_ipopt_refinement=args.periodic_ipopt_refinement,
         periodic_ipopt_refinement_iterations=args.periodic_ipopt_refinement_iterations,
         periodic_ipopt_refinement_use_sx=args.periodic_ipopt_refinement_use_sx,

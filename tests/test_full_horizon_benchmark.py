@@ -331,6 +331,7 @@ def test_rho_and_full_horizon_use_the_intended_solver_contract(tmp_path):
     )
     assert "--optional-nlp-periodic-ipopt-hot-start" in full
     assert "--initial-guess-diagnostics" in full
+    assert "--exact-initial-nlp-audit" in full
     assert "--acados-diagnostics" not in full
     assert "--periodic-ipopt-refinement-use-sx" in full
     assert full[full.index("--periodic-ipopt-refinement-iterations") + 1] == "2000"

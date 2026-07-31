@@ -60,11 +60,11 @@ provenance humaine.
 
 | Composant | Version Bioptim réellement utilisée |
 |---|---|
-| Construction et certification des seeds | `efd59c39777c83f97058f8d6c1ef472f78f9925d` |
-| IPOPT full/reduced | `efd59c39777c83f97058f8d6c1ef472f78f9925d` |
-| MadNLP/MUMPS full/reduced | `efd59c39777c83f97058f8d6c1ef472f78f9925d` |
-| FATROP/collocation full/reduced | `efd59c39777c83f97058f8d6c1ef472f78f9925d` |
-| ACADOS full/reduced et variantes | `efd59c39777c83f97058f8d6c1ef472f78f9925d` |
+| Construction et certification des seeds | `dad96b90d47c36126c1e97ec35f27c499abf4b12` |
+| IPOPT full/reduced | `dad96b90d47c36126c1e97ec35f27c499abf4b12` |
+| MadNLP/MUMPS full/reduced | `dad96b90d47c36126c1e97ec35f27c499abf4b12` |
+| FATROP/collocation full/reduced | `dad96b90d47c36126c1e97ec35f27c499abf4b12` |
+| ACADOS full/reduced et variantes | `dad96b90d47c36126c1e97ec35f27c499abf4b12` |
 
 Ce commit appartient à la branche dédiée
 `codex/cocofest-acados-v055-exploration`. Il part exactement de
@@ -80,6 +80,8 @@ et rassemble les adaptations communes aux différents solveurs :
 - la sauvegarde de l’état primal-dual, qui n’est volontairement pas utilisée
   pour écraser le rollout/projection primal de Cocofest;
 - les bornes de contrôle ordonnées et exprimées dans les coordonnées scalées;
+- l'audit optionnel de la violation canonique `g(x0)` et des bornes de
+  variables juste avant l'appel solveur, exclu du temps de résolution;
 - le scaling du guess terminal ACADOS, vérifié explicitement aux stages 0 et
   N par le test ajouté dans `036b9155`;
 - un JSON ACADOS isolé dans chaque dossier de code généré;
@@ -2640,7 +2642,7 @@ nouvelle bifurcation tardive ne se développe.
 Le run
 [`30592226411`](https://github.com/mickaelbegon/cocofest/actions/runs/30592226411)
 est le premier gate où tous les jobs utilisent réellement le même SHA Bioptim
-`efd59c39777c83f97058f8d6c1ef472f78f9925d`. IPOPT et MadNLP/MUMPS
+`dad96b90d47c36126c1e97ec35f27c499abf4b12`. IPOPT et MadNLP/MUMPS
 convergent 5/5 en full et en reduced; FATROP converge 5/5 en reduced, mais sa
 formulation full reste bloquée par la structure de collocation. Les résultats
 reduced sont quasiment identiques :
@@ -3502,8 +3504,11 @@ lent que le RHO full/SX : son raffinement IPOPT coûte `7.8 s`, puis MadNLP
 cycles, le raffinement IPOPT limité à 300 itérations échoue avec
 `inf_pr=3.145` et n'est pas appliqué; MadNLP part donc du simple relevé
 reduced→full, atteint 2000 itérations et reste très infaisable. Les deux
-chances identiques reproduisent le même bassin et n'apportent aucune
-robustesse.
+chances échouent avec des durées et pics RSS proches. Dans cette version du
+runner, la seconde chance écrasait toutefois le JSON et le log de la première :
+on peut conclure à la reproductibilité de l'échec, mais pas démontrer qu'il
+s'agit exactement du même bassin numérique. Les chances sont désormais
+stockées dans des sous-répertoires indépendants `chance-1/` et `chance-2/`.
 
 La campagne ne donne donc **aucune extrapolation mémoire fiable** vers 16 ou
 128 GiB : la barrière observée est la qualité du warm-start à deux cycles,
@@ -3538,7 +3543,7 @@ standard change numériquement le problème initial même à une taille où il
 était compatible. Le pont IPOPT/SX atteint `inf_pr=4.28e-4` sans converger et
 est appliqué comme seed provisoirement faisable; MadNLP s'arrête ensuite au
 statut natif `5` après `181` itérations, avec la même infaisabilité primale et
-une infaisabilité duale de `22.90`. Les deux chances reproduisent cet échec
+une infaisabilité duale de `22.90`. Les deux chances reproduisent un échec
 (`1.71–1.73 GiB` de RSS), alors que la campagne antérieure avec le pont
 standard certifiait un cycle.
 
@@ -3659,7 +3664,7 @@ fois chacun :
 | Temps mur, chance 1 | `316.3 s` | `1629.5 s` |
 | Temps mur, chance 2 | `311.8 s` | `1662.5 s` |
 | Pic RSS | `1.383 / 1.365 GiB` | `2.352 / 2.351 GiB` |
-| Statut natif final | `6` | `6` |
+| Statut natif final conservé (chance 2) | `6` | `6` |
 | Violation de borne du seed | `theta: 6.2792 rad` | `q: 6.2804 rad` |
 
 Le dernier chiffre est la cause dominante : le seed est hors borne d'environ
@@ -3669,7 +3674,9 @@ dynamique full. Les défauts RK4 du seed full sont au contraire petits
 (`q=2.09e-4 rad`, `qdot=9.71e-3 rad/s`, FES scaled `9.79e-3`). IPOPT reste à
 `inf_pr=1.925` et MadNLP consomme `1440.2 s` pour 2000 itérations, car ils
 essaient de réparer une incohérence de borne artificielle beaucoup plus grande
-que ces défauts dynamiques. La seconde chance reproduit le même bassin; la
+que ces défauts dynamiques. Les deux chances échouent dans des temps proches;
+les anciens artefacts ne conservant que le détail de la seconde, ils ne
+permettent pas d'affirmer qu'elles suivent exactement le même bassin. La
 mémoire reste très loin de la limite `12.495 GiB`.
 
 L'instrumentation indique exactement `full q[2], node 240, terminal` : le seed
@@ -3830,13 +3837,16 @@ ont passé le garde-fou final, mais la génération CSV a tenté d'insérer la l
 `[0.01, 0.005, 0.002]` directement dans une ligne. Cette liste est désormais
 sérialisée en JSON dans une cellule CSV.
 
-Enfin, la mesure exacte de la violation canonique `g(x_0)` doit être ajoutée
-dans l'interface Bioptim générique, après `solver_call_limits()` et avant le
-chronométrage du solveur. Elle devra évaluer les contraintes *shaked* et leurs
-bornes réelles; `inf_pr` au premier itéré interne ne lui est pas équivalent.
-Cette instrumentation sera partagée par IPOPT et MadNLP et permettra de
-localiser les défauts de collocation sans modifier le NLP ni polluer le temps
-de résolution.
+Enfin, la mesure exacte de la violation canonique `g(x_0)` est maintenant
+implémentée dans l'interface Bioptim générique au SHA
+`dad96b90d47c36126c1e97ec35f27c499abf4b12`. Elle intervient après
+`solver_call_limits()` et avant le chronométrage du solveur, évalue les
+contraintes *shaked* et leurs bornes réellement soumises, puis sépare la
+violation de `g` de celle des variables. `inf_pr` au premier itéré interne ne
+lui est pas équivalent. La fonction CasADi est mise en cache, son coût est
+reporté séparément, et aucune fonction supplémentaire n'est construite quand
+l'option est désactivée. Le sweep full horizon l'active explicitement pour
+IPOPT et MadNLP; les campagnes de performance ordinaires la laissent inactive.
 
 La campagne de validation finale
 [`30632613180`](https://github.com/mickaelbegon/cocofest/actions/runs/30632613180)
@@ -3888,3 +3898,76 @@ physique moyenne : son dépassement atteint `0.4027 rad/s`, au-delà de la
 marge d'audit `0.1 rad/s`. Son `physically_validated_cycles=0` n'est donc pas
 une incohérence du comptage, mais l'effet d'un second critère physique plus
 strict que l'angle seul.
+
+### Unités de l'homotopie terminale et finalisation unique du warm-start
+
+La campagne instrumentée
+[`30633889235`](https://github.com/mickaelbegon/cocofest/actions/runs/30633889235)
+confirme que le défaut de l'homotopie est une confusion d'unités et non une
+erreur de l'audit. Pour le témoin full/Byrd, l'erreur terminale vaut
+`0.00118175 rad` dans la coordonnée NLP `q[2]`, mais `0.00146097 rad` après
+projection sur l'angle physique. Pour l'homotopie, l'erreur physique monte à
+`0.002473 rad`, alors que le dernier palier impose bien `0.002 rad` directement
+sur `q[2]`.
+
+Dans la formulation full, le slack demandé par la CLI est un angle physique
+`s_theta`. Il est converti de manière conservatrice vers la coordonnée roue :
+
+$$
+s_q = s_\theta
+\min_{\theta\in[0,2\pi]}
+\left|\frac{\partial q_\mathrm{roue}}{\partial\theta}\right|.
+$$
+
+Cette conversion était utilisée pour la borne nominale, mais pas pour les
+paliers d'homotopie `0.01, 0.005, 0.002`, qui étaient appliqués tels quels à
+`q[2]`. Tous les paliers utilisent maintenant le même facteur; les logs
+conservent à la fois `slack` en radians physiques et
+`applied_wheel_q_slack` dans la coordonnée NLP. La formulation reduced a un
+facteur unitaire puisque son état est directement `theta`.
+
+Le warm-start suit désormais une seule séquence de finalisation après **la
+dernière** source de seed, y compris après un seed explicite de continuation
+d'horizon ou le pavage d'une solution à un cycle :
+
+1. reconstruire la cible absolue sur les `K` cycles de l'OCP;
+2. tronquer le seed dans les bornes finales;
+3. si le terminal full a été modifié, restaurer la variété de contact en
+   préservant `q[2]`;
+4. vérifier qu'aucun état n'est resté hors borne.
+
+Cette étape évite qu'une continuation d'horizon réintroduise après coup la
+cible à un cycle ou un terminal hors contact. L'audit NLP et l'audit physique
+sont en outre recalculés sur le même préfixe ACADOS effectivement validé, tout
+en conservant la référence angulaire absolue fixe : tronquer le préfixe ne
+peut donc pas masquer un drift constant.
+
+Enfin, les deux chances du sweep full horizon écrivaient historiquement dans
+le même répertoire. Elles disposent maintenant de chemins séparés, ce qui
+préserve pour chaque essai le JSON, la solution et le `solver.log`. Le gate
+ACADOS corrigé est la campagne
+[`30635563993`](https://github.com/mickaelbegon/cocofest/actions/runs/30635563993).
+Il valide la correction d'unités, mais réfute l'homotopie comme accélérateur
+ou comme moyen de prolonger le préfixe :
+
+| Cas full/SX, IRK | Préfixe NLP | Préfixe physique | Erreur angulaire physique max. | Médiane effective | P90 effective | Restauration totale | Fatigue exécutée |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| Byrd--Omojokun, seuil rollout `1` | 13 | 13 | `0.001460971 rad` | `0.6355 s` | `1.2274 s` | `0 s` | `132.64613` |
+| Homotopie physique `0.01,0.005,0.002` | 13 | 13 | `0.001460967 rad` | `2.1014 s` | `3.3029 s` | `31.006 s` | `132.64833` |
+
+Le dernier slack physique `0.002 rad` est maintenant appliqué comme
+`0.001181754 rad` sur `q[2]`; les deux audits terminaux retombent ainsi sur les
+valeurs du témoin. Les paliers atteignent tous la cible stricte jusqu'au RHO
+13, puis le premier palier `0.01 rad` échoue lors de la préparation du RHO 14
+avec un résidu de stationnarité de `0.2022` et un résidu dynamique de
+`0.002066`. Le préfixe n'est donc pas prolongé, tandis que le temps médian
+effectif est multiplié par `3.31` et que 31 secondes sont consacrées aux
+restaurations. Cette homotopie est conservée comme outil diagnostique, pas
+comme configuration recommandée.
+
+Le coût et la fatigue des deux trajectoires diffèrent de seulement
+`0.00166 %`; la correction d'unités supprime donc le faux écart physique sans
+modifier matériellement la solution physiologique. La campagne reste verte
+au sens infrastructure, mais aucun cas ACADOS ne certifie plus de 13 RHO : le
+prochain levier est la qualité du transfert mécanique, pas un slack terminal
+plus large.
