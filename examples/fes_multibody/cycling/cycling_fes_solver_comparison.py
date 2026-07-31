@@ -2134,8 +2134,26 @@ def isolated_window_checkpoint_snapshots(
     feasibility = result.get("window_feasibility") or []
     strict_prefix = _physically_validated_cycle_count(result)
     capacity_scales = result.get("fatigue_capacity_scales") or {}
+    checkpoint_cycles = list(cycles)
+    if cycles_per_window == 1:
+        for window_index, solution in enumerate(windows):
+            feasibility_passes = (
+                window_index < len(feasibility)
+                and bool(feasibility[window_index].get("passes_tolerance", False))
+            )
+            if getattr(solution, "status", None) == 0 and feasibility_passes:
+                continue
+            failed_cycle = window_index + 1
+            checkpoint_cycles.extend(
+                cycle
+                for cycle in (failed_cycle - 1, failed_cycle, failed_cycle + 1)
+                if 1 <= cycle <= len(windows)
+            )
+            break
+    checkpoint_cycles = tuple(dict.fromkeys(checkpoint_cycles))
+    control_bounds = result.get("control_bounds") or {}
     snapshots = {}
-    for cycle in cycles:
+    for cycle in checkpoint_cycles:
         snapshot = {
             "cycle": int(cycle),
             "rho": int(cycle) if cycles_per_window == 1 else None,
@@ -2148,6 +2166,7 @@ def isolated_window_checkpoint_snapshots(
             "primal_feasible": None,
             "capacity_states": {},
             "pulse_width_us": {},
+            "pulse_width_active_set": {},
         }
         snapshots[f"cycle_{cycle}"] = snapshot
         if cycles_per_window != 1:
@@ -2200,9 +2219,25 @@ def isolated_window_checkpoint_snapshots(
             trace = np.asarray(values, dtype=float).reshape(-1)
             if trace.size == 0 or not np.all(np.isfinite(trace)):
                 continue
-            snapshot["pulse_width_us"][key.removeprefix("last_pulse_width_")] = (
-                1e6 * trace
-            ).tolist()
+            muscle = key.removeprefix("last_pulse_width_")
+            snapshot["pulse_width_us"][muscle] = (1e6 * trace).tolist()
+            bounds = control_bounds.get(key) or {}
+            lower = _finite_float(bounds.get("lower"))
+            upper = _finite_float(bounds.get("upper"))
+            if lower is None or upper is None or upper <= lower:
+                continue
+            tolerance = max(1e-12, (upper - lower) * 1e-3)
+            snapshot["pulse_width_active_set"][muscle] = {
+                "lower_bound_us": 1e6 * lower,
+                "upper_bound_us": 1e6 * upper,
+                "classification_tolerance_us": 1e6 * tolerance,
+                "lower_active_indices": np.flatnonzero(
+                    trace <= lower + tolerance
+                ).astype(int).tolist(),
+                "upper_active_indices": np.flatnonzero(
+                    trace >= upper - tolerance
+                ).astype(int).tolist(),
+            }
         snapshot["available"] = bool(
             snapshot["capacity_states"] or snapshot["pulse_width_us"]
         )

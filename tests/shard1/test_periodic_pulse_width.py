@@ -4436,6 +4436,61 @@ def test_benchmark_json_summary_contains_comparable_fatigue_metrics(tmp_path):
     assert row["state_boundary_jumps"]["by_state"]["omega"]["jump"] == [[0.0]]
 
 
+def test_failed_rho_checkpoints_preserve_neighboring_pw_active_sets():
+    lower = 131.405e-6
+    upper = 600e-6
+
+    class SnapshotSolution:
+        def __init__(self, status, offset):
+            self.status = status
+            self.offset = offset
+
+        def decision_states(self, to_merge=None):
+            return {"A_Biceps": np.array([[3000.0, 2999.0 - self.offset]])}
+
+        def decision_controls(self, to_merge=None):
+            return {
+                "last_pulse_width_Biceps": np.array(
+                    [[lower, 300e-6 + self.offset * 1e-9, upper]]
+                )
+            }
+
+    result = {
+        "args": SimpleNamespace(cycles_per_window=1),
+        "window_solutions": [
+            SnapshotSolution(0, 0),
+            SnapshotSolution(1, 1),
+            SnapshotSolution(0, 2),
+            SnapshotSolution(0, 3),
+        ],
+        "window_statuses": [0, 1, 0, 0],
+        "window_objectives": [1.0, 2.0, 3.0, 4.0],
+        "window_feasibility": [
+            {"passes_tolerance": True},
+            {"passes_tolerance": False},
+            {"passes_tolerance": True},
+            {"passes_tolerance": True},
+        ],
+        "solver_success": False,
+        "covered_cycles": 4,
+        "fatigue_capacity_scales": {"A_Biceps": 3000.0},
+        "control_bounds": {
+            "last_pulse_width_Biceps": {"lower": lower, "upper": upper}
+        },
+    }
+
+    checkpoints = comparison_example.isolated_window_checkpoint_snapshots(result)
+
+    assert {"cycle_1", "cycle_2", "cycle_3"}.issubset(checkpoints)
+    assert checkpoints["cycle_1"]["belongs_to_strict_prefix"] is True
+    assert checkpoints["cycle_2"]["primal_feasible"] is False
+    active_set = checkpoints["cycle_2"]["pulse_width_active_set"]["Biceps"]
+    assert active_set["lower_bound_us"] == pytest.approx(131.405)
+    assert active_set["upper_bound_us"] == pytest.approx(600.0)
+    assert active_set["lower_active_indices"] == [0]
+    assert active_set["upper_active_indices"] == [2]
+
+
 def test_independent_bound_violation_accepts_infinite_bounds():
     violation = periodic_example._maximum_bound_violation(
         values=[12.0, 0.5],

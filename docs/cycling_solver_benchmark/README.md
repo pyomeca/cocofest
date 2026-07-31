@@ -2971,8 +2971,11 @@ convergent, mais cette campagne révèle une sensibilité au transfert :
   (`maxiter=2000`, résidu primal `2.46e-2`), puis récupère dès le RHO 82;
 - le reduced échoue au RHO 1 avec une seed IPOPT située sur une autre branche,
   puis converge aux RHO 2 à 100;
-- l'échec isolé suivi d'une récupération prouve qu'il ne s'agit pas d'une
-  impossibilité créée par la fatigue;
+- l'échec isolé suivi d'une récupération signale une difficulté numérique,
+  mais cette récupération seule ne certifie pas la chaîne : le transfert a
+  déjà propagé l'état issu du solve non faisable. La convergence d'IPOPT sur
+  le même RHO est l'argument qui exclut ici une impossibilité créée par la
+  fatigue;
 - le préfixe physique strict vaut néanmoins 80 pour le full et 0 pour le
   reduced : les fenêtres postérieures ne sont jamais agrégées comme une
   trajectoire exécutable.
@@ -3058,13 +3061,36 @@ ce qui fournit un second contrôle indépendant de l'optimum reduced.
 Le raffinement IPOPT initial de MadNLP déplace bien l'échec reduced du RHO 1
 au RHO 99, mais ne supprime pas la barrière full au RHO 81. Les deux échecs
 atteignent `maxiter=2000`, avec des résidus primaux respectifs de `6.34e-2`
-et `1.78e-2`; le RHO suivant converge dans les deux cas. Il s'agit donc d'un
-échec local du transfert ou de la branche active, et non d'une preuve
-d'infaisabilité due à la fatigue. Les coûts et fatigues MadNLP ne doivent pas
-servir à comparer full et reduced à 100 RHO, car leurs préfixes physiques
-n'ont pas la même longueur. La prochaine expérience MadNLP pertinente est
-une seconde chance au **même** RHO depuis une primale reconstruite ou
-raffinée, et non un raffinement unique payé seulement avant le RHO 1.
+et `1.78e-2`. IPOPT converge sur les mêmes RHO et établit leur faisabilité;
+le RHO suivant converge aussi avec MadNLP, mais depuis l'état du solve échoué.
+En full, cette propagation change notamment la vitesse initiale de
+`-7.420 rad/s` à `-6.489 rad/s`. Cette dernière valeur reste dans les bornes;
+c'est le primal complet et ses contraintes, violées jusqu'à `2.29e-1`, qui
+ne sont pas admissibles. Les coutures postérieures sont exactement nulles
+parce que ce terminal invalide est copié au RHO suivant, non parce que le
+cycle manquant est devenu faisable. Ces fenêtres sont informatives sur le
+comportement du solveur, mais ne constituent donc pas une chaîne physique de
+remplacement.
+
+Les patrons de stimulation renforcent l'hypothèse d'un changement d'ensemble
+actif. Sur la trajectoire IPOPT full valide, la PW du Biceps saute d'environ
+`360 us` entre les cycles 82 et 83, puis effectue un saut presque symétrique
+au cycle suivant. En reduced, les variations intercycles du Triceps sont
+fortes et intermittentes, puis atteignent environ `43 us` avant l'échec
+MadNLP au RHO 99; IPOPT franchit la même région avec des variations d'environ
+`40–49 us`. Cela est compatible avec des optima presque dégénérés ou des
+basculements de recrutement, plutôt qu'avec un défaut de la dynamique full
+seule. Ce n'est toutefois pas une preuve formelle de causalité tant que les
+vecteurs PW complets, leurs masques actifs à `pd0`/`600 us` et les
+multiplicateurs du RHO échoué ne sont pas exportés.
+
+Les coûts et fatigues MadNLP ne doivent pas servir à comparer full et reduced
+à 100 RHO, car leurs préfixes physiques n'ont pas la même longueur. La
+prochaine expérience MadNLP pertinente est une seconde chance au **même** RHO
+depuis une primale reconstruite ou raffinée, et non un raffinement unique payé
+seulement avant le RHO 1. Le benchmark ne devra plus avancer depuis un solve
+non convergé : les checkpoints full RHO 80 et reduced RHO 98 doivent rester
+les deux états de départ certifiés pour toutes les tentatives suivantes.
 
 Enfin, ACADOS full avec un poids de cadence `1` résout numériquement
 `96/100` fenêtres dans ce run, mais son préfixe strict s'arrête au RHO 13.
