@@ -58,12 +58,14 @@ from cocofest.dynamics.reduced_cycling import (
 try:
     from .cycling_pulse_width_mhe import (
         prepare_nmpc,
+        project_full_first_node_initial_guess_to_contact,
         set_fes_model,
         validate_and_clip_pulse_width_seed,
     )
 except ImportError:
     from cycling_pulse_width_mhe import (
         prepare_nmpc,
+        project_full_first_node_initial_guess_to_contact,
         set_fes_model,
         validate_and_clip_pulse_width_seed,
     )
@@ -14194,11 +14196,37 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
         # otherwise the first RHO inherits a stale pre-seed target and the
         # anti-drift audit can fail by roughly twice the allowed slack.
         recenter_absolute_wheel_q_reference_from_initial_guess(nmpc)
+        # The absolute target may be stricter than the source seed, notably
+        # when a physical theta tolerance is mapped conservatively onto the
+        # redundant full q[wheel] coordinate. Clip only after the final target
+        # has been installed; for a reduced->full bridge, restore the contact
+        # manifold at the terminal node while preserving that clipped wheel
+        # coordinate.
+        nmpc._correct_init_guess_to_fit_bounds(corrected_input="states")
+        terminal_contact_projection = None
+        if mechanical_bridge and nmpc.position_state_key == "q":
+            terminal_contact_projection = (
+                project_full_first_node_initial_guess_to_contact(
+                    nmpc,
+                    node=-1,
+                    project_velocity=False,
+                )
+            )
+            nmpc._sync_acados_state_bounds()
         if echo:
             print(
                 f"common_initial_solution: applied ({common_seed_path}, "
                 f"mechanical_bridge={mechanical_bridge})"
             )
+            if terminal_contact_projection is not None:
+                print(
+                    "common_initial_solution_terminal_contact_projection: "
+                    f"applied={terminal_contact_projection['applied']} "
+                    f"node={terminal_contact_projection.get('node')} "
+                    f"q_max_change={terminal_contact_projection['q_max_change']:.6g} "
+                    "preserved_wheel_q="
+                    f"{terminal_contact_projection.get('preserved_wheel_q')}"
+                )
         if args.solver == "acados" and not args.disable_periodic_fes_warmup_projection:
             common_projection = project_periodic_fes_initial_guess(
                 nmpc,

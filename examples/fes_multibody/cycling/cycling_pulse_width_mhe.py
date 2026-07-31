@@ -54,9 +54,9 @@ from cocofest import (
 
 
 def project_full_first_node_initial_guess_to_contact(
-    periodic_nmpc, *, project_velocity: bool = False
+    periodic_nmpc, *, project_velocity: bool = False, node: int = 0
 ) -> dict:
-    """Project free full coordinates while preserving the bound crank states."""
+    """Project one full-mechanics node while preserving its crank states."""
 
     summary = {
         "applied": False,
@@ -82,8 +82,13 @@ def project_full_first_node_initial_guess_to_contact(
     q_init = np.asarray(q_guess.init, dtype=float)
     qdot_init = np.asarray(qdot_guess.init, dtype=float)
     wheel_index = int(getattr(periodic_nmpc, "wheel_state_index", 2))
-    q_before = q_init[:, 0].copy()
-    qdot_before = qdot_init[:, 0].copy()
+    normalized_node = int(node)
+    if normalized_node < 0:
+        normalized_node += q_init.shape[1]
+    if normalized_node < 0 or normalized_node >= q_init.shape[1]:
+        raise IndexError("The contact-projection node is outside the state grid.")
+    q_before = q_init[:, normalized_node].copy()
+    qdot_before = qdot_init[:, normalized_node].copy()
     target_q = float(q_before[wheel_index])
     target_qdot = float(qdot_before[wheel_index])
     kinematics = reduced_dynamics.kinematics
@@ -113,14 +118,15 @@ def project_full_first_node_initial_guess_to_contact(
     # only the redundant coordinates and velocities are numerical projections.
     lifted_q[wheel_index] = target_q
     lifted_qdot[wheel_index] = target_qdot
-    q_init[:, 0] = lifted_q
+    q_init[:, normalized_node] = lifted_q
     if project_velocity:
-        qdot_init[:, 0] = lifted_qdot
+        qdot_init[:, normalized_node] = lifted_qdot
     q_guess.init[:, :] = q_init
     qdot_guess.init[:, :] = qdot_init
     summary.update(
         applied=True,
         mode=("position_velocity" if project_velocity else "position"),
+        node=normalized_node,
         q_max_change=float(np.max(np.abs(lifted_q - q_before))),
         qdot_max_change=(
             float(np.max(np.abs(lifted_qdot - qdot_before)))

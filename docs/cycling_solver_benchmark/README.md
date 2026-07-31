@@ -3646,10 +3646,62 @@ complète. Enfin, le défaut RK4 aux endpoints est un diagnostic indépendant et
 non la violation exacte des contraintes de collocation `g(x_0)`; cette
 dernière reste à ajouter.
 
-Le prochain gate full-horizon doit d'abord mesurer ces défauts pour full/MX et
-reduced/MX à deux cycles. Une phase-I ne sera introduite qu'après localisation
-du bloc dominant; augmenter encore le budget MadNLP sans cette information
-n'est pas justifié par les trois campagnes disponibles.
+Le gate diagnostique
+[`30629504378`](https://github.com/mickaelbegon/cocofest/actions/runs/30629504378)
+a finalement localisé un défaut déterministe avant le solveur. Le RHO
+reduced/SX produit bien un préfixe de deux cycles certifié en `29.5 s`, puis le
+single-shot full/MX à un cycle converge (`41.81 s` MadNLP, `106.1 s`
+mur-à-mur, `1.705 GiB`). À deux cycles, les contrôles appariés échouent deux
+fois chacun :
+
+| Single-shot MX, 2 cycles | Reduced | Full |
+|---|---:|---:|
+| Temps mur, chance 1 | `316.3 s` | `1629.5 s` |
+| Temps mur, chance 2 | `311.8 s` | `1662.5 s` |
+| Pic RSS | `1.383 / 1.365 GiB` | `2.352 / 2.351 GiB` |
+| Statut natif final | `6` | `6` |
+| Violation de borne du seed | `theta: 6.2792 rad` | `q: 6.2804 rad` |
+
+Le dernier chiffre est la cause dominante : le seed est hors borne d'environ
+un tour complet **avant** le raffinement IPOPT et MadNLP. Le défaut existe
+aussi dans la formulation reduced; il ne peut donc pas être attribué à la
+dynamique full. Les défauts RK4 du seed full sont au contraire petits
+(`q=2.09e-4 rad`, `qdot=9.71e-3 rad/s`, FES scaled `9.79e-3`). IPOPT reste à
+`inf_pr=1.925` et MadNLP consomme `1440.2 s` pour 2000 itérations, car ils
+essaient de réparer une incohérence de borne artificielle beaucoup plus grande
+que ces défauts dynamiques. La seconde chance reproduit le même bassin; la
+mémoire reste très loin de la limite `12.495 GiB`.
+
+L'instrumentation indique exactement `full q[2], node 240, terminal` : le seed
+vaut `-17.89513 rad`, tandis que la borne erronée est centrée vers
+`-11.61355 rad`. Après chargement du préfixe, la fonction de recentrage
+reconstruisait toujours la cible comme
+
+$$
+q_N=q_0-2\pi,
+$$
+
+même lorsque l'OCP single-shot contient deux cycles. Elle utilise maintenant
+
+$$
+q_N=q_0-N_\mathrm{cycles}\,2\pi.
+$$
+
+Cette correction ramène localement l'écart full de `6.2804 rad` à
+`4.29e-4 rad`. Ce reliquat vient de la conversion conservatrice du slack
+physique `theta` vers la coordonnée redondante `q[2]`. Le seed est désormais
+tronqué seulement après installation de la cible absolue finale, puis le nœud
+terminal full est reprojeté sur la variété de contact en préservant la
+coordonnée roue tronquée. Le test local sur l'artefact exact ne trouve alors
+plus aucune violation de borne en full ni en reduced; la correction de
+configuration terminale maximale vaut `1.22e-4 rad` et le résidu tangent
+reste faible (`2.77e-3 rad/s`).
+
+Cette correction enlève donc un obstacle certain, mais la convergence
+single-shot deux cycles doit encore être recertifiée en Linux. La mesure
+exacte de `g(x_0)` reste utile ensuite : elle distinguera le défaut de
+collocation résiduel du défaut Ding. Une phase-I ou un budget MadNLP supérieur
+n'est pas justifié avant ce nouveau gate avec seed borné.
 
 ### A/B ACADOS ciblé : contrat du slack terminal et baseline 20 RHO
 

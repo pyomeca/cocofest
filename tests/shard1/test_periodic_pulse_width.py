@@ -235,6 +235,13 @@ def test_full_transfer_contact_projection_preserves_bound_crank_states():
     assert summary["mode"] == "position"
     np.testing.assert_allclose(nmpc.nlp[0].x_init["qdot"].init[:, 0], [0.0, 0.0, -6.0])
 
+    summary = mhe_example.project_full_first_node_initial_guess_to_contact(
+        nmpc, node=-1
+    )
+    assert summary["node"] == 1
+    np.testing.assert_allclose(nmpc.nlp[0].x_init["q"].init[:, 1], [10.0, 15.0, 5.0])
+    np.testing.assert_allclose(nmpc.nlp[0].x_init["qdot"].init[:, 1], [1.0, 1.0, -7.0])
+
 
 def test_updating_full_model_preserves_every_force_relationship(monkeypatch):
     captured = {}
