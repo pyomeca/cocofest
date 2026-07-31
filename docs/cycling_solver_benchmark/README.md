@@ -3309,6 +3309,53 @@ le mode effectivement appliqué ainsi que les options
 d'un point non admissible contamine le RHO suivant et rend l'ablation
 reproductible.
 
+Le run
+[`30608917200`](https://github.com/mickaelbegon/cocofest/actions/runs/30608917200),
+au SHA `0605e5eca1d804185f7e6fa90df47f302d605239`, ne montre pas de gain
+robuste :
+
+| Byrd–Omojokun full | Dual reset | Dual preserve certifié |
+|---|---:|---:|
+| Préfixe strict | `13/100` | `13/20` |
+| Échecs dans les 20 premiers RHO | `14, 16, 18, 20` | `14, 16, 18, 20` |
+| Médiane chaude mur-à-mur | `0.592 s` | `0.623 s` |
+| P90 chaud mur-à-mur | `1.003 s` | `1.188 s` |
+| Fatigue exécutée du préfixe | `132.646468` | `132.647337` |
+
+Les résidus finals montrent pourquoi une moyenne seule serait trompeuse. Au
+RHO 16, `preserve` réduit la dynamique de `4.70e-3` à `1.43e-4` et la
+stationnarité de `0.458` à `0.056`; au RHO 18, il dégrade au contraire la
+dynamique de `5.68e-3` à `7.53e-3`; au RHO 20, elle passe de `9.90e-7` à
+`3.18e-6`. Aucun de ces changements ne déplace le premier échec. De plus, le
+premier RHO, pourtant explicitement en `reset` dans les deux capsules et
+chargé depuis la même signature de seed, prend respectivement `50` et `87`
+itérations. Sur les 20 RHO communs, `preserve` ajoute `49` itérations et
+`2.426 s` de solveur, soit `+8.8 %`.
+
+Cette différence au premier RHO précède cependant l'activation de
+`preserve` : l'homotopie contrôle initiale échoue dans les deux cas avec des
+résidus différents, puis la capsule est réutilisée. Le mode `reset` annule
+`pi/lam`, mais ne recrée pas la capsule et ne garantit pas la remise à zéro
+des slacks et de toute la mémoire QP interne. L'exécution OpenMP peut ensuite
+amplifier de faibles différences d'ordre numérique sur ce NLP sensible. Une
+ablation causale plus stricte devra recréer ou réinitialiser complètement la
+capsule après cette homotopie, imposer un thread, puis répéter chaque cas au
+moins trois fois. Les petits écarts actuels ne doivent pas être
+surinterprétés.
+
+Conclusion : la conservation duale peut améliorer spectaculairement un RHO
+isolé, mais elle n'est ni stable ni plus rapide dans cette campagne. Elle ne
+devient pas le réglage par défaut. Le prochain essai utile doit agir sur le
+primal transféré avant le solve, ou tester séparément l'interdiction du retour
+automatique vers `NOMINAL_QP`, plutôt que cumuler ces facteurs.
+
+Le premier artefact de cette ablation a aussi révélé une lacune de
+sérialisation : les modes étaient correctement visibles dans le log, mais le
+rapport agrégé ne recopiait que les duals des solveurs NLP. Le sérialiseur
+conserve désormais également `acados_dual_warm_start_summaries` dans
+`warm_start.dual_summaries` et joint le mode effectivement appliqué à chaque
+ligne `windows`.
+
 Cette garantie dépend de l'interface actuelle : aucun `solver_state` ACADOS
 n'est mis en attente après l'avance de fenêtre. Si Bioptim active plus tard
 une restauration native des multiplicateurs ACADOS, il faudra appliquer ce
@@ -3463,3 +3510,26 @@ IPOPT/SX à 2000 itérations, et évite l'erreur de dimension à trois cycles.
 Cette règle est un correctif expérimental ciblé, pas encore une solution
 générale; à terme, une seed full construite séquentiellement par RHO devra
 remplacer le warm-up historique de taille fixe.
+
+Le sweep apparié
+[`30604211968`](https://github.com/mickaelbegon/cocofest/actions/runs/30604211968)
+confirme ce diagnostic :
+
+| Horizon full/MX | Raffinement IPOPT | MadNLP/MUMPS | Pic RSS | Verdict |
+|---:|---:|---:|---:|---|
+| 1 cycle | `8.07 s`, `inf_pr=5.72e-12` | `110` it., `42.57 s`, `1.89e-12` | `1.716 GiB` | certifié |
+| 2 cycles | `120.64 s`, `inf_pr=1.925` | `2000` it., `1.668` | `2.353 GiB` | échec, deux fois |
+| 3 cycles | `356.81 s`, `inf_pr=1.185` | interrompu à `1800 s` | `2.924 GiB` | timeout, deux fois |
+
+Le budget IPOPT porté de 300 à 2000 itérations ne rend donc pas le bridge
+deux cycles admissible; comme ce raffinement n'est pas appliqué, MadNLP
+retrouve exactement le résidu `1.668` de la campagne antérieure. Trois cycles
+restent également très loin du seuil avant MadNLP. Les pics RSS, inférieurs à
+`3 GiB` face à une limite de `12.5 GiB`, excluent encore une limite mémoire.
+Cette campagne rétablit en revanche proprement le témoin un cycle : le modèle
+full et MadNLP fonctionnent lorsqu'ils reçoivent un point full certifié.
+
+Un second sweep ajoute les défauts initiaux par bloc et un témoin
+monolithique reduced/MX. Il doit déterminer si le saut vient principalement
+de `q/qdot`, des 20 états Ding ou de leur couture collocation; ces données
+sont nécessaires avant d'introduire une phase-I mécanique.

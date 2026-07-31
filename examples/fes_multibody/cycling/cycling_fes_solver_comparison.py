@@ -2391,9 +2391,23 @@ def solver_overview_rows(results: dict[str, dict]) -> list[dict]:
     for solver_name, result in results.items():
         performance = _window_performance(result)
         window_rows = _benchmark_window_rows(result)
+        dual_warm_start_summaries = (
+            result.get("acados_dual_warm_start_summaries")
+            or result.get("nlp_dual_warm_start_summaries")
+            or []
+        )
+        dual_warm_start_by_window = {
+            item["window"]: item
+            for item in dual_warm_start_summaries
+            if item.get("window") is not None
+        }
         restoration_timing = acados_transfer_restoration_timing(result)
         restoration_by_rho = restoration_timing["by_target_rho_wall_time_s"]
         for window in window_rows:
+            applied_dual = dual_warm_start_by_window.get(window["window"])
+            window["dual_warm_start_mode"] = (
+                None if applied_dual is None else applied_dual.get("mode")
+            )
             restoration_wall_time = restoration_by_rho.get(window["rho"], 0.0)
             window["feasibility_restoration_wall_time_s"] = restoration_wall_time
             window["effective_wall_time_s"] = (
@@ -2572,7 +2586,7 @@ def solver_overview_rows(results: dict[str, dict]) -> list[dict]:
                 ),
                 "warm_start": {
                     "initial_guess_audits": result.get("initial_guess_audits") or [],
-                    "dual_summaries": result.get("nlp_dual_warm_start_summaries") or [],
+                    "dual_summaries": dual_warm_start_summaries,
                     "historical_cache_hit": result.get("standard_warmup_cache_hit"),
                 },
                 "fatigue_capacity_scales": result.get("fatigue_capacity_scales", {}),

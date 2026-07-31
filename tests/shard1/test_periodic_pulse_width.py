@@ -4801,6 +4801,44 @@ def test_benchmark_json_summary_contains_comparable_fatigue_metrics(tmp_path):
     assert row["state_boundary_jumps"]["by_state"]["omega"]["jump"] == [[0.0]]
 
 
+def test_acados_dual_warm_start_summaries_survive_benchmark_serialization():
+    result = _benchmark_result([0], solver_success=True, success=True)
+    result["acados_dual_warm_start_summaries"] = [
+        {
+            "window": 0,
+            "mode": "reset",
+            "shift_stages": 0,
+            "zeroed_tail_stages": 31,
+        },
+        {
+            "window": 1,
+            "mode": "preserve",
+            "shift_stages": 0,
+            "zeroed_tail_stages": 0,
+        },
+    ]
+
+    row = comparison_example.solver_overview_rows({"acados": result})[0]
+
+    assert row["warm_start"]["dual_summaries"] == [
+        {
+            "window": 0,
+            "mode": "reset",
+            "shift_stages": 0,
+            "zeroed_tail_stages": 31,
+        },
+        {
+            "window": 1,
+            "mode": "preserve",
+            "shift_stages": 0,
+            "zeroed_tail_stages": 0,
+        },
+    ]
+    assert [window["dual_warm_start_mode"] for window in row["windows"]] == [
+        "reset"
+    ]
+
+
 def test_failed_rho_checkpoints_preserve_neighboring_pw_active_sets():
     lower = 131.405e-6
     upper = 600e-6
