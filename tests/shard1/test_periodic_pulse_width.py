@@ -313,6 +313,10 @@ def test_full_qdot_envelope_contains_every_lifted_reduced_velocity():
             "does not support",
         ),
         (
+            {"search_direction_mode": "FEASIBILITY_QP"},
+            "declares FEASIBILITY_QP but does not implement",
+        ),
+        (
             {
                 "with_anderson_acceleration": True,
                 "globalization": "FUNNEL_L1PEN_LINESEARCH",
@@ -328,6 +332,7 @@ def test_full_qdot_envelope_contains_every_lifted_reduced_velocity():
 def test_acados_v055_rejects_unsafe_option_combinations(overrides, message):
     options = {
         "nlp_solver_type": "SQP",
+        "search_direction_mode": "NOMINAL_QP",
         "globalization": "FIXED_STEP",
         "ext_qp_res": False,
         "code_reuse_tolerance": 1e-12,
@@ -5267,8 +5272,8 @@ def test_github_acados_runner_uses_reference_and_option_profiles_sequentially():
     assert "--acados-transfer-bound-homotopy-iterations 40" in workflow
     assert "--acados-transfer-bound-homotopy-solver-tolerance 1e-4" in workflow
     assert "run_case sqp-feasible-qp-irk" in workflow
-    assert "run_case sqp-feasibility-qp-irk" in workflow
-    assert "--acados-search-direction-mode FEASIBILITY_QP" in workflow
+    assert "run_case sqp-feasibility-qp-irk" not in workflow
+    assert "--acados-search-direction-mode FEASIBILITY_QP" not in workflow
     assert "SQP_WITH_FEASIBLE_QP IRK" in workflow
     assert 'run_case sqp-feasible-qp-irk "$mechanics" "$ACADOS_SMOKE_RHOS"' in workflow
     assert "--acados-search-direction-mode BYRD_OMOJOKUN" in workflow
@@ -5328,7 +5333,7 @@ def test_github_acados_runner_uses_reference_and_option_profiles_sequentially():
     assert "--acados-wheel-qdot-regularization-weight 0.1" in workflow
     assert "run_case sqp-irk-two-stage-cadence-reg-1 full" in workflow
     assert "run_case sqp-irk-cadence-reg-1-best-retry full" in workflow
-    assert "run_case sqp-feasibility-qp-cadence-reg-1-irk full" in workflow
+    assert "run_case sqp-byrd-omojokun-cadence-reg-1-irk full" in workflow
     assert "--acados-store-iterates" in workflow
     assert "--acados-maxiter-retries 1" in workflow
     assert "--acados-maxiter-retry-iterations 20" in workflow
@@ -5352,7 +5357,7 @@ def test_github_acados_runner_uses_reference_and_option_profiles_sequentially():
     assert "run_case sqp-irk-two-stage-adaptive reduced" in long_campaign
     assert "run_case sqp-irk-two-stage-cadence-reg-1 full" in long_campaign
     assert "run_case sqp-irk-cadence-reg-1-best-retry full" in long_campaign
-    assert "run_case sqp-feasibility-qp-cadence-reg-1-irk full" in long_campaign
+    assert "run_case sqp-byrd-omojokun-cadence-reg-1-irk full" in long_campaign
     assert "run_case sqp-irk-two-stage-cadence-reg-1 reduced" in long_campaign
     assert "sqp-irk-two-stage-cadence-reg-0p1" not in long_campaign
     assert "sqp-rti-irk" not in long_campaign

@@ -1360,7 +1360,12 @@ def build_argument_parser() -> argparse.ArgumentParser:
         "--acados-search-direction-mode",
         choices=("NOMINAL_QP", "BYRD_OMOJOKUN", "FEASIBILITY_QP"),
         default="NOMINAL_QP",
-        help="Search direction mode used by ACADOS, mainly for SQP_WITH_FEASIBLE_QP.",
+        help=(
+            "Search direction mode used by ACADOS, mainly for "
+            "SQP_WITH_FEASIBLE_QP. FEASIBILITY_QP is exposed by the pinned "
+            "ACADOS 0.5.5 API but rejected because that implementation is empty; "
+            "use BYRD_OMOJOKUN for feasibility restoration."
+        ),
     )
     parser.add_argument(
         "--acados-use-constraint-hessian-in-feas-qp",
@@ -3744,6 +3749,7 @@ def set_acados_unsafe_option(solver: Solver.ACADOS, value, name: str) -> None:
 def validate_acados_v055_options(
     *,
     nlp_solver_type: str,
+    search_direction_mode: str,
     globalization: str,
     ext_qp_res: bool,
     code_reuse_tolerance: float,
@@ -3753,6 +3759,12 @@ def validate_acados_v055_options(
 ) -> None:
     """Reject option combinations that ACADOS 0.5.5 cannot use safely."""
 
+    if search_direction_mode == "FEASIBILITY_QP":
+        raise ValueError(
+            "ACADOS 0.5.5 declares FEASIBILITY_QP but does not implement its "
+            "search direction; it returns ACADOS_READY without an SQP iteration. "
+            "Use BYRD_OMOJOKUN with SQP_WITH_FEASIBLE_QP instead."
+        )
     if nlp_solver_type == "SQP_WITH_FEASIBLE_QP" and ext_qp_res:
         raise ValueError(
             "ACADOS 0.5.5 does not support --acados-ext-qp-res with "
@@ -3824,6 +3836,7 @@ def configure_acados_solver(
 ) -> Solver.ACADOS:
     validate_acados_v055_options(
         nlp_solver_type=nlp_solver_type,
+        search_direction_mode=search_direction_mode,
         globalization=globalization,
         ext_qp_res=ext_qp_res,
         code_reuse_tolerance=code_reuse_tolerance,

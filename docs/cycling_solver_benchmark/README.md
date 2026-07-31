@@ -1199,18 +1199,20 @@ non linéaire de cadence physique est donc réactivée pour ACADOS dans le nouve
 écran 5 RHO; les variantes full ne seront admises à 30 RHO que si l’audit
 physique confirme le statut natif.
 
-La première stratégie testée est la voie native
+La première stratégie envisagée était la voie native
 `SQP_WITH_FEASIBLE_QP` :
 
 1. direction `FEASIBILITY_QP` pour restaurer le primal;
 2. bascule autorisée vers la direction nominale pour minimiser la fatigue.
 
-Cette variante est ajoutée à l’écran ACADOS full/reduced, à côté du SQP
-nominal, de `BYRD_OMOJOKUN`, de l’homotopie de bornes et de RTI. Elle réutilise
-un seul OCP précompilé. Si elle ne restaure pas les résidus stricts, l’étape
-suivante sera un second OCP précompilé avec dynamique dure et coût de proximité.
-Les contrôles virtuels ne seront ajoutés qu’en dernier recours, avec un seuil
-explicite sur leur norme avant acceptation.
+L'inspection de la révision ACADOS épinglée a ensuite montré que la première
+étape n'est pas implémentée (voir la fin de la section 19.4). Le benchmark
+rejette désormais explicitement `FEASIBILITY_QP` et utilise
+`BYRD_OMOJOKUN`, qui est le chemin de restauration effectivement calculé.
+Cette variante réutilise un seul OCP précompilé. Si elle ne restaure pas les
+résidus stricts, l’étape suivante sera un second OCP précompilé avec dynamique
+dure et coût de proximité. Les contrôles virtuels ne seront ajoutés qu’en
+dernier recours, avec un seuil explicite sur leur norme avant acceptation.
 
 La restauration locale actuelle `q/qdot + offsets PW` est explicitement
 refusée avec la mécanique réduite `theta/omega`; elle n’est pas un OCP et ne
@@ -3247,13 +3249,27 @@ le budget SQP. Elle doit séparer les objectifs :
 1. une courte phase dont la direction cherche explicitement la faisabilité;
 2. seulement après certification du primal, la phase SQP nominale de fatigue.
 
-L'ablation suivante utilise d'abord la voie native ACADOS
-`SQP_WITH_FEASIBLE_QP`, initialisée en `FEASIBILITY_QP` et autorisée à
-basculer automatiquement vers la direction nominale. Elle conserve une seule
-capsule compilée et réutilisée pendant les 100 RHO, le même seed full, le
-poids de cadence `1`, les mêmes bornes et le même budget `100`. Elle est
-isolée du retry et de l'homotopie afin que son effet soit interprétable. La
-garde de projection du retry passe séparément de `1e-12` à `1e-9` pour ne
+L'ablation suivante a d'abord demandé à la voie native ACADOS
+`SQP_WITH_FEASIBLE_QP` de démarrer en `FEASIBILITY_QP`. Le run
+[`30605234066`](https://github.com/mickaelbegon/cocofest/actions/runs/30605234066),
+au SHA `fdc38c5daaf49d74722efe2b82778ac61a0999bc`, retourne au premier RHO le
+statut `5` (`ACADOS_READY`), zéro itération et zéro temps solveur. Ce n'est ni
+une non-convergence physique ni un échec de compilation. Dans
+`ocp_nlp_sqp_with_feasible_qp.c` de la révision ACADOS
+`59d93e17d2985fdd73fc58b8a83ed8f83a024171`, la branche
+`FEASIBILITY_QP` imprime « mode not implemented », ne calcule aucune direction
+et retourne avant que le statut soit mis à jour. L'API expose donc une option
+incomplète.
+
+Le code Cocofest rejette maintenant cette combinaison avec une erreur
+explicite. La campagne de remplacement conserve
+`SQP_WITH_FEASIBLE_QP`, une seule capsule compilée et réutilisée pendant les
+100 RHO, le même seed full, le poids de cadence `1`, les mêmes bornes et le
+même budget `100`, mais démarre en `BYRD_OMOJOKUN`. Cette branche est
+implémentée : elle résout un QP de faisabilité puis le QP nominal et peut
+revenir au mode nominal lorsque les slacks de restauration sont nuls. Elle
+reste isolée du retry et de l'homotopie afin que son effet soit interprétable.
+La garde de projection du retry passe séparément de `1e-12` à `1e-9` pour ne
 plus classer le bruit d'arrondi observé comme une modification physique.
 
 Si la voie native échoue, deux capsules ACADOS pourront ensuite être
