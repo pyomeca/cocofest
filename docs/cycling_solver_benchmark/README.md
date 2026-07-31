@@ -2520,3 +2520,66 @@ de 20 à 40 itérations, sans relâcher le seuil final à `lambda=1`.
 RTI reste une phase de polissage éventuelle, pas un solveur autonome : il est
 rapide, mais aucune variante RTI n'a produit un préfixe physique au-delà du
 premier RHO.
+
+### 19.2 Validation full/reduced corrigée à 30 RHO
+
+Le run Linux
+[`30591104965`](https://github.com/mickaelbegon/cocofest/actions/runs/30591104965),
+au SHA Cocofest `eb4fb2d3eb93ffaf0213d4a1393895be3ab7d1e1`, confirme
+l’effet de la contrainte de cadence à tous les stages Radau. Ce run utilise
+encore le SHA Bioptim historique
+`a3499cab16d7605b8efa7255cf89f1af6a7c59c9`, enregistré dans chaque JSON;
+la matrice du workflow a depuis été alignée sur le SHA commun documenté à la
+section 0.
+
+| Solveur/formulation | RHO stricts | Objectif | Fatigue exécutée | AUC | Capacité minimale | Médiane solveur | Mur-à-mur |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| IPOPT full | 30/30 | 265.314 | 256.893 | 1.52148 | 0.964144 | 5.022 s | 211.7 s |
+| IPOPT reduced | 30/30 | 264.927 | 256.519 | 1.52072 | 0.964187 | 0.806 s | 156.2 s |
+| MadNLP/MUMPS full | 30/30 | 265.595 | 257.165 | 1.52156 | 0.964100 | 3.183 s | 158.3 s |
+| MadNLP/MUMPS reduced | 30/30 | 264.819 | 256.415 | 1.52022 | 0.964179 | 0.894 s | 73.5 s |
+| FATROP reduced | 30/30 | 264.895 | 256.488 | 1.52055 | 0.964183 | 1.502 s | 197.8 s |
+
+Les écarts full/reduced sont maintenant petits et reproduits par deux
+solveurs indépendants :
+
+| Métrique relative full - reduced | IPOPT | MadNLP/MUMPS |
+|---|---:|---:|
+| Objectif | +0.1458 % | +0.2929 % |
+| Fatigue exécutée | +0.1457 % | +0.2926 % |
+| AUC | +0.0501 % | +0.0878 % |
+| Capacité minimale, différence absolue | -4.30e-5 | -7.91e-5 |
+
+La décomposition musculaire ne montre plus l’ancien gain massif et artificiel
+du Biceps en full :
+
+| Muscle | IPOPT full | IPOPT reduced | MadNLP full | MadNLP reduced |
+|---|---:|---:|---:|---:|
+| Biceps | 145.892 | 145.524 | 146.334 | 145.561 |
+| Delt_ant | 66.819 | 66.827 | 66.733 | 66.734 |
+| Delt_post | 31.425 | 31.431 | 31.362 | 31.362 |
+| Triceps | 12.756 | 12.737 | 12.736 | 12.758 |
+
+Une bifurcation transitoire de l’ensemble actif reste visible. Avec IPOPT, le
+RHO 7 demande 241 itérations en full contre 39 en reduced. Au cycle 10, une
+PW du Biceps diffère d’environ `61.3 us` et la phase du pédalier de
+`0.0171 rad` au maximum. Au cycle 30, les patrons se sont réalignés : écart
+maximal Biceps `0.343 us` avec IPOPT et `0.071 us` avec MadNLP, écart de phase
+inférieur à `0.0021 rad`. La petite différence de fatigue cumulée est donc
+compatible avec un changement local et temporaire de branche active, amplifié
+par le coût quadratique, plutôt qu’avec une erreur systématique de la
+dynamique réduite.
+
+Le mécanisme causal principal de l’ancien écart de 22 à 25 % est ainsi
+identifié : full autorisait auparavant une cadence intra-intervalle interdite
+à reduced. Il reste des différences de discrétisation, la bande de contact
+full de `20 um` et les résidus de projection vers la variété réduite. La
+cadence projetée dépasse la borne d’environ `0.00375 rad/s`, cohérente avec le
+résidu tangent `0.00416 rad/s` et très inférieure à la tolérance d’audit
+`0.1 rad/s`; il ne faut pas la confondre avec la valeur exacte de la contrainte
+marker-based du NLP.
+
+La formulation reduced conserve un gain important : médiane solveur environ
+`6.23x` plus courte pour IPOPT et `3.56x` pour MadNLP. Le palier 100 RHO doit
+encore vérifier que l’écart de fatigue reste inférieur à `0.5 %` et qu’aucune
+nouvelle bifurcation tardive ne se développe.
