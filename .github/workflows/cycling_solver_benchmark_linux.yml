@@ -582,10 +582,19 @@ jobs:
           : > acados-smoke-results/expected-cases.txt
           : > acados-smoke-results/reference-cases.txt
           acados_extended=false
+          acados_long=false
           if (( ACADOS_SMOKE_RHOS > 5 || ACADOS_OPTION_RHOS > 5 )); then
             acados_extended=true
           fi
+          if (( ACADOS_SMOKE_RHOS > 30 )); then
+            # The 30-RHO campaign already rejects the broad option screen.
+            # Keep only the common references, the numerically strongest
+            # reduced restoration, and the cadence-regularized candidates
+            # during the expensive 100-RHO endurance run.
+            acados_long=true
+          fi
           echo "$acados_extended" > acados-smoke-results/extended-campaign.txt
+          echo "$acados_long" > acados-smoke-results/long-campaign.txt
           run_case() {
             local variant="$1"
             local mechanics="$2"
@@ -823,7 +832,17 @@ jobs:
             echo "$solver_exit" > "$case_dir/process-exit-code.txt"
           }
 
-          if [[ "$acados_extended" == "false" ]]; then
+          if [[ "$acados_long" == "true" ]]; then
+            printf '%s\n' \
+              sqp-irk-reference-full \
+              sqp-irk-reference-reduced \
+              > acados-smoke-results/reference-cases.txt
+            run_case sqp-irk-reference full "$ACADOS_SMOKE_RHOS" SQP IRK 5 5
+            run_case sqp-irk-reference reduced "$ACADOS_SMOKE_RHOS" SQP IRK 5 5
+            run_case sqp-irk-two-stage-adaptive reduced "$ACADOS_SMOKE_RHOS" SQP IRK 5 5
+            run_case sqp-irk-two-stage-cadence-reg-1 full "$ACADOS_SMOKE_RHOS" SQP IRK 5 5
+            run_case sqp-irk-two-stage-cadence-reg-1 reduced "$ACADOS_SMOKE_RHOS" SQP IRK 5 5
+          elif [[ "$acados_extended" == "false" ]]; then
             printf '%s\n' \
               sqp-irk-reference-full \
               sqp-irk-reference-reduced \

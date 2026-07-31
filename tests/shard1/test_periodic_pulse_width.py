@@ -4452,6 +4452,17 @@ def test_github_acados_runner_uses_reference_and_option_profiles_sequentially():
     assert "run_case sqp-irk-two-stage-cadence-reg-1 full" in workflow
     assert "run_case sqp-irk-two-stage-cadence-reg-1 reduced" in workflow
     assert "--acados-wheel-qdot-regularization-weight 1" in workflow
+    assert "if (( ACADOS_SMOKE_RHOS > 30 )); then" in workflow
+    assert 'echo "$acados_long" > acados-smoke-results/long-campaign.txt' in workflow
+    long_campaign = workflow.split(
+        'if [[ "$acados_long" == "true" ]]; then', maxsplit=1
+    )[1].split('elif [[ "$acados_extended" == "false" ]]; then', maxsplit=1)[0]
+    assert long_campaign.count("run_case ") == 5
+    assert "run_case sqp-irk-two-stage-adaptive reduced" in long_campaign
+    assert "run_case sqp-irk-two-stage-cadence-reg-1 full" in long_campaign
+    assert "run_case sqp-irk-two-stage-cadence-reg-1 reduced" in long_campaign
+    assert "sqp-irk-two-stage-cadence-reg-0p1" not in long_campaign
+    assert "sqp-rti-irk" not in long_campaign
     assert "--shared-transfer-contact-projection" in workflow
     assert (
         "--shared-transfer-contact-projection-mode position_velocity"

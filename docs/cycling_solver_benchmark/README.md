@@ -2725,3 +2725,38 @@ sur la grille raffinée, conserve exactement les deux extrémités et ne lisse
 jamais les contrôles discontinus. Le NLP raffiné restaure ensuite ses propres
 équations de collocation. Les itérés ACADOS échoués restent exclus de l’audit
 du préfixe déjà validé.
+
+Le run 30 RHO
+[`30594633810`](https://github.com/mickaelbegon/cocofest/actions/runs/30594633810)
+confirme que cette adaptation de seed fonctionne. MadNLP/MUMPS Radau degré 5
+converge `5/5`; après le premier solve à 107 itérations, sa médiane chaude vaut
+environ `1.99 s`. IPOPT trouve aussi cinq points primalement faisables, mais
+le deuxième solve atteint sa limite de 2000 itérations : les cinq nombres
+d'itérations sont `1692, 2000, 84, 92, 120`. Le préfixe optimal strict reste
+donc `1/5`. Comme ce cas est un audit de transcription hors temps réel, et non
+un candidat au RHO en ligne, sa limite est portée à 5000 itérations sans
+modifier celle des formulations Radau degré 3.
+
+Ce même run a révélé une erreur du rapport, pas des solveurs : les traces
+physiques de collocation conservaient leurs points internes, mais la
+troncature les lisait comme des nœuds de tir. Le rapport affichait alors zéro
+cycle physique malgré un audit mécanique positif. Le stride explicite
+`degree + 1` est maintenant utilisé pour IPOPT, MadNLP et FATROP; ACADOS garde
+un stride égal à un. Les coûts, fatigues et patrons ne sont exportés que sur
+le préfixe ainsi certifié.
+
+Le screen ACADOS
+[`30594812890`](https://github.com/mickaelbegon/cocofest/actions/runs/30594812890)
+montre les limites de la pénalité de cadence. Avec un poids `0.1`, trois RHO
+convergent mais la violation de vitesse sécante atteint encore
+`0.437 rad/s`. Avec un poids `1`, le premier RHO reduced passe l'audit continu,
+puis le transfert échoue. La référence full converge numériquement `30/30`,
+mais sa violation sécante reste `0.403 rad/s`. Le problème n'est donc ni
+spécifique à reduced, ni corrigé par une faible pénalité.
+
+La campagne 100 RHO ne répète plus tout l'écran ACADOS déjà réfuté. Elle
+conserve cinq cas : les références full/reduced, l'homotopie adaptative
+reduced pour mesurer la robustesse numérique, et la régularisation de poids
+`1` en full/reduced. Les options RTI, Anderson, IRK léger, contact redondant,
+homotopie fixe et poids `0.1` restent disponibles dans les campagnes de
+5–30 RHO et dans leurs artefacts séparés.
