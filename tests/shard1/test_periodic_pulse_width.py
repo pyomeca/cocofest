@@ -3307,6 +3307,26 @@ def test_terminal_wheel_bound_is_recentered_before_a_new_continuation():
     assert sync_calls == [True]
 
 
+def test_terminal_wheel_bound_continuation_requires_the_final_target():
+    slacks = (0.01, 0.005, 0.002)
+
+    assert periodic_example.terminal_wheel_bound_continuation_reached_target(
+        [
+            {"slack": 0.01, "accepted": True},
+            {"slack": 0.005, "accepted": True},
+            {"slack": 0.002, "accepted": True},
+        ],
+        slacks,
+    )
+    assert not periodic_example.terminal_wheel_bound_continuation_reached_target(
+        [
+            {"slack": 0.01, "accepted": True},
+            {"slack": 0.005, "accepted": False},
+        ],
+        slacks,
+    )
+
+
 def test_acados_residual_history_selects_one_feasible_iterate():
     diagnostics = {
         "res_stat_all": np.array([5.0, 0.2, 1e-4]),
@@ -4116,6 +4136,23 @@ def test_acados_wheel_audit_uses_the_public_absolute_feasibility_threshold():
         nlp_tolerance=1e-6,
         primal_feasibility_threshold=1e-5,
         acados_terminal_wheel_q_slack=0.002,
+        acados_wheel_q_slack=0.0,
+    )
+
+    progress, absolute = periodic_example._wheel_cycle_diagnostic_tolerances(args)
+
+    assert progress == pytest.approx(0.00402)
+    assert absolute == pytest.approx(0.00201)
+
+
+def test_acados_wheel_audit_uses_the_final_homotopy_slack():
+    args = SimpleNamespace(
+        solver="acados",
+        acados_tolerance=1e-3,
+        nlp_tolerance=1e-6,
+        primal_feasibility_threshold=1e-5,
+        acados_terminal_wheel_q_slack=0.01,
+        acados_terminal_wheel_q_homotopy_slacks=(0.01, 0.005, 0.002),
         acados_wheel_q_slack=0.0,
     )
 
@@ -5473,6 +5510,8 @@ def test_github_acados_runner_uses_reference_and_option_profiles_sequentially():
     )
     assert "expected_reference_count=2" in workflow
     assert "expected_reference_count=1" in workflow
+    assert '--arg homotopy_only "$ACADOS_HOMOTOPY_ONLY"' in workflow
+    assert '$extended == "true" and $homotopy_only != "true"' in workflow
     assert (
         'if [[ "$ACADOS_HOMOTOPY_ONLY" == "true" ]]; then' in workflow
     )
@@ -5499,19 +5538,25 @@ def test_github_acados_runner_uses_reference_and_option_profiles_sequentially():
     assert "run_case sqp-irk-cadence-reg-1-best-retry full" in workflow
     assert "run_case sqp-byrd-omojokun-cadence-reg-1-irk full" in workflow
     assert "run_case sqp-byrd-terminal-homotopy-cadence-reg-1-irk full" in workflow
+    assert "run_case sqp-byrd-rollout-accept-cadence-reg-1-irk full" in workflow
     assert "--acados-terminal-wheel-q-homotopy-slacks 0.01,0.005,0.002" in workflow
     assert "--acados-terminal-wheel-q-homotopy-each-window" in workflow
+    assert "--shared-transfer-rollout-max-bound-violation 12" in workflow
     assert "sqp-byrd-dual-preserve-cadence-reg-1-irk" not in workflow
     assert 'inputs.cycles == \'acados_homotopy\'' in workflow
     assert 'if [[ "$ACADOS_HOMOTOPY_ONLY" == "true" ]]; then' in workflow
     focused_campaign = workflow.split(
         'if [[ "$ACADOS_HOMOTOPY_ONLY" == "true" ]]; then', maxsplit=1
     )[1].split('elif [[ "$acados_long" == "true" ]]; then', maxsplit=1)[0]
-    assert focused_campaign.count("run_case ") == 3
+    assert focused_campaign.count("run_case ") == 4
     assert "run_case sqp-irk-reference full 1" in focused_campaign
     assert "run_case sqp-byrd-omojokun-cadence-reg-1-irk full" in focused_campaign
     assert (
         "run_case sqp-byrd-terminal-homotopy-cadence-reg-1-irk full"
+        in focused_campaign
+    )
+    assert (
+        "run_case sqp-byrd-rollout-accept-cadence-reg-1-irk full"
         in focused_campaign
     )
     assert "--acados-store-iterates" in workflow

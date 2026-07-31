@@ -3246,17 +3246,26 @@ def _load_warmup_cache(cache_path: Path) -> "_WarmupSolutionAdapter":
     return _WarmupSolutionAdapter(states, controls, metadata=metadata)
 
 
+def _terminal_wheel_q_target_slack(args: argparse.Namespace) -> float:
+    """Return the final physical slack, excluding relaxed continuation stages."""
+
+    terminal_homotopy_slacks = getattr(
+        args, "acados_terminal_wheel_q_homotopy_slacks", None
+    )
+    return (
+        float(terminal_homotopy_slacks[-1])
+        if terminal_homotopy_slacks
+        else float(args.acados_terminal_wheel_q_slack)
+    )
+
+
 def _common_initial_solution_metadata(args: argparse.Namespace) -> dict:
     """Describe the physical OCP represented by a shared target seed."""
 
     terminal_homotopy_slacks = getattr(
         args, "acados_terminal_wheel_q_homotopy_slacks", None
     )
-    terminal_target_slack = (
-        float(terminal_homotopy_slacks[-1])
-        if terminal_homotopy_slacks
-        else float(args.acados_terminal_wheel_q_slack)
-    )
+    terminal_target_slack = _terminal_wheel_q_target_slack(args)
     return {
         "schema": "cocofest-common-periodic-initial-solution-v2",
         "model_formulation": args.model_formulation,
@@ -3690,6 +3699,15 @@ def _codegen_signature(args: argparse.Namespace) -> str:
             args.terminal_qdot_regularization_target_source
         ),
         "acados_terminal_wheel_q_slack": args.acados_terminal_wheel_q_slack,
+        "acados_terminal_wheel_q_target_slack": (
+            _terminal_wheel_q_target_slack(args)
+        ),
+        "acados_terminal_wheel_q_homotopy_slacks": getattr(
+            args, "acados_terminal_wheel_q_homotopy_slacks", None
+        ),
+        "acados_terminal_wheel_q_homotopy_each_window": bool(
+            getattr(args, "acados_terminal_wheel_q_homotopy_each_window", False)
+        ),
         "terminal_wheel_q_reference_mode": "absolute_initial",
         "state_scaling": args.state_scaling,
         "pulse_width_scaling": args.pulse_width_scaling,
@@ -5042,6 +5060,18 @@ def run_acados_terminal_wheel_bound_continuation(
     return summaries
 
 
+def terminal_wheel_bound_continuation_reached_target(
+    summaries: list[dict], slacks: tuple[float, ...]
+) -> bool:
+    """Return whether the continuation certified its final physical band."""
+
+    return bool(
+        summaries
+        and summaries[-1].get("accepted") is True
+        and np.isclose(float(summaries[-1]["slack"]), float(slacks[-1]))
+    )
+
+
 def wheel_cycle_boundary_initial_guess_errors(periodic_nmpc) -> list[dict]:
     """Measure crank-position errors at internal cycle seams."""
 
@@ -6380,7 +6410,7 @@ def _wheel_cycle_diagnostic_tolerances(
     # The independent feasibility audit operates on the scaled decision
     # vector. Convert its accepted q violation back to physical radians.
     numerical_margin = float(scaled_feasibility_threshold) * wheel_q_scaling
-    terminal_slack = args.acados_terminal_wheel_q_slack
+    terminal_slack = _terminal_wheel_q_target_slack(args)
     first_node_slack = args.acados_wheel_q_slack
     progress_tolerance = (
         max(2.0 * terminal_slack, first_node_slack + terminal_slack)
@@ -7146,7 +7176,7 @@ def attach_mechanical_equivalence_audit(
         else summary.get("covered_cycles") or 0
     )
     if covered_cycles > 0:
-        terminal_slack = float(getattr(args, "acados_terminal_wheel_q_slack", 0.0))
+        terminal_slack = _terminal_wheel_q_target_slack(args)
         numerical_tolerance = float(
             getattr(args, "primal_feasibility_threshold", 1e-5) or 1e-5
         )
@@ -15285,6 +15315,27 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
             inter_window_terminal_wheel_bound_summaries.extend(
                 window_terminal_continuation
             )
+            if not terminal_wheel_bound_continuation_reached_target(
+                window_terminal_continuation,
+                args.acados_terminal_wheel_q_homotopy_slacks,
+            ):
+                # Never solve or export a RHO with the last accepted relaxed
+                # bound. Such a point belongs to the feasibility path, not to
+                # the physical target problem.
+                continue_solving = False
+                transfer_failure_window = cycle_idx
+                if echo:
+                    last_stage = (
+                        window_terminal_continuation[-1]
+                        if window_terminal_continuation
+                        else {}
+                    )
+                    print(
+                        "acados_terminal_wheel_bound_failure_stop: "
+                        f"window={cycle_idx} "
+                        f"slack={last_stage.get('slack')} "
+                        f"status={last_stage.get('status')}"
+                    )
         if completed_window_diagnostics is not None:
             if echo and args.acados_diagnostics:
                 print_acados_diagnostics(

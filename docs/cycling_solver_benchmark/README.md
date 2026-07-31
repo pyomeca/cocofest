@@ -3702,13 +3702,52 @@ comparé à l'objectif physique de fatigue exécuté.
 | Deltoïde postérieur | `18.7623` | `0.156064` | `0.987336` |
 | Triceps | `0.563790` | `0.0241525` | `0.996867` |
 
-L'homotopie terminale reste pertinente comme A/B minimal, mais les logs
-montrent un signal plus fort : les échecs 14, 16 et 18 suivent un rollout IRK
-accepté puis une projection mécanique de `0.26–0.30 rad`, tandis que les RHO
-intermédiaires réussissent lorsque ce rollout est rejeté. Le relâchement
-terminal maximal n'est que `0.008 rad`. Si la relance ne prolonge pas le
-préfixe strict, le filtre de rollout déjà défini à `0.2` doit donc devenir le
-prochain témoin causal, avant d'ajouter des itérations.
+L'audit indépendant de la chronologie a corrigé une première interprétation
+des logs : le transfert affiché sous `window N` prépare la fenêtre `N`, alors
+que le statut imprimé ensuite décrit la fenêtre `N-1`. Les rollouts IRK
+acceptés, malgré une projection de `0.26–0.30 rad`, préparent donc les RHO
+15/17/19 qui convergent. Les échecs 14/16/18/20 suivent au contraire un
+rollout rejeté et conservent un shift projeté dont le défaut `qdot` absolu
+vaut `2.37–2.50 rad/s` (`0.386–0.407` après scaling). Les rollouts acceptés
+ramènent ce défaut à `0.293–0.314 rad/s`, mais augmentent le défaut FES scalé
+d'environ `0.55` à `2.45`. La mécanique apparaît donc prioritaire dans le
+choix du candidat de warm-start; un maximum global mélangeant mécanique et
+FES choisirait ici la mauvaise seed.
+
+Le seuil historique `0.2` n'est pas dimensionnellement cohérent : il compare
+un maximum de violations exprimées tantôt en rad, rad/s, N ou unités d'état
+musculaire. Il rejette tous les rollouts observés et n'a pas amélioré le
+préfixe strict par rapport au seuil `1.0` dans la campagne 100 RHO. Le prochain
+A/B causal conserve exactement le même OCP Byrd/IRK, mais porte ce seuil à
+`12` afin d'accepter tous les rollouts observés, dont les rejets maximaux en
+`qdot` atteignent environ `9.73 rad/s`. Cette valeur n'est pas une option de
+production : elle sert uniquement à vérifier si l'acceptation systématique du
+rollout supprime l'alternance à partir du RHO 14. Si le test est positif, le
+code devra comparer deux candidats déjà projetés, shift et rollout IRK, à
+partir de défauts mécaniques `q/qdot` normalisés et séparés des défauts FES.
+
+La relance corrigée
+[`30630853017`](https://github.com/mickaelbegon/cocofest/actions/runs/30630853017)
+a bien exécuté l'homotopie. Elle améliore superficiellement le préfixe NLP de
+13 à 15 RHO et porte le premier `MAXITER` du solve principal au RHO 16, mais
+elle ne constitue pas une solution physique : le préfixe angulaire strict
+s'arrête au RHO 6 et la restauration ajoute `50.42 s` aux 20 fenêtres. À la
+préparation du RHO 7, le palier `0.01 rad` converge, puis le palier
+`0.005 rad` atteint 50 itérations avec un résidu dynamique de seulement
+`2.95e-7`, mais une stationnarité de `6.46e-3`. Le code conservait alors le
+dernier palier accepté et continuait à résoudre avec une borne relâchée. Cela
+explique à la fois les résolutions principales à zéro itération et le drift
+angulaire ultérieur jusqu'à `0.01239 rad`.
+
+Ce comportement est maintenant interdit : une continuation qui n'atteint pas
+le dernier palier physique `0.002 rad` arrête la chaîne avant la résolution et
+l'export du RHO suivant. L'audit angulaire utilise également le slack cible
+final, jamais le premier slack relâché. Numériquement, le faible résidu primal
+du palier échoué confirme l'intérêt éventuel d'une vraie capsule de
+faisabilité qui relâche la stationnarité, suivie d'une capsule d'optimalité;
+répéter trois optimisations complètes à chaque fenêtre est toutefois trop
+coûteux pour l'objectif sous la seconde. Le test rollout systématique est donc
+prioritaire.
 
 Enfin, la mesure exacte de la violation canonique `g(x_0)` doit être ajoutée
 dans l'interface Bioptim générique, après `solver_call_limits()` et avant le

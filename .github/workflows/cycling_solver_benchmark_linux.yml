@@ -632,7 +632,7 @@ jobs:
                 --common-initial-solution-output
                 "$GITHUB_WORKSPACE/acados-smoke-results/reference-full-feasible-seed.npz"
               )
-            elif [[ ( "$variant" == "sqp-irk-two-stage-cadence-reg-1" || "$variant" == "sqp-irk-cadence-reg-1-rollout-guard" || "$variant" == "sqp-irk-cadence-reg-1-best-retry" || "$variant" == "sqp-byrd-omojokun-cadence-reg-1-irk" || "$variant" == "sqp-byrd-terminal-homotopy-cadence-reg-1-irk" ) && "$mechanics" == "full" ]]; then
+            elif [[ ( "$variant" == "sqp-irk-two-stage-cadence-reg-1" || "$variant" == "sqp-irk-cadence-reg-1-rollout-guard" || "$variant" == "sqp-irk-cadence-reg-1-best-retry" || "$variant" == "sqp-byrd-omojokun-cadence-reg-1-irk" || "$variant" == "sqp-byrd-terminal-homotopy-cadence-reg-1-irk" || "$variant" == "sqp-byrd-rollout-accept-cadence-reg-1-irk" ) && "$mechanics" == "full" ]]; then
               common_seed="$GITHUB_WORKSPACE/acados-smoke-results/reference-full-feasible-seed.npz"
               if [[ ! -f "$common_seed" ]]; then
                 echo "The full cadence-regularized case requires the preceding feasible reference seed." >&2
@@ -756,7 +756,7 @@ jobs:
                 --acados-wheel-qdot-regularization-weight 0.1
               )
             fi
-            if [[ "$variant" == "sqp-irk-two-stage-cadence-reg-1" || "$variant" == "sqp-irk-cadence-reg-1-rollout-guard" || "$variant" == "sqp-irk-cadence-reg-1-best-retry" || "$variant" == "sqp-byrd-omojokun-cadence-reg-1-irk" || "$variant" == "sqp-byrd-terminal-homotopy-cadence-reg-1-irk" ]]; then
+            if [[ "$variant" == "sqp-irk-two-stage-cadence-reg-1" || "$variant" == "sqp-irk-cadence-reg-1-rollout-guard" || "$variant" == "sqp-irk-cadence-reg-1-best-retry" || "$variant" == "sqp-byrd-omojokun-cadence-reg-1-irk" || "$variant" == "sqp-byrd-terminal-homotopy-cadence-reg-1-irk" || "$variant" == "sqp-byrd-rollout-accept-cadence-reg-1-irk" ]]; then
               solver_options+=(
                 --acados-wheel-qdot-regularization-weight 1
               )
@@ -771,17 +771,29 @@ jobs:
                 --acados-terminal-wheel-q-homotopy-each-window
               )
             fi
+            if [[ "$variant" == "sqp-byrd-rollout-accept-cadence-reg-1-irk" ]]; then
+              # Causal A/B only: accept every rollout violation observed in
+              # the 20-RHO baseline (the largest is about 9.73 in physical,
+              # but dimensionally mixed, units). The logs are offset by one
+              # window: accepted rollouts prepared the successful RHO
+              # 15/17/19, whereas rejected rollouts left a shifted primal
+              # with a 2.37--2.50 rad/s qdot defect before RHO 14/16/18/20.
+              # A threshold of 12 is deliberately not a production policy;
+              # it tests whether always rolling out removes that alternation.
+              solver_options+=(
+                --shared-transfer-rollout-max-bound-violation 12
+              )
+            fi
             if [[ "$variant" == "sqp-irk-cadence-reg-1-rollout-guard" ]]; then
               if [[ "$mechanics" != "full" ]]; then
                 echo "The guarded full-mechanics rollout requires full mechanics." >&2
                 return 2
               fi
-              # A/B test the shifted primal against the IRK-rollout transfer.
-              # In the first 100-RHO campaign, the only four ACADOS max-iter
-              # events occurred after accepted rollouts, while all 54 rejected
-              # rollouts converged. The smallest accepted violation was 0.223,
-              # so 0.2 deliberately rejects every observed rollout rather
-              # than claiming to be a dimensionless universal filter.
+              # Historical rejection screen. The threshold is applied to a
+              # maximum mixing physical units (rad, rad/s, N, ...), so it is
+              # not a normalized production rule. The later window-index
+              # audit also showed that rejected, not accepted, rollouts
+              # preceded the alternating failures at RHO 14/16/18/20.
               solver_options+=(
                 --shared-transfer-rollout-max-bound-violation 0.2
               )
@@ -907,6 +919,7 @@ jobs:
             run_case sqp-irk-reference full 1 SQP IRK 5 5
             run_case sqp-byrd-omojokun-cadence-reg-1-irk full "$ACADOS_SMOKE_RHOS" SQP_WITH_FEASIBLE_QP IRK 5 5
             run_case sqp-byrd-terminal-homotopy-cadence-reg-1-irk full "$ACADOS_SMOKE_RHOS" SQP_WITH_FEASIBLE_QP IRK 5 5
+            run_case sqp-byrd-rollout-accept-cadence-reg-1-irk full "$ACADOS_SMOKE_RHOS" SQP_WITH_FEASIBLE_QP IRK 5 5
           elif [[ "$acados_long" == "true" ]]; then
             printf '%s\n' \
               sqp-irk-reference-full \
@@ -1106,10 +1119,12 @@ jobs:
           fi
           for case_name in "${reference_cases[@]}"; do
             result="acados-smoke-results/${case_name}/result.json"
-            jq -e --arg extended "$extended_campaign" '
+            jq -e \
+              --arg extended "$extended_campaign" \
+              --arg homotopy_only "$ACADOS_HOMOTOPY_ONLY" '
               (.configurations.acados.use_sx == true) and
               (
-                if $extended == "true"
+                if $extended == "true" and $homotopy_only != "true"
                 then .configurations.acados.n_windows > 5
                 else true
                 end
