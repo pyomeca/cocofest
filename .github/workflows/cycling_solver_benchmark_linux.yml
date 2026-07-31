@@ -628,8 +628,8 @@ jobs:
               mechanics_options+=(
                 --acados-control-homotopy-release-final-radius
                 --full-contact-position-tolerance 2e-5
-                --transfer-contact-manifold-projection
-                --transfer-contact-manifold-projection-mode position_velocity
+                --shared-transfer-contact-projection
+                --shared-transfer-contact-projection-mode position_velocity
               )
             fi
             if [[ "$nlp_solver" == "SQP_RTI" ]]; then

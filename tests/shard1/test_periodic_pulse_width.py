@@ -2864,6 +2864,21 @@ def test_benchmark_extracts_collocation_shooting_nodes_without_interpolation():
     np.testing.assert_array_equal(limited["control_traces"]["u"], [[0, 1, 2, 3]])
 
 
+def test_benchmark_accepts_a_shorter_certified_physical_prefix():
+    result = _benchmark_result([0, 0, 4])
+    result["physical_crank_angle_trace"] = np.array([0.0, -np.pi, -2 * np.pi])
+    result["physical_crank_velocity_trace"] = np.array([-6.0, -6.1, -6.0])
+
+    limited = comparison_example._truncate_result_to_cycles(result, 2)
+
+    np.testing.assert_array_equal(
+        limited["physical_crank_angle_trace"], [0.0, -np.pi, -2 * np.pi]
+    )
+    np.testing.assert_array_equal(
+        limited["physical_crank_velocity_trace"], [-6.0, -6.1, -6.0]
+    )
+
+
 def test_state_comparison_aligns_wheel_turn_representation():
     reference = {
         "q": np.array(
@@ -4383,9 +4398,9 @@ def test_github_acados_runner_uses_reference_and_option_profiles_sequentially():
     assert "--acados-transfer-bound-homotopy-fractions 0,1" in workflow
     assert "run_case sqp-irk-two-stage-cadence-guard reduced" in workflow
     assert "--wheel-qdot-bound-margin 2.5" in workflow
-    assert "--transfer-contact-manifold-projection" in workflow
+    assert "--shared-transfer-contact-projection" in workflow
     assert (
-        "--transfer-contact-manifold-projection-mode position_velocity"
+        "--shared-transfer-contact-projection-mode position_velocity"
         in workflow
     )
     assert 'expected ${#expected_cases[@]} JSON files' in workflow

@@ -456,6 +456,32 @@ def _shooting_node_control_trace(
     return values[..., : requested_intervals * stride : stride]
 
 
+def _shooting_node_physical_trace(
+    values: np.ndarray, result: dict, cycle_count: int
+) -> np.ndarray:
+    """Truncate an already projected crank trace without assuming a full tail.
+
+    Mechanical certification is deliberately restricted to the contiguous
+    accepted ACADOS prefix.  Consequently, these projected traces can contain
+    fewer cycles than the raw state export whenever a later RHO fails.  They
+    are always expressed on the shooting-node grid, independently of the
+    transcription used by the underlying solver.
+    """
+
+    values = np.asarray(values)
+    shooting_per_cycle = int(result["args"].stimulations_per_cycle)
+    available_cycles, remainder = divmod(
+        values.shape[-1] - 1, shooting_per_cycle
+    )
+    if remainder:
+        raise ValueError(
+            "Physical crank trace cannot be mapped exactly to complete cycles: "
+            f"{values.shape[-1]} values for {shooting_per_cycle} intervals/cycle."
+        )
+    requested_cycles = min(int(cycle_count), available_cycles)
+    return values[..., : requested_cycles * shooting_per_cycle + 1]
+
+
 def _truncate_result_to_cycles(result: dict, cycle_count: int) -> dict:
     truncated = {
         **result,
@@ -473,7 +499,7 @@ def _truncate_result_to_cycles(result: dict, cycle_count: int) -> dict:
     }
     for key in ("physical_crank_angle_trace", "physical_crank_velocity_trace"):
         if result.get(key) is not None:
-            truncated[key] = _shooting_node_state_trace(
+            truncated[key] = _shooting_node_physical_trace(
                 result[key], result, cycle_count
             )
     return truncated
