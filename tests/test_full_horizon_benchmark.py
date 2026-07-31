@@ -189,6 +189,16 @@ def test_validated_cycles_retains_a_shorter_rho_prefix(tmp_path):
     )
 
 
+def test_unknown_mumps_warning_accepts_monitored_string_path(tmp_path):
+    log_path = tmp_path / "solver.log"
+    log_path.write_text(
+        "libMAD WARNING: option linear_solver is of unknown type mumps, ignoring\n",
+        encoding="utf-8",
+    )
+
+    assert full_horizon._log_has_unknown_mumps_warning(str(log_path))
+
+
 def test_workflow_has_an_isolated_mx_mumps_full_horizon_mode():
     workflow = (
         Path(__file__).resolve().parents[1]

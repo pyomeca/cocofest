@@ -350,7 +350,8 @@ def _benchmark_payload_is_readable(result_path: Path) -> bool:
         return False
 
 
-def _log_has_unknown_mumps_warning(log_path: Path) -> bool:
+def _log_has_unknown_mumps_warning(log_path: str | Path) -> bool:
+    log_path = Path(log_path)
     try:
         text = log_path.read_text(encoding="utf-8", errors="replace")
     except OSError:
