@@ -15,7 +15,7 @@ import re
 import sys
 from sys import platform as sys_platform
 from time import perf_counter
-from types import MethodType
+from types import MethodType, SimpleNamespace
 import warnings
 
 import numpy as np
@@ -8825,7 +8825,10 @@ def apply_transfer_state_bound_fraction(
     periodic_nmpc._sync_acados_state_bounds()
 
 
-def _acados_residual_history_summary(diagnostics: dict) -> dict:
+def _acados_residual_history_summary(
+    diagnostics: dict,
+    feasibility_tolerance: float | None = None,
+) -> dict:
     rows = []
     for key in ("res_stat_all", "res_eq_all", "res_ineq_all", "res_comp_all"):
         values = diagnostics.get(key)
@@ -8843,20 +8846,36 @@ def _acados_residual_history_summary(diagnostics: dict) -> dict:
     feasibility = np.max(np.abs(history[1:]), axis=0)
     stationarity = np.abs(history[0])
     candidate_indices = np.flatnonzero(finite_columns)
+    selection = "minimum_feasibility"
+    if feasibility_tolerance is not None:
+        feasible_candidates = np.flatnonzero(
+            finite_columns & (feasibility <= feasibility_tolerance)
+        )
+        if feasible_candidates.size:
+            candidate_indices = feasible_candidates
+            selection = "minimum_stationarity_within_feasibility"
+            sort_keys = (
+                feasibility[candidate_indices],
+                stationarity[candidate_indices],
+            )
+        else:
+            sort_keys = (
+                stationarity[candidate_indices],
+                feasibility[candidate_indices],
+            )
+    else:
+        sort_keys = (
+            stationarity[candidate_indices],
+            feasibility[candidate_indices],
+        )
     best_index = int(
-        candidate_indices[
-            np.lexsort(
-                (
-                    stationarity[candidate_indices],
-                    feasibility[candidate_indices],
-                )
-            )[0]
-        ]
+        candidate_indices[np.lexsort(sort_keys)[0]]
     )
     return {
         "initial": history[:, 0],
         "best": history[:, best_index],
         "best_index": best_index,
+        "selection": selection,
         "componentwise_best": np.min(np.abs(history), axis=1),
         "final": history[:, -1],
     }
@@ -8903,7 +8922,9 @@ def _acados_maxiter_retry_candidate(
 
     if status != 2:
         return {"eligible": False, "reason": "status_not_maxiter"}
-    history = _acados_residual_history_summary(diagnostics)
+    history = _acados_residual_history_summary(
+        diagnostics, feasibility_tolerance=feasibility_tolerance
+    )
     if not history:
         return {"eligible": False, "reason": "residual_history_unavailable"}
     best = np.asarray(history["best"], dtype=float).reshape(-1)
@@ -8924,6 +8945,7 @@ def _acados_maxiter_retry_candidate(
             "best_residuals": best,
             "best_feasibility": best_feasibility,
             "final_feasibility": final_feasibility,
+            "selection": history["selection"],
         }
     return {
         "eligible": True,
@@ -8932,7 +8954,152 @@ def _acados_maxiter_retry_candidate(
         "best_residuals": best,
         "best_feasibility": best_feasibility,
         "final_feasibility": final_feasibility,
+        "selection": history["selection"],
     }
+
+
+def capture_acados_stored_primal_dual_iterate(
+    periodic_nmpc,
+    iterate_index: int,
+) -> tuple[dict, dict | None]:
+    """Detach a complete stored ACADOS iterate for restoration after a QP reset."""
+
+    interface = getattr(periodic_nmpc, "ocp_solver", None)
+    acados_solver = getattr(interface, "ocp_solver", None)
+    get_iterate = getattr(acados_solver, "get_iterate", None)
+    get_solver_state = getattr(interface, "get_solver_state", None)
+    if get_iterate is None or get_solver_state is None:
+        return {"captured": False, "reason": "solver_state_api_unavailable"}, None
+    try:
+        stored_iterate = get_iterate(iterate_index)
+        solver_state = get_solver_state()
+    except (AttributeError, IndexError, RuntimeError, TypeError, ValueError) as exc:
+        return {
+            "captured": False,
+            "reason": "stored_iterate_unavailable",
+            "error": str(exc),
+        }, None
+    if not isinstance(solver_state, dict) or not isinstance(
+        solver_state.get("iterate"), dict
+    ):
+        return {"captured": False, "reason": "solver_state_template_unavailable"}, None
+    try:
+        algebraic_size = int(acados_solver.get_dim_flat("z"))
+    except (AttributeError, RuntimeError, TypeError, ValueError) as exc:
+        return {
+            "captured": False,
+            "reason": "algebraic_state_dimension_unavailable",
+            "error": str(exc),
+        }, None
+    if algebraic_size:
+        return {
+            "captured": False,
+            "reason": "algebraic_states_not_supported",
+            "algebraic_size": algebraic_size,
+        }, None
+
+    flatten = getattr(stored_iterate, "flatten", None)
+    if flatten is None:
+        return {
+            "captured": False,
+            "reason": "stored_iterate_flatten_api_unavailable",
+        }, None
+    try:
+        flat_iterate = flatten()
+    except (AttributeError, RuntimeError, TypeError, ValueError) as exc:
+        return {
+            "captured": False,
+            "reason": "stored_iterate_flatten_failed",
+            "error": str(exc),
+        }, None
+
+    field_sizes = {}
+    for field in ("x", "u", "pi", "lam", "sl", "su"):
+        try:
+            values = np.asarray(getattr(flat_iterate, field), dtype=float).reshape(-1)
+            expected_size = int(acados_solver.get_dim_flat(field))
+        except (AttributeError, RuntimeError, TypeError, ValueError) as exc:
+            return {
+                "captured": False,
+                "reason": "stored_iterate_field_unavailable",
+                "field": field,
+                "error": str(exc),
+            }, None
+        if values.size != expected_size:
+            return {
+                "captured": False,
+                "reason": "stored_iterate_dimension_mismatch",
+                "field": field,
+                "size": int(values.size),
+                "expected_size": expected_size,
+            }, None
+        if not np.all(np.isfinite(values)):
+            return {
+                "captured": False,
+                "reason": "stored_iterate_nonfinite",
+                "field": field,
+            }, None
+        solver_state["iterate"][field] = values.copy()
+        field_sizes[field] = int(values.size)
+    return {
+        "captured": True,
+        "reason": None,
+        "iterate_index": int(iterate_index),
+        "field_sizes": field_sizes,
+    }, solver_state
+
+
+def queue_acados_primal_dual_solver_state(periodic_nmpc, solver_state: dict) -> dict:
+    """Queue an exact state through Bioptim's public warm-start hook."""
+
+    interface = getattr(periodic_nmpc, "ocp_solver", None)
+    set_lagrange_multiplier = getattr(interface, "set_lagrange_multiplier", None)
+    if set_lagrange_multiplier is None:
+        return {"queued": False, "reason": "solver_state_queue_unavailable"}
+    try:
+        set_lagrange_multiplier(SimpleNamespace(solver_state=solver_state))
+    except (AttributeError, RuntimeError, TypeError, ValueError) as exc:
+        return {
+            "queued": False,
+            "reason": "solver_state_queue_failed",
+            "error": str(exc),
+        }
+    return {"queued": True, "reason": None}
+
+
+def clear_acados_primal_dual_solver_state(periodic_nmpc) -> dict:
+    """Clear a queued Python-side iterate without mutating the ACADOS capsule."""
+
+    interface = getattr(periodic_nmpc, "ocp_solver", None)
+    set_lagrange_multiplier = getattr(interface, "set_lagrange_multiplier", None)
+    if set_lagrange_multiplier is None:
+        return {"cleared": False, "reason": "solver_state_queue_unavailable"}
+    try:
+        set_lagrange_multiplier(SimpleNamespace(solver_state=None))
+    except (AttributeError, RuntimeError, TypeError, ValueError) as exc:
+        return {
+            "cleared": False,
+            "reason": "solver_state_clear_failed",
+            "error": str(exc),
+        }
+    return {"cleared": True, "reason": None}
+
+
+def _acados_bound_projection_max_change(primal_summary: dict) -> float:
+    """Return the largest bound projection applied to a stored primal."""
+
+    projection = primal_summary.get("bound_projection") or {}
+    changes = (
+        projection.get("state_max_change", 0.0),
+        projection.get("control_max_change", 0.0),
+    )
+    try:
+        values = np.asarray(changes, dtype=float)
+    except (TypeError, ValueError):
+        return np.inf
+    if values.shape != (2,) or not np.all(np.isfinite(values)):
+        return np.inf
+    return float(np.max(np.abs(values)))
 
 
 def install_acados_conditional_maxiter_retry(
@@ -8946,6 +9113,9 @@ def install_acados_conditional_maxiter_retry(
     echo: bool = True,
     residual_diagnostics_function=None,
     apply_primal_function=None,
+    capture_solver_state_function=None,
+    queue_solver_state_function=None,
+    clear_solver_state_function=None,
     reset_memory_function=None,
     set_iterations_function=None,
 ) -> bool:
@@ -8971,6 +9141,21 @@ def install_acados_conditional_maxiter_retry(
         apply_acados_capsule_primal_to_initial_guess
         if apply_primal_function is None
         else apply_primal_function
+    )
+    capture_solver_state_function = (
+        capture_acados_stored_primal_dual_iterate
+        if capture_solver_state_function is None
+        else capture_solver_state_function
+    )
+    queue_solver_state_function = (
+        queue_acados_primal_dual_solver_state
+        if queue_solver_state_function is None
+        else queue_solver_state_function
+    )
+    clear_solver_state_function = (
+        clear_acados_primal_dual_solver_state
+        if clear_solver_state_function is None
+        else clear_solver_state_function
     )
     reset_memory_function = (
         reset_acados_solver_memory
@@ -9000,6 +9185,7 @@ def install_acados_conditional_maxiter_retry(
         return output
 
     def solve_with_conditional_retry(_interface, *args, **kwargs):
+        retry_wrapper_start = perf_counter()
         armed = bool(
             getattr(periodic_nmpc, "_cocofest_acados_main_window_retry_armed", False)
         )
@@ -9016,7 +9202,9 @@ def install_acados_conditional_maxiter_retry(
             return first_output
 
         window = int(getattr(periodic_nmpc, "total_optimization_run", -1))
-        total_wall_time_s = float(getattr(_interface, "real_time_to_optimize", 0.0))
+        native_solver_wall_time_s = float(
+            getattr(_interface, "real_time_to_optimize", 0.0)
+        )
         attempt_summaries = []
         retry_budget_changed = False
         for attempt in range(max_retries):
@@ -9038,9 +9226,19 @@ def install_acados_conditional_maxiter_retry(
                     f"eligible={candidate['eligible']} "
                     f"reason={candidate.get('reason')} "
                     f"best_index={candidate.get('best_index')} "
+                    f"selection={candidate.get('selection')} "
                     f"best_feasibility={candidate.get('best_feasibility')}"
                 )
             if not candidate["eligible"]:
+                break
+
+            primal_dual_capture, solver_state = capture_solver_state_function(
+                periodic_nmpc, candidate["best_index"]
+            )
+            attempt_summary["primal_dual_capture"] = primal_dual_capture
+            if not primal_dual_capture["captured"] or solver_state is None:
+                attempt_summary["eligible"] = False
+                attempt_summary["reason"] = primal_dual_capture["reason"]
                 break
 
             primal_summary = apply_primal_function(
@@ -9053,6 +9251,14 @@ def install_acados_conditional_maxiter_retry(
                 attempt_summary["eligible"] = False
                 attempt_summary["reason"] = primal_summary["reason"]
                 break
+            projection_max_change = _acados_bound_projection_max_change(
+                primal_summary
+            )
+            attempt_summary["bound_projection_max_change"] = projection_max_change
+            if projection_max_change > 1e-12:
+                attempt_summary["eligible"] = False
+                attempt_summary["reason"] = "stored_primal_requires_bound_projection"
+                break
 
             attempt_summary["iteration_budget_set"] = set_iterations_function(
                 periodic_nmpc, retry_iterations
@@ -9062,10 +9268,26 @@ def install_acados_conditional_maxiter_retry(
                 attempt_summary["reason"] = "iteration_budget_update_failed"
                 break
             retry_budget_changed = True
+            primal_dual_queue = queue_solver_state_function(
+                periodic_nmpc, solver_state
+            )
+            attempt_summary["primal_dual_queue"] = primal_dual_queue
+            if not primal_dual_queue["queued"]:
+                attempt_summary["eligible"] = False
+                attempt_summary["reason"] = primal_dual_queue["reason"]
+                break
             attempt_summary["solver_reset"] = reset_memory_function(periodic_nmpc)
             if not attempt_summary["solver_reset"]:
+                attempt_summary["solver_state_clear"] = clear_solver_state_function(
+                    periodic_nmpc
+                )
                 attempt_summary["eligible"] = False
                 attempt_summary["reason"] = "solver_memory_reset_failed"
+                if not attempt_summary["solver_state_clear"]["cleared"]:
+                    raise RuntimeError(
+                        "ACADOS retry could not reset the capsule or clear the "
+                        "queued primal-dual state."
+                    )
                 break
 
             previous_solver_time_s = _acados_stat_scalar(
@@ -9106,7 +9328,7 @@ def install_acados_conditional_maxiter_retry(
             retry_wall_time_s = float(
                 getattr(_interface, "real_time_to_optimize", 0.0)
             )
-            total_wall_time_s += retry_wall_time_s
+            native_solver_wall_time_s += retry_wall_time_s
             attempt_summary["retry_status"] = int(
                 getattr(_interface, "status", -1)
             )
@@ -9131,6 +9353,7 @@ def install_acados_conditional_maxiter_retry(
             iteration_budget_restored = bool(
                 set_iterations_function(periodic_nmpc, nominal_iterations)
             )
+        total_wall_time_s = perf_counter() - retry_wrapper_start
         _interface.real_time_to_optimize = total_wall_time_s
         if attempt_summaries:
             summaries.append(
@@ -9145,6 +9368,7 @@ def install_acados_conditional_maxiter_retry(
                         + float(_interface._cocofest_retry_extra_solver_time_s)
                     ),
                     "wall_time_s": total_wall_time_s,
+                    "native_solver_wall_time_s": native_solver_wall_time_s,
                     "iteration_budget_restored": iteration_budget_restored,
                 }
             )

@@ -938,6 +938,102 @@ def test_acados_maxiter_retry_candidate_requires_nearly_feasible_history():
     ) == {"eligible": False, "reason": "status_not_maxiter"}
 
 
+def test_acados_maxiter_retry_prefers_stationarity_within_feasible_candidates():
+    diagnostics = {
+        "res_stat_all": np.array([20.0, 0.4, 0.01]),
+        "res_eq_all": np.array([0.4, 1e-5, 0.002]),
+        "res_ineq_all": np.array([0.01, 1e-8, 1e-7]),
+        "res_comp_all": np.array([0.0, 1e-9, 1e-8]),
+    }
+
+    candidate = periodic_example._acados_maxiter_retry_candidate(
+        2, diagnostics, feasibility_tolerance=0.0025
+    )
+
+    assert candidate["eligible"] is True
+    assert candidate["best_index"] == 2
+    assert candidate["selection"] == "minimum_stationarity_within_feasibility"
+
+
+def test_capture_and_queue_acados_stored_primal_dual_iterate():
+    fields = ("x", "u", "pi", "lam", "sl", "su")
+
+    class StoredIterate:
+        def __init__(self):
+            self.arrays = {
+                field: np.full(2, fields.index(field) + 1.0) for field in fields
+            }
+
+        def flatten(self):
+            return SimpleNamespace(**self.arrays)
+
+    class Capsule:
+        stored = StoredIterate()
+
+        def get_iterate(self, index):
+            assert index == 8
+            return self.stored
+
+        def get_dim_flat(self, field):
+            if field == "z":
+                return 0
+            assert field in fields
+            return 2
+
+    class Interface:
+        def __init__(self):
+            self.ocp_solver = Capsule()
+            self.queued = None
+
+        def get_solver_state(self):
+            return {
+                "solver": "ACADOS",
+                "format_version": 1,
+                "n_horizon": 30,
+                "iterate": {field: np.zeros(2) for field in fields},
+            }
+
+        def set_lagrange_multiplier(self, solution):
+            self.queued = solution.solver_state
+
+    interface = Interface()
+    nmpc = SimpleNamespace(ocp_solver=interface)
+
+    summary, state = periodic_example.capture_acados_stored_primal_dual_iterate(
+        nmpc, 8
+    )
+    queued = periodic_example.queue_acados_primal_dual_solver_state(nmpc, state)
+    interface.ocp_solver.stored.arrays["x"][:] = -99.0
+
+    assert summary["captured"] is True
+    assert summary["field_sizes"] == {field: 2 for field in fields}
+    assert queued == {"queued": True, "reason": None}
+    for index, field in enumerate(fields):
+        np.testing.assert_allclose(interface.queued["iterate"][field], index + 1.0)
+
+
+def test_capture_rejects_acados_algebraic_states():
+    class Capsule:
+        def get_iterate(self, index):
+            return SimpleNamespace(flatten=lambda: SimpleNamespace())
+
+        def get_dim_flat(self, field):
+            return 1 if field == "z" else 0
+
+    interface = SimpleNamespace(
+        ocp_solver=Capsule(),
+        get_solver_state=lambda: {"iterate": {}},
+    )
+
+    summary, state = periodic_example.capture_acados_stored_primal_dual_iterate(
+        SimpleNamespace(ocp_solver=interface), 0
+    )
+
+    assert summary["captured"] is False
+    assert summary["reason"] == "algebraic_states_not_supported"
+    assert state is None
+
+
 def test_conditional_maxiter_retry_ignores_successful_main_solve():
     class FakeAcadosInterface:
         status = -1
@@ -1016,6 +1112,7 @@ def test_conditional_maxiter_retry_replaces_solution_and_accounts_full_budget():
     summaries = []
     applied = []
     resets = []
+    queued_states = []
     iteration_budgets = []
 
     def residual_diagnostics(current_nmpc):
@@ -1057,6 +1154,21 @@ def test_conditional_maxiter_retry_replaces_solution_and_accounts_full_budget():
         echo=False,
         residual_diagnostics_function=residual_diagnostics,
         apply_primal_function=apply_primal,
+        capture_solver_state_function=lambda current_nmpc, iterate_index: (
+            {
+                "captured": True,
+                "reason": None,
+                "iterate_index": iterate_index,
+            },
+            {"iterate": "stored"},
+        ),
+        queue_solver_state_function=lambda current_nmpc, state: (
+            queued_states.append(state) or {"queued": True, "reason": None}
+        ),
+        clear_solver_state_function=lambda current_nmpc: {
+            "cleared": True,
+            "reason": None,
+        },
         reset_memory_function=lambda current_nmpc: resets.append(True) or True,
         set_iterations_function=lambda current_nmpc, value: (
             iteration_budgets.append(value) or True
@@ -1067,16 +1179,170 @@ def test_conditional_maxiter_retry_replaces_solution_and_accounts_full_budget():
     assert installed is True
     assert output["status"] == 0
     assert output["solver_time_to_optimize"] == pytest.approx(1.45)
-    assert output["real_time_to_optimize"] == pytest.approx(1.65)
+    assert output["real_time_to_optimize"] >= 0.0
     assert output["iter"] == 107
     assert applied == [(1, True)]
     assert resets == [True]
+    assert queued_states == [{"iterate": "stored"}]
     assert iteration_budgets == [20, 100]
     assert summaries[0]["window"] == 13
     assert summaries[0]["attempts"][0]["trigger_status"] == 2
     assert summaries[0]["attempts"][0]["retry_status"] == 0
     assert summaries[0]["final_status"] == 0
+    assert summaries[0]["native_solver_wall_time_s"] == pytest.approx(1.65)
+    assert summaries[0]["wall_time_s"] == pytest.approx(
+        output["real_time_to_optimize"]
+    )
     assert summaries[0]["iteration_budget_restored"] is True
+
+
+def test_conditional_maxiter_retry_does_not_reset_when_primal_dual_queue_fails():
+    class FakeAcadosInterface:
+        status = -1
+        real_time_to_optimize = 0.1
+
+        def solve(self):
+            self.status = 2
+            return self.get_optimized_value()
+
+        def get_optimized_value(self):
+            return {
+                "status": self.status,
+                "solver_time_to_optimize": 0.1,
+                "real_time_to_optimize": self.real_time_to_optimize,
+                "iter": 100,
+            }
+
+    interface = FakeAcadosInterface()
+    nmpc = SimpleNamespace(
+        ocp_solver=interface,
+        total_optimization_run=13,
+        _cocofest_acados_main_window_retry_armed=True,
+    )
+    diagnostics = {
+        "sqp_iter": 100,
+        "time_tot": 0.1,
+        "res_stat_all": np.array([1.0, 0.2]),
+        "res_eq_all": np.array([0.1, 1e-4]),
+        "res_ineq_all": np.array([0.0, 0.0]),
+        "res_comp_all": np.array([0.0, 0.0]),
+    }
+    resets = []
+    budgets = []
+    summaries = []
+
+    periodic_example.install_acados_conditional_maxiter_retry(
+        nmpc,
+        max_retries=1,
+        retry_iterations=20,
+        feasibility_tolerance=0.0025,
+        nominal_iterations=100,
+        summaries=summaries,
+        echo=False,
+        residual_diagnostics_function=lambda current_nmpc: diagnostics,
+        apply_primal_function=lambda *args, **kwargs: {
+            "applied": True,
+            "reason": None,
+            "bound_projection": {
+                "state_max_change": 0.0,
+                "control_max_change": 0.0,
+            },
+        },
+        capture_solver_state_function=lambda current_nmpc, iterate_index: (
+            {"captured": True, "reason": None},
+            {"iterate": "stored"},
+        ),
+        queue_solver_state_function=lambda current_nmpc, state: {
+            "queued": False,
+            "reason": "test_queue_failure",
+        },
+        clear_solver_state_function=lambda current_nmpc: pytest.fail(
+            "Nothing was queued, so no state should need clearing."
+        ),
+        reset_memory_function=lambda current_nmpc: resets.append(True) or True,
+        set_iterations_function=lambda current_nmpc, value: budgets.append(value)
+        or True,
+    )
+
+    output = interface.solve()
+
+    assert output["status"] == 2
+    assert resets == []
+    assert budgets == [20, 100]
+    assert summaries[0]["attempts"][0]["reason"] == "test_queue_failure"
+
+
+def test_conditional_maxiter_retry_rejects_a_projected_stored_primal():
+    class FakeAcadosInterface:
+        status = -1
+        real_time_to_optimize = 0.1
+
+        def solve(self):
+            self.status = 2
+            return self.get_optimized_value()
+
+        def get_optimized_value(self):
+            return {
+                "status": self.status,
+                "solver_time_to_optimize": 0.1,
+                "real_time_to_optimize": self.real_time_to_optimize,
+                "iter": 100,
+            }
+
+    interface = FakeAcadosInterface()
+    nmpc = SimpleNamespace(
+        ocp_solver=interface,
+        total_optimization_run=13,
+        _cocofest_acados_main_window_retry_armed=True,
+    )
+    diagnostics = {
+        "sqp_iter": 100,
+        "time_tot": 0.1,
+        "res_stat_all": np.array([1.0, 0.2]),
+        "res_eq_all": np.array([0.1, 1e-4]),
+        "res_ineq_all": np.array([0.0, 0.0]),
+        "res_comp_all": np.array([0.0, 0.0]),
+    }
+    queues = []
+    resets = []
+    summaries = []
+
+    periodic_example.install_acados_conditional_maxiter_retry(
+        nmpc,
+        max_retries=1,
+        retry_iterations=20,
+        feasibility_tolerance=0.0025,
+        nominal_iterations=100,
+        summaries=summaries,
+        echo=False,
+        residual_diagnostics_function=lambda current_nmpc: diagnostics,
+        apply_primal_function=lambda *args, **kwargs: {
+            "applied": True,
+            "reason": None,
+            "bound_projection": {
+                "state_max_change": 1e-8,
+                "control_max_change": 0.0,
+            },
+        },
+        capture_solver_state_function=lambda current_nmpc, iterate_index: (
+            {"captured": True, "reason": None},
+            {"iterate": "stored"},
+        ),
+        queue_solver_state_function=lambda current_nmpc, state: (
+            queues.append(state) or {"queued": True, "reason": None}
+        ),
+        reset_memory_function=lambda current_nmpc: resets.append(True) or True,
+        set_iterations_function=lambda current_nmpc, value: True,
+    )
+
+    interface.solve()
+
+    assert queues == []
+    assert resets == []
+    assert (
+        summaries[0]["attempts"][0]["reason"]
+        == "stored_primal_requires_bound_projection"
+    )
 
 
 def test_conditional_maxiter_retry_fails_if_nominal_budget_is_not_restored():
@@ -1139,6 +1405,18 @@ def test_conditional_maxiter_retry_fails_if_nominal_budget_is_not_restored():
             "reason": None,
             "source": "stored_iterate",
         },
+        capture_solver_state_function=lambda current_nmpc, iterate_index: (
+            {"captured": True, "reason": None},
+            {"iterate": "stored"},
+        ),
+        queue_solver_state_function=lambda current_nmpc, state: {
+            "queued": True,
+            "reason": None,
+        },
+        clear_solver_state_function=lambda current_nmpc: {
+            "cleared": True,
+            "reason": None,
+        },
         reset_memory_function=lambda current_nmpc: True,
         set_iterations_function=lambda current_nmpc, value: value == 20,
     )
@@ -1197,6 +1475,18 @@ def test_conditional_maxiter_retry_does_not_mask_original_solver_exception():
             "applied": True,
             "reason": None,
             "source": "stored_iterate",
+        },
+        capture_solver_state_function=lambda current_nmpc, iterate_index: (
+            {"captured": True, "reason": None},
+            {"iterate": "stored"},
+        ),
+        queue_solver_state_function=lambda current_nmpc, state: {
+            "queued": True,
+            "reason": None,
+        },
+        clear_solver_state_function=lambda current_nmpc: {
+            "cleared": True,
+            "reason": None,
         },
         reset_memory_function=lambda current_nmpc: True,
         # Simulate a failed restoration. Even with warnings promoted to

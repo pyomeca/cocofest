@@ -3194,6 +3194,23 @@ phase `FEASIBILITY_QP` ou Byrd–Omojokun avant le SQP nominal deviendra
 pertinente. Aucun itéré presque faisable ne doit être promu : le critère de
 succès reste statut zéro et audit physique complet.
 
+Cette ablation est maintenant implémentée sans changer le budget de `20`
+itérations. Parmi les itérés dont la faisabilité est inférieure à `2.5e-3`,
+le candidat minimise d'abord la stationnarité, puis la faisabilité en cas
+d'égalité. Les six vecteurs aplatis `x`, `u`, `pi`, `lam`, `sl` et `su` sont
+copiés avant le reset et leurs dimensions sont comparées à celles du capsule.
+Le primal met d'abord à jour l'initialisation Bioptim. L'itéré primal-dual
+complet est ensuite copié dans le hook Python de warm-start **avant** le reset
+QP; le reset ne peut donc pas détruire cette copie détachée. `solve()` la
+restaure après la mise à jour des coûts, contraintes, bornes et paramètres,
+juste avant l'appel ACADOS. Un champ absent, de mauvaise dimension ou non
+fini, un état algébrique non pris en charge, ou une projection non négligeable
+du primal aux bornes annule le retry au lieu de revenir silencieusement au
+primal seul. Cette dernière garde évite de combiner des duaux historiques avec
+un primal projeté différent. Le prochain écran `best-retry` mesure donc
+réellement cette stratégie primal-dual; il ne doit pas être comparé sous le
+même nom à la campagne primal seule sans tenir compte du SHA.
+
 Conclusion : la mécanique reduced est maintenant validée comme approximation
 physiologique de la full sur 100 RHO pour ce régime, avec un écart inférieur
 à `0.10 %` et un gain chaud de `4.46x` sous IPOPT. Le point
