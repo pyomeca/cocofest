@@ -4495,7 +4495,7 @@ def test_github_acados_runner_uses_reference_and_option_profiles_sequentially():
     assert 'solver_options+=(--madnlp-c-compile)' in benchmark_runner
     assert '--fatrop-state-scaling "$fatrop_state_scaling"' in benchmark_runner
     assert 'collocation_degree="${11:-3}"' in benchmark_runner
-    assert workflow.count("BENCHMARK_MAX_ITER=5000 bash") == 2
+    assert "BENCHMARK_MAX_ITER=5000 bash" not in workflow
     assert '--ipopt-collocation-degree "$collocation_degree"' in benchmark_runner
     assert 'case "$graph_mode" in' in benchmark_runner
     assert "The endurance benchmark is SX-only" in benchmark_runner

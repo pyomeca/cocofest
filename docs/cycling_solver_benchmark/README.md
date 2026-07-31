@@ -2733,9 +2733,11 @@ converge `5/5`; après le premier solve à 107 itérations, sa médiane chaude v
 environ `1.99 s`. IPOPT trouve aussi cinq points primalement faisables, mais
 le deuxième solve atteint sa limite de 2000 itérations : les cinq nombres
 d'itérations sont `1692, 2000, 84, 92, 120`. Le préfixe optimal strict reste
-donc `1/5`. Comme ce cas est un audit de transcription hors temps réel, et non
-un candidat au RHO en ligne, sa limite est portée à 5000 itérations sans
-modifier celle des formulations Radau degré 3.
+donc `1/5`. Le run
+[`30595640543`](https://github.com/mickaelbegon/cocofest/actions/runs/30595640543)
+a ensuite porté cette limite à 5000 : le même RHO reste primalement faisable
+mais non optimal après `307.9 s`. Le plafond est donc ramené à 2000 pour cet
+audit; MadNLP/MUMPS est le backend raffiné pertinent.
 
 Ce même run a révélé une erreur du rapport, pas des solveurs : les traces
 physiques de collocation conservaient leurs points internes, mais la
@@ -2753,6 +2755,39 @@ convergent mais la violation de vitesse sécante atteint encore
 puis le transfert échoue. La référence full converge numériquement `30/30`,
 mais sa violation sécante reste `0.403 rad/s`. Le problème n'est donc ni
 spécifique à reduced, ni corrigé par une faible pénalité.
+
+Le premier échec full avec le poids `1` était toutefois un problème de
+warm-start, et non une incompatibilité de la pénalité. Dans le run
+[`30595640543`](https://github.com/mickaelbegon/cocofest/actions/runs/30595640543),
+le premier RHO atteint 100 SQP avec un défaut dynamique `1.69e-2`, alors que
+les cinq RHO suivants convergent en 8 à 16 itérations. Le workflow applique
+donc réellement la stratégie à deux OCP :
+
+1. l'OCP full sans pénalité construit et sauvegarde son premier RHO faisable;
+2. l'OCP full avec pénalité de cadence charge ce primal sur la même fenêtre;
+3. chaque bibliothèque reste compilée une seule fois et ses paramètres
+   mobiles sont ensuite mis à jour pendant la boucle RHO.
+
+Le smoke
+[`30596285427`](https://github.com/mickaelbegon/cocofest/actions/runs/30596285427)
+valide ce chaînage :
+
+| ACADOS full, poids 1 | Valeur |
+|---|---:|
+| Préfixe NLP et physique | `6/6` |
+| Itérations du premier RHO | `19` |
+| Médiane chaude murale | `0.490 s` |
+| Violation maximale de vitesse sécante | `0.00751 rad/s` |
+| Fatigue exécutée, sans recompter la pénalité | `35.7698` |
+| AUC de fatigue | `0.251207` |
+| Minimum `A/A_scale` | `0.977954` |
+| Mur-à-mur du cas | `25.08 s` |
+
+Les résidus dynamiques finaux sont compris entre environ `2e-10` et `6e-8`.
+Cette réussite ne doit pas être transposée à reduced : le poids `1` reduced
+reste limité à un RHO; l'homotopie adaptative résout six NLP mais conserve une
+violation sécante de `0.377 rad/s`. ACADOS full régularisé devient donc le
+candidat d'endurance, tandis que les variantes reduced restent des ablations.
 
 La campagne 100 RHO ne répète plus tout l'écran ACADOS déjà réfuté. Elle
 conserve cinq cas : les références full/reduced, l'homotopie adaptative

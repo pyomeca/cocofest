@@ -1676,11 +1676,11 @@ jobs:
 
       - name: Run IPOPT reduced Radau degree 5
         if: ${{ matrix.solver == 'ipopt' && inputs.refined_collocation_validation }}
-        # Degree 5 is a transcription audit, not a real-time candidate.  Its
-        # first two solves needed 1692 and >2000 iterations in run 30594633810,
-        # while remaining primal-feasible to 1e-7.  Give this offline
-        # validation enough iterations to reach optimality.
-        run: BENCHMARK_MAX_ITER=5000 bash .github/scripts/run_cycling_benchmark_case.sh ipopt-radau5 ipopt reduced mumps collocation benchmark-results "$REFINED_COLLOCATION_RHOS" false sx none 5
+        # Degree 5 is a transcription audit, not a real-time candidate.
+        # Run 30595640543 remained at maxiter even after 5000 iterations while
+        # primal-feasible. Keep the bounded 2000-iteration diagnostic instead
+        # of spending another five minutes without extending the strict prefix.
+        run: bash .github/scripts/run_cycling_benchmark_case.sh ipopt-radau5 ipopt reduced mumps collocation benchmark-results "$REFINED_COLLOCATION_RHOS" false sx none 5
       - name: Checkpoint IPOPT reduced Radau degree 5
         if: ${{ always() && matrix.solver == 'ipopt' && inputs.refined_collocation_validation }}
         continue-on-error: true
@@ -1719,7 +1719,7 @@ jobs:
 
       - name: Run MadNLP MUMPS reduced Radau degree 5
         if: ${{ matrix.solver == 'madnlp' && inputs.refined_collocation_validation }}
-        run: BENCHMARK_MAX_ITER=5000 bash .github/scripts/run_cycling_benchmark_case.sh madnlp-mumps-radau5 madnlp reduced mumps collocation benchmark-results "$REFINED_COLLOCATION_RHOS" false sx none 5
+        run: bash .github/scripts/run_cycling_benchmark_case.sh madnlp-mumps-radau5 madnlp reduced mumps collocation benchmark-results "$REFINED_COLLOCATION_RHOS" false sx none 5
       - name: Checkpoint MadNLP MUMPS reduced Radau degree 5
         if: ${{ always() && matrix.solver == 'madnlp' && inputs.refined_collocation_validation }}
         continue-on-error: true
