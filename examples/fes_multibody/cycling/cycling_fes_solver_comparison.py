@@ -463,23 +463,34 @@ def _shooting_node_physical_trace(
 
     Mechanical certification is deliberately restricted to the contiguous
     accepted ACADOS prefix.  Consequently, these projected traces can contain
-    fewer cycles than the raw state export whenever a later RHO fails.  They
-    are always expressed on the shooting-node grid, independently of the
-    transcription used by the underlying solver.
+    fewer cycles than the raw state export whenever a later RHO fails.
+    Collocation traces still contain their internal points; ACADOS shooting
+    traces do not.  The audit records this stride explicitly.
     """
 
     values = np.asarray(values)
     shooting_per_cycle = int(result["args"].stimulations_per_cycle)
+    mechanical_audit = result.get("mechanical_equivalence_audit") or {}
+    stride = int(
+        mechanical_audit.get(
+            "cadence_audit_node_stride", _configured_state_node_stride(result)
+        )
+    )
+    if stride < 1:
+        raise ValueError("Physical crank trace stride must be strictly positive.")
     available_cycles, remainder = divmod(
-        values.shape[-1] - 1, shooting_per_cycle
+        values.shape[-1] - 1, shooting_per_cycle * stride
     )
     if remainder:
         raise ValueError(
             "Physical crank trace cannot be mapped exactly to complete cycles: "
-            f"{values.shape[-1]} values for {shooting_per_cycle} intervals/cycle."
+            f"{values.shape[-1]} values for {shooting_per_cycle} intervals/cycle "
+            f"and stride {stride}."
         )
     requested_cycles = min(int(cycle_count), available_cycles)
-    return values[..., : requested_cycles * shooting_per_cycle + 1]
+    return values[
+        ..., : requested_cycles * shooting_per_cycle * stride + 1 : stride
+    ]
 
 
 def _truncate_result_to_cycles(result: dict, cycle_count: int) -> dict:

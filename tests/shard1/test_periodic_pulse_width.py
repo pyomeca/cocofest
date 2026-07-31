@@ -2897,6 +2897,35 @@ def test_benchmark_accepts_a_shorter_certified_physical_prefix():
     )
 
 
+def test_benchmark_extracts_collocation_points_from_physical_crank_trace():
+    result = _benchmark_result([0, 0], solver_success=True, success=True)
+    result["args"] = SimpleNamespace(
+        stimulations_per_cycle=2,
+        ode_solver="collocation",
+        collocation_degree=5,
+    )
+    result["exported_cycles"] = 2
+    collocation_values = np.arange(25, dtype=float)
+    result["wheel_angle_trace"] = collocation_values
+    result["state_traces"] = {"q": collocation_values[np.newaxis, :]}
+    result["control_traces"] = {"u": np.arange(4, dtype=float)[np.newaxis, :]}
+    result["physical_crank_angle_trace"] = collocation_values
+    result["physical_crank_velocity_trace"] = -collocation_values
+    result["mechanical_equivalence_audit"] = {
+        "cadence_audit_node_stride": 6,
+        "passes_tolerance": True,
+    }
+
+    limited = comparison_example._truncate_result_to_cycles(result, 2)
+
+    np.testing.assert_array_equal(
+        limited["physical_crank_angle_trace"], [0, 6, 12, 18, 24]
+    )
+    np.testing.assert_array_equal(
+        limited["physical_crank_velocity_trace"], [0, -6, -12, -18, -24]
+    )
+
+
 def test_state_comparison_aligns_wheel_turn_representation():
     reference = {
         "q": np.array(
