@@ -4217,6 +4217,25 @@ def _status_is_success(status) -> bool:
     return status == 0
 
 
+def select_acados_dual_warm_start_mode(
+    requested_mode: str, previous_status, previous_feasibility: dict | None
+) -> tuple[str, bool]:
+    """Only preserve duals from a status-zero, primal/dynamics-certified window."""
+    if requested_mode not in {"preserve", "reset", "shift"}:
+        raise ValueError(f"Unsupported ACADOS dual warm-start mode '{requested_mode}'.")
+    previous_window_certified = bool(
+        _status_is_success(previous_status)
+        and previous_feasibility is not None
+        and previous_feasibility.get("passes_tolerance", False)
+    )
+    effective_mode = (
+        requested_mode
+        if requested_mode != "preserve" or previous_window_certified
+        else "reset"
+    )
+    return effective_mode, previous_window_certified
+
+
 def _status_label(status) -> str:
     if status is None:
         return "None"
@@ -13271,7 +13290,14 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
             args.acados_cyclical_transfer_mode == "repeat"
         )
         nmpc.transfer_debug = echo
-        nmpc._cocofest_dual_warm_start_mode = args.acados_dual_warm_start_mode
+        # There is no certified predecessor for the first RHO. Even when the
+        # experiment requests dual preservation, start from zero multipliers
+        # and enable preservation only after a primal/dynamics-certified solve.
+        nmpc._cocofest_dual_warm_start_mode = (
+            "reset"
+            if args.acados_dual_warm_start_mode == "preserve"
+            else args.acados_dual_warm_start_mode
+        )
         nmpc._cocofest_dual_shift_stages = args.stimulations_per_cycle
         nmpc._cocofest_wheel_cycle_boundary_slack = (
             args.acados_terminal_wheel_q_slack if args.solver == "acados" else None
@@ -14265,6 +14291,7 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
         )
 
     acados_window_diagnostics = []
+    acados_dual_warm_start_summaries = []
     nlp_dual_warm_start_summaries = []
     nlp_solver_stats = []
     compiled_nlp_tracker = CompiledNlpReuseTracker(nlp_c_compile_enabled(args))
@@ -14408,8 +14435,6 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
                     **snapshot_nlp_solver_stats(_nmpc),
                 }
             )
-        if args.solver == "acados":
-            _nmpc._cocofest_dual_warm_start_mode = args.acados_dual_warm_start_mode
         transfer_rollout_applied = None
         completed_window_diagnostics = None
         if args.solver == "acados" and _sol is not None:
@@ -14417,6 +14442,19 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
             # backend. Snapshot the completed window before they overwrite it.
             completed_window_diagnostics = snapshot_acados_diagnostics(_sol)
             acados_window_diagnostics.append(completed_window_diagnostics)
+            applied_dual_summary = dict(
+                getattr(
+                    _nmpc,
+                    "_cocofest_last_dual_warm_start_summary",
+                    {
+                        "mode": "unknown",
+                        "shift_stages": 0,
+                        "zeroed_tail_stages": 0,
+                    },
+                )
+            )
+            applied_dual_summary["window"] = cycle_idx - 1
+            acados_dual_warm_start_summaries.append(applied_dual_summary)
         if echo and _sol is not None:
             states = _sol.decision_states(to_merge=SolutionMerge.NODES)
             position_key = _nmpc.position_state_key
@@ -14444,6 +14482,7 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
                     f"lam_x={dual_summary['lam_x_size']} "
                     f"reason={dual_summary['reason']}"
                 )
+        feasibility = None
         if _sol is not None:
             feasibility = getattr(_sol, "_cocofest_feasibility_summary", None)
             if feasibility is not None:
@@ -14451,6 +14490,23 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
                     consecutive_physical_failures = 0
                 else:
                     consecutive_physical_failures += 1
+        if args.solver == "acados":
+            requested_dual_mode = args.acados_dual_warm_start_mode
+            effective_dual_mode, previous_window_certified = (
+                select_acados_dual_warm_start_mode(
+                    requested_dual_mode,
+                    None if _sol is None else _sol.status,
+                    feasibility,
+                )
+            )
+            _nmpc._cocofest_dual_warm_start_mode = effective_dual_mode
+            if echo:
+                print(
+                    "acados_dual_warm_start_next: "
+                    f"requested={requested_dual_mode} "
+                    f"effective={effective_dual_mode} "
+                    f"previous_window_certified={previous_window_certified}"
+                )
         continue_solving = (
             cycle_idx < requested_window_solves
             and consecutive_physical_failures < args.max_consecutive_failing
@@ -15559,6 +15615,10 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
     )
     if args.solver == "acados" and args.acados_diagnostics:
         summary["acados_diagnostics"] = acados_window_diagnostics
+    if args.solver == "acados":
+        summary["acados_dual_warm_start_summaries"] = (
+            acados_dual_warm_start_summaries
+        )
     if nlp_dual_warm_start_summaries:
         summary["nlp_dual_warm_start_summaries"] = nlp_dual_warm_start_summaries
         if args.solver == "ipopt":

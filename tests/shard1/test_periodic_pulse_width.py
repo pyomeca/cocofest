@@ -4336,6 +4336,32 @@ def test_acados_dual_warm_start_can_reset_all_multipliers():
     assert all(not np.any(values) for values in solver.values.values())
 
 
+@pytest.mark.parametrize(
+    ("status", "passes_tolerance", "expected_mode", "certified"),
+    (
+        (0, True, "preserve", True),
+        (2, True, "reset", False),
+        (0, False, "reset", False),
+        (None, None, "reset", False),
+    ),
+)
+def test_acados_duals_are_only_preserved_after_primal_dynamics_certification(
+    status, passes_tolerance, expected_mode, certified
+):
+    feasibility = (
+        None
+        if passes_tolerance is None
+        else {"passes_tolerance": passes_tolerance}
+    )
+
+    mode, was_certified = periodic_example.select_acados_dual_warm_start_mode(
+        "preserve", status, feasibility
+    )
+
+    assert mode == expected_mode
+    assert was_certified is certified
+
+
 def test_acados_dual_warm_start_can_shift_one_cycle_and_zero_tail():
     solver = _DualWarmStartSolver(horizon=3)
 
@@ -5334,6 +5360,8 @@ def test_github_acados_runner_uses_reference_and_option_profiles_sequentially():
     assert "run_case sqp-irk-two-stage-cadence-reg-1 full" in workflow
     assert "run_case sqp-irk-cadence-reg-1-best-retry full" in workflow
     assert "run_case sqp-byrd-omojokun-cadence-reg-1-irk full" in workflow
+    assert "run_case sqp-byrd-dual-preserve-cadence-reg-1-irk full" in workflow
+    assert "--acados-dual-warm-start-mode preserve" in workflow
     assert "--acados-store-iterates" in workflow
     assert "--acados-maxiter-retries 1" in workflow
     assert "--acados-maxiter-retry-iterations 20" in workflow
@@ -5353,11 +5381,15 @@ def test_github_acados_runner_uses_reference_and_option_profiles_sequentially():
     long_campaign = workflow.split(
         'if [[ "$acados_long" == "true" ]]; then', maxsplit=1
     )[1].split('elif [[ "$acados_extended" == "false" ]]; then', maxsplit=1)[0]
-    assert long_campaign.count("run_case ") == 7
+    assert long_campaign.count("run_case ") == 8
     assert "run_case sqp-irk-two-stage-adaptive reduced" in long_campaign
     assert "run_case sqp-irk-two-stage-cadence-reg-1 full" in long_campaign
     assert "run_case sqp-irk-cadence-reg-1-best-retry full" in long_campaign
     assert "run_case sqp-byrd-omojokun-cadence-reg-1-irk full" in long_campaign
+    assert (
+        "run_case sqp-byrd-dual-preserve-cadence-reg-1-irk full 20 "
+        "SQP_WITH_FEASIBLE_QP IRK 5 5"
+    ) in long_campaign
     assert "run_case sqp-irk-two-stage-cadence-reg-1 reduced" in long_campaign
     assert "sqp-irk-two-stage-cadence-reg-0p1" not in long_campaign
     assert "sqp-rti-irk" not in long_campaign

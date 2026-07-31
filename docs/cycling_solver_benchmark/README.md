@@ -3272,7 +3272,50 @@ reste isolée du retry et de l'homotopie afin que son effet soit interprétable.
 La garde de projection du retry passe séparément de `1e-12` à `1e-9` pour ne
 plus classer le bruit d'arrondi observé comme une modification physique.
 
-Si la voie native échoue, deux capsules ACADOS pourront ensuite être
+Le run de remplacement
+[`30606375038`](https://github.com/mickaelbegon/cocofest/actions/runs/30606375038),
+au SHA `76ca1b6e2756d52b44ce309cfa3142239a35ef2e`, confirme que le chemin
+Byrd–Omojokun est réellement exécuté : aucun message « not implemented », des
+itérations non nulles et des temps QP mesurés. Il ne franchit toutefois pas le
+RHO 14 :
+
+| ACADOS full, cadence poids 1 | SQP nominal | Retry primal-dual | Byrd–Omojokun |
+|---|---:|---:|---:|
+| Solves réussis | `96/100` | `96/100` | `96/100` |
+| Préfixe physique strict | `13` | `13` | `13` |
+| Échecs | `14, 16, 18, 20` | `14, 16, 18, 20` | `14, 16, 18, 20` |
+| Médiane chaude solveur | `0.522 s` | `0.545 s` | `0.567 s` |
+| Fatigue exécutée du préfixe | `132.646886` | `132.646886` | `132.646397` |
+
+Au RHO 14, Byrd–Omojokun réduit le résidu dynamique de `3.02e-3` à
+`3.10e-4` et la stationnarité de `0.296` à `0.073`; la restauration améliore
+donc localement le point d'environ un ordre de grandeur. Elle reste néanmoins
+31 fois au-dessus du seuil physique `1e-5`, atteint encore `MAXITER=100`, et
+le gain n'est pas stable aux RHO 16–20. La combinaison native des QP de
+faisabilité et d'optimalité est ainsi utile comme diagnostic, mais ne fournit
+pas encore le warm-start robuste recherché.
+
+L'ablation suivante conserve strictement cette configuration et ne change que
+le warm-start dual sur les 20 premiers RHO. Les multiplicateurs ACADOS sont
+conservés après un statut zéro dont les bornes, contraintes et résidus
+primal/dynamiques satisfont le seuil; ils sont remis à zéro au premier RHO,
+après `MAXITER` et après tout échec de cette certification. L'audit global de
+la trace angulaire reste une métrique séparée et n'est pas implicitement
+revendiqué par ce gate. Le JSON enregistre maintenant, pour chaque fenêtre,
+le mode effectivement appliqué ainsi que les options
+`acados_dual_warm_start_mode`,
+`acados_disable_direction_mode_switch_to_nominal` et
+`acados_use_constraint_hessian_in_feas_qp`. Cette règle évite qu'un dual issu
+d'un point non admissible contamine le RHO suivant et rend l'ablation
+reproductible.
+
+Cette garantie dépend de l'interface actuelle : aucun `solver_state` ACADOS
+n'est mis en attente après l'avance de fenêtre. Si Bioptim active plus tard
+une restauration native des multiplicateurs ACADOS, il faudra appliquer ce
+gate après cette restauration afin qu'elle n'écrase pas le choix
+`reset/preserve`.
+
+Puisque la voie native échoue, deux capsules ACADOS pourront ensuite être
 compilées au montage, l'une en restauration et l'autre en `NOMINAL_QP`, puis
 recevoir les mêmes paramètres mobiles et le même primal certifié. Cette
 séparation est préférable à une nouvelle relaxation des contraintes
