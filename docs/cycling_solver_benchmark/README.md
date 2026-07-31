@@ -2668,24 +2668,60 @@ La vitesse moyenne sort donc de la borne de `0.37634 rad/s`. Par le théorème
 de la moyenne, au moins un point interne la viole nécessairement, même si
 tous les `omega` exportés sont admissibles. L’audit mécanique calcule
 désormais cette vitesse sécante et rejette une trajectoire ACADOS lorsque la
-violation dépasse `0.1 rad/s`. Une variante conservatrice réduit provisoirement
-la marge nodale de `3.0` à `2.5 rad/s`; elle ne fait pas partie du problème
-commun et est rapportée comme ablation de sécurité.
+violation dépasse `0.1 rad/s`.
+
+Les runs
+[`30593571421`](https://github.com/mickaelbegon/cocofest/actions/runs/30593571421)
+et
+[`30594236036`](https://github.com/mickaelbegon/cocofest/actions/runs/30594236036)
+ont invalidé la première garde envisagée. Réduire la marge nodale de `3.0` à
+`2.5 rad/s` rend déjà la seed commune incohérente avec la dynamique
+discrète : le premier SQP retourne `ACADOS_MINSTEP`, avec un résidu d’égalité
+d’environ `5.96e-2`, avant tout RHO validé. Surtout, resserrer les valeurs
+nodales ne constitue pas une contrainte mathématique sur les étages IRK. Cette
+ablation est donc documentée mais retirée des campagnes 30/100 RHO.
 
 Ces deux effets agissent en sens opposés sur l’interprétation : l’intégration
 du calcium est plus fidèle avec l’IRK ACADOS, mais son ensemble admissible
 continu est trop large entre les nœuds. La campagne suivante doit donc :
 
-1. tester le warm-start à homotopie adaptative et la garde de cadence;
+1. tester le warm-start à homotopie adaptative et une régularisation douce de
+   cadence, sans imposer une vitesse constante;
 2. réintégrer densément chaque intervalle ACADOS accepté;
 3. raffiner la collocation du calcium pour IPOPT et MadNLP;
 4. injecter le patron ACADOS dans ce NLP raffiné;
 5. comparer seulement ensuite fatigue, coût et optimalité.
 
-Le full ACADOS souffre d’un autre défaut de transfert, désormais corrigé dans
-le workflow. Le nouvel angle et la nouvelle vitesse du pédalier étaient fixés
-au premier nœud, mais les vitesses redondantes du bras conservaient parfois
-leur ancienne phase; une couture observée atteignait `0.64 rad/s`, puis HPIPM
-retournait `ACADOS_QP_FAILURE`. Le warm-start full projette maintenant position
-et vitesse sur la variété de contact en préservant exactement les deux états
-du pédalier. Les itérés échoués sont exclus de l’audit du préfixe déjà validé.
+Le full ACADOS souffrait d’un autre défaut de transfert. Le nouvel angle et la
+nouvelle vitesse du pédalier étaient fixés au premier nœud, mais les vitesses
+redondantes du bras conservaient parfois leur ancienne phase; une couture
+observée atteignait `0.64 rad/s`, puis HPIPM retournait
+`ACADOS_QP_FAILURE`. Le warm-start full projette maintenant position et
+vitesse sur la variété de contact en préservant exactement les deux états du
+pédalier. Cette correction est effectivement activée dans le JSON du run
+`30594236036`. La référence full résout alors les cinq NLP, mais elle est
+correctement rejetée par l’audit continu : sa vitesse sécante minimale vaut
+`-9.68586 rad/s`, soit une violation de `0.40268 rad/s`. La même anomalie
+existe donc en full et en reduced; elle ne provient pas de la réduction
+mécanique.
+
+L’homotopie adaptative `[0, 1]` n’est pas plus rapide sur ce gate. À cinq RHO,
+elle consomme `25.32 s` de restauration, contre `10.17 s` pour les neuf
+fractions fixes. Le dernier transfert requiert de nombreuses bissections très
+proches de `lambda=1`; essayer directement la borne finale répète ainsi
+plusieurs échecs coûteux. Elle reste une donnée d’ablation, pas le choix par
+défaut.
+
+Deux poids de régularisation de `omega`, `0.1` et `1`, sont maintenant évalués.
+Cette pénalité ne fixe pas la cadence : elle laisse la trajectoire varier dans
+la bande physique, mais décourage les excursions qui créent les dépassements
+internes. Le rapport conserve séparément l’objectif de fatigue exécutée, afin
+de mesurer explicitement le prix physiologique de cette régularisation.
+
+Enfin, le premier essai Radau degré 5 a exposé une limite de préparation, et
+non une non-convergence : la seed degré 3 contient `121` points d’état, contre
+`181` pour le degré 5. L’adaptateur interpole désormais uniquement les états
+sur la grille raffinée, conserve exactement les deux extrémités et ne lisse
+jamais les contrôles discontinus. Le NLP raffiné restaure ensuite ses propres
+équations de collocation. Les itérés ACADOS échoués restent exclus de l’audit
+du préfixe déjà validé.

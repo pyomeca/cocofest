@@ -1902,10 +1902,27 @@ jobs:
           select_acados_case() {
             local mechanics="$1"
             local candidate
-            for candidate in \
-              "benchmark-acados-all/sqp-irk-two-stage-${mechanics}/result.json" \
+            local candidates=()
+            if [[ "$mechanics" == "reduced" ]]; then
+              candidates+=(
+                "benchmark-acados-all/sqp-irk-two-stage-cadence-reg-0p1-reduced/result.json"
+              )
+            fi
+            candidates+=(
+              "benchmark-acados-all/sqp-irk-two-stage-cadence-reg-1-${mechanics}/result.json"
+              "benchmark-acados-all/sqp-irk-two-stage-${mechanics}/result.json"
               "benchmark-acados-all/sqp-irk-reference-${mechanics}/result.json"
-            do
+            )
+            # Prefer the least regularized physically certified trajectory.
+            # If none passes, still export the highest-priority attempted case
+            # so the combined report records the failure instead of hiding it.
+            for candidate in "${candidates[@]}"; do
+              if [[ -f "$candidate" ]] && jq -e '.results[0].success == true' "$candidate" >/dev/null; then
+                echo "$candidate"
+                return 0
+              fi
+            done
+            for candidate in "${candidates[@]}"; do
               if [[ -f "$candidate" ]]; then
                 echo "$candidate"
                 return 0

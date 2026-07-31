@@ -4407,6 +4407,9 @@ def test_github_acados_runner_uses_reference_and_option_profiles_sequentially():
     assert "sqp-irk-reference-full" in workflow
     assert 'result="acados-smoke-results/${case_name}/result.json"' in workflow
     assert "select_acados_case()" in workflow
+    assert "sqp-irk-two-stage-cadence-reg-0p1-reduced/result.json" in workflow
+    assert "sqp-irk-two-stage-cadence-reg-1-${mechanics}/result.json" in workflow
+    assert ".results[0].success == true" in workflow
     assert "sqp-irk-two-stage-${mechanics}/result.json" in workflow
     assert "sqp-irk-reference-${mechanics}/result.json" in workflow
     assert workflow.index(
