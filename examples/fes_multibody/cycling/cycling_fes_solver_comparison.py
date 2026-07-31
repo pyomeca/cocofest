@@ -2589,6 +2589,7 @@ def solver_overview_rows(results: dict[str, dict]) -> list[dict]:
                 "mechanical_equivalence_audit": result.get(
                     "mechanical_equivalence_audit"
                 ),
+                "nlp_crank_diagnostics": result.get("nlp_crank_diagnostics"),
                 "physical_crank_diagnostics": result.get("physical_crank_diagnostics"),
                 "state_boundary_jumps": result.get("state_boundary_jumps")
                 or {

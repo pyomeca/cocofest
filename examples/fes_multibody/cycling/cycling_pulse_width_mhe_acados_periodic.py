@@ -7086,6 +7086,13 @@ def attach_mechanical_equivalence_audit(
 ) -> dict:
     """Attach physical crank traces and reject visibly off-manifold motion."""
 
+    # Preserve the audit of the generalized crank coordinate before replacing
+    # the benchmark verdict with the angle reconstructed on the contact
+    # manifold. The two quantities are intentionally distinct for the full
+    # formulation: a bound on q[wheel] does not by itself certify the projected
+    # physical crank angle at the same tolerance.
+    summary["nlp_crank_diagnostics"] = deepcopy(summary.get("diagnostics"))
+
     if reduced_cycling_dynamics is None:
         summary["mechanical_equivalence_audit"] = {
             "available": False,

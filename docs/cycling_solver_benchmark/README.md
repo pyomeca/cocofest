@@ -3785,3 +3785,54 @@ bornes réelles; `inf_pr` au premier itéré interne ne lui est pas équivalent.
 Cette instrumentation sera partagée par IPOPT et MadNLP et permettra de
 localiser les défauts de collocation sans modifier le NLP ni polluer le temps
 de résolution.
+
+La campagne de validation finale
+[`30632613180`](https://github.com/mickaelbegon/cocofest/actions/runs/30632613180)
+est verte. Elle confirme à la fois la sérialisation correcte du chemin
+d'homotopie dans le CSV et l'arrêt sûr de la continuation lorsqu'elle ne peut
+pas atteindre sa borne physique finale. Les résultats comparables sont :
+
+| Cas full/SX, IRK | RHO tentés | Statuts natifs réussis | Préfixe NLP | Préfixe physique | Médiane/P90 effective | Restauration |
+|---|---:|---:|---:|---:|---:|---:|
+| Byrd--Omojokun, seuil rollout `1` | 20 | 16 | 13 | 13 | `0.568 / 1.055 s` | `0 s` |
+| Byrd--Omojokun, seuil causal `12` | 8 | 6 | 6 | 0 | `1.745 / 1.924 s` | `0 s` |
+| Byrd--Omojokun, homotopie `0.01,0.005,0.002` | 6 | 6 | 6 | 0 | `2.376 / 2.642 s` | `14.711 s` |
+
+Le témoin au seuil `1` reste donc la meilleure configuration : il certifie 13
+RHO consécutifs, atteint une erreur angulaire physique maximale de
+`0.001461 rad`, une fatigue exécutée de `132.6468` et un ratio minimal de
+capacité `A/A_0=0.962934`. Le seuil `12` est rejeté : il porte l'erreur
+angulaire à `0.004911 rad`, l'erreur de projection mécanique à `0.02810 rad`
+et le résidu tangent à `0.3834 rad/s`.
+
+L'homotopie terminale s'arrête maintenant avant d'exporter le RHO 7 lorsque
+son premier palier échoue; la borne relâchée ne fuit plus vers un solve
+ultérieur. Elle reste néanmoins non certifiée dès le premier cycle : l'erreur
+angulaire reconstruite vaut `0.002473 rad`, au-dessus de la tolérance
+`0.002010 rad`, bien que le dernier palier ait effectivement replacé la borne
+de la coordonnée `q[2]` à `0.002 rad`. Ce décalage est explicable :
+
+$$
+\theta_\mathrm{phys}(q_N)-\theta_\mathrm{phys}(q_0)+2\pi
+=
+\underbrace{q_{N,\mathrm{roue}}-q_{0,\mathrm{roue}}+2\pi}_{\text{borné dans le NLP}}
++
+\underbrace{\Delta\Pi_N-\Delta\Pi_0}_{\text{projection sur la variété de contact}}.
+$$
+
+L'homotopie pousse le premier terme près de la face `+0.002 rad`; la
+variation de la projection géométrique ajoute environ `0.00047 rad`. L'audit
+global reste pourtant très près de la variété (`1.63e-4 rad` de projection
+maximale et `7.87e-4 rad/s` de résidu tangent), ce qui exclut une trajectoire
+grossièrement non physique. Pour garantir une tolérance **physique** de
+`0.002 rad`, il faudra soit borner directement l'angle projeté/une contrainte
+de contact terminale, soit réserver une marge conservatrice et resserrer la
+borne sur `q[2]` vers `0.0015 rad`. Cette dernière valeur doit être validée par
+un A/B et ne constitue pas encore un réglage de production.
+
+Enfin, le témoin SQP nominal à un cycle satisfait son angle
+(`0.001468 rad`) mais échoue au certificat mécanique à cause de la cadence
+physique moyenne : son dépassement atteint `0.4027 rad/s`, au-delà de la
+marge d'audit `0.1 rad/s`. Son `physically_validated_cycles=0` n'est donc pas
+une incohérence du comptage, mais l'effet d'un second critère physique plus
+strict que l'angle seul.

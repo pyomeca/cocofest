@@ -2577,9 +2577,14 @@ def test_mechanical_equivalence_audit_rejects_off_manifold_full_motion():
     assert summary["mechanical_equivalence_audit"]["available"]
     assert not summary["mechanical_equivalence_audit"]["passes_tolerance"]
     assert not summary["physical_success"]
+    assert summary["nlp_crank_diagnostics"] == {
+        "is_physical": True,
+        "issues": [],
+    }
     assert (
         "mechanical_trajectory_off_reduced_manifold" in summary["diagnostics"]["issues"]
     )
+    assert summary["nlp_crank_diagnostics"]["issues"] == []
     assert summary["physical_crank_angle_trace"].shape == theta.shape
     assert summary["physical_crank_velocity_trace"].shape == omega.shape
 
