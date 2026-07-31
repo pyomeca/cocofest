@@ -2935,6 +2935,7 @@ def main(
     periodic_fes_warmup_force_qdot_defect_limit: float = 3.0,
     periodic_fes_warmup_force_adaptive_steps: int = 10,
     acados_diagnostics: bool = False,
+    initial_guess_diagnostics: bool = False,
     periodic_ipopt_refinement: bool = True,
     periodic_ipopt_refinement_iterations: int = 300,
     periodic_ipopt_refinement_use_sx: bool = True,
@@ -3531,6 +3532,9 @@ def main(
     # manifold as the reduced theta/omega OCP before phase and cadence metrics
     # are computed.
     for solver_configuration in solver_args.values():
+        solver_configuration.initial_guess_diagnostics = bool(
+            initial_guess_diagnostics
+        )
         solver_configuration.mechanical_equivalence_audit = True
         solver_configuration.full_contact_constraints_terminal = bool(
             full_contact_constraints_terminal
@@ -4629,6 +4633,11 @@ def build_cli() -> argparse.ArgumentParser:
     )
     parser.add_argument("--acados-project-qdot-from-q", action="store_true")
     parser.add_argument("--acados-diagnostics", action="store_true")
+    parser.add_argument(
+        "--initial-guess-diagnostics",
+        action="store_true",
+        help="Store solver-neutral primal-seed defect diagnostics for every backend.",
+    )
     parser.add_argument("--disable-periodic-fes-warmup-projection", action="store_true")
     parser.add_argument(
         "--periodic-fes-warmup-projection-weight", type=float, default=1.0
@@ -5080,6 +5089,7 @@ if __name__ == "__main__":
             args.periodic_fes_warmup_force_adaptive_steps
         ),
         acados_diagnostics=args.acados_diagnostics,
+        initial_guess_diagnostics=args.initial_guess_diagnostics,
         periodic_ipopt_refinement=args.periodic_ipopt_refinement,
         periodic_ipopt_refinement_iterations=args.periodic_ipopt_refinement_iterations,
         periodic_ipopt_refinement_use_sx=args.periodic_ipopt_refinement_use_sx,

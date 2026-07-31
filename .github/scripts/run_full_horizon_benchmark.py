@@ -521,11 +521,10 @@ def _full_horizon_command(
     command.extend(
         [
         "--optional-nlp-periodic-ipopt-hot-start",
-        # Despite its historical name, this flag also prints solver-neutral
-        # initial-guess defects.  Keeping the block/FES/RK4 diagnostics in the
-        # full-horizon artifact is essential when the reduced-to-full bridge
-        # is geometrically accurate but the NLP refinement still diverges.
-        "--acados-diagnostics",
+        # Store the block/FES/RK4 seed defects for MadNLP as well as ACADOS.
+        # These diagnostics distinguish a geometrically exact reduced-to-full
+        # bridge from a dynamically infeasible monolithic transcription.
+        "--initial-guess-diagnostics",
         "--periodic-ipopt-refinement-use-sx",
         "--periodic-ipopt-refinement-iterations",
         str(args.max_iterations),

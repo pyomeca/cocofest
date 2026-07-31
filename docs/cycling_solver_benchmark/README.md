@@ -3529,7 +3529,83 @@ restent également très loin du seuil avant MadNLP. Les pics RSS, inférieurs �
 Cette campagne rétablit en revanche proprement le témoin un cycle : le modèle
 full et MadNLP fonctionnent lorsqu'ils reçoivent un point full certifié.
 
-Un second sweep ajoute les défauts initiaux par bloc et un témoin
-monolithique reduced/MX. Il doit déterminer si le saut vient principalement
-de `q/qdot`, des 20 états Ding ou de leur couture collocation; ces données
-sont nécessaires avant d'introduire une phase-I mécanique.
+Le second sweep,
+[`30606725396`](https://github.com/mickaelbegon/cocofest/actions/runs/30606725396),
+ajoute le témoin monolithique reduced/MX et modifie l'interprétation :
+
+| Formulation MX | Horizon | IPOPT/SX de raffinement | MadNLP/MUMPS | Pic RSS | Verdict |
+|---|---:|---:|---:|---:|---|
+| full | 1 cycle | `5.28 s`, `inf_pr=5.72e-12` | `110` it., `28.09 s`, primal `1.54e-12` | `1.686 GiB` | certifié |
+| full | 2 cycles | `79.47 s`, `inf_pr=1.925` | `1990` it., primal `1.644`, dual `32.90` | `2.358 GiB` | échec, deux fois |
+| full | 3 cycles | `259.25 s`, `inf_pr=1.185` | timeout à `1800 s` | `2.936 GiB` | échec, deux fois |
+| reduced | 2 cycles | `14.95 s`, `inf_pr=2.498` | `2000` it., primal `1.251`, dual `55.40` | `1.367 GiB` | échec, deux fois |
+
+Le témoin reduced/MX est décisif : enlever les coordonnées mécaniques
+redondantes réduit fortement le coût d'une itération, mais ne restaure pas la
+convergence du problème monolithique à deux cycles. La cause première n'est
+donc pas démontrée comme étant la mécanique full. Elle se situe plus
+probablement dans la construction du seed multi-cycle, sa couture avec la
+transcription collocation, ou la globalisation du NLP non convexe. La
+mécanique full amplifie ensuite le mauvais conditionnement et le coût des
+dérivées secondes : par rapport au reduced/MX échoué, le mur MadNLP est
+`7.13x` plus long, la Hessienne `9.78x`, le Jacobien `7.87x` et l'évaluation
+des contraintes `21.8x` plus coûteux.
+
+Le relevé reduced→full est géométriquement exact sur le seed final
+(`3.55e-15 rad` en configuration et `2.02e-14 rad/s` en vitesse), mais cela ne
+certifie pas la dynamique : une trajectoire peut satisfaire la variété de
+contact tout en ayant un grand défaut de tir
+
+$$
+d_k=x_{k+1}-\Phi_h(x_k,u_k).
+$$
+
+Dans cette baseline, `--full-contact-position-tolerance 2e-5` est configuré,
+mais aucune des options `--full-contact-position-terminal` ou
+`--full-contact-position-all-nodes` n'est activée : cette tolérance est donc
+inactive. Le contact full est imposé dans la dynamique au niveau accélération,
+et position/vitesse ne sont fermées qu'au départ. Cela peut amplifier le drift
+du dernier itéré full, mais n'explique pas l'échec reduced/MX. Le premier A/B
+contact devra ajouter seulement la position terminale; la variante all-nodes
+viendra ensuite, car elle agrandit le NLP.
+
+Le contrôle reduced émet en outre deux warnings de projection du warm-start
+historique (`0.3306 rad`, puis `0.06161 rad` lors de la construction du
+raffinement). Leur ordre dans le log montre cependant qu'ils précèdent la
+copie du préfixe RHO final : ils sont bruyants et doivent être instrumentés,
+mais ne prouvent pas que la seed finale a subi ces corrections. Un audit
+explicite NPZ→`x_init`, par clé, est nécessaire pour mesurer le clipping réel.
+
+Une propriété plus directement mesurée est préoccupante pour un algorithme de
+point intérieur : aux frontières des cycles 1 et 2, l'angle du seed se trouve
+à seulement `1.2e-8 rad` et `5.1e-8 rad` de la face supérieure de la borne
+mobile de `0.002 rad`. Une phase de faisabilité avec `0.005–0.01 rad`, suivie
+d'un resserrement vers `0.002 rad`, est donc prioritaire dans le prochain A/B.
+
+Enfin, cette campagne a révélé une erreur d'instrumentation : le runner
+transmettait `--acados-diagnostics`, mais le comparateur forçait cette option
+à `False` pour MadNLP. Les défauts détaillés annoncés n'étaient donc présents
+ni dans le log ni dans `initial_guess_audits`. Le code distingue maintenant :
+
+- `--acados-diagnostics`, réservé aux résidus SQP/QP et multiplicateurs du
+  backend ACADOS;
+- `--initial-guess-diagnostics`, commun à tous les solveurs, qui stocke dans
+  `results[].warm_start.initial_guess_audits[].defects` les violations de
+  bornes, le défaut cinématique `q/qdot`, le rollout périodique de Ding et le
+  défaut RK4 de la dynamique complète par bloc et par état.
+
+Ces audits tiennent compte de l'organisation collocation : avec Radau degré 3,
+les `60` contrôles correspondent à `241` colonnes d'état et les vrais nœuds de
+tir sont `0, 4, 8, …, 240`. Le stride est enregistré dans le JSON. La métrique
+`q/qdot` est explicitement une cohérence Euler avant, pas une équation de
+collocation exacte. Le rollout Ding isolé suppose `FL=1`, `FV=1` et force
+passive nulle; son calcium est directement interprétable, mais les défauts
+`F/A/Tau1/Km` doivent être confirmés par le rollout de la dynamique OCP
+complète. Enfin, le défaut RK4 aux endpoints est un diagnostic indépendant et
+non la violation exacte des contraintes de collocation `g(x_0)`; cette
+dernière reste à ajouter.
+
+Le prochain gate full-horizon doit d'abord mesurer ces défauts pour full/MX et
+reduced/MX à deux cycles. Une phase-I ne sera introduite qu'après localisation
+du bloc dominant; augmenter encore le budget MadNLP sans cette information
+n'est pas justifié par les trois campagnes disponibles.

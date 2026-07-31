@@ -281,6 +281,7 @@ def test_rho_and_full_horizon_use_the_intended_solver_contract(tmp_path):
         "--adopt-common-initial-solution-warmup-cycles" not in one_cycle_full
     )
     assert "--optional-nlp-periodic-ipopt-hot-start" in full
-    assert "--acados-diagnostics" in full
+    assert "--initial-guess-diagnostics" in full
+    assert "--acados-diagnostics" not in full
     assert "--periodic-ipopt-refinement-use-sx" in full
     assert full[full.index("--periodic-ipopt-refinement-iterations") + 1] == "2000"

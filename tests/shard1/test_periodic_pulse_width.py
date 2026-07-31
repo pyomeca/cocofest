@@ -9062,6 +9062,115 @@ def test_initial_guess_audit_is_solver_independent_and_deterministic():
     assert audit_initial_guess(nmpc)["signature"] != first["signature"]
 
 
+def test_detailed_initial_guess_diagnostics_are_solver_independent(monkeypatch):
+    state_bounds = SimpleNamespace(
+        min=np.array([[-10.0, -10.0, -10.0]]),
+        max=np.array([[10.0, 10.0, 10.0]]),
+    )
+    control_bounds = SimpleNamespace(min=np.array([[0.0]]), max=np.array([[1.0]]))
+    nmpc = SimpleNamespace(
+        cycle_duration=1.0,
+        cycle_len=2,
+        nlp=[
+            SimpleNamespace(
+                x_init={
+                    "q": SimpleNamespace(init=np.array([[0.0, 1.0, 2.0]])),
+                    "qdot": SimpleNamespace(init=np.array([[1.0, 1.0, 1.0]])),
+                },
+                u_init={"tau": SimpleNamespace(init=np.array([[0.5, 2.0]]))},
+                x_bounds={"q": state_bounds, "qdot": state_bounds},
+                u_bounds={"tau": control_bounds},
+            )
+        ],
+    )
+    fes = {
+        "absolute_by_state": {"Cn": 0.25},
+        "absolute_by_muscle": {"Biceps": 0.25},
+        "scaled_by_state": {"Cn": 0.5},
+    }
+    full = {
+        "absolute_by_block": {"q": 0.75},
+        "scaled_by_block": {"q": 0.125},
+        "top_keys": {"q": 0.75},
+        "q_by_dof": {"wheel": 0.75},
+        "qdot_by_dof": {},
+        "worst_qdot_nodes": [],
+    }
+    monkeypatch.setattr(periodic_example, "_periodic_fes_rollout_defect_details", lambda _: fes)
+    monkeypatch.setattr(periodic_example, "_full_dynamics_rollout_defect_details", lambda _: full)
+
+    diagnostics = periodic_example.collect_initial_guess_diagnostics(nmpc)
+
+    assert diagnostics["state_node_stride"] == 1
+    assert diagnostics["q_kinematic"] == {
+        "method": "forward_euler_endpoint_consistency",
+        "maximum": 1.0,
+        "per_dof": [1.0],
+    }
+    assert diagnostics["state_bound_violations"] == {}
+    assert diagnostics["control_bound_violations"] == {"tau": 1.0}
+    assert diagnostics["periodic_fes_rollout"] == fes
+    assert diagnostics["full_dynamics_rk4_rollout"] == full
+
+
+def test_collocation_initial_guess_uses_only_shooting_endpoints():
+    nmpc = SimpleNamespace(
+        nlp=[
+            SimpleNamespace(
+                x_init={"q": SimpleNamespace(init=np.zeros((1, 9)))},
+                u_init={"tau": SimpleNamespace(init=np.zeros((1, 2)))},
+            )
+        ]
+    )
+
+    indices, stride = periodic_example._initial_guess_shooting_node_indices(nmpc)
+
+    np.testing.assert_array_equal(indices, [0, 4, 8])
+    assert stride == 4
+
+
+def test_collocation_endpoint_correction_preserves_internal_stage_offsets():
+    original = np.array(
+        [[0.0, 10.0, 20.0, 30.0, 100.0, 110.0, 120.0, 130.0, 200.0]]
+    )
+    projected_endpoints = np.array([[1.0, 102.0, 203.0]])
+
+    updated = periodic_example._lift_shooting_endpoint_update_to_state_columns(
+        original,
+        projected_endpoints,
+        np.array([0, 4, 8]),
+    )
+
+    np.testing.assert_allclose(updated[:, [0, 4, 8]], projected_endpoints)
+    np.testing.assert_allclose(
+        updated[0, 1:4] - original[0, 1:4], [4 / 3, 5 / 3, 2]
+    )
+    np.testing.assert_allclose(
+        updated[0, 5:8] - original[0, 5:8], [7 / 3, 8 / 3, 3]
+    )
+
+
+def test_comparison_forwards_solver_neutral_seed_diagnostics(monkeypatch):
+    captured = {}
+
+    def fake_run(solver_name, args, **_):
+        captured[solver_name] = args
+        return {}
+
+    monkeypatch.setattr(comparison_example, "_run_benchmark_case", fake_run)
+    monkeypatch.setattr(comparison_example, "print_solver_overview", lambda _: None)
+
+    comparison_example.main(
+        solvers=("ipopt", "madnlp"),
+        n_windows=1,
+        initial_guess_diagnostics=True,
+    )
+
+    assert captured["ipopt"].initial_guess_diagnostics is True
+    assert captured["madnlp"].initial_guess_diagnostics is True
+    assert captured["madnlp"].acados_diagnostics is False
+
+
 def test_generic_initial_guess_copy_reports_incompatible_grids():
     source = {"q": SimpleNamespace(init=np.ones((1, 3)))}
     target = {"q": SimpleNamespace(init=np.zeros((1, 2)))}

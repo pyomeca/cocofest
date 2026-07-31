@@ -1523,6 +1523,15 @@ def build_argument_parser() -> argparse.ArgumentParser:
         help="Print ACADOS residuals, SQP/QP stats and finite-value checks after the solve.",
     )
     parser.add_argument(
+        "--initial-guess-diagnostics",
+        action="store_true",
+        help=(
+            "Audit the physical primal seed before solving, independently of the "
+            "selected backend (bounds, kinematics, periodic Ding rollout, and "
+            "complete-dynamics RK4 defects)."
+        ),
+    )
+    parser.add_argument(
         "--acados-print-level",
         type=int,
         default=0,
@@ -5327,7 +5336,66 @@ def _trajectory_bounds_for_guess(bounds, n_nodes: int) -> tuple[np.ndarray, np.n
     return lower, upper
 
 
-def print_initial_guess_diagnostics(nmpc) -> None:
+def _initial_guess_shooting_node_indices(nmpc) -> tuple[np.ndarray, int]:
+    """Locate shooting endpoints in RK or collocation initial-guess layouts."""
+
+    nlp = nmpc.nlp[0]
+    if not nlp.x_init.keys() or not nlp.u_init.keys():
+        return np.array([], dtype=int), 0
+    first_state_key = next(iter(nlp.x_init.keys()))
+    first_control_key = next(iter(nlp.u_init.keys()))
+    n_state_nodes = int(nlp.x_init[first_state_key].init.shape[1])
+    n_control_nodes = int(nlp.u_init[first_control_key].init.shape[1])
+    if n_control_nodes < 1 or n_state_nodes < 2:
+        return np.array([], dtype=int), 0
+    interval_columns, remainder = divmod(n_state_nodes - 1, n_control_nodes)
+    if remainder or interval_columns < 1:
+        raise ValueError(
+            "Cannot identify shooting nodes in the initial guess: "
+            f"{n_state_nodes} state columns for {n_control_nodes} controls."
+        )
+    indices = np.arange(0, n_state_nodes, interval_columns, dtype=int)
+    if indices.size != n_control_nodes + 1 or indices[-1] != n_state_nodes - 1:
+        raise ValueError(
+            "The inferred initial-guess shooting-node layout does not end at "
+            f"the terminal state (stride={interval_columns})."
+        )
+    return indices, interval_columns
+
+
+def _lift_shooting_endpoint_update_to_state_columns(
+    original: np.ndarray,
+    projected_endpoints: np.ndarray,
+    shooting_indices: np.ndarray,
+) -> np.ndarray:
+    """Preserve collocation-stage structure while moving shooting endpoints."""
+
+    if projected_endpoints.shape != (original.shape[0], shooting_indices.size):
+        raise ValueError("Projected endpoint values do not match the shooting grid.")
+    updated = np.array(original, dtype=float, copy=True)
+    corrections = projected_endpoints - original[:, shooting_indices]
+    for interval, (start, stop) in enumerate(
+        zip(shooting_indices[:-1], shooting_indices[1:], strict=True)
+    ):
+        width = int(stop - start)
+        updated[:, start] = projected_endpoints[:, interval]
+        for offset in range(1, width):
+            # Radau's last internal stage represents the interval endpoint;
+            # interpolating the correction also remains benign for other
+            # collocation layouts while preserving each original stage shape.
+            fraction = offset / max(width - 1, 1)
+            correction = (
+                (1.0 - fraction) * corrections[:, interval]
+                + fraction * corrections[:, interval + 1]
+            )
+            updated[:, start + offset] += correction
+    updated[:, shooting_indices[-1]] = projected_endpoints[:, -1]
+    return updated
+
+
+def collect_initial_guess_diagnostics(nmpc) -> dict:
+    """Collect solver-neutral primal-seed defects in a JSON-ready structure."""
+
     states = {
         key: np.asarray(nmpc.nlp[0].x_init[key].init, dtype=float)
         for key in nmpc.nlp[0].x_init.keys()
@@ -5337,18 +5405,28 @@ def print_initial_guess_diagnostics(nmpc) -> None:
         for key in nmpc.nlp[0].u_init.keys()
     }
 
+    diagnostics = {
+        "state_node_stride": None,
+        "q_kinematic": None,
+        "state_bound_violations": {},
+        "control_bound_violations": {},
+        "periodic_fes_rollout": {},
+        "full_dynamics_rk4_rollout": {},
+    }
+    shooting_indices, state_node_stride = _initial_guess_shooting_node_indices(nmpc)
+    diagnostics["state_node_stride"] = state_node_stride
     if "q" in states and "qdot" in states:
         dt = nmpc.cycle_duration / nmpc.cycle_len
-        q = states["q"]
-        qdot = states["qdot"]
+        q = states["q"][:, shooting_indices]
+        qdot = states["qdot"][:, shooting_indices]
         qdot_from_q = np.diff(q, axis=1) / dt
         q_kinematic_defect = qdot_from_q - qdot[:, :-1]
         per_dof = np.max(np.abs(q_kinematic_defect), axis=1)
-        print(
-            "initial_guess_q_kinematic_defect_max: "
-            f"{_format_array(np.max(np.abs(q_kinematic_defect)))}"
-        )
-        print("initial_guess_q_kinematic_defect_per_dof: " f"{_format_array(per_dof)}")
+        diagnostics["q_kinematic"] = {
+            "method": "forward_euler_endpoint_consistency",
+            "maximum": float(np.max(np.abs(q_kinematic_defect))),
+            "per_dof": per_dof.astype(float).tolist(),
+        }
 
     state_violations = {}
     for key, values in states.items():
@@ -5359,6 +5437,7 @@ def print_initial_guess_diagnostics(nmpc) -> None:
         max_violation = float(np.max(violation)) if violation.size else 0.0
         if max_violation > 1e-9:
             state_violations[key] = max_violation
+    diagnostics["state_bound_violations"] = state_violations
 
     control_violations = {}
     for key, values in controls.items():
@@ -5369,18 +5448,58 @@ def print_initial_guess_diagnostics(nmpc) -> None:
         max_violation = float(np.max(violation)) if violation.size else 0.0
         if max_violation > 1e-12:
             control_violations[key] = max_violation
-
-    print(
-        "initial_guess_state_bound_violations: "
-        f"{state_violations if state_violations else 'None'}"
-    )
-    print(
-        "initial_guess_control_bound_violations: "
-        f"{control_violations if control_violations else 'None'}"
-    )
+    diagnostics["control_bound_violations"] = control_violations
 
     fes_defects = _periodic_fes_rollout_defect_details(nmpc)
     if fes_defects:
+        diagnostics["periodic_fes_rollout"] = fes_defects
+
+    full_defects = _full_dynamics_rollout_defect_details(nmpc)
+    if full_defects:
+        diagnostics["full_dynamics_rk4_rollout"] = full_defects
+
+    return diagnostics
+
+
+def print_initial_guess_diagnostics(nmpc, diagnostics: dict | None = None) -> dict:
+    """Print and return solver-neutral primal-seed defects."""
+
+    diagnostics = (
+        collect_initial_guess_diagnostics(nmpc)
+        if diagnostics is None
+        else diagnostics
+    )
+    print(
+        "initial_guess_state_node_stride: "
+        f"{diagnostics.get('state_node_stride')}"
+    )
+    q_kinematic = diagnostics.get("q_kinematic")
+    if q_kinematic:
+        print(f"initial_guess_q_kinematic_method: {q_kinematic['method']}")
+        print(
+            "initial_guess_q_kinematic_defect_max: "
+            f"{_format_array(q_kinematic['maximum'])}"
+        )
+        print(
+            "initial_guess_q_kinematic_defect_per_dof: "
+            f"{_format_array(q_kinematic['per_dof'])}"
+        )
+
+    print(
+        "initial_guess_state_bound_violations: "
+        f"{diagnostics['state_bound_violations'] or 'None'}"
+    )
+    print(
+        "initial_guess_control_bound_violations: "
+        f"{diagnostics['control_bound_violations'] or 'None'}"
+    )
+
+    fes_defects = diagnostics.get("periodic_fes_rollout") or {}
+    if fes_defects:
+        print(
+            "initial_guess_periodic_fes_assumptions: "
+            f"{fes_defects.get('isolated_ding_assumptions')}"
+        )
         print(
             "initial_guess_periodic_fes_defect_by_state: "
             f"{_format_named_values(fes_defects['absolute_by_state'])}"
@@ -5394,8 +5513,12 @@ def print_initial_guess_diagnostics(nmpc) -> None:
             f"{_format_named_values(fes_defects['scaled_by_state'])}"
         )
 
-    full_defects = _full_dynamics_rollout_defect_details(nmpc)
+    full_defects = diagnostics.get("full_dynamics_rk4_rollout") or {}
     if full_defects:
+        print(
+            "initial_guess_full_rk4_state_node_stride: "
+            f"{full_defects.get('state_node_stride')}"
+        )
         print(
             "initial_guess_full_rk4_defect_by_block: "
             f"{_format_named_values(full_defects['absolute_by_block'])}"
@@ -5438,6 +5561,7 @@ def print_initial_guess_diagnostics(nmpc) -> None:
                 f"forces={_format_compact_named_values(item['forces'])} "
                 f"pulse_widths={_format_compact_named_values(item['controls'])}"
             )
+    return diagnostics
 
 
 def project_qdot_initial_guess_from_q(
@@ -7272,6 +7396,7 @@ def _periodic_fes_rollout_defects(
     periodic_nmpc, projection_substeps: int = 10
 ) -> dict[str, float]:
     dt = periodic_nmpc.cycle_duration / periodic_nmpc.cycle_len
+    shooting_indices, _ = _initial_guess_shooting_node_indices(periodic_nmpc)
     defects = {}
     for muscle_model in periodic_nmpc.nlp[0].model.muscles_dynamics_model:
         muscle_name = muscle_model.muscle_name
@@ -7286,7 +7411,7 @@ def _periodic_fes_rollout_defects(
 
         states = np.vstack(
             [periodic_nmpc.nlp[0].x_init[key].init[0, :] for key in state_keys]
-        )
+        )[:, shooting_indices]
         controls = periodic_nmpc.nlp[0].u_init[control_key].init[0, :]
         max_defect = 0.0
         for node, pulse_width in enumerate(controls):
@@ -7309,6 +7434,9 @@ def _periodic_fes_rollout_defect_details(
     periodic_nmpc, projection_substeps: int = 10
 ) -> dict[str, dict[str, float]]:
     dt = periodic_nmpc.cycle_duration / periodic_nmpc.cycle_len
+    shooting_indices, state_node_stride = _initial_guess_shooting_node_indices(
+        periodic_nmpc
+    )
     state_labels = ("Cn", "Cn_sum", "F", "A", "Tau1", "Km")
     absolute_by_state = dict.fromkeys(state_labels, 0.0)
     scaled_by_state = dict.fromkeys(state_labels, 0.0)
@@ -7330,7 +7458,7 @@ def _periodic_fes_rollout_defect_details(
         )
         states = np.vstack(
             [periodic_nmpc.nlp[0].x_init[key].init[0, :] for key in state_keys]
-        )
+        )[:, shooting_indices]
         controls = periodic_nmpc.nlp[0].u_init[control_key].init[0, :]
         state_scales = np.maximum(np.max(np.abs(states), axis=1), 1.0)
         muscle_max = 0.0
@@ -7359,6 +7487,12 @@ def _periodic_fes_rollout_defect_details(
         return {}
 
     return {
+        "state_node_stride": state_node_stride,
+        "isolated_ding_assumptions": {
+            "force_length_relationship": 1.0,
+            "force_velocity_relationship": 1.0,
+            "passive_force_relationship": 0.0,
+        },
         "absolute_by_state": absolute_by_state,
         "absolute_by_muscle": absolute_by_muscle,
         "scaled_by_state": scaled_by_state,
@@ -7506,10 +7640,11 @@ def _full_dynamics_rollout_defect_details(
     first_control_key = next(iter(nlp.u_init.keys()))
     n_state_nodes = nlp.x_init[first_state_key].init.shape[1]
     n_control_nodes = nlp.u_init[first_control_key].init.shape[1]
-    if n_state_nodes != n_control_nodes + 1:
-        return {}
+    shooting_indices, state_node_stride = _initial_guess_shooting_node_indices(nmpc)
 
-    states = _stack_initial_guess_values(nlp.x_init, nlp.states, n_state_nodes)
+    states = _stack_initial_guess_values(
+        nlp.x_init, nlp.states, n_state_nodes
+    )[:, shooting_indices]
     controls = _stack_initial_guess_values(nlp.u_init, nlp.controls, n_control_nodes)
     dt = nmpc.cycle_duration / nmpc.cycle_len
     stage_numerical_timeseries = [
@@ -7650,6 +7785,7 @@ def _full_dynamics_rollout_defect_details(
         return sorted(rows, key=lambda item: abs(item["defect"]), reverse=True)
 
     return {
+        "state_node_stride": state_node_stride,
         "absolute_by_block": absolute_by_block,
         "scaled_by_block": scaled_by_block,
         "top_keys": top_keys,
@@ -7671,7 +7807,10 @@ def high_accuracy_integrator_map_diagnostics(
     first_control_key = next(iter(nlp.u_init.keys()))
     n_state_nodes = nlp.x_init[first_state_key].init.shape[1]
     n_control_nodes = nlp.u_init[first_control_key].init.shape[1]
-    states = _stack_initial_guess_values(nlp.x_init, nlp.states, n_state_nodes)
+    shooting_indices, state_node_stride = _initial_guess_shooting_node_indices(nmpc)
+    states = _stack_initial_guess_values(
+        nlp.x_init, nlp.states, n_state_nodes
+    )[:, shooting_indices]
     controls = _stack_initial_guess_values(nlp.u_init, nlp.controls, n_control_nodes)
     dt = nmpc.cycle_duration / nmpc.cycle_len
     rows = []
@@ -7714,6 +7853,7 @@ def high_accuracy_integrator_map_diagnostics(
                 "rk4_vs_reference": float(np.max(np.abs(rk4_next - reference_next))),
                 "trajectory_vs_rk4": float(np.max(np.abs(trajectory_next - rk4_next))),
                 "reference_evaluations": int(reference.nfev),
+                "state_node_stride": state_node_stride,
             }
         )
     return rows
@@ -10368,6 +10508,9 @@ def project_periodic_fes_initial_guess(
         )
 
     dt = periodic_nmpc.cycle_duration / periodic_nmpc.cycle_len
+    shooting_indices, state_node_stride = _initial_guess_shooting_node_indices(
+        periodic_nmpc
+    )
     defects_before = _periodic_fes_rollout_defects(
         periodic_nmpc, projection_substeps=projection_substeps
     )
@@ -10398,18 +10541,19 @@ def project_periodic_fes_initial_guess(
         if control_key not in periodic_nmpc.nlp[0].u_init.keys():
             continue
 
-        original_states = np.vstack(
+        original_state_columns = np.vstack(
             [periodic_nmpc.nlp[0].x_init[key].init[0, :] for key in state_keys]
         )
+        original_states = original_state_columns[:, shooting_indices]
         controls = periodic_nmpc.nlp[0].u_init[control_key].init[0, :]
         lower_bounds = []
         upper_bounds = []
         for key in state_keys:
             lower, upper = _state_trajectory_bounds(
-                periodic_nmpc, key, original_states.shape[1]
+                periodic_nmpc, key, original_state_columns.shape[1]
             )
-            lower_bounds.append(lower)
-            upper_bounds.append(upper)
+            lower_bounds.append(lower[shooting_indices])
+            upper_bounds.append(upper[shooting_indices])
         lower_bounds = np.vstack(lower_bounds)
         upper_bounds = np.vstack(upper_bounds)
         if projection_strategy == "least_squares":
@@ -10462,6 +10606,16 @@ def project_periodic_fes_initial_guess(
             projection_weight * projected_states
             + (1.0 - projection_weight) * original_states
         )
+        projected_state_columns = _lift_shooting_endpoint_update_to_state_columns(
+            original_state_columns,
+            projected_states,
+            shooting_indices,
+        )
+        blended_state_columns = _lift_shooting_endpoint_update_to_state_columns(
+            original_state_columns,
+            blended_states,
+            shooting_indices,
+        )
         write_state_keys = _projection_write_state_keys(
             muscle_name, projection_mode, available_keys=available_keys
         )
@@ -10470,18 +10624,19 @@ def project_periodic_fes_initial_guess(
                 continue
             if projection_mode == "all_force_adaptive_blend" and key.startswith("F_"):
                 force_candidates[key] = (
-                    original_states[state_idx, :].copy(),
-                    projected_states[state_idx, :].copy(),
+                    original_state_columns[state_idx, :].copy(),
+                    projected_state_columns[state_idx, :].copy(),
                 )
-                values = original_states[state_idx, :]
+                values = original_state_columns[state_idx, :]
             elif projection_mode == "all_force_blend" and key.startswith("F_"):
                 state_projection_weight = force_projection_weight
                 values = (
-                    state_projection_weight * projected_states[state_idx, :]
-                    + (1.0 - state_projection_weight) * original_states[state_idx, :]
+                    state_projection_weight * projected_state_columns[state_idx, :]
+                    + (1.0 - state_projection_weight)
+                    * original_state_columns[state_idx, :]
                 )
             else:
-                values = blended_states[state_idx, :]
+                values = blended_state_columns[state_idx, :]
             lower, upper = _state_trajectory_bounds(periodic_nmpc, key, values.size)
             lower_violation = np.maximum(lower - values, 0.0)
             upper_violation = np.maximum(values - upper, 0.0)
@@ -10514,6 +10669,7 @@ def project_periodic_fes_initial_guess(
     max_after = max(defects_after.values(), default=0.0)
     return {
         "projected_muscles": projected_muscles,
+        "state_node_stride": state_node_stride,
         "projection_weight": projection_weight,
         "projection_mode": projection_mode,
         "projection_strategy": projection_strategy,
@@ -12447,6 +12603,10 @@ def _should_apply_transfer_phase_one(
 def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
     preparation_start = perf_counter()
     apply_assisted_hot_start_defaults(args)
+    initial_guess_diagnostics_requested = bool(
+        getattr(args, "initial_guess_diagnostics", False)
+        or (args.solver == "acados" and args.acados_diagnostics)
+    )
     args.terminal_wheel_q_reference_mode = "absolute_initial"
     objectives = parse_objectives(args.objective)
     torque_diagnostics = crank_torque_diagnostics(
@@ -14020,7 +14180,7 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
     if periodic_cn_sum_approximation and target_periodic_ipopt_refinement_enabled:
         if echo:
             print("running_periodic_ipopt_refinement: True")
-            if args.acados_diagnostics:
+            if initial_guess_diagnostics_requested:
                 print("periodic_ipopt_refinement_initial_defects:")
                 print_initial_guess_diagnostics(nmpc)
         refinement_cache_path = _periodic_ipopt_refinement_cache_path(args, model_path)
@@ -14252,13 +14412,19 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
                     f"dop853_nfev={row['reference_evaluations']}"
                 )
 
-    if args.solver == "acados" and args.acados_diagnostics:
-        print_initial_guess_diagnostics(nmpc)
+    initial_guess_diagnostic_summary = None
+    if initial_guess_diagnostics_requested:
+        initial_guess_diagnostic_summary = collect_initial_guess_diagnostics(nmpc)
+        if echo:
+            print("solver_neutral_initial_guess_diagnostics:")
+            print_initial_guess_diagnostics(nmpc, initial_guess_diagnostic_summary)
 
     initial_guess_audit = audit_initial_guess(nmpc)
     initial_guess_snapshot = initial_guess_audit.pop("snapshot")
     initial_guess_state_traces = initial_guess_snapshot["states"]
     initial_guess_control_traces = initial_guess_snapshot["controls"]
+    if initial_guess_diagnostic_summary is not None:
+        initial_guess_audit["defects"] = initial_guess_diagnostic_summary
     if build_mechanical_audit_profile and reduced_cycling_dynamics is not None:
         _, _, mechanical_initial_guess_audit = audit_mechanical_trajectory(
             initial_guess_state_traces,
@@ -15156,6 +15322,14 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
         if continue_solving and _sol is not None:
             next_audit = audit_initial_guess(_nmpc)
             next_audit.pop("snapshot")
+            if initial_guess_diagnostics_requested:
+                next_diagnostics = collect_initial_guess_diagnostics(_nmpc)
+                next_audit["defects"] = next_diagnostics
+                if echo:
+                    print(
+                        f"window[{cycle_idx}] solver_neutral_initial_guess_diagnostics:"
+                    )
+                    print_initial_guess_diagnostics(_nmpc, next_diagnostics)
             initial_guess_audits.append({"window": cycle_idx, **next_audit})
             if echo:
                 print(
