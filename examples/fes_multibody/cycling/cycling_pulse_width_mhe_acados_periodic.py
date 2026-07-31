@@ -186,7 +186,9 @@ def _scaled_acados_dynamics_rhs(rhs, state_scaling: np.ndarray, n_parameters: in
     return rhs / vertcat(*DM(complete_scaling).elements())
 
 
-def apply_acados_wheel_cycle_boundary_bounds(interface) -> list[dict[str, float | int]]:
+def apply_acados_wheel_cycle_boundary_bounds(
+    interface,
+) -> list[dict[str, float | int]]:
     """Apply crank-position bounds at internal cycle seams.
 
     Bioptim's ACADOS interface only exports nonlinear constraints at ALL or END
@@ -351,7 +353,10 @@ def patch_bioptim_acados_interface() -> None:
                 n_substeps=getattr(ocp, "_cocofest_discrete_substeps", 5),
             )
         else:
-            if is_periodic_node and self.opts.integrator_type in ("ERK", "IRK"):
+            if is_periodic_node and self.opts.integrator_type in (
+                "ERK",
+                "IRK",
+            ):
                 dynamics_time = _periodic_node_dynamics_time(
                     self.opts.integrator_type,
                     local_time,
@@ -719,11 +724,7 @@ def next_acados_control_homotopy_radius(
     if maximum_radius is not None and maximum_radius <= 0.0:
         raise ValueError("The maximum control-homotopy radius must be positive.")
     grown_radius = current_radius * growth
-    return (
-        grown_radius
-        if maximum_radius is None
-        else min(grown_radius, maximum_radius)
-    )
+    return grown_radius if maximum_radius is None else min(grown_radius, maximum_radius)
 
 
 def _terminal_wheel_objective_weight(args: argparse.Namespace) -> float:
@@ -1175,6 +1176,24 @@ def build_argument_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--receding-horizon-solution-output",
+        type=Path,
+        default=None,
+        help=(
+            "Save the fully concatenated, physically validated RHO trajectory "
+            "as a reusable multi-cycle initial solution. The exported metadata "
+            "describes one horizon spanning every requested cycle."
+        ),
+    )
+    parser.add_argument(
+        "--allow-partial-receding-horizon-solution-output",
+        action="store_true",
+        help=(
+            "Allow --receding-horizon-solution-output to retain the longest "
+            "strictly validated prefix after a later RHO failure."
+        ),
+    )
+    parser.add_argument(
         "--acados-horizon-continuation",
         action="store_true",
         help=(
@@ -1362,7 +1381,11 @@ def build_argument_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--acados-globalization",
-        choices=("FIXED_STEP", "MERIT_BACKTRACKING", "FUNNEL_L1PEN_LINESEARCH"),
+        choices=(
+            "FIXED_STEP",
+            "MERIT_BACKTRACKING",
+            "FUNNEL_L1PEN_LINESEARCH",
+        ),
         default="FUNNEL_L1PEN_LINESEARCH",
         help="ACADOS globalization strategy.",
     )
@@ -1374,7 +1397,11 @@ def build_argument_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--acados-nlp-qp-tol-strategy",
-        choices=("FIXED_QP_TOL", "ADAPTIVE_CURRENT_RES_JOINT", "ADAPTIVE_QPSCALING"),
+        choices=(
+            "FIXED_QP_TOL",
+            "ADAPTIVE_CURRENT_RES_JOINT",
+            "ADAPTIVE_QPSCALING",
+        ),
         default="ADAPTIVE_QPSCALING",
         help="Strategy used by ACADOS to set QP tolerances inside SQP.",
     )
@@ -2568,11 +2595,13 @@ def build_argument_parser() -> argparse.ArgumentParser:
 def build_ode_solver(args: argparse.Namespace):
     if args.ode_solver == "collocation":
         return OdeSolver.COLLOCATION(
-            polynomial_degree=args.collocation_degree, method=args.collocation_method
+            polynomial_degree=args.collocation_degree,
+            method=args.collocation_method,
         )
     if args.ode_solver == "irk":
         return OdeSolver.IRK(
-            polynomial_degree=args.collocation_degree, method=args.collocation_method
+            polynomial_degree=args.collocation_degree,
+            method=args.collocation_method,
         )
     if args.ode_solver == "rk8":
         return OdeSolver.RK8(n_integration_steps=args.rk_steps)
@@ -2607,7 +2636,8 @@ def ensure_acados_environment(acados_source_dir: str | None = None) -> Path:
     acados_dir = Path(
         acados_source_dir
         or os.environ.get(
-            "ACADOS_SOURCE_DIR", str(Path.home() / "Documents/bioptim/external/acados")
+            "ACADOS_SOURCE_DIR",
+            str(Path.home() / "Documents/bioptim/external/acados"),
         )
     ).resolve()
     os.environ["ACADOS_SOURCE_DIR"] = str(acados_dir)
@@ -2685,7 +2715,11 @@ def _resolve_standard_warmup_seed(seed: str | Path) -> Path:
     else:
         repository_root = Path(__file__).resolve().parents[3]
         example_root = Path(__file__).resolve().parent
-        candidates = [Path.cwd() / seed, repository_root / seed, example_root / seed]
+        candidates = [
+            Path.cwd() / seed,
+            repository_root / seed,
+            example_root / seed,
+        ]
 
     attempted = []
     for candidate in candidates:
@@ -3191,13 +3225,95 @@ def _common_initial_solution_metadata(args: argparse.Namespace) -> dict:
         "pulse_width_active_set": args.pulse_width_active_set,
         "pulse_width_minimum_policy": "model_pd0",
         "pulse_width_maximum_s": 0.0006,
-        "warmup_cycles_consumed": int(
-            getattr(args, "warmup_cycles_consumed", 0)
-        ),
+        "warmup_cycles_consumed": int(getattr(args, "warmup_cycles_consumed", 0)),
         "ode_solver": args.ode_solver,
         "nlp_ordering_strategy": getattr(args, "nlp_ordering_strategy", None),
         "producer_solver": args.solver,
     }
+
+
+def _receding_horizon_solution_metadata(
+    args: argparse.Namespace,
+    cycle_count: int,
+    maximum_boundary_jump: float,
+) -> dict:
+    """Describe a concatenated RHO trace as one multi-cycle primal seed."""
+
+    metadata = _common_initial_solution_metadata(args)
+    metadata.update(
+        {
+            "cycles_per_window": int(cycle_count),
+            "producer_mode": "receding_horizon_concatenation",
+            "producer_cycles_per_window": int(args.cycles_per_window),
+            "producer_requested_cycles": int(args.n_windows),
+            "state_boundary_maximum_absolute_jump": float(
+                maximum_boundary_jump
+            ),
+        }
+    )
+    return metadata
+
+
+def _save_receding_horizon_solution(
+    output_path: Path,
+    summary: dict,
+    args: argparse.Namespace,
+) -> None:
+    """Persist the complete RHO trace, or an explicitly allowed valid prefix."""
+
+    if args.single_shot:
+        raise ValueError(
+            "--receding-horizon-solution-output cannot be used with --single-shot."
+        )
+    cycle_count = int(summary.get("covered_cycles") or 0)
+    allow_partial = bool(
+        getattr(args, "allow_partial_receding_horizon_solution_output", False)
+    )
+    complete = bool(summary.get("success")) and cycle_count == int(args.n_windows)
+    if cycle_count < 1 or (not complete and not allow_partial):
+        raise RuntimeError(
+            "The concatenated RHO initial solution was not saved because the "
+            f"strict physical prefix covers {cycle_count}/{args.n_windows} cycles."
+        )
+    states = {
+        key: np.asarray(values)
+        for key, values in (summary.get("state_traces") or {}).items()
+    }
+    controls = {
+        key: np.asarray(values)
+        for key, values in (summary.get("control_traces") or {}).items()
+    }
+    if not states or not controls:
+        raise RuntimeError("The successful RHO result has no trajectory to export.")
+    boundary_summary = summary.get("state_boundary_jumps") or {}
+    by_state = boundary_summary.get("by_state") or {}
+    if cycle_count > 1 and (
+        boundary_summary.get("available") is not True or not by_state
+    ):
+        raise RuntimeError(
+            "The concatenated RHO initial solution has no explicit state-boundary "
+            "certificate."
+        )
+    maximum_boundary_jump = max(
+        (
+            float(item["maximum_absolute_jump"])
+            for item in by_state.values()
+        ),
+        default=0.0,
+    )
+    if not np.isfinite(maximum_boundary_jump) or maximum_boundary_jump > 1e-5:
+        raise RuntimeError(
+            "The concatenated RHO initial solution was not saved because its "
+            f"largest state seam is {maximum_boundary_jump:.6g}, above 1e-5."
+        )
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    _save_warmup_cache(
+        output_path,
+        _WarmupSolutionAdapter(states, controls),
+        metadata=_receding_horizon_solution_metadata(
+            args, cycle_count, maximum_boundary_jump
+        ),
+    )
 
 
 def _validate_common_initial_solution_metadata(
@@ -3374,9 +3490,7 @@ def _horizon_seed_cache_signature(args: argparse.Namespace) -> str:
         "ode_solver": args.ode_solver,
         "rk_steps": args.rk_steps,
         "enforce_start_constraints": args.enforce_start_constraints,
-        "full_contact_constraints_terminal": (
-            args.full_contact_constraints_terminal
-        ),
+        "full_contact_constraints_terminal": (args.full_contact_constraints_terminal),
         "full_contact_position_terminal": args.full_contact_position_terminal,
         "full_contact_position_tolerance": args.full_contact_position_tolerance,
         "state_scaling": args.state_scaling,
@@ -3452,9 +3566,7 @@ def _codegen_signature(args: argparse.Namespace) -> str:
         "constant_crank_torque": args.constant_crank_torque,
         "use_sx": args.use_sx,
         "enforce_start_constraints": args.enforce_start_constraints,
-        "full_contact_constraints_terminal": (
-            args.full_contact_constraints_terminal
-        ),
+        "full_contact_constraints_terminal": (args.full_contact_constraints_terminal),
         "full_contact_position_terminal": args.full_contact_position_terminal,
         "full_contact_position_tolerance": args.full_contact_position_tolerance,
         "control_regularization_weight": args.control_regularization_weight,
@@ -3511,14 +3623,10 @@ def _codegen_signature(args: argparse.Namespace) -> str:
         "acados_warm_start_first_qp_from_nlp": (
             args.acados_warm_start_first_qp_from_nlp
         ),
-        "acados_reset_solver_before_solve": (
-            args.acados_reset_solver_before_solve
-        ),
+        "acados_reset_solver_before_solve": (args.acados_reset_solver_before_solve),
         "acados_check_reuse_possible": args.acados_check_reuse_possible,
         "acados_code_reuse_tolerance": args.acados_code_reuse_tolerance,
-        "acados_with_anderson_acceleration": (
-            args.acados_with_anderson_acceleration
-        ),
+        "acados_with_anderson_acceleration": (args.acados_with_anderson_acceleration),
         "acados_anderson_activation_threshold": (
             args.acados_anderson_activation_threshold
         ),
@@ -3666,9 +3774,7 @@ def configure_acados_solver(
         code_reuse_tolerance=code_reuse_tolerance,
         with_anderson_acceleration=with_anderson_acceleration,
         anderson_activation_threshold=anderson_activation_threshold,
-        byrd_omojokon_slack_relaxation_factor=(
-            byrd_omojokon_slack_relaxation_factor
-        ),
+        byrd_omojokon_slack_relaxation_factor=(byrd_omojokon_slack_relaxation_factor),
     )
 
     solver = Solver.ACADOS()
@@ -4285,7 +4391,12 @@ def collect_acados_diagnostics(solution) -> dict:
         if values.size >= 4:
             diagnostics["named_residuals"] = dict(
                 zip(
-                    ("stationarity", "dynamics", "inequality", "complementarity"),
+                    (
+                        "stationarity",
+                        "dynamics",
+                        "inequality",
+                        "complementarity",
+                    ),
                     values[:4],
                 )
             )
@@ -4486,9 +4597,7 @@ def run_acados_control_homotopy(
         if stationarity_tolerance is None
         else stationarity_tolerance
     )
-    set_stationarity_tolerance = getattr(
-        stage_solver, "set_nlp_solver_tol_stat", None
-    )
+    set_stationarity_tolerance = getattr(stage_solver, "set_nlp_solver_tol_stat", None)
     if set_stationarity_tolerance is not None:
         set_stationarity_tolerance(effective_stationarity_tolerance)
     acados_interface = getattr(periodic_nmpc, "ocp_solver", None)
@@ -5570,7 +5679,9 @@ def _window_accounting(
     }
 
 
-def _window_objective_values(source_window_solutions: list) -> list[float | None]:
+def _window_objective_values(
+    source_window_solutions: list,
+) -> list[float | None]:
     """Extract per-window costs; the merged RHO Solution stores a dummy zero cost."""
 
     values = []
@@ -5735,9 +5846,10 @@ def _independent_solution_bound_violations(
     if not isinstance(limits, dict):
         limits = {}
     if constraint_values_source is None:
-        constraint_values, constraint_values_source = _solution_constraint_values(
-            solution
-        )
+        (
+            constraint_values,
+            constraint_values_source,
+        ) = _solution_constraint_values(solution)
     constraint_details = _maximum_bound_violation_details(
         constraint_values,
         limits.get("lbg"),
@@ -5788,9 +5900,7 @@ def _solution_feasibility_summary(
         for values in container.values()
     )
 
-    constraint_values, constraint_values_source = _solution_constraint_values(
-        solution
-    )
+    constraint_values, constraint_values_source = _solution_constraint_values(solution)
     if constraint_values is None:
         constraints_finite = True
         max_abs_constraint_value = None
@@ -5970,9 +6080,9 @@ def augment_feasibility_with_acados_residuals(
             # combined verdict instead of preserving the earlier
             # ``constraint_feasibility_unavailable`` failure.
             "passes_tolerance": bool(passes_combined_audit),
-            "failure_reason": None if passes_combined_audit else augmented.get(
-                "failure_reason"
-            ),
+            "failure_reason": None
+            if passes_combined_audit
+            else augmented.get("failure_reason"),
         }
     )
     if not passes_acados:
@@ -6037,7 +6147,9 @@ def _wheel_q_state_scaling(nmpc) -> float:
     return wheel_q_scaling
 
 
-def _wheel_trace_absolute_reference(nmpc) -> tuple[float | None, float | None, int]:
+def _wheel_trace_absolute_reference(
+    nmpc,
+) -> tuple[float | None, float | None, int]:
     """Return the fixed reference at the first cycle exported by the RHO."""
 
     if not getattr(nmpc, "anchor_wheel_q_to_absolute_reference", False):
@@ -6238,9 +6350,7 @@ class CompiledNlpReuseTracker:
             "unique_runtime_bound_vectors": unique_bound_vectors,
             "runtime_bounds_changed": bool(unique_bound_vectors > 1),
             "compiled_source_observed": bool(self._compiled_source_signatures),
-            "compiled_source_observation_count": len(
-                self._compiled_source_signatures
-            ),
+            "compiled_source_observation_count": len(self._compiled_source_signatures),
             "unique_compiled_source_versions": len(unique_compiled_sources),
             "compiled_source_reused": bool(
                 observation_count > 1
@@ -6377,9 +6487,7 @@ def build_window_summary(
     state_traces = _state_traces_from_exported_cycles(
         merged_solution, exported_cycle_solutions
     )
-    state_boundary_jumps = _state_boundary_jump_summary(
-        exported_cycle_solutions
-    )
+    state_boundary_jumps = _state_boundary_jump_summary(exported_cycle_solutions)
     window_objectives = _window_objective_values(source_window_solutions)
     finite_objectives = [value for value in window_objectives if value is not None]
     objective = float(sum(finite_objectives)) if finite_objectives else float("nan")
@@ -6497,6 +6605,10 @@ def build_single_shot_summary(
         and feasibility["trajectories_finite"]
         and feasibility["constraints_finite"]
     )
+    validated_cycle_count = int(cycle_count) if solver_success else 0
+    physically_validated_cycle_count = (
+        int(cycle_count) if solver_success and physical_success else 0
+    )
     return {
         "mode": "single_shot",
         "status": sol.status,
@@ -6508,16 +6620,20 @@ def build_single_shot_summary(
         "state_traces": state_traces,
         "control_traces": control_traces,
         "solution": sol,
-        "window_solutions": [],
+        "window_solutions": [sol],
         "window_statuses": [sol.status],
         "window_iterations": [getattr(sol, "iterations", None)],
         "window_objectives": [objective],
         "window_feasibility": [feasibility],
+        "requested_windows": int(cycle_count),
+        "requested_cycles": int(cycle_count),
         "attempted_windows": 1,
         "successful_windows": int(solver_success),
         "failed_windows": int(not solver_success),
-        "exported_cycles": int(solver_success),
-        "covered_cycles": int(solver_success),
+        "exported_cycles": validated_cycle_count,
+        "covered_cycles": validated_cycle_count,
+        "validated_cycles": validated_cycle_count,
+        "physically_validated_cycles": physically_validated_cycle_count,
         "absolute_wheel_q_reference": absolute_cycle_reference,
         "solver_success": bool(solver_success),
         "physical_success": bool(physical_success),
@@ -6545,52 +6661,41 @@ def audit_mechanical_trajectory(
         raise ValueError("The physical crank-velocity margin must be positive.")
     if cadence_node_stride < 1:
         raise ValueError("cadence_node_stride must be strictly positive.")
-    if (
-        shooting_interval_duration_s is not None
-        and (
-            not np.isfinite(shooting_interval_duration_s)
-            or shooting_interval_duration_s <= 0.0
-        )
+    if shooting_interval_duration_s is not None and (
+        not np.isfinite(shooting_interval_duration_s)
+        or shooting_interval_duration_s <= 0.0
     ):
-        raise ValueError(
-            "shooting_interval_duration_s must be finite and positive."
-        )
+        raise ValueError("shooting_interval_duration_s must be finite and positive.")
     kinematics = reduced_cycling_dynamics.kinematics
     if "theta" in state_traces and "omega" in state_traces:
         theta = np.asarray(state_traces["theta"], dtype=float)
         omega = np.asarray(state_traces["omega"], dtype=float)
         lifted_q, lifted_qdot = kinematics.lift_generalized_trajectory(theta, omega)
-        projected_theta, projected_omega, audit = (
-            kinematics.project_generalized_trajectory(lifted_q, lifted_qdot)
-        )
+        (
+            projected_theta,
+            projected_omega,
+            audit,
+        ) = kinematics.project_generalized_trajectory(lifted_q, lifted_qdot)
         source_formulation = "reduced"
     elif "q" in state_traces and "qdot" in state_traces:
-        projected_theta, projected_omega, audit = (
-            kinematics.project_generalized_trajectory(
-                np.asarray(state_traces["q"], dtype=float),
-                np.asarray(state_traces["qdot"], dtype=float),
-            )
+        (
+            projected_theta,
+            projected_omega,
+            audit,
+        ) = kinematics.project_generalized_trajectory(
+            np.asarray(state_traces["q"], dtype=float),
+            np.asarray(state_traces["qdot"], dtype=float),
         )
         source_formulation = "full"
     else:
-        raise KeyError(
-            "Mechanical audit requires theta/omega or q/qdot state traces."
-        )
+        raise KeyError("Mechanical audit requires theta/omega or q/qdot state traces.")
 
-    configuration_error = float(
-        audit["maximum_configuration_projection_error_rad"]
-    )
-    velocity_error = float(
-        audit.get("maximum_tangent_velocity_residual_rad_s", 0.0)
-    )
+    configuration_error = float(audit["maximum_configuration_projection_error_rad"])
+    velocity_error = float(audit.get("maximum_tangent_velocity_residual_rad_s", 0.0))
     physical_omega = projected_omega[0]
     audited_omega = physical_omega[::cadence_node_stride]
-    omega_lower = float(
-        crank_velocity_target_rad_s - crank_velocity_margin_rad_s
-    )
-    omega_upper = float(
-        crank_velocity_target_rad_s + crank_velocity_margin_rad_s
-    )
+    omega_lower = float(crank_velocity_target_rad_s - crank_velocity_margin_rad_s)
+    omega_upper = float(crank_velocity_target_rad_s + crank_velocity_margin_rad_s)
     omega_violation = float(
         max(
             0.0,
@@ -6613,8 +6718,8 @@ def audit_mechanical_trajectory(
         # an independent necessary condition: if Δtheta / Δt is outside the
         # cadence bounds, at least one internal point necessarily violates
         # those bounds even when every exported omega node is admissible.
-        interval_average_omega = (
-            np.diff(projected_theta[0]) / float(shooting_interval_duration_s)
+        interval_average_omega = np.diff(projected_theta[0]) / float(
+            shooting_interval_duration_s
         )
         interval_average_omega_violation = float(
             max(
@@ -6631,24 +6736,14 @@ def audit_mechanical_trajectory(
             "source_formulation": source_formulation,
             "configuration_tolerance_rad": float(configuration_tolerance_rad),
             "velocity_tolerance_rad_s": float(velocity_tolerance_rad_s),
-            "physical_crank_velocity_min_rad_s": float(
-                np.min(physical_omega)
-            ),
-            "physical_crank_velocity_max_rad_s": float(
-                np.max(physical_omega)
-            ),
+            "physical_crank_velocity_min_rad_s": float(np.min(physical_omega)),
+            "physical_crank_velocity_max_rad_s": float(np.max(physical_omega)),
             "physical_crank_velocity_lower_bound_rad_s": omega_lower,
             "physical_crank_velocity_upper_bound_rad_s": omega_upper,
             "cadence_audit_node_stride": int(cadence_node_stride),
-            "audited_physical_crank_velocity_min_rad_s": float(
-                np.min(audited_omega)
-            ),
-            "audited_physical_crank_velocity_max_rad_s": float(
-                np.max(audited_omega)
-            ),
-            "maximum_physical_crank_velocity_bound_violation_rad_s": (
-                omega_violation
-            ),
+            "audited_physical_crank_velocity_min_rad_s": float(np.min(audited_omega)),
+            "audited_physical_crank_velocity_max_rad_s": float(np.max(audited_omega)),
+            "maximum_physical_crank_velocity_bound_violation_rad_s": (omega_violation),
             "maximum_shooting_node_crank_velocity_bound_violation_rad_s": (
                 omega_violation
             ),
@@ -6724,17 +6819,14 @@ def attach_mechanical_equivalence_audit(
             for status, feasibility in zip(
                 window_statuses, window_feasibility, strict=False
             ):
-                if (
-                    not _status_is_success(status)
-                    or not feasibility.get("passes_tolerance", False)
+                if not _status_is_success(status) or not feasibility.get(
+                    "passes_tolerance", False
                 ):
                     break
                 validated_windows += 1
             if validated_windows:
                 audited_validated_cycles = (
-                    validated_windows
-                    + int(getattr(args, "cycles_per_window", 1))
-                    - 1
+                    validated_windows + int(getattr(args, "cycles_per_window", 1)) - 1
                 )
                 expected_columns = (
                     audited_validated_cycles
@@ -6794,9 +6886,7 @@ def attach_mechanical_equivalence_audit(
         else summary.get("covered_cycles") or 0
     )
     if covered_cycles > 0:
-        terminal_slack = float(
-            getattr(args, "acados_terminal_wheel_q_slack", 0.0)
-        )
+        terminal_slack = float(getattr(args, "acados_terminal_wheel_q_slack", 0.0))
         numerical_tolerance = float(
             getattr(args, "primal_feasibility_threshold", 1e-5) or 1e-5
         )
@@ -6804,16 +6894,14 @@ def attach_mechanical_equivalence_audit(
             theta,
             requested_windows=covered_cycles,
             expected_cycle_shift=-2.0 * np.pi,
-            cycle_progress_tolerance=2.0 * terminal_slack
-            + 2.0 * numerical_tolerance,
+            cycle_progress_tolerance=2.0 * terminal_slack + 2.0 * numerical_tolerance,
             absolute_cycle_reference=float(theta[0]),
             absolute_cycle_tolerance=terminal_slack + numerical_tolerance,
         )
         summary["physical_crank_diagnostics"] = physical_crank_diagnostics
         summary["diagnostics"]["physical_crank"] = physical_crank_diagnostics
     physical_trace_passes = (
-        physical_crank_diagnostics is None
-        or physical_crank_diagnostics["is_physical"]
+        physical_crank_diagnostics is None or physical_crank_diagnostics["is_physical"]
     )
     if not audit["passes_tolerance"] or not physical_trace_passes:
         issues = summary["diagnostics"].setdefault("issues", [])
@@ -7113,7 +7201,8 @@ def _periodic_fes_rollout_defects(
                 n_substeps=projection_substeps,
             )
             max_defect = max(
-                max_defect, float(np.max(np.abs(states[:, node + 1] - expected)))
+                max_defect,
+                float(np.max(np.abs(states[:, node + 1] - expected))),
             )
         defects[muscle_name] = max_defect
     return defects
@@ -8563,7 +8652,9 @@ def rollout_transferred_cycle_acados_irk(
     }
 
 
-def _copy_state_bounds(periodic_nmpc) -> dict[str, tuple[np.ndarray, np.ndarray]]:
+def _copy_state_bounds(
+    periodic_nmpc,
+) -> dict[str, tuple[np.ndarray, np.ndarray]]:
     return {
         key: (
             np.asarray(periodic_nmpc.nlp[0].x_bounds[key].min, dtype=float).copy(),
@@ -8622,7 +8713,11 @@ def build_relaxed_transfer_state_bounds(
         terminal_scale = np.maximum.reduce(
             (
                 trajectory_range,
-                np.where(np.isfinite(terminal_bound_range), terminal_bound_range, 0.0),
+                np.where(
+                    np.isfinite(terminal_bound_range),
+                    terminal_bound_range,
+                    0.0,
+                ),
                 np.full(trajectory_range.shape, np.finfo(float).eps),
             )
         )
@@ -8936,10 +9031,7 @@ def run_acados_transfer_bound_homotopy(
                 )
                 if can_refine:
                     refined_fraction = 0.5 * (accepted_fraction + fraction)
-                    if (
-                        refined_fraction - accepted_fraction
-                        < minimum_fraction_step
-                    ):
+                    if refined_fraction - accepted_fraction < minimum_fraction_step:
                         can_refine = False
                 if not can_refine:
                     if accepted_fraction is None:
@@ -8959,9 +9051,7 @@ def run_acados_transfer_bound_homotopy(
                     (
                         float(
                             np.max(
-                                np.abs(
-                                    periodic_nmpc.nlp[0].x_init[key].init - values
-                                )
+                                np.abs(periodic_nmpc.nlp[0].x_init[key].init - values)
                             )
                         )
                         for key, values in accepted_states.items()
@@ -8972,9 +9062,7 @@ def run_acados_transfer_bound_homotopy(
                     (
                         float(
                             np.max(
-                                np.abs(
-                                    periodic_nmpc.nlp[0].u_init[key].init - values
-                                )
+                                np.abs(periodic_nmpc.nlp[0].u_init[key].init - values)
                             )
                         )
                         for key, values in accepted_controls.items()
@@ -8989,9 +9077,7 @@ def run_acados_transfer_bound_homotopy(
                     (
                         float(
                             np.max(
-                                np.abs(
-                                    periodic_nmpc.nlp[0].x_init[key].init - values
-                                )
+                                np.abs(periodic_nmpc.nlp[0].x_init[key].init - values)
                             )
                         )
                         for key, values in accepted_states.items()
@@ -9002,9 +9088,7 @@ def run_acados_transfer_bound_homotopy(
                     (
                         float(
                             np.max(
-                                np.abs(
-                                    periodic_nmpc.nlp[0].u_init[key].init - values
-                                )
+                                np.abs(periodic_nmpc.nlp[0].u_init[key].init - values)
                             )
                         )
                         for key, values in accepted_controls.items()
@@ -9012,12 +9096,12 @@ def run_acados_transfer_bound_homotopy(
                     default=0.0,
                 )
                 summaries[-1]["refinement_inserted_fraction"] = refined_fraction
-                summaries[-1]["pre_rollback_state_distance"] = (
-                    pre_rollback_state_distance
-                )
-                summaries[-1]["pre_rollback_control_distance"] = (
-                    pre_rollback_control_distance
-                )
+                summaries[-1][
+                    "pre_rollback_state_distance"
+                ] = pre_rollback_state_distance
+                summaries[-1][
+                    "pre_rollback_control_distance"
+                ] = pre_rollback_control_distance
                 summaries[-1]["rollback_state_error"] = rollback_state_error
                 summaries[-1]["rollback_control_error"] = rollback_control_error
                 scheduled_fractions.insert(stage_index, refined_fraction)
@@ -9484,7 +9568,8 @@ def _bounded_least_squares_project_periodic_states(
         variable_lower, variable_upper, scales
     )
     x0 = np.minimum(
-        np.maximum(clipped_original[:, 1:].reshape((-1,)), lower_flat), upper_flat
+        np.maximum(clipped_original[:, 1:].reshape((-1,)), lower_flat),
+        upper_flat,
     )
     first_node = clipped_original[:, 0].copy()
     warmup_variable = clipped_original[:, 1:]
@@ -9696,7 +9781,10 @@ def project_periodic_fes_initial_guess(
         lower_bounds = np.vstack(lower_bounds)
         upper_bounds = np.vstack(upper_bounds)
         if projection_strategy == "least_squares":
-            projected_states, ls_stats = _bounded_least_squares_project_periodic_states(
+            (
+                projected_states,
+                ls_stats,
+            ) = _bounded_least_squares_project_periodic_states(
                 muscle_model,
                 original_states,
                 controls,
@@ -9916,11 +10004,12 @@ def _adapt_warmup_solution_to_periodic_nodes(
                 "A reduced mechanical profile is required to lift theta/omega "
                 "onto the full q/qdot contact manifold."
             )
-        lifted_q, lifted_qdot = (
-            bridge_dynamics.kinematics.lift_generalized_trajectory(
-                resampled_states["theta"],
-                resampled_states["omega"],
-            )
+        (
+            lifted_q,
+            lifted_qdot,
+        ) = bridge_dynamics.kinematics.lift_generalized_trajectory(
+            resampled_states["theta"],
+            resampled_states["omega"],
         )
         resampled_states["q"] = lifted_q
         resampled_states["qdot"] = lifted_qdot
@@ -9934,11 +10023,13 @@ def _adapt_warmup_solution_to_periodic_nodes(
             raise RuntimeError(
                 "The reduced warm-start target does not expose reduced_dynamics."
             )
-        theta, omega, projection_audit = (
-            reduced_dynamics.kinematics.project_generalized_trajectory(
-                resampled_states["q"],
-                resampled_states["qdot"],
-            )
+        (
+            theta,
+            omega,
+            projection_audit,
+        ) = reduced_dynamics.kinematics.project_generalized_trajectory(
+            resampled_states["q"],
+            resampled_states["qdot"],
         )
         maximum_projection_error = projection_audit[
             "maximum_configuration_projection_error_rad"
@@ -10065,7 +10156,10 @@ def _rollout_tiled_fes_states(
 
     nlp = periodic_nmpc.nlp[0]
     if not hasattr(nlp, "model") or not hasattr(nlp, "states"):
-        return {"applied": False, "reason": "model_or_state_mapping_unavailable"}
+        return {
+            "applied": False,
+            "reason": "model_or_state_mapping_unavailable",
+        }
 
     fes_keys = [
         key
@@ -10454,7 +10548,9 @@ def apply_phase_shifted_warmup_initial_guess(
     periodic_nmpc._correct_init_guess_to_fit_bounds(corrected_input="controls")
 
 
-def pulse_width_initial_guess_summary(periodic_nmpc) -> list[dict[str, float | str]]:
+def pulse_width_initial_guess_summary(
+    periodic_nmpc,
+) -> list[dict[str, float | str]]:
     summaries = []
     for key in periodic_nmpc.nlp[0].u_init.keys():
         if not key.startswith("last_pulse_width_"):
@@ -10472,7 +10568,9 @@ def pulse_width_initial_guess_summary(periodic_nmpc) -> list[dict[str, float | s
     return summaries
 
 
-def pulse_width_active_set_summary(periodic_nmpc) -> list[dict[str, int | str]]:
+def pulse_width_active_set_summary(
+    periodic_nmpc,
+) -> list[dict[str, int | str]]:
     summaries = []
     for key in periodic_nmpc.nlp[0].u_init.keys():
         if not key.startswith("last_pulse_width_"):
@@ -10983,7 +11081,9 @@ def apply_warmup_control_regularization_targets(
     return apply_control_regularization_targets(periodic_nmpc, warmup_controls)
 
 
-def apply_initial_guess_control_regularization_targets(periodic_nmpc) -> list[str]:
+def apply_initial_guess_control_regularization_targets(
+    periodic_nmpc,
+) -> list[str]:
     controls = {
         key: np.asarray(periodic_nmpc.nlp[0].u_init[key].init, dtype=float)
         for key in periodic_nmpc.nlp[0].u_init.keys()
@@ -11107,7 +11207,11 @@ def set_acados_runtime_control_regularization_weight(
     interface = getattr(periodic_nmpc, "ocp_solver", None)
     generated_solver = getattr(interface, "ocp_solver", None)
     if generated_solver is None:
-        return {"applied": False, "reason": "solver_unavailable", "weight": weight}
+        return {
+            "applied": False,
+            "reason": "solver_unavailable",
+            "weight": weight,
+        }
 
     layout = acados_objective_weight_layout(periodic_nmpc)
     matrices = {
@@ -11178,7 +11282,9 @@ def set_terminal_wheel_q_bound_slack(periodic_nmpc, slack: float) -> None:
     periodic_nmpc._sync_acados_state_bounds()
 
 
-def recenter_absolute_wheel_q_reference_from_initial_guess(periodic_nmpc) -> bool:
+def recenter_absolute_wheel_q_reference_from_initial_guess(
+    periodic_nmpc,
+) -> bool:
     """Anchor the absolute cycle targets to the initial state actually loaded."""
 
     if not getattr(periodic_nmpc, "anchor_wheel_q_to_absolute_reference", False):
@@ -11233,10 +11339,14 @@ def apply_pulse_width_control_trust_region(
         periodic_nmpc._cocofest_original_control_bounds = {
             key: (
                 np.array(
-                    periodic_nmpc.nlp[0].u_bounds[key].min, dtype=float, copy=True
+                    periodic_nmpc.nlp[0].u_bounds[key].min,
+                    dtype=float,
+                    copy=True,
                 ),
                 np.array(
-                    periodic_nmpc.nlp[0].u_bounds[key].max, dtype=float, copy=True
+                    periodic_nmpc.nlp[0].u_bounds[key].max,
+                    dtype=float,
+                    copy=True,
                 ),
             )
             for key in periodic_nmpc.nlp[0].u_init.keys()
@@ -11252,9 +11362,10 @@ def apply_pulse_width_control_trust_region(
 
         center = np.asarray(periodic_nmpc.nlp[0].u_init[key].init, dtype=float)
         bounds = periodic_nmpc.nlp[0].u_bounds[key]
-        original_min, original_max = periodic_nmpc._cocofest_original_control_bounds[
-            key
-        ]
+        (
+            original_min,
+            original_max,
+        ) = periodic_nmpc._cocofest_original_control_bounds[key]
         original_lower = float(np.min(original_min))
         original_upper = float(np.max(original_max))
         center_min = float(np.min(center))
@@ -11310,19 +11421,12 @@ def apply_phase_aligned_pulse_width_transition_guard(
         )
     if not np.isfinite(activation_threshold) or activation_threshold < 0.0:
         raise ValueError(
-            "--acados-transfer-active-set-threshold must be finite and "
-            "non-negative."
+            "--acados-transfer-active-set-threshold must be finite and " "non-negative."
         )
 
-    nodewise_bounds = getattr(
-        periodic_nmpc, "_cocofest_nodewise_control_bounds", {}
-    )
-    trust_centers = getattr(
-        periodic_nmpc, "_cocofest_control_trust_centers", {}
-    )
-    original_bounds = getattr(
-        periodic_nmpc, "_cocofest_original_control_bounds", {}
-    )
+    nodewise_bounds = getattr(periodic_nmpc, "_cocofest_nodewise_control_bounds", {})
+    trust_centers = getattr(periodic_nmpc, "_cocofest_control_trust_centers", {})
+    original_bounds = getattr(periodic_nmpc, "_cocofest_original_control_bounds", {})
     if not nodewise_bounds:
         raise RuntimeError(
             "The active-set guard requires an existing pulse-width trust region."
@@ -11597,7 +11701,10 @@ def run_standard_ipopt_warmup(
         str(model_path), stim_time, periodic_cn_sum_approximation=False
     )
     warmup_nmpc = prepare_nmpc(
-        warmup_model, warmup_mhe_info, warmup_cycling_info, dict(simulation_conditions)
+        warmup_model,
+        warmup_mhe_info,
+        warmup_cycling_info,
+        dict(simulation_conditions),
     )
     warmup_nmpc.n_cycles_simultaneous = args.cycles_per_window
 
@@ -11758,6 +11865,18 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
                 "--common-initial-solution and "
                 "--common-initial-solution-output must not be the same file."
             )
+    if args.receding_horizon_solution_output is not None and args.single_shot:
+        raise ValueError(
+            "--receding-horizon-solution-output cannot be used with --single-shot."
+        )
+    if (
+        args.allow_partial_receding_horizon_solution_output
+        and args.receding_horizon_solution_output is None
+    ):
+        raise ValueError(
+            "--allow-partial-receding-horizon-solution-output requires "
+            "--receding-horizon-solution-output."
+        )
     if (
         args.standard_warmup_max_iterations is not None
         and args.standard_warmup_max_iterations < 1
@@ -11781,12 +11900,9 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
         raise ValueError(
             "--transfer-contact-manifold-projection applies only to full mechanics."
         )
-    if (
-        args.acados_transfer_active_set_guard_radius is not None
-        and (
-            not np.isfinite(args.acados_transfer_active_set_guard_radius)
-            or args.acados_transfer_active_set_guard_radius < 0
-        )
+    if args.acados_transfer_active_set_guard_radius is not None and (
+        not np.isfinite(args.acados_transfer_active_set_guard_radius)
+        or args.acados_transfer_active_set_guard_radius < 0
     ):
         raise ValueError(
             "--acados-transfer-active-set-guard-radius must be finite and "
@@ -11810,8 +11926,7 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
         or args.acados_transfer_active_set_threshold < 0
     ):
         raise ValueError(
-            "--acados-transfer-active-set-threshold must be finite and "
-            "non-negative."
+            "--acados-transfer-active-set-threshold must be finite and " "non-negative."
         )
     if (
         args.full_dynamics_phase_one_max_state_change is not None
@@ -12239,13 +12354,14 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
             or reduced_cycling_dynamics.muscle_geometry is None
         ):
             reduced_build_start = perf_counter()
-            reduced_cycling_dynamics, reduced_build_audit = (
-                build_reduced_cycling_dynamics(
-                    model_path,
-                    sample_count=181,
-                    kinematic_order=12,
-                    dynamics_order=12,
-                )
+            (
+                reduced_cycling_dynamics,
+                reduced_build_audit,
+            ) = build_reduced_cycling_dynamics(
+                model_path,
+                sample_count=181,
+                kinematic_order=12,
+                dynamics_order=12,
             )
             reduced_profile_path.parent.mkdir(parents=True, exist_ok=True)
             reduced_cycling_dynamics.save(reduced_profile_path)
@@ -12326,12 +12442,8 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
         "enforce_contact_constraints_terminal": bool(
             args.full_contact_constraints_terminal
         ),
-        "enforce_contact_position_terminal": bool(
-            args.full_contact_position_terminal
-        ),
-        "contact_position_tolerance_m": float(
-            args.full_contact_position_tolerance
-        ),
+        "enforce_contact_position_terminal": bool(args.full_contact_position_terminal),
+        "contact_position_tolerance_m": float(args.full_contact_position_tolerance),
         "enforce_contact_constraints_all_nodes": bool(
             args.full_contact_constraints_all_nodes
         ),
@@ -12339,8 +12451,7 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
             args.full_contact_position_all_nodes
         ),
         "enforce_physical_crank_velocity_bounds": bool(
-            build_mechanical_audit_profile
-            and args.mechanical_formulation == "full"
+            build_mechanical_audit_profile and args.mechanical_formulation == "full"
         ),
         # The custom terminal phase constraint remains experimental: the
         # current Bioptim/CasADi stack aborts while initializing IPOPT when
@@ -12403,9 +12514,9 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
     if args.control_regularization_target_source in {"warmup", "previous"}:
         nmpc_simulation_conditions["control_regularization_target"] = None
     refinement_simulation_conditions = dict(nmpc_simulation_conditions)
-    refinement_simulation_conditions["wheel_cycle_boundary_slack"] = (
-        simulation_conditions["wheel_cycle_boundary_slack"]
-    )
+    refinement_simulation_conditions[
+        "wheel_cycle_boundary_slack"
+    ] = simulation_conditions["wheel_cycle_boundary_slack"]
 
     prefetched_standard_warmup = None
     if args.pulse_width_active_set == "warmup":
@@ -12420,13 +12531,16 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
             warmup_conditions_for_active_set["control_regularization_weight"] = 0.0
             warmup_conditions_for_active_set["control_regularization_target"] = None
         if args.terminal_qdot_regularization_target_source == "first_node":
-            warmup_conditions_for_active_set["terminal_qdot_regularization_weight"] = (
-                0.0
-            )
+            warmup_conditions_for_active_set[
+                "terminal_qdot_regularization_weight"
+            ] = 0.0
         standard_warmup_cache_hit = (
             bool(getattr(args, "standard_warmup_seed", None))
             or _warmup_cache_path(
-                args, model_path, warmup_conditions_for_active_set, cycling_info
+                args,
+                model_path,
+                warmup_conditions_for_active_set,
+                cycling_info,
             ).exists()
         )
         prefetched_standard_warmup = run_standard_ipopt_warmup(
@@ -12436,9 +12550,9 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
             warmup_conditions_for_active_set,
             model_path,
         )
-        nmpc_simulation_conditions["pulse_width_active_reference"] = (
-            prefetched_standard_warmup.decision_controls(to_merge=SolutionMerge.NODES)
-        )
+        nmpc_simulation_conditions[
+            "pulse_width_active_reference"
+        ] = prefetched_standard_warmup.decision_controls(to_merge=SolutionMerge.NODES)
 
     nmpc = prepare_nmpc(model, mhe_info, cycling_info, nmpc_simulation_conditions)
     nmpc.n_cycles_simultaneous = args.cycles_per_window
@@ -12485,9 +12599,7 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
                 * np.linspace(0.0, 2.0 * np.pi, 361)
             )
             wheel_tangent = np.abs(
-                reduced_cycling_dynamics.kinematics.tangent(theta_samples)[
-                    wheel_index
-                ]
+                reduced_cycling_dynamics.kinematics.tangent(theta_samples)[wheel_index]
             )
             terminal_position_slack *= float(np.min(wheel_tangent))
         nmpc.terminal_state_slack = {
@@ -12573,8 +12685,7 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
             f"{args.full_contact_constraints_terminal}"
         )
         print(
-            "full_contact_position_terminal: "
-            f"{args.full_contact_position_terminal}"
+            "full_contact_position_terminal: " f"{args.full_contact_position_terminal}"
         )
         print(
             "full_contact_position_tolerance_m: "
@@ -12817,14 +12928,8 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
                 "acados_reset_solver_before_solve: "
                 f"{args.acados_reset_solver_before_solve}"
             )
-            print(
-                "acados_check_reuse_possible: "
-                f"{args.acados_check_reuse_possible}"
-            )
-            print(
-                "acados_code_reuse_tolerance: "
-                f"{args.acados_code_reuse_tolerance}"
-            )
+            print("acados_check_reuse_possible: " f"{args.acados_check_reuse_possible}")
+            print("acados_code_reuse_tolerance: " f"{args.acados_code_reuse_tolerance}")
             print(
                 "acados_with_anderson_acceleration: "
                 f"{args.acados_with_anderson_acceleration}"
@@ -13047,11 +13152,18 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
             standard_warmup_cache_hit = (
                 bool(getattr(args, "standard_warmup_seed", None))
                 or _warmup_cache_path(
-                    args, model_path, warmup_simulation_conditions, cycling_info
+                    args,
+                    model_path,
+                    warmup_simulation_conditions,
+                    cycling_info,
                 ).exists()
             )
             warmup_solution = run_standard_ipopt_warmup(
-                args, mhe_info, cycling_info, warmup_simulation_conditions, model_path
+                args,
+                mhe_info,
+                cycling_info,
+                warmup_simulation_conditions,
+                model_path,
             )
         else:
             warmup_solution = prefetched_standard_warmup
@@ -13106,8 +13218,8 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
         common_seed_path = _resolve_standard_warmup_seed(args.common_initial_solution)
         common_seed = _load_warmup_cache(common_seed_path)
         _validate_common_initial_solution_metadata(common_seed, args, common_seed_path)
-        seed_mechanical_formulation = (
-            (common_seed.metadata or {}).get("mechanical_formulation")
+        seed_mechanical_formulation = (common_seed.metadata or {}).get(
+            "mechanical_formulation"
         )
         mechanical_bridge = (
             seed_mechanical_formulation is not None
@@ -13475,9 +13587,7 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
             crank_velocity_target_rad_s=args.wheel_qdot_regularization_target,
             crank_velocity_margin_rad_s=args.wheel_qdot_bound_margin,
         )
-        initial_guess_audit["mechanical_equivalence"] = (
-            mechanical_initial_guess_audit
-        )
+        initial_guess_audit["mechanical_equivalence"] = mechanical_initial_guess_audit
     if echo:
         print(
             "initial_guess_audit: "
@@ -13504,9 +13614,7 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
     acados_window_diagnostics = []
     nlp_dual_warm_start_summaries = []
     nlp_solver_stats = []
-    compiled_nlp_tracker = CompiledNlpReuseTracker(
-        nlp_c_compile_enabled(args)
-    )
+    compiled_nlp_tracker = CompiledNlpReuseTracker(nlp_c_compile_enabled(args))
     transfer_rollout_summaries = []
     transfer_control_scaling_summaries = []
     transfer_qdot_projection_summaries = []
@@ -13625,9 +13733,7 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
     def update_functions(_nmpc, cycle_idx, _sol):
         nonlocal transfer_failure_window, consecutive_physical_failures
         print(f"window {cycle_idx}")
-        contact_projection = getattr(
-            _nmpc, "last_transfer_contact_projection", None
-        )
+        contact_projection = getattr(_nmpc, "last_transfer_contact_projection", None)
         if contact_projection is not None:
             contact_projection = {"window": cycle_idx, **contact_projection}
             transfer_contact_projection_summaries.append(contact_projection)
@@ -14025,9 +14131,7 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
                 minimum_fraction_step=(
                     args.acados_transfer_bound_homotopy_min_fraction_step
                 ),
-                max_refinements=(
-                    args.acados_transfer_bound_homotopy_max_refinements
-                ),
+                max_refinements=(args.acados_transfer_bound_homotopy_max_refinements),
                 echo=echo,
             )
             homotopy_summary["window"] = cycle_idx
@@ -14354,9 +14458,9 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
 
     solver_first_iter = None
     if args.solver == "acados":
-        if (
-            args.acados_warm_start_first_qp_from_nlp
-            and args.acados_qp_cond_n not in (None, nmpc.nlp[0].ns)
+        if args.acados_warm_start_first_qp_from_nlp and args.acados_qp_cond_n not in (
+            None,
+            nmpc.nlp[0].ns,
         ):
             raise ValueError(
                 "--acados-warm-start-first-qp-from-nlp requires full "
@@ -14421,12 +14525,8 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
             reset_solver_before_solve=args.acados_reset_solver_before_solve,
             check_reuse_possible=args.acados_check_reuse_possible,
             code_reuse_tolerance=args.acados_code_reuse_tolerance,
-            with_anderson_acceleration=(
-                args.acados_with_anderson_acceleration
-            ),
-            anderson_activation_threshold=(
-                args.acados_anderson_activation_threshold
-            ),
+            with_anderson_acceleration=(args.acados_with_anderson_acceleration),
+            anderson_activation_threshold=(args.acados_anderson_activation_threshold),
             byrd_omojokon_slack_relaxation_factor=(
                 args.acados_byrd_omojokon_slack_relaxation_factor
             ),
@@ -14697,9 +14797,9 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
         summary["fatigue_capacity_scales"] = fatigue_capacity_scales
         summary["wheel_q_scaling"] = wheel_q_scaling
         summary["absolute_wheel_q_origin_reference"] = absolute_wheel_q_origin_reference
-        summary["absolute_wheel_q_start_cycle_index"] = (
-            absolute_wheel_q_start_cycle_index
-        )
+        summary[
+            "absolute_wheel_q_start_cycle_index"
+        ] = absolute_wheel_q_start_cycle_index
         summary["native_solver_status"] = _native_solver_status(nmpc)
         summary["compiled_nlp_reuse"] = compiled_nlp_tracker.summary()
         if control_homotopy_summaries:
@@ -14709,14 +14809,10 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
         if terminal_wheel_bound_summaries:
             summary["terminal_wheel_bound_summaries"] = terminal_wheel_bound_summaries
         if build_mechanical_audit_profile:
-            attach_mechanical_equivalence_audit(
-                summary, reduced_cycling_dynamics
-            )
+            attach_mechanical_equivalence_audit(summary, reduced_cycling_dynamics)
         return summary
 
-    nmpc.project_full_transfer_contact = bool(
-        args.transfer_contact_manifold_projection
-    )
+    nmpc.project_full_transfer_contact = bool(args.transfer_contact_manifold_projection)
     nmpc.project_full_transfer_contact_velocity = (
         args.transfer_contact_manifold_projection_mode == "position_velocity"
     )
@@ -14806,45 +14902,45 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
     if transfer_rollout_summaries:
         summary["transfer_rollout_summaries"] = transfer_rollout_summaries
     if transfer_control_scaling_summaries:
-        summary["transfer_control_scaling_summaries"] = (
-            transfer_control_scaling_summaries
-        )
+        summary[
+            "transfer_control_scaling_summaries"
+        ] = transfer_control_scaling_summaries
     if transfer_qdot_projection_summaries:
-        summary["transfer_qdot_projection_summaries"] = (
-            transfer_qdot_projection_summaries
-        )
+        summary[
+            "transfer_qdot_projection_summaries"
+        ] = transfer_qdot_projection_summaries
     if transfer_mechanical_restoration_summaries:
-        summary["transfer_mechanical_restoration_summaries"] = (
-            transfer_mechanical_restoration_summaries
-        )
+        summary[
+            "transfer_mechanical_restoration_summaries"
+        ] = transfer_mechanical_restoration_summaries
     if transfer_ding_force_compensation_summaries:
-        summary["transfer_ding_force_compensation_summaries"] = (
-            transfer_ding_force_compensation_summaries
-        )
+        summary[
+            "transfer_ding_force_compensation_summaries"
+        ] = transfer_ding_force_compensation_summaries
     if transfer_bound_homotopy_summaries:
         summary["transfer_bound_homotopy_summaries"] = transfer_bound_homotopy_summaries
     if transfer_sqp_restart_summaries:
         summary["transfer_sqp_restart_summaries"] = transfer_sqp_restart_summaries
     if transfer_active_set_guard_summaries:
-        summary["transfer_active_set_guard_summaries"] = (
-            transfer_active_set_guard_summaries
-        )
+        summary[
+            "transfer_active_set_guard_summaries"
+        ] = transfer_active_set_guard_summaries
     if transfer_contact_projection_summaries:
-        summary["transfer_contact_projection_summaries"] = (
-            transfer_contact_projection_summaries
-        )
+        summary[
+            "transfer_contact_projection_summaries"
+        ] = transfer_contact_projection_summaries
     if transfer_bound_projection_summaries:
-        summary["transfer_bound_projection_summaries"] = (
-            transfer_bound_projection_summaries
-        )
+        summary[
+            "transfer_bound_projection_summaries"
+        ] = transfer_bound_projection_summaries
     if inter_window_refinement_summaries:
         summary["inter_window_refinement_summaries"] = inter_window_refinement_summaries
     if cycle_boundary_homotopy_summary is not None:
         summary["cycle_boundary_homotopy_summary"] = cycle_boundary_homotopy_summary
     if inter_window_control_homotopy_summaries:
-        summary["inter_window_control_homotopy_summaries"] = (
-            inter_window_control_homotopy_summaries
-        )
+        summary[
+            "inter_window_control_homotopy_summaries"
+        ] = inter_window_control_homotopy_summaries
     if control_homotopy_summaries:
         summary["control_homotopy_summaries"] = control_homotopy_summaries
     if proximal_control_summaries:
@@ -14852,15 +14948,15 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
     if terminal_wheel_bound_summaries:
         summary["terminal_wheel_bound_summaries"] = terminal_wheel_bound_summaries
     if inter_window_proximal_control_summaries:
-        summary["inter_window_proximal_control_summaries"] = (
-            inter_window_proximal_control_summaries
-        )
+        summary[
+            "inter_window_proximal_control_summaries"
+        ] = inter_window_proximal_control_summaries
     if transfer_failure_window is not None:
         summary["transfer_failure_window"] = transfer_failure_window
     if inter_window_terminal_wheel_bound_summaries:
-        summary["inter_window_terminal_wheel_bound_summaries"] = (
-            inter_window_terminal_wheel_bound_summaries
-        )
+        summary[
+            "inter_window_terminal_wheel_bound_summaries"
+        ] = inter_window_terminal_wheel_bound_summaries
     if initial_guess_state_traces is not None:
         summary["initial_guess_state_traces"] = initial_guess_state_traces
         summary["initial_guess_control_traces"] = initial_guess_control_traces
@@ -14881,6 +14977,13 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
     summary["native_solver_status"] = _native_solver_status(nmpc)
     if build_mechanical_audit_profile:
         attach_mechanical_equivalence_audit(summary, reduced_cycling_dynamics)
+    if args.receding_horizon_solution_output is not None:
+        rho_output_path = (
+            Path(args.receding_horizon_solution_output).expanduser().resolve()
+        )
+        _save_receding_horizon_solution(rho_output_path, summary, args)
+        if echo:
+            print(f"receding_horizon_solution_output: saved ({rho_output_path})")
     return summary
 
 

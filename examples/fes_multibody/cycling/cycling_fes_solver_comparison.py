@@ -54,6 +54,7 @@ BENCHMARK_SOLVERS = ("ipopt", "acados", "fatrop", "madnlp")
 BENCHMARK_STIMULATION_PATTERN_CYCLES = (10, 30, 100)
 BENCHMARK_CONFIGURATION_FIELDS = (
     "solver",
+    "single_shot",
     "objective",
     "objective_shape",
     "model_formulation",
@@ -148,6 +149,7 @@ BENCHMARK_CONFIGURATION_FIELDS = (
     "legacy_standard_warmup_seed_signed_torque",
     "common_initial_solution",
     "common_initial_solution_output",
+    "allow_partial_receding_horizon_solution_output",
     "ipopt_hsl_library",
     "ipopt_c_compile",
     "ipopt_print_level",
@@ -488,9 +490,7 @@ def _shooting_node_physical_trace(
             f"and stride {stride}."
         )
     requested_cycles = min(int(cycle_count), available_cycles)
-    return values[
-        ..., : requested_cycles * shooting_per_cycle * stride + 1 : stride
-    ]
+    return values[..., : requested_cycles * shooting_per_cycle * stride + 1 : stride]
 
 
 def _truncate_result_to_cycles(result: dict, cycle_count: int) -> dict:
@@ -694,9 +694,7 @@ def _executed_fatigue_objective(
 ) -> float | None:
     """Return the sum of the independently re-evaluated muscle costs."""
 
-    rows = _executed_fatigue_objective_by_muscle(
-        result, cycle_count, weight=weight
-    )
+    rows = _executed_fatigue_objective_by_muscle(result, cycle_count, weight=weight)
     if not rows:
         return None
     return float(sum(row["executed_fatigue_objective"] for row in rows))
@@ -751,7 +749,9 @@ def _external_crank_power_metrics(result: dict, cycle_count: int) -> dict:
     role = (
         "driving"
         if mean_power > power_tolerance
-        else "resistive" if mean_power < -power_tolerance else "neutral"
+        else "resistive"
+        if mean_power < -power_tolerance
+        else "neutral"
     )
     metrics.update(
         mean_power_w=mean_power,
@@ -1161,7 +1161,8 @@ def _shared_initial_guess_comparison(ipopt_result: dict, acados_result: dict) ->
             common_values += ipopt_array.size
             if ipopt_array.size:
                 max_error = max(
-                    max_error, float(np.max(np.abs(ipopt_array - acados_array)))
+                    max_error,
+                    float(np.max(np.abs(ipopt_array - acados_array))),
                 )
 
     ipopt_audits = ipopt_result.get("initial_guess_audits") or []
@@ -1190,6 +1191,7 @@ def _pick(value, fallback):
 
 def _solver_config(
     solver_name: str,
+    single_shot: bool,
     objective: str,
     objective_shape: str,
     cycles_per_window: int,
@@ -1289,7 +1291,7 @@ def _solver_config(
 
         return _namespace_from_cli(
             solver="ipopt",
-            single_shot=False,
+            single_shot=single_shot,
             model_formulation=_pick(
                 ipopt_model_formulation, defaults["model_formulation"]
             ),
@@ -1407,7 +1409,7 @@ def _solver_config(
     if solver_name == "acados":
         return _namespace_from_cli(
             solver="acados",
-            single_shot=False,
+            single_shot=single_shot,
             model_formulation="periodic_node",
             torque_application="constant",
             cycles_per_window=cycles_per_window,
@@ -1422,9 +1424,7 @@ def _solver_config(
             acados_control_homotopy_stage_iterations=(
                 acados_control_homotopy_stage_iterations
             ),
-            acados_control_homotopy_max_restarts=(
-                acados_control_homotopy_max_restarts
-            ),
+            acados_control_homotopy_max_restarts=(acados_control_homotopy_max_restarts),
             ipopt_linear_solver=ipopt_linear_solver,
             ipopt_dual_warm_start_mode=ipopt_dual_warm_start_mode,
             n_windows=n_windows,
@@ -1863,6 +1863,7 @@ def _run_benchmark_case(
                 "standard_warmup_seed",
                 "common_initial_solution",
                 "common_initial_solution_output",
+                "receding_horizon_solution_output",
                 "reduced_cycling_profile",
             ):
                 path_value = getattr(args, path_attribute, None)
@@ -1997,9 +1998,9 @@ def _stimulation_pattern_snapshot(result: dict, cycle: int) -> dict:
         snapshot["reason"] = "cycle_must_be_positive"
         return snapshot
     if cycle > validated_cycles:
-        snapshot["reason"] = (
-            f"only_{validated_cycles}_cycles_belong_to_the_converged_prefix"
-        )
+        snapshot[
+            "reason"
+        ] = f"only_{validated_cycles}_cycles_belong_to_the_converged_prefix"
         return snapshot
 
     shooting_per_cycle = snapshot["stimulations_per_cycle"]
@@ -2045,9 +2046,7 @@ def _stimulation_pattern_snapshot(result: dict, cycle: int) -> dict:
             if np.all(np.isfinite(crank_velocity)):
                 snapshot["crank_velocity_rad_s"] = crank_velocity.tolist()
         elif (
-            qdot.ndim == 2
-            and qdot.shape[0] > velocity_index
-            and qdot.shape[1] >= stop
+            qdot.ndim == 2 and qdot.shape[0] > velocity_index and qdot.shape[1] >= stop
         ):
             crank_velocity = qdot[velocity_index, start:stop]
             if np.all(np.isfinite(crank_velocity)):
@@ -2259,9 +2258,7 @@ def pulse_width_cycle_variation(result: dict, cycle_count: int) -> dict:
                     "root_mean_square_change_us": float(
                         np.sqrt(np.mean(np.square(transition)))
                     ),
-                    "maximum_absolute_change_us": float(
-                        np.max(np.abs(transition))
-                    ),
+                    "maximum_absolute_change_us": float(np.max(np.abs(transition))),
                 }
             )
         summary["muscles"].append(
@@ -2430,10 +2427,15 @@ def solver_overview_rows(results: dict[str, dict]) -> list[dict]:
         rows.append(
             {
                 "solver": solver_name,
+                "mode": result.get("mode"),
                 "success": bool(result.get("success")),
                 "solver_success": bool(result.get("solver_success")),
                 "physical_success": bool(result.get("physical_success")),
                 "status": None if status is None else int(status),
+                "requested_cycles": result.get("requested_cycles")
+                or result.get("requested_windows"),
+                "exported_cycles": result.get("exported_cycles"),
+                "covered_cycles": result.get("covered_cycles"),
                 "validated_windows": performance["successful_prefix_windows"],
                 "nlp_validated_cycles": performance["nlp_validated_cycles"],
                 "physically_validated_cycles": performance[
@@ -2499,9 +2501,7 @@ def solver_overview_rows(results: dict[str, dict]) -> list[dict]:
                 "mechanical_equivalence_audit": result.get(
                     "mechanical_equivalence_audit"
                 ),
-                "physical_crank_diagnostics": result.get(
-                    "physical_crank_diagnostics"
-                ),
+                "physical_crank_diagnostics": result.get("physical_crank_diagnostics"),
                 "state_boundary_jumps": result.get("state_boundary_jumps")
                 or {
                     "available": False,
@@ -2670,6 +2670,7 @@ def main(
     objective: str = "fatigue",
     objective_shape: str = "quadratic",
     solvers: tuple[str, ...] = BENCHMARK_SOLVERS,
+    single_shot: bool = False,
     cycles_per_window: int = 1,
     stimulations_per_cycle: int = 30,
     n_windows: int = 2,
@@ -2695,6 +2696,8 @@ def main(
     legacy_standard_warmup_seed_signed_torque: float | None = None,
     common_initial_solution: str | Path | None = None,
     common_initial_solution_output: str | Path | None = None,
+    receding_horizon_solution_output: str | Path | None = None,
+    allow_partial_receding_horizon_solution_output: bool = False,
     ipopt_hsl_library: str | None = None,
     ipopt_c_compile: bool = False,
     ipopt_print_level: int = 0,
@@ -2907,6 +2910,9 @@ def main(
     common_initial_solution_output = resolve_invocation_path(
         common_initial_solution_output
     )
+    receding_horizon_solution_output = resolve_invocation_path(
+        receding_horizon_solution_output
+    )
     reduced_cycling_profile = resolve_invocation_path(reduced_cycling_profile)
     ipopt_hsl_library = resolve_invocation_path(ipopt_hsl_library)
     output_json = resolve_invocation_path(output_json)
@@ -2915,6 +2921,11 @@ def main(
         n_threads = os.cpu_count() or 1
     if n_threads < 1:
         raise ValueError("n_threads must be at least 1.")
+    if single_shot and n_windows != cycles_per_window:
+        raise ValueError(
+            "--single-shot requires --n-windows to equal --cycles-per-window "
+            "so the reported cycle count matches the optimized horizon."
+        )
     if isinstance(solvers, str):
         solvers = parse_solver_names(solvers)
     solvers = tuple(dict.fromkeys(name.lower() for name in solvers))
@@ -2936,6 +2947,7 @@ def main(
 
     ipopt_args = _solver_config(
         "ipopt",
+        single_shot=single_shot,
         objective=objective,
         objective_shape=objective_shape,
         cycles_per_window=cycles_per_window,
@@ -2953,9 +2965,7 @@ def main(
         acados_control_homotopy_stage_iterations=(
             acados_control_homotopy_stage_iterations
         ),
-        acados_control_homotopy_max_restarts=(
-            acados_control_homotopy_max_restarts
-        ),
+        acados_control_homotopy_max_restarts=(acados_control_homotopy_max_restarts),
         control_regularization_weight=control_regularization_weight,
         control_regularization_target=control_regularization_target,
         control_regularization_target_source=control_regularization_target_source,
@@ -3040,6 +3050,7 @@ def main(
     )
     acados_args = _solver_config(
         "acados",
+        single_shot=single_shot,
         objective=objective,
         objective_shape=objective_shape,
         cycles_per_window=cycles_per_window,
@@ -3057,9 +3068,7 @@ def main(
         acados_control_homotopy_stage_iterations=(
             acados_control_homotopy_stage_iterations
         ),
-        acados_control_homotopy_max_restarts=(
-            acados_control_homotopy_max_restarts
-        ),
+        acados_control_homotopy_max_restarts=(acados_control_homotopy_max_restarts),
         control_regularization_weight=(
             acados_control_regularization_weight
             if acados_control_regularization_weight is not None
@@ -3170,6 +3179,14 @@ def main(
     acados_args.common_initial_solution = common_initial_solution
     ipopt_args.common_initial_solution_output = common_initial_solution_output
     acados_args.common_initial_solution_output = common_initial_solution_output
+    ipopt_args.receding_horizon_solution_output = receding_horizon_solution_output
+    acados_args.receding_horizon_solution_output = receding_horizon_solution_output
+    ipopt_args.allow_partial_receding_horizon_solution_output = (
+        allow_partial_receding_horizon_solution_output
+    )
+    acados_args.allow_partial_receding_horizon_solution_output = (
+        allow_partial_receding_horizon_solution_output
+    )
     acados_args.experimental_reduced_acados = experimental_reduced_acados
     for name, value in (
         ("ipopt_print_level", ipopt_print_level),
@@ -3213,14 +3230,10 @@ def main(
     acados_args.acados_warm_start_first_qp_from_nlp = (
         acados_warm_start_first_qp_from_nlp
     )
-    acados_args.acados_reset_solver_before_solve = (
-        acados_reset_solver_before_solve
-    )
+    acados_args.acados_reset_solver_before_solve = acados_reset_solver_before_solve
     acados_args.acados_check_reuse_possible = acados_check_reuse_possible
     acados_args.acados_code_reuse_tolerance = acados_code_reuse_tolerance
-    acados_args.acados_with_anderson_acceleration = (
-        acados_with_anderson_acceleration
-    )
+    acados_args.acados_with_anderson_acceleration = acados_with_anderson_acceleration
     acados_args.acados_anderson_activation_threshold = (
         acados_anderson_activation_threshold
     )
@@ -3337,9 +3350,7 @@ def main(
     acados_args.full_dynamics_phase_one_max_fes_change = (
         acados_transfer_phase_one_max_fes_change
     )
-    acados_args.acados_transfer_bound_homotopy = (
-        acados_transfer_bound_homotopy
-    )
+    acados_args.acados_transfer_bound_homotopy = acados_transfer_bound_homotopy
     # The bound homotopy may become primal-feasible before its last SQP
     # iterate. Retain those iterates so the continuation can restart from the
     # certified best primal instead of a later, degraded MAXITER iterate.
@@ -3459,9 +3470,7 @@ def main(
             full_contact_position_all_nodes
         )
         solver_configuration.reduced_cycling_profile = (
-            None
-            if reduced_cycling_profile is None
-            else Path(reduced_cycling_profile)
+            None if reduced_cycling_profile is None else Path(reduced_cycling_profile)
         )
     if mechanical_formulation not in ("full", "reduced"):
         raise ValueError("mechanical_formulation must be 'full' or 'reduced'.")
@@ -3536,10 +3545,20 @@ def build_cli() -> argparse.ArgumentParser:
         help="Benchmark objective; use 'fatigue' for the endurance comparison.",
     )
     parser.add_argument(
-        "--objective-shape", default="quadratic", choices=("quadratic", "linear")
+        "--objective-shape",
+        default="quadratic",
+        choices=("quadratic", "linear"),
     )
     parser.add_argument("--cycles-per-window", type=int, default=1)
     parser.add_argument("--stimulations-per-cycle", type=int, default=30)
+    parser.add_argument(
+        "--single-shot",
+        action="store_true",
+        help=(
+            "Solve one OCP spanning --cycles-per-window cycles instead of "
+            "entering the receding-horizon loop."
+        ),
+    )
     parser.add_argument(
         "--n-windows",
         type=int,
@@ -4028,7 +4047,9 @@ def build_cli() -> argparse.ArgumentParser:
     )
     parser.add_argument("--shared-transfer-rollout-substeps", type=int, default=5)
     parser.add_argument(
-        "--shared-transfer-rollout-max-bound-violation", type=float, default=1.0
+        "--shared-transfer-rollout-max-bound-violation",
+        type=float,
+        default=1.0,
     )
     parser.add_argument(
         "--shared-transfer-ding-force-compensation",
@@ -4039,10 +4060,14 @@ def build_cli() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
-        "--shared-transfer-ding-force-compensation-substeps", type=int, default=5
+        "--shared-transfer-ding-force-compensation-substeps",
+        type=int,
+        default=5,
     )
     parser.add_argument(
-        "--shared-transfer-ding-force-compensation-iterations", type=int, default=20
+        "--shared-transfer-ding-force-compensation-iterations",
+        type=int,
+        default=20,
     )
     parser.add_argument(
         "--acados-transfer-ding-force-compensation",
@@ -4229,7 +4254,9 @@ def build_cli() -> argparse.ArgumentParser:
         help="Maximum retained control radius, in seconds, after inter-window growth.",
     )
     parser.add_argument(
-        "--acados-integrator-type", choices=("ERK", "IRK", "DISCRETE"), default="IRK"
+        "--acados-integrator-type",
+        choices=("ERK", "IRK", "DISCRETE"),
+        default="IRK",
     )
     parser.add_argument(
         "--acados-collocation-type",
@@ -4269,7 +4296,9 @@ def build_cli() -> argparse.ArgumentParser:
         "--acados-wheel-qdot-regularization-weight", type=float, default=None
     )
     parser.add_argument(
-        "--wheel-qdot-regularization-target", type=float, default=-float(2 * np.pi)
+        "--wheel-qdot-regularization-target",
+        type=float,
+        default=-float(2 * np.pi),
     )
     parser.add_argument("--wheel-qdot-bound-margin", type=float, default=3.0)
     parser.add_argument(
@@ -4425,9 +4454,7 @@ def build_cli() -> argparse.ArgumentParser:
         default=0,
     )
     parser.add_argument("--acados-warm-start-first-qp", action="store_true")
-    parser.add_argument(
-        "--acados-warm-start-first-qp-from-nlp", action="store_true"
-    )
+    parser.add_argument("--acados-warm-start-first-qp-from-nlp", action="store_true")
     parser.add_argument(
         "--acados-dual-warm-start-mode",
         choices=("preserve", "reset", "shift"),
@@ -4464,13 +4491,21 @@ def build_cli() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--acados-globalization",
-        choices=("FIXED_STEP", "MERIT_BACKTRACKING", "FUNNEL_L1PEN_LINESEARCH"),
+        choices=(
+            "FIXED_STEP",
+            "MERIT_BACKTRACKING",
+            "FUNNEL_L1PEN_LINESEARCH",
+        ),
         default="FUNNEL_L1PEN_LINESEARCH",
     )
     parser.add_argument("--acados-fixed-step-length", type=float, default=1.0)
     parser.add_argument(
         "--acados-nlp-qp-tol-strategy",
-        choices=("FIXED_QP_TOL", "ADAPTIVE_CURRENT_RES_JOINT", "ADAPTIVE_QPSCALING"),
+        choices=(
+            "FIXED_QP_TOL",
+            "ADAPTIVE_CURRENT_RES_JOINT",
+            "ADAPTIVE_QPSCALING",
+        ),
         default="ADAPTIVE_QPSCALING",
     )
     parser.add_argument(
@@ -4487,9 +4522,7 @@ def build_cli() -> argparse.ArgumentParser:
     parser.add_argument("--acados-reset-solver-before-solve", action="store_true")
     parser.add_argument("--acados-check-reuse-possible", action="store_true")
     parser.add_argument("--acados-code-reuse-tolerance", type=float, default=1e-12)
-    parser.add_argument(
-        "--acados-with-anderson-acceleration", action="store_true"
-    )
+    parser.add_argument("--acados-with-anderson-acceleration", action="store_true")
     parser.add_argument(
         "--acados-anderson-activation-threshold", type=float, default=0.1
     )
@@ -4529,19 +4562,29 @@ def build_cli() -> argparse.ArgumentParser:
         default=1.0,
     )
     parser.add_argument(
-        "--periodic-fes-warmup-projection-defect-weight", type=float, default=100.0
+        "--periodic-fes-warmup-projection-defect-weight",
+        type=float,
+        default=100.0,
     )
     parser.add_argument(
-        "--periodic-fes-warmup-projection-trust-radius", type=float, default=None
+        "--periodic-fes-warmup-projection-trust-radius",
+        type=float,
+        default=None,
     )
     parser.add_argument(
-        "--periodic-fes-warmup-projection-max-iterations", type=int, default=200
+        "--periodic-fes-warmup-projection-max-iterations",
+        type=int,
+        default=200,
     )
     parser.add_argument(
-        "--periodic-fes-warmup-force-projection-weight", type=float, default=0.25
+        "--periodic-fes-warmup-force-projection-weight",
+        type=float,
+        default=0.25,
     )
     parser.add_argument(
-        "--periodic-fes-warmup-force-qdot-defect-limit", type=float, default=3.0
+        "--periodic-fes-warmup-force-qdot-defect-limit",
+        type=float,
+        default=3.0,
     )
     parser.add_argument(
         "--periodic-fes-warmup-force-adaptive-steps", type=int, default=10
@@ -4592,6 +4635,23 @@ def build_cli() -> argparse.ArgumentParser:
         default=None,
         help="Optional path for a compact JSON summary of every selected solver.",
     )
+    parser.add_argument(
+        "--receding-horizon-solution-output",
+        type=Path,
+        default=None,
+        help=(
+            "Save the complete validated RHO trajectory as a multi-cycle .npz "
+            "initial solution."
+        ),
+    )
+    parser.add_argument(
+        "--allow-partial-receding-horizon-solution-output",
+        action="store_true",
+        help=(
+            "Export the longest physically valid RHO prefix when a later "
+            "window fails."
+        ),
+    )
     return parser
 
 
@@ -4599,6 +4659,7 @@ if __name__ == "__main__":
     args = build_cli().parse_args()
     main(
         solvers=args.solvers,
+        single_shot=args.single_shot,
         output_json=args.output_json,
         objective=args.objective,
         objective_shape=args.objective_shape,
@@ -4608,19 +4669,11 @@ if __name__ == "__main__":
         mechanical_formulation=args.mechanical_formulation,
         reduced_cycling_profile=args.reduced_cycling_profile,
         experimental_reduced_acados=args.experimental_reduced_acados,
-        full_contact_constraints_terminal=(
-            args.full_contact_constraints_terminal
-        ),
+        full_contact_constraints_terminal=(args.full_contact_constraints_terminal),
         full_contact_position_terminal=args.full_contact_position_terminal,
-        full_contact_position_tolerance=(
-            args.full_contact_position_tolerance
-        ),
-        full_contact_constraints_all_nodes=(
-            args.full_contact_constraints_all_nodes
-        ),
-        full_contact_position_all_nodes=(
-            args.full_contact_position_all_nodes
-        ),
+        full_contact_position_tolerance=(args.full_contact_position_tolerance),
+        full_contact_constraints_all_nodes=(args.full_contact_constraints_all_nodes),
+        full_contact_position_all_nodes=(args.full_contact_position_all_nodes),
         n_threads=args.n_threads,
         compact_rho_output=args.compact_rho_output,
         resistive_torque=args.resistive_torque,
@@ -4637,6 +4690,10 @@ if __name__ == "__main__":
         ),
         common_initial_solution=args.common_initial_solution,
         common_initial_solution_output=args.common_initial_solution_output,
+        receding_horizon_solution_output=(args.receding_horizon_solution_output),
+        allow_partial_receding_horizon_solution_output=(
+            args.allow_partial_receding_horizon_solution_output
+        ),
         ipopt_hsl_library=args.ipopt_hsl_library,
         ipopt_c_compile=args.ipopt_c_compile,
         ipopt_print_level=args.ipopt_print_level,
@@ -4682,9 +4739,7 @@ if __name__ == "__main__":
         acados_max_iter=args.acados_max_iter,
         acados_assisted_hot_start=args.acados_assisted_hot_start,
         acados_control_homotopy_radii=args.acados_control_homotopy_radii,
-        acados_control_homotopy_tolerance=(
-            args.acados_control_homotopy_tolerance
-        ),
+        acados_control_homotopy_tolerance=(args.acados_control_homotopy_tolerance),
         acados_control_homotopy_stage_iterations=(
             args.acados_control_homotopy_stage_iterations
         ),
@@ -4784,9 +4839,7 @@ if __name__ == "__main__":
         acados_qp_cond_n=args.acados_qp_cond_n,
         acados_qp_warm_start_level=args.acados_qp_warm_start_level,
         acados_warm_start_first_qp=args.acados_warm_start_first_qp,
-        acados_warm_start_first_qp_from_nlp=(
-            args.acados_warm_start_first_qp_from_nlp
-        ),
+        acados_warm_start_first_qp_from_nlp=(args.acados_warm_start_first_qp_from_nlp),
         acados_dual_warm_start_mode=args.acados_dual_warm_start_mode,
         acados_levenberg_marquardt=args.acados_levenberg_marquardt,
         acados_regularize_method=args.acados_regularize_method,
@@ -4802,9 +4855,7 @@ if __name__ == "__main__":
         acados_reset_solver_before_solve=args.acados_reset_solver_before_solve,
         acados_check_reuse_possible=args.acados_check_reuse_possible,
         acados_code_reuse_tolerance=args.acados_code_reuse_tolerance,
-        acados_with_anderson_acceleration=(
-            args.acados_with_anderson_acceleration
-        ),
+        acados_with_anderson_acceleration=(args.acados_with_anderson_acceleration),
         acados_anderson_activation_threshold=(
             args.acados_anderson_activation_threshold
         ),
@@ -4815,9 +4866,7 @@ if __name__ == "__main__":
         shared_transfer_full_dynamics_rollout=(
             args.shared_transfer_full_dynamics_rollout
         ),
-        shared_transfer_contact_projection=(
-            args.shared_transfer_contact_projection
-        ),
+        shared_transfer_contact_projection=(args.shared_transfer_contact_projection),
         shared_transfer_contact_projection_mode=(
             args.shared_transfer_contact_projection_mode
         ),
@@ -4847,9 +4896,7 @@ if __name__ == "__main__":
         acados_transfer_phase_one_max_fes_change=(
             args.acados_transfer_phase_one_max_fes_change
         ),
-        acados_transfer_bound_homotopy=(
-            args.acados_transfer_bound_homotopy
-        ),
+        acados_transfer_bound_homotopy=(args.acados_transfer_bound_homotopy),
         acados_transfer_bound_homotopy_fractions=(
             args.acados_transfer_bound_homotopy_fractions
         ),

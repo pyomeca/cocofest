@@ -2250,7 +2250,55 @@ Pour mesurer la compilation, relancer sur le même type de runner avec :
 -f compile_nlp_evaluators=false
 ```
 
-### 14.3 Écrans d’options
+### 14.3 RHO reduced contre horizon complet
+
+Le mode isolé `full_horizon` n’exécute pas ACADOS. Le RHO reduced de référence
+reste en IPOPT/SX; chaque horizon complet est construit en MX et résolu par
+MadNLP/MUMPS :
+
+1. un RHO IPOPT/MUMPS reduced à fenêtres d’un cycle produit une trajectoire
+   concaténée jusqu’au plafond demandé ou au premier échec; dans ce dernier
+   cas, son préfixe strictement validé devient automatiquement le nouveau
+   plafond;
+2. cette trajectoire est découpée en seeds appariés pour les horizons complets
+   `1, 2, 3, 5, 10, 15, 20, 25, 30`, puis `35…60` par pas de 5 et enfin
+   `70, 80, …`;
+3. une non-convergence a droit à une seconde tentative et reste visible comme
+   trou dans le rapport; la première limite mémoire déclenche un raffinement
+   cycle par cycle du dernier intervalle;
+4. le pic RSS de tout l’arbre du processus solveur est mesuré. En mode `auto`,
+   la limite vaut `12.5 GiB` sur une machine de 16 GiB et `97.5 GiB` sur une
+   machine de 128 GiB.
+
+Le RHO utilise IPOPT/SX, dont le préfixe reduced 100/100 est certifié;
+l’horizon complet utilise MX. `--single-shot` impose une seule résolution de
+l’OCP, `--madnlp-linear-solver mumps` est transmis explicitement et
+`--ipopt-no-use-sx` verrouille le graphe MX du problème full. Un pont
+IPOPT/MX facultatif raffine d’abord le préfixe RHO relevé sur la mécanique
+complète, puis warm-starte MadNLP. Le champ `full_horizon_max_cycles` est un
+plafond arbitraire, pas une liste de valeurs codée en dur. Chaque taille est
+réinitialisée depuis le préfixe correspondant de la trajectoire RHO reduced
+concaténée; les solutions full-horizon précédentes ne sont donc pas propagées
+et ne peuvent pas biaiser la branche comparée.
+
+```bash
+gh workflow run cycling_solver_benchmark_linux.yml \
+  --repo mickaelbegon/cocofest \
+  --ref codex/acados-pr-refresh \
+  -f runner_label=self-hosted-linux-128gb \
+  -f cycles=full_horizon \
+  -f full_horizon_max_cycles=100 \
+  -f full_horizon_memory_limit_gib=auto \
+  -f crank_assistance_nm=0.00 \
+  -f terminal_wheel_q_slack=0.002 \
+  -f solver_max_iterations=2000
+```
+
+L’artefact `cycling-full-horizon-*` conserve le seed RHO concaténé, chaque
+préfixe, chaque JSON/solution full-horizon, les logs, les pics RSS et le motif
+d’arrêt.
+
+### 14.4 Écrans d’options
 
 ```bash
 gh workflow run cycling_solver_benchmark_linux.yml \
@@ -2259,7 +2307,7 @@ gh workflow run cycling_solver_benchmark_linux.yml \
   -f cycles=screen
 ```
 
-### 14.4 ACADOS uniquement
+### 14.5 ACADOS uniquement
 
 ```bash
 gh workflow run cycling_solver_benchmark_linux.yml \
@@ -2790,8 +2838,259 @@ violation sécante de `0.377 rad/s`. ACADOS full régularisé devient donc le
 candidat d'endurance, tandis que les variantes reduced restent des ablations.
 
 La campagne 100 RHO ne répète plus tout l'écran ACADOS déjà réfuté. Elle
-conserve cinq cas : les références full/reduced, l'homotopie adaptative
-reduced pour mesurer la robustesse numérique, et la régularisation de poids
-`1` en full/reduced. Les options RTI, Anderson, IRK léger, contact redondant,
-homotopie fixe et poids `0.1` restent disponibles dans les campagnes de
-5–30 RHO et dans leurs artefacts séparés.
+conserve six cas : les références full/reduced, l'homotopie adaptative
+reduced pour mesurer la robustesse numérique, la régularisation de poids `1`
+en full/reduced, puis une ablation full qui refuse tout rollout dont la
+violation brute dépasse `0.2`. Ce dernier seuil rejette en pratique tous les
+rollouts observés : c'est donc un test A/B « rollout activé ou désactivé »,
+pas encore un critère universel. Les options RTI, Anderson, IRK léger, contact
+redondant, homotopie fixe et poids `0.1` restent disponibles dans les
+campagnes de 5–30 RHO et dans leurs artefacts séparés.
+
+### 19.4 Recertification full/reduced sur 100 RHO
+
+Le run Linux
+[`30596787253`](https://github.com/mickaelbegon/cocofest/actions/runs/30596787253)
+est la première comparaison moderne où IPOPT réalise les `100/100` RHO à la
+fois en full et en reduced, avec :
+
+- un cycle par OCP et 30 stimulations par cycle;
+- un couple externe nul, donc aucune assistance masquant l'arrivée de la
+  fatigue;
+- les mêmes 20 états de Ding, la même force active, la même force passive et
+  les mêmes bornes de PW;
+- des graphes SX;
+- une collocation Radau de degré 3;
+- les bornes de cadence imposées aussi aux étages internes;
+- une tolérance de couture de `20 µm` sur la position du centre du pédalier;
+- une borne terminale absolue sur l'angle, sans accumulation d'une erreur
+  relative au cycle précédent.
+
+La différence mécanique est uniquement la suivante. La formulation full
+optimise les six états mécaniques
+
+$$
+x_\mathrm{mec}^{\mathrm{full}}
+=
+\begin{bmatrix}
+q_1&q_2&q_3&\dot q_1&\dot q_2&\dot q_3
+\end{bmatrix}^{\mathsf T},
+$$
+
+alors que la formulation reduced optimise
+
+$$
+x_\mathrm{mec}^{\mathrm{red}}
+=
+\begin{bmatrix}
+\theta&\omega
+\end{bmatrix}^{\mathsf T},
+\qquad
+q=\Phi(\theta),
+\qquad
+\dot q=T(\theta)\,\omega.
+$$
+
+La dynamique mécanique reduced est obtenue par projection tangentielle,
+sans imposer une cadence constante :
+
+$$
+T^{\mathsf T}M(\Phi)T\,\dot\omega
+=
+T^{\mathsf T}
+\left(
+\tau_\mathrm{muscle}
++\tau_\mathrm{ext}
+-h(\Phi,T\omega)
+-M(\Phi)\dot T\,\omega
+\right).
+$$
+
+Les résultats cumulés sont :
+
+| IPOPT/MUMPS, 100 RHO | Full | Reduced | Écart full/reduced |
+|---|---:|---:|---:|
+| RHO convergés et préfixe physique | `100/100` | `100/100` | — |
+| Objectif total | `4490.808678` | `4486.837031` | `+0.08852 %` |
+| Fatigue exécutée | `4347.234072` | `4343.389989` | `+0.08850 %` |
+| AUC de fatigue, quatre muscles | `9.304433` | `9.301200` | `+0.03476 %` |
+| Minimum $A/A_\mathrm{scale}$ | `0.9003621` | `0.9003667` | `-4.66e-6` |
+| Itérations médianes | `58` | `36` | `-37.9 %` |
+| Médiane chaude murale | `4.314 s` | `0.951 s` | reduced `4.54x` plus rapide |
+| Mur-à-mur du cas | `609.5 s` | `248.4 s` | reduced `2.45x` plus rapide |
+
+La compilation C reduced est réalisée une seule fois, puis la même
+bibliothèque est réutilisée pendant les 100 RHO. Le rapport vérifie que les
+bornes mobiles changent 100 fois sans reconstruction du graphe. Le full reste
+interprété parce que sa compilation persistante n'est pas encore disponible
+sur cette transcription; la comparaison de temps mur-à-mur inclut donc ce
+choix d'implémentation, tandis que la comparaison physiologique n'en dépend
+pas.
+
+La fatigue par muscle confirme l'équivalence :
+
+| Muscle | Coût full | Coût reduced | AUC full | AUC reduced | Capacité finale full | Capacité finale reduced |
+|---|---:|---:|---:|---:|---:|---:|
+| Biceps | `3793.3635` | `3789.4340` | `5.480659` | `5.477162` | `0.900362` | `0.900367` |
+| Delt_ant | `204.6198` | `204.7659` | `1.428163` | `1.428637` | `0.984379` | `0.984351` |
+| Delt_post | `86.9963` | `87.0756` | `0.929638` | `0.930080` | `0.991952` | `0.991945` |
+| Triceps | `262.2544` | `262.1145` | `1.465973` | `1.465321` | `0.976045` | `0.975964` |
+
+Les patrons de stimulation ne sont pas nécessairement identiques
+échantillon par échantillon, car le problème admet plusieurs branches actives
+presque équivalentes. Au cycle 10, le RMSE full/reduced du Biceps vaut
+`12.24 µs` et le maximum `61.38 µs`; au cycle 30 ils tombent à `0.028 µs` et
+`0.153 µs`. Le Triceps reste sous `0.31 µs` de RMSE aux deux horizons et les
+deux deltoïdes sont pratiquement confondus. Une nouvelle bifurcation de la
+branche active du Biceps apparaît au cycle 100, avec un RMSE de `9.30 µs`,
+sans produire d'écart significatif de fatigue cumulée. Comparer seulement les
+PW brutes serait donc trop sévère; il faut aussi comparer la phase, le couple,
+le coût et les états de fatigue.
+
+FATROP reduced converge également `100/100` :
+
+| FATROP reduced | Valeur |
+|---|---:|
+| Fatigue exécutée | `4343.534710` |
+| AUC de fatigue | `9.299235` |
+| Minimum $A/A_\mathrm{scale}$ | `0.9003607` |
+| Médiane chaude murale | `1.398 s` |
+| Mur-à-mur du cas | `327.9 s` |
+
+Son écart de fatigue avec IPOPT reduced est d'environ `0.0033 %`. Il valide
+donc indépendamment l'optimum reduced, mais reste environ `1.47x` plus lent
+par RHO chaud. FATROP full demeure bloqué avant le solve par la détection de
+structure de l'interface CasADi/FATROP; ce résultat n'est ni un échec de
+faisabilité ni un argument contre la mécanique full.
+
+MadNLP/MUMPS est plus rapide que le full IPOPT lorsque ses fenêtres
+convergent, mais cette campagne révèle une sensibilité au transfert :
+
+- le full converge `99/100`, avec un premier échec au RHO 81
+  (`maxiter=2000`, résidu primal `2.46e-2`), puis récupère dès le RHO 82;
+- le reduced échoue au RHO 1 avec une seed IPOPT située sur une autre branche,
+  puis converge aux RHO 2 à 100;
+- l'échec isolé suivi d'une récupération prouve qu'il ne s'agit pas d'une
+  impossibilité créée par la fatigue;
+- le préfixe physique strict vaut néanmoins 80 pour le full et 0 pour le
+  reduced : les fenêtres postérieures ne sont jamais agrégées comme une
+  trajectoire exécutable.
+
+Le rapport corrige désormais le numéro du premier échec même lorsque des RHO
+ultérieurs réussissent. La seed commune est immuable à l'intérieur d'un run,
+mais le solve IPOPT qui la produit peut sélectionner des branches non convexes
+différentes entre deux runs. MadNLP effectue donc maintenant, avant le
+chronométrage, un raffinement IPOPT périodique sur sa transcription exacte.
+Ce coût est imputé à `initial_guess_preparation_time_s`; il ne reconstruit pas
+le graphe pendant la boucle. Cette correction doit passer successivement les
+gates 5, 30 et 100 RHO avant que MadNLP soit déclaré robuste.
+
+Le gate 5 RHO
+[`30598124791`](https://github.com/mickaelbegon/cocofest/actions/runs/30598124791)
+valide la première étape :
+
+| MadNLP/MUMPS avec raffinement IPOPT | Full | Reduced |
+|---|---:|---:|
+| Préfixe strict | `5/5` | `5/5` |
+| Objectif | `19.862934` | `19.863857` |
+| Fatigue exécutée | `19.233967` | `19.234884` |
+| Préparation initiale | `56.38 s` | `43.84 s` |
+| Médiane chaude murale | `3.494 s` | `1.110 s` |
+
+Le coût de préparation augmente volontairement, mais il est payé une fois
+avant la séquence et n'entre pas dans la médiane chaude. L'écart de fatigue
+full/reduced vaut seulement `0.0048 %` sur ce gate. Les validations 30 puis
+100 RHO restent nécessaires.
+
+Enfin, ACADOS full avec un poids de cadence `1` résout numériquement
+`96/100` fenêtres dans ce run, mais son préfixe strict s'arrête au RHO 13.
+Les échecs aux RHO 14, 16, 18 et 20 atteignent `MAXITER`; les RHO 21 à 100
+réussissent. Sa médiane chaude vaut `0.395 s` et la violation maximale de
+vitesse sécante n'est plus que `0.0118 rad/s`. La vitesse est donc
+prometteuse, mais la robustesse de transfert n'est pas encore suffisante pour
+une comparaison physiologique sur 100 cycles. Le test A/B de rejet du rollout
+et le raffinement de warm-start sont suivis dans des runs séparés; leurs
+résultats ne doivent pas être mélangés aux nombres certifiés ci-dessus.
+
+Le premier run A/B
+[`30597927290`](https://github.com/mickaelbegon/cocofest/actions/runs/30597927290)
+n'a pas exécuté la garde : le workflow envoyait le nom interne
+`--acados-transfer-rollout-max-bound-violation`, absent du CLI public, au lieu
+de `--shared-transfer-rollout-max-bound-violation`. Les cinq autres cas ont
+produit leurs JSON, puis le contrôle d'intégrité a correctement rejeté
+l'artefact incomplet. Cet échec est purement infrastructurel et ne fournit
+aucune donnée scientifique sur la garde; le nom d'option est corrigé avant la
+relance.
+
+Conclusion : la mécanique reduced est maintenant validée comme approximation
+physiologique de la full sur 100 RHO pour ce régime, avec un écart inférieur
+à `0.09 %` et un gain chaud supérieur à `4.5x` sous IPOPT. Le point
+d'incertitude principal n'est plus la réduction mécanique, mais la robustesse
+des transferts MadNLP et ACADOS sur les branches actives du problème non
+convexe.
+
+### 19.5 Sweep expérimental MadNLP/MUMPS MX en full horizon
+
+Le workflow accepte le mode `cycles=full_horizon` pour estimer la taille
+maximale d'un OCP monolithique sur une classe de machine donnée. Ce mode est
+isolé du benchmark RHO principal. Le RHO IPOPT reduced qui construit la seed
+reste en SX, configuration déjà certifiée et plus rapide; seuls les OCP
+monolithiques MadNLP travaillent en MX, car leur question est la capacité
+mémoire d'un grand graphe plutôt que le meilleur temps par RHO.
+
+La procédure est :
+
+1. résoudre la séquence reduced d'un cycle par RHO jusqu'au plafond demandé;
+2. exporter le préfixe convergé et physiquement valide, même si un RHO
+   ultérieur échoue, et adapter le plafond à sa longueur;
+3. concaténer cette trajectoire en une seed multi-cycle;
+4. tester une grille sparse
+   `1, 2, 3, 5, 10, 15, 20, 25, 30`, puis `35…60` par pas de 5 et
+   `70, 80, …`;
+5. donner deux chances à chaque non-convergence; continuer la grille après un
+   trou de convergence, mais raffiner cycle par cycle après la première limite
+   mémoire;
+6. interrompre le groupe de processus avant épuisement de la mémoire.
+
+Chaque taille repart du préfixe reduced correspondant, relevé exactement vers
+la mécanique full. Le résultat full précédent est sauvegardé comme artefact,
+mais n'initialise pas la taille suivante. Il s'agit donc explicitement d'un
+**homotopie de taille appariée par RHO**, et non d'une continuation de branche
+full-to-full. Cette indépendance évite de confondre capacité mémoire et
+qualité d'une continuation full, au prix de constructions froides répétées.
+
+La limite automatique de RSS vaut `12.5 GiB` sur un runner de `16 GiB` et
+`97.5 GiB` sur une machine de `128 GiB`. Le moniteur additionne le RSS de tout
+le groupe de processus MadNLP/Julia et conserve les logs et checkpoints de
+chaque taille. Un cas n'est déclaré réussi que si :
+
+$$
+\text{statut solveur valide}
+\;\land\;
+\text{faisabilité primale}
+\;\land\;
+\text{audit physique}
+\;\land\;
+N_\mathrm{cycles\ certifiés}=N_\mathrm{cycles\ demandés}.
+$$
+
+Le comptage single-shot a été corrigé en conséquence : un OCP de 30 cycles
+réussi exporte et certifie 30 cycles, et non une seule fenêtre de solveur.
+Pour chaque taille, le pont IPOPT/MX optionnel part du préfixe RHO relevé sur
+la mécanique full avant MadNLP/MUMPS. Chaque tentative est limitée à 30
+minutes et une erreur de CLI, d'import, de JSON ou le warning
+`linear_solver ... unknown type mumps` rend le job rouge; elle n'est jamais
+interprétée comme une limite scientifique. Ce mode mesure donc le plus grand
+horizon testé qui converge, avec les éventuels trous explicitement listés,
+mais pas encore un gain de performance exploitable en temps réel.
+
+Commande GitHub pour un runner standard :
+
+```bash
+gh workflow run cycling_solver_benchmark_linux.yml \
+  --repo mickaelbegon/cocofest \
+  --ref codex/acados-pr-refresh \
+  -f cycles=full_horizon \
+  -f full_horizon_max_cycles=100 \
+  -f full_horizon_memory_limit_gib=auto
+```

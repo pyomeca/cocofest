@@ -10,9 +10,19 @@ on:
         default: ubuntu-24.04
         type: string
       cycles:
-        description: Number of RHO solves, "screen" for options, or "acados" for ACADOS-only smoke tests
+        description: Number of RHO solves, "screen", "acados", or "full_horizon"
         required: true
         default: "100"
+        type: string
+      full_horizon_max_cycles:
+        description: Maximum cycle count explored by the RHO-seeded full-horizon size homotopy
+        required: true
+        default: "100"
+        type: string
+      full_horizon_memory_limit_gib:
+        description: Process-tree peak RSS cap in GiB, or "auto" (12.5 on 16 GiB; 97.5 on 128 GiB)
+        required: true
+        default: "auto"
         type: string
       cycles_per_window:
         description: Simultaneous cycles per OCP (1 for backend benchmark; 2 for memory/robustness study)
@@ -178,7 +188,7 @@ jobs:
       - name: Validate the seed on the assisted target
         env:
           PYTHONPATH: ${{ github.workspace }}
-          BENCHMARK_CYCLES_PER_WINDOW: ${{ inputs.cycles_per_window }}
+          BENCHMARK_CYCLES_PER_WINDOW: ${{ inputs.cycles == 'full_horizon' && '1' || inputs.cycles_per_window }}
         run: |
           mkdir -p benchmark-seed-result
           if [[ "$BENCHMARK_CYCLES_PER_WINDOW" != "1" && "$BENCHMARK_CYCLES_PER_WINDOW" != "2" ]]; then
@@ -248,10 +258,10 @@ jobs:
 
   prepare-madnlp-stack:
     name: Prepare the cached MadNLP numerical stack
-    # The long benchmark MadNLP runner restores/builds its own stack so IPOPT
-    # never waits for MadNLP preparation. This pre-warm job is only
-    # retained for the focused solver-option screen.
-    if: inputs.cycles == 'screen'
+    # The standard long benchmark MadNLP runner restores/builds its own stack
+    # so IPOPT never waits for it. The focused option screen and isolated
+    # full-horizon mode share this explicit pre-warm job.
+    if: ${{ inputs.cycles == 'screen' || inputs.cycles == 'full_horizon' }}
     runs-on: ${{ inputs.runner_label }}
     timeout-minutes: 90
     env:
@@ -360,7 +370,7 @@ jobs:
 
   prepare-acados-stack:
     name: Prepare the cached ACADOS numerical stack
-    if: ${{ inputs.cycles != 'screen' && inputs.cycles_per_window == '1' }}
+    if: ${{ inputs.cycles != 'screen' && inputs.cycles != 'full_horizon' && inputs.cycles_per_window == '1' }}
     needs: prepare-seed
     runs-on: ${{ inputs.runner_label }}
     timeout-minutes: 120
@@ -473,7 +483,7 @@ jobs:
 
   acados-smoke:
     name: ACADOS — sequential full/reduced and option screen
-    if: ${{ inputs.cycles != 'screen' && inputs.cycles_per_window == '1' }}
+    if: ${{ inputs.cycles != 'screen' && inputs.cycles != 'full_horizon' && inputs.cycles_per_window == '1' }}
     needs: [prepare-seed, prepare-acados-stack]
     runs-on: ${{ inputs.runner_label }}
     timeout-minutes: 240
@@ -770,7 +780,7 @@ jobs:
               # so 0.2 deliberately rejects every observed rollout rather
               # than claiming to be a dimensionless universal filter.
               solver_options+=(
-                --acados-transfer-rollout-max-bound-violation 0.2
+                --shared-transfer-rollout-max-bound-violation 0.2
               )
             fi
             if [[ "$variant" == "sqp-irk-two-stage-adaptive" ]]; then
@@ -1356,7 +1366,7 @@ jobs:
 
   benchmark:
     name: ${{ matrix.case_slug }} — sequential full/reduced
-    if: ${{ inputs.cycles != 'screen' && inputs.cycles != 'acados' }}
+    if: ${{ inputs.cycles != 'screen' && inputs.cycles != 'acados' && inputs.cycles != 'full_horizon' }}
     needs: prepare-seed
     runs-on: ${{ inputs.runner_label }}
     timeout-minutes: ${{ matrix.timeout_minutes }}
@@ -1885,6 +1895,131 @@ jobs:
               ' "$result"
             fi
           done
+
+  full-horizon:
+    name: MadNLP/MUMPS — RHO-reduced seeded full-horizon sweep (MX)
+    if: inputs.cycles == 'full_horizon'
+    needs: [prepare-seed, prepare-madnlp-stack]
+    runs-on: ${{ inputs.runner_label }}
+    timeout-minutes: 720
+    env:
+      CASADI_CXX_ABI: "1"
+      PYTHONPATH: ${{ github.workspace }}
+      COCOFEST_BENCHMARK_COMMIT: ${{ github.sha }}
+      BIOPTIM_BENCHMARK_COMMIT: ${{ env.BIOPTIM_PRODUCTION_COMMIT }}
+      BIOPTIM_INTEGRATION_BRANCH: codex/cocofest-acados-v055-exploration
+    defaults:
+      run:
+        shell: bash -el {0}
+
+    steps:
+      - name: Checkout Cocofest
+        uses: actions/checkout@v6
+
+      - name: Checkout the pinned Bioptim integration
+        uses: actions/checkout@v6
+        with:
+          repository: ${{ env.BIOPTIM_REPOSITORY }}
+          ref: ${{ env.BIOPTIM_PRODUCTION_COMMIT }}
+          path: .benchmark-deps/bioptim
+
+      - name: Set up the Linux benchmark environment
+        uses: conda-incubator/setup-miniconda@v4
+        with:
+          miniforge-version: latest
+          activate-environment: ${{ env.CONDA_ENV_NAME }}
+          conda-remove-defaults: true
+
+      - name: Restore the prepared MadNLP numerical stack
+        uses: actions/cache/restore@v6
+        with:
+          path: ${{ env.CONDA }}/envs/${{ env.CONDA_ENV_NAME }}
+          key: numerical-stack-${{ env.NUMERICAL_STACK_CACHE_VERSION }}-${{ inputs.runner_label }}-${{ runner.arch }}-madnlp-mumps-${{ env.CASADI_MADNLP_COMMIT }}-${{ env.LIBMAD_COMMIT }}-${{ hashFiles('.github/cycling-benchmark-linux-environment.yml', '.github/scripts/install_biorbd_casadi_linux.sh', '.github/scripts/install_casadi_madnlp_linux.sh') }}
+          fail-on-cache-miss: true
+
+      - name: Restore the prepared MadNLP MUMPS runtime
+        uses: actions/cache/restore@v6
+        with:
+          path: .cache/madnlp-mumps
+          key: libmad-mumps-${{ inputs.runner_label }}-${{ runner.arch }}-julia-${{ env.JULIA_VERSION }}-${{ env.LIBMAD_COMMIT }}-${{ env.JULIAC_COMMIT }}
+          fail-on-cache-miss: true
+
+      - name: Configure the solver runtime
+        run: |
+          test -f .cache/madnlp-mumps/lib/libMad.so
+          echo "LD_LIBRARY_PATH=$GITHUB_WORKSPACE/.cache/madnlp-mumps/lib:$GITHUB_WORKSPACE/.cache/madnlp-mumps/share/julia/lib:${LD_LIBRARY_PATH:-}" \
+            >> "$GITHUB_ENV"
+          echo "LIBMAD_BENCHMARK_COMMIT=$LIBMAD_COMMIT" >> "$GITHUB_ENV"
+          available_cores="$(env -u OMP_NUM_THREADS -u OMP_THREAD_LIMIT nproc)"
+          if [[ "$available_cores" -lt 1 ]]; then
+            echo "No CPU was reported by nproc." >&2
+            exit 1
+          fi
+          echo "BENCHMARK_THREADS=$available_cores" >> "$GITHUB_ENV"
+          lscpu
+          grep -E 'MemTotal|MemAvailable' /proc/meminfo
+
+      - name: Install the pinned Bioptim integration
+        run: python -m pip install --no-deps -e .benchmark-deps/bioptim
+
+      - name: Download the validated one-cycle seed
+        uses: actions/download-artifact@v8
+        with:
+          name: cycling-assisted-common-seed-${{ github.run_id }}
+          path: benchmark-seed
+
+      - name: Validate the full-horizon runner and solver contract
+        run: |
+          python -m pytest -q tests/test_full_horizon_benchmark.py
+          python - <<'PY'
+          import casadi as cas
+          import bioptim
+
+          assert cas.has_nlpsol("madnlp")
+          assert hasattr(bioptim.Solver, "MADNLP")
+          print(f"CasADi {cas.__version__}; Bioptim {bioptim.__version__}")
+          PY
+          test -s benchmark-seed/common-reduced.npz
+          test -s benchmark-seed/reduced-cycling-fourier12.npz
+
+      - name: Run the RSS-bounded full-horizon sweep
+        env:
+          FULL_HORIZON_MAX_CYCLES: ${{ inputs.full_horizon_max_cycles }}
+          FULL_HORIZON_MEMORY_LIMIT_GIB: ${{ inputs.full_horizon_memory_limit_gib }}
+        run: |
+          if ! [[ "$FULL_HORIZON_MAX_CYCLES" =~ ^[1-9][0-9]*$ ]]; then
+            echo "full_horizon_max_cycles must be a strictly positive integer." >&2
+            exit 1
+          fi
+          python .github/scripts/run_full_horizon_benchmark.py \
+            --workspace "$GITHUB_WORKSPACE" \
+            --seed-dir "$GITHUB_WORKSPACE/benchmark-seed" \
+            --output-dir "$GITHUB_WORKSPACE/full-horizon-results" \
+            --max-cycles "$FULL_HORIZON_MAX_CYCLES" \
+            --memory-limit-gib "$FULL_HORIZON_MEMORY_LIMIT_GIB" \
+            --n-threads "$BENCHMARK_THREADS" \
+            --max-iterations "${{ inputs.solver_max_iterations }}" \
+            --crank-assistance "${{ inputs.crank_assistance_nm }}" \
+            --terminal-wheel-q-slack "${{ inputs.terminal_wheel_q_slack }}"
+
+      - name: Add the full-horizon comparison to the job summary
+        if: always()
+        run: |
+          if [[ -f full-horizon-results/full-horizon-report.md ]]; then
+            cat full-horizon-results/full-horizon-report.md >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "No full-horizon report was produced." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Upload every full-horizon checkpoint
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: cycling-full-horizon-${{ github.run_id }}
+          path: full-horizon-results/
+          if-no-files-found: warn
+          retention-days: 30
+
   screen-report:
     name: Aggregate solver option screen
     if: ${{ always() && inputs.cycles == 'screen' }}
@@ -1938,7 +2073,7 @@ jobs:
 
   report:
     name: Aggregate Kevin benchmark
-    if: ${{ always() && inputs.cycles != 'screen' && inputs.cycles != 'acados' }}
+    if: ${{ always() && inputs.cycles != 'screen' && inputs.cycles != 'acados' && inputs.cycles != 'full_horizon' }}
     needs: [benchmark, acados-smoke]
     runs-on: ubuntu-24.04
     permissions:

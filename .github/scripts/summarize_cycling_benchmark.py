@@ -74,6 +74,12 @@ def _entry_base_case(entry: dict) -> str:
     return _entry_case(entry).replace("-compiled/", "/")
 
 
+def _solver_comparison_family(entry: dict) -> str:
+    """Pair full/reduced physics even when only one evaluator is C-compiled."""
+
+    return _solver_variant(entry).replace("-compiled", "")
+
+
 def _solver_variant(entry: dict) -> str:
     solver = entry["result"].get("solver", "unknown").lower()
     configuration = entry.get("configuration", {})
@@ -490,12 +496,14 @@ def mechanical_stimulation_comparisons(entries: list[dict]) -> list[dict]:
     """Compare full and reduced mechanics for each solver at cycles 10 and 30."""
 
     rows = []
-    for solver_variant in dict.fromkeys(_solver_variant(entry) for entry in entries):
+    for solver_family in dict.fromkeys(
+        _solver_comparison_family(entry) for entry in entries
+    ):
         full_entry = next(
             (
                 entry
                 for entry in entries
-                if _solver_variant(entry) == solver_variant
+                if _solver_comparison_family(entry) == solver_family
                 and _mechanical_formulation(entry) == "full"
             ),
             None,
@@ -504,7 +512,7 @@ def mechanical_stimulation_comparisons(entries: list[dict]) -> list[dict]:
             (
                 entry
                 for entry in entries
-                if _solver_variant(entry) == solver_variant
+                if _solver_comparison_family(entry) == solver_family
                 and _mechanical_formulation(entry) == "reduced"
             ),
             None,
@@ -785,7 +793,9 @@ def render_markdown(
         lines.append(
             "| {case} | {graph} | {solver_tolerance} | {physical_threshold} | {success} | {successful}/{attempted} | {validated}/{requested} | {first_failed_rho} | {e2e} | {prep} | {profile} | {median} | {effective_median} | {effective_p90} | {stop} |".format(
                 case=_entry_label(entry),
-                graph="SX" if entry["configuration"].get("use_sx") is True else "NON-SX",
+                graph="SX"
+                if entry["configuration"].get("use_sx") is True
+                else "NON-SX",
                 solver_tolerance=_fmt_scientific(
                     entry["configuration"].get("nlp_tolerance")
                 ),

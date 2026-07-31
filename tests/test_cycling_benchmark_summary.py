@@ -515,9 +515,12 @@ def test_mechanical_comparison_keeps_madnlp_backends_separate():
 
 
 def test_mechanical_pattern_comparison_uses_full_as_reference():
-    def entry(mechanics, values):
+    def entry(mechanics, values, *, compiled=False):
         return {
-            "configuration": {"mechanical_formulation": mechanics},
+            "configuration": {
+                "mechanical_formulation": mechanics,
+                "ipopt_c_compile": compiled,
+            },
             "result": {
                 "solver": "ipopt",
                 "stimulation_patterns": {
@@ -532,10 +535,13 @@ def test_mechanical_pattern_comparison_uses_full_as_reference():
         }
 
     comparisons = summary.mechanical_stimulation_comparisons(
-        [entry("full", [100e-6, 200e-6]), entry("reduced", [101e-6, 201e-6])]
+        [
+            entry("full", [100e-6, 200e-6]),
+            entry("reduced", [101e-6, 201e-6], compiled=True),
+        ]
     )
 
     assert len(comparisons) == 1
     assert comparisons[0]["reference_case"] == "ipopt/full"
-    assert comparisons[0]["case"] == "ipopt/reduced"
+    assert comparisons[0]["case"] == "ipopt-compiled/reduced"
     assert math.isclose(comparisons[0]["root_mean_square_error_us"], 1.0)

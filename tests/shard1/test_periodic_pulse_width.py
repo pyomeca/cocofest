@@ -51,7 +51,9 @@ def _muscle_model():
     )
 
 
-def test_full_contact_stabilization_constrains_every_shooting_node(monkeypatch):
+def test_full_contact_stabilization_constrains_every_shooting_node(
+    monkeypatch,
+):
     captured = []
 
     class FakeConstraintList:
@@ -101,7 +103,9 @@ def test_full_contact_terminal_stabilization_closes_only_rho_seam(monkeypatch):
     assert captured[3][1]["second_marker"] == "global_wheel_center"
 
 
-def test_full_contact_terminal_position_avoids_velocity_redundancy(monkeypatch):
+def test_full_contact_terminal_position_avoids_velocity_redundancy(
+    monkeypatch,
+):
     captured = []
 
     class FakeConstraintList:
@@ -125,7 +129,9 @@ def test_full_contact_terminal_position_avoids_velocity_redundancy(monkeypatch):
     assert captured[-1][1]["first_marker"] == "wheel_center"
 
 
-def test_full_contact_position_stabilization_avoids_velocity_redundancy(monkeypatch):
+def test_full_contact_position_stabilization_avoids_velocity_redundancy(
+    monkeypatch,
+):
     captured = []
 
     class FakeConstraintList:
@@ -148,7 +154,9 @@ def test_full_contact_position_stabilization_avoids_velocity_redundancy(monkeypa
     assert captured[0][1]["max_bound"] == 2e-5
 
 
-def test_full_cadence_constraint_covers_collocation_stages_and_terminal(monkeypatch):
+def test_full_cadence_constraint_covers_collocation_stages_and_terminal(
+    monkeypatch,
+):
     captured = []
 
     class FakeConstraintList:
@@ -191,7 +199,14 @@ def test_full_transfer_contact_projection_preserves_bound_crank_states():
     q = np.array([[0.0, 1.0], [0.0, 1.0], [4.0, 5.0]])
     qdot = np.array([[0.0, 1.0], [0.0, 1.0], [-6.0, -7.0]])
     nmpc = SimpleNamespace(
-        nlp=[SimpleNamespace(x_init={"q": SimpleNamespace(init=q), "qdot": SimpleNamespace(init=qdot)})],
+        nlp=[
+            SimpleNamespace(
+                x_init={
+                    "q": SimpleNamespace(init=q),
+                    "qdot": SimpleNamespace(init=qdot),
+                }
+            )
+        ],
         wheel_state_index=2,
         _cocofest_mechanical_equivalence_dynamics=SimpleNamespace(
             kinematics=Kinematics()
@@ -211,17 +226,13 @@ def test_full_transfer_contact_projection_preserves_bound_crank_states():
     np.testing.assert_allclose(nmpc.nlp[0].x_init["q"].init[:, 1], [1.0, 1.0, 5.0])
     np.testing.assert_allclose(nmpc.nlp[0].x_init["qdot"].init[:, 1], [1.0, 1.0, -7.0])
 
-    nmpc.nlp[0].x_init["q"].init[:, :] = np.array(
-        [[0.0, 1.0], [0.0, 1.0], [4.0, 5.0]]
-    )
+    nmpc.nlp[0].x_init["q"].init[:, :] = np.array([[0.0, 1.0], [0.0, 1.0], [4.0, 5.0]])
     nmpc.nlp[0].x_init["qdot"].init[:, :] = np.array(
         [[0.0, 1.0], [0.0, 1.0], [-6.0, -7.0]]
     )
     summary = mhe_example.project_full_first_node_initial_guess_to_contact(nmpc)
     assert summary["mode"] == "position"
-    np.testing.assert_allclose(
-        nmpc.nlp[0].x_init["qdot"].init[:, 0], [0.0, 0.0, -6.0]
-    )
+    np.testing.assert_allclose(nmpc.nlp[0].x_init["qdot"].init[:, 0], [0.0, 0.0, -6.0])
 
 
 def test_updating_full_model_preserves_every_force_relationship(monkeypatch):
@@ -272,7 +283,10 @@ def test_full_qdot_envelope_contains_every_lifted_reduced_velocity():
             )
 
     reduced = SimpleNamespace(kinematics=Kinematics())
-    lower, upper = mhe_example.full_coordinate_qdot_bounds_from_reduced_profile(
+    (
+        lower,
+        upper,
+    ) = mhe_example.full_coordinate_qdot_bounds_from_reduced_profile(
         reduced,
         physical_crank_velocity_target=-2.0 * np.pi,
         physical_crank_velocity_margin=3.0,
@@ -603,9 +617,7 @@ def test_phase_aligned_active_set_guard_only_releases_transition_neighborhoods()
     nmpc = SimpleNamespace(
         nlp=[
             SimpleNamespace(
-                u_init={
-                    "last_pulse_width_Biceps": SimpleNamespace(init=center.copy())
-                },
+                u_init={"last_pulse_width_Biceps": SimpleNamespace(init=center.copy())},
                 u_bounds={"last_pulse_width_Biceps": bounds},
             )
         ]
@@ -618,12 +630,17 @@ def test_phase_aligned_active_set_guard_only_releases_transition_neighborhoods()
         margin=1,
         activation_threshold=0.01,
     )
-    lower, upper = nmpc._cocofest_nodewise_control_bounds[
-        "last_pulse_width_Biceps"
-    ]
+    lower, upper = nmpc._cocofest_nodewise_control_bounds["last_pulse_width_Biceps"]
 
     assert summary["last_pulse_width_Biceps"]["transition_nodes"] == [2, 5]
-    assert summary["last_pulse_width_Biceps"]["released_nodes"] == [1, 2, 3, 4, 5, 6]
+    assert summary["last_pulse_width_Biceps"]["released_nodes"] == [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+    ]
     np.testing.assert_allclose(lower[:, [0, 7]], [[0.1, 0.1]])
     np.testing.assert_allclose(upper[:, [0, 7]], [[0.11, 0.11]])
     np.testing.assert_allclose(upper[:, [1, 5, 6]], [[0.3, 0.3, 0.3]])
@@ -640,9 +657,7 @@ def test_phase_aligned_active_set_guard_does_not_widen_uniform_recruitment():
     nmpc = SimpleNamespace(
         nlp=[
             SimpleNamespace(
-                u_init={
-                    "last_pulse_width_Biceps": SimpleNamespace(init=center.copy())
-                },
+                u_init={"last_pulse_width_Biceps": SimpleNamespace(init=center.copy())},
                 u_bounds={"last_pulse_width_Biceps": bounds},
             )
         ]
@@ -652,9 +667,7 @@ def test_phase_aligned_active_set_guard_does_not_widen_uniform_recruitment():
     summary = periodic_example.apply_phase_aligned_pulse_width_transition_guard(
         nmpc, radius=0.2
     )
-    lower, upper = nmpc._cocofest_nodewise_control_bounds[
-        "last_pulse_width_Biceps"
-    ]
+    lower, upper = nmpc._cocofest_nodewise_control_bounds["last_pulse_width_Biceps"]
 
     assert summary["last_pulse_width_Biceps"]["released_count"] == 0
     assert summary["last_pulse_width_Biceps"]["reason"] == "no_active_set_transition"
@@ -671,9 +684,7 @@ def test_phase_aligned_active_set_guard_wraps_circular_margin():
     nmpc = SimpleNamespace(
         nlp=[
             SimpleNamespace(
-                u_init={
-                    "last_pulse_width_Biceps": SimpleNamespace(init=center.copy())
-                },
+                u_init={"last_pulse_width_Biceps": SimpleNamespace(init=center.copy())},
                 u_bounds={"last_pulse_width_Biceps": bounds},
             )
         ]
@@ -689,9 +700,7 @@ def test_phase_aligned_active_set_guard_wraps_circular_margin():
 
     assert summary["transition_nodes"] == [0, 2]
     assert summary["released_nodes"] == [0, 1, 2, 3, 7]
-    lower, upper = nmpc._cocofest_nodewise_control_bounds[
-        "last_pulse_width_Biceps"
-    ]
+    lower, upper = nmpc._cocofest_nodewise_control_bounds["last_pulse_width_Biceps"]
     np.testing.assert_allclose(lower[:, [4, 5, 6]], 0.1)
     np.testing.assert_allclose(upper[:, [4, 5, 6]], 0.11)
     np.testing.assert_allclose(upper[:, 7], 0.3)
@@ -816,7 +825,12 @@ def test_terminal_wheel_bound_slacks_are_parsed_as_a_decreasing_sequence():
         ]
     )
 
-    assert args.acados_terminal_wheel_q_homotopy_slacks == (0.2, 0.1, 0.05, 0.02)
+    assert args.acados_terminal_wheel_q_homotopy_slacks == (
+        0.2,
+        0.1,
+        0.05,
+        0.02,
+    )
     assert args.acados_terminal_wheel_q_homotopy_each_window is True
 
 
@@ -1086,7 +1100,9 @@ def test_standard_warmup_cache_metadata_rejects_a_resistance_seed(tmp_path):
         )
 
 
-def test_common_initial_solution_metadata_rejects_an_incompatible_horizon(tmp_path):
+def test_common_initial_solution_metadata_rejects_an_incompatible_horizon(
+    tmp_path,
+):
     args = SimpleNamespace(
         model_formulation="periodic_node",
         mechanical_formulation="reduced",
@@ -1117,7 +1133,9 @@ def test_common_initial_solution_metadata_rejects_an_incompatible_horizon(tmp_pa
         )
 
 
-def test_common_initial_solution_metadata_allows_a_transcription_change(tmp_path):
+def test_common_initial_solution_metadata_allows_a_transcription_change(
+    tmp_path,
+):
     args = SimpleNamespace(
         model_formulation="periodic_node",
         mechanical_formulation="full",
@@ -1148,7 +1166,9 @@ def test_common_initial_solution_metadata_allows_a_transcription_change(tmp_path
     )
 
 
-def test_common_initial_solution_metadata_allows_a_stricter_start_seed(tmp_path):
+def test_common_initial_solution_metadata_allows_a_stricter_start_seed(
+    tmp_path,
+):
     args = SimpleNamespace(
         model_formulation="periodic_node",
         mechanical_formulation="reduced",
@@ -1178,7 +1198,9 @@ def test_common_initial_solution_metadata_allows_a_stricter_start_seed(tmp_path)
     )
 
 
-def test_common_initial_solution_metadata_rejects_a_looser_start_seed(tmp_path):
+def test_common_initial_solution_metadata_rejects_a_looser_start_seed(
+    tmp_path,
+):
     args = SimpleNamespace(
         model_formulation="periodic_node",
         mechanical_formulation="reduced",
@@ -1278,6 +1300,105 @@ def test_common_initial_solution_metadata_rejects_a_different_warmup_cycle(
         )
 
 
+def test_receding_horizon_solution_is_exported_as_one_multi_cycle_seed(
+    tmp_path,
+):
+    args = periodic_example.build_argument_parser().parse_args([])
+    args.single_shot = False
+    args.cycles_per_window = 1
+    args.n_windows = 2
+    args.terminal_wheel_q_reference_mode = "absolute_initial"
+    output_path = tmp_path / "two_cycle_rho_seed.npz"
+    summary = {
+        "success": True,
+        "covered_cycles": 2,
+        "state_traces": {
+            "theta": np.array([[0.0, -2.0 * np.pi, -4.0 * np.pi]]),
+            "omega": np.array([[-2.0 * np.pi] * 3]),
+        },
+        "control_traces": {"Biceps": np.array([[150e-6, 160e-6]])},
+        "state_boundary_jumps": {
+            "available": True,
+            "boundary_count": 1,
+            "by_state": {
+                "theta": {"maximum_absolute_jump": 1e-10},
+                "omega": {"maximum_absolute_jump": 2e-10},
+            },
+        },
+    }
+
+    periodic_example._save_receding_horizon_solution(output_path, summary, args)
+    seed = periodic_example._load_warmup_cache(output_path)
+
+    assert seed.metadata["cycles_per_window"] == 2
+    assert seed.metadata["producer_mode"] == "receding_horizon_concatenation"
+    assert seed.metadata["producer_cycles_per_window"] == 1
+    assert seed.metadata["producer_requested_cycles"] == 2
+    assert (
+        seed.metadata["state_boundary_maximum_absolute_jump"]
+        == pytest.approx(2e-10)
+    )
+    np.testing.assert_allclose(
+        seed.decision_states()["theta"],
+        summary["state_traces"]["theta"],
+    )
+
+
+def test_receding_horizon_solution_rejects_an_incomplete_physical_prefix(
+    tmp_path,
+):
+    args = periodic_example.build_argument_parser().parse_args([])
+    args.single_shot = False
+    args.cycles_per_window = 1
+    args.n_windows = 100
+    summary = {
+        "success": False,
+        "covered_cycles": 99,
+        "state_traces": {"theta": np.zeros((1, 2))},
+        "control_traces": {"Biceps": np.zeros((1, 1))},
+    }
+
+    with pytest.raises(RuntimeError, match="99/100"):
+        periodic_example._save_receding_horizon_solution(
+            tmp_path / "invalid.npz", summary, args
+        )
+
+
+def test_receding_horizon_solution_can_export_an_explicit_partial_prefix(
+    tmp_path,
+):
+    args = periodic_example.build_argument_parser().parse_args([])
+    args.single_shot = False
+    args.cycles_per_window = 1
+    args.n_windows = 3
+    args.allow_partial_receding_horizon_solution_output = True
+    args.terminal_wheel_q_reference_mode = "absolute_initial"
+    output_path = tmp_path / "two_of_three_cycle_rho_seed.npz"
+    summary = {
+        "success": False,
+        "covered_cycles": 2,
+        "state_traces": {
+            "theta": np.array([[0.0, -2.0 * np.pi, -4.0 * np.pi]]),
+            "omega": np.array([[-2.0 * np.pi] * 3]),
+        },
+        "control_traces": {"Biceps": np.array([[150e-6, 160e-6]])},
+        "state_boundary_jumps": {
+            "available": True,
+            "boundary_count": 1,
+            "by_state": {
+                "theta": {"maximum_absolute_jump": 0.0},
+                "omega": {"maximum_absolute_jump": 0.0},
+            },
+        },
+    }
+
+    periodic_example._save_receding_horizon_solution(output_path, summary, args)
+    seed = periodic_example._load_warmup_cache(output_path)
+
+    assert seed.metadata["cycles_per_window"] == 2
+    assert seed.metadata["producer_requested_cycles"] == 3
+
+
 def test_periodic_node_projection_uses_all_five_ding_states():
     keys = {
         "Cn_Biceps",
@@ -1333,7 +1454,9 @@ def test_phase_one_maps_reduced_mechanics_without_classifying_them_as_fes():
     np.testing.assert_allclose(scales[0], 2.0 * np.pi)
 
 
-def test_legacy_warmup_requires_an_explicit_compatible_torque_assertion(tmp_path):
+def test_legacy_warmup_requires_an_explicit_compatible_torque_assertion(
+    tmp_path,
+):
     args = periodic_example.build_argument_parser().parse_args([])
     legacy_path = tmp_path / "legacy_warmup.npz"
     solution = periodic_example._WarmupSolutionAdapter(
@@ -1389,7 +1512,10 @@ def test_legacy_warmup_can_be_truncated_to_a_shorter_integer_cycle_horizon():
         declared_signed_torque_nm=-0.2,
     )
 
-    assert solution.decision_controls()["last_pulse_width_Biceps"].shape == (1, 30)
+    assert solution.decision_controls()["last_pulse_width_Biceps"].shape == (
+        1,
+        30,
+    )
     assert solution.decision_states()["q"].shape == (1, 121)
     assert solution.metadata["legacy_source_control_nodes"] == 60
     assert solution.metadata["legacy_truncated"] is True
@@ -1514,7 +1640,12 @@ def test_strict_fes_continuity_uses_a_distinct_periodic_ipopt_cache(
 def test_target_integrator_uses_a_distinct_periodic_ipopt_cache(tmp_path, monkeypatch):
     parser = periodic_example.build_argument_parser()
     rk4_args = parser.parse_args(
-        ["--periodic-ipopt-refinement-ode-solver", "target", "--ode-solver", "rk4"]
+        [
+            "--periodic-ipopt-refinement-ode-solver",
+            "target",
+            "--ode-solver",
+            "rk4",
+        ]
     )
     collocation_args = parser.parse_args(
         [
@@ -1639,9 +1770,7 @@ def test_reduced_common_seed_is_lifted_exactly_for_full_mechanics():
         ],
     )
 
-    adapted = periodic_example._adapt_warmup_solution_to_periodic_nodes(
-        target, warmup
-    )
+    adapted = periodic_example._adapt_warmup_solution_to_periodic_nodes(target, warmup)
 
     np.testing.assert_allclose(
         adapted.decision_states()["q"],
@@ -1702,9 +1831,9 @@ def test_mechanical_equivalence_audit_rejects_off_manifold_full_motion():
     assert summary["mechanical_equivalence_audit"]["available"]
     assert not summary["mechanical_equivalence_audit"]["passes_tolerance"]
     assert not summary["physical_success"]
-    assert "mechanical_trajectory_off_reduced_manifold" in summary["diagnostics"][
-        "issues"
-    ]
+    assert (
+        "mechanical_trajectory_off_reduced_manifold" in summary["diagnostics"]["issues"]
+    )
     assert summary["physical_crank_angle_trace"].shape == theta.shape
     assert summary["physical_crank_velocity_trace"].shape == omega.shape
 
@@ -1790,7 +1919,11 @@ def test_control_homotopy_stops_on_failure_and_restores_bounds(monkeypatch):
         stage_iterations=25,
     )
 
-    assert [summary["accepted"] for summary in summaries] == [True, True, False]
+    assert [summary["accepted"] for summary in summaries] == [
+        True,
+        True,
+        False,
+    ]
     assert applied_statuses == [2, 0]
     assert stage_bounds[0] == {}
     np.testing.assert_allclose(
@@ -2321,7 +2454,9 @@ def test_ding_force_compensation_supports_periodic_node_calcium_forcing():
     np.testing.assert_allclose(controls, 0.4, atol=1e-6)
 
 
-def test_terminal_wheel_bound_continuation_tightens_accepted_stages(monkeypatch):
+def test_terminal_wheel_bound_continuation_tightens_accepted_stages(
+    monkeypatch,
+):
     class FakeSolver:
         def set_convergence_tolerance(self, value):
             self.tolerance = value
@@ -2345,10 +2480,18 @@ def test_terminal_wheel_bound_continuation_tightens_accepted_stages(monkeypatch)
                 x_bounds={
                     "q": SimpleNamespace(
                         min=np.array(
-                            [[0.0, 0.0, 0.0], [0.0, 0.0, 0.0], [0.0, 0.0, -1.2]]
+                            [
+                                [0.0, 0.0, 0.0],
+                                [0.0, 0.0, 0.0],
+                                [0.0, 0.0, -1.2],
+                            ]
                         ),
                         max=np.array(
-                            [[0.0, 0.0, 0.0], [0.0, 0.0, 0.0], [0.0, 0.0, -0.8]]
+                            [
+                                [0.0, 0.0, 0.0],
+                                [0.0, 0.0, 0.0],
+                                [0.0, 0.0, -0.8],
+                            ]
                         ),
                     )
                 }
@@ -2724,7 +2867,9 @@ def test_stimulation_snapshots_use_one_based_cycles_and_real_crank_phase():
         "covered_cycles": cycle_count,
         "exported_cycles": cycle_count,
         "wheel_angle_trace": np.linspace(
-            0.0, -2.0 * np.pi * cycle_count, cycle_count * shooting_per_cycle + 1
+            0.0,
+            -2.0 * np.pi * cycle_count,
+            cycle_count * shooting_per_cycle + 1,
         ),
         "physical_crank_angle_trace": np.linspace(
             0.2,
@@ -2813,9 +2958,7 @@ def test_isolated_checkpoint_preserves_terminal_fatigue_after_prefix_failure():
         def decision_controls(self, to_merge):
             assert to_merge == SolutionMerge.NODES
             return {
-                "last_pulse_width_Biceps": np.asarray(
-                    [self._pulse_width], dtype=float
-                )
+                "last_pulse_width_Biceps": np.asarray([self._pulse_width], dtype=float)
             }
 
     result = _benchmark_result([0, 1, 0], solver_success=False, success=False)
@@ -2842,17 +2985,13 @@ def test_isolated_checkpoint_preserves_terminal_fatigue_after_prefix_failure():
     assert checkpoint["objective"] == 3.0
     assert checkpoint["primal_feasible"] is True
     assert checkpoint["capacity_states"]["A_Biceps"]["terminal_ratio"] == 0.96
-    np.testing.assert_allclose(
-        checkpoint["pulse_width_us"]["Biceps"], [240.0, 250.0]
-    )
+    np.testing.assert_allclose(checkpoint["pulse_width_us"]["Biceps"], [240.0, 250.0])
 
 
 def test_pulse_width_cycle_variation_reports_aligned_transition_percentiles():
     result = _benchmark_result([0, 0, 0], solver_success=True, success=True)
 
-    variation = comparison_example.pulse_width_cycle_variation(
-        result, cycle_count=3
-    )
+    variation = comparison_example.pulse_width_cycle_variation(result, cycle_count=3)
 
     assert variation["available"] is True
     assert variation["transition_count"] == 2
@@ -3002,10 +3141,8 @@ def test_endurance_metrics_report_fatigue_and_control_saturation():
     executed_objective = comparison_example._executed_fatigue_objective(
         result, cycle_count=2
     )
-    muscle_objectives = (
-        comparison_example._executed_fatigue_objective_by_muscle(
-            result, cycle_count=2
-        )
+    muscle_objectives = comparison_example._executed_fatigue_objective_by_muscle(
+        result, cycle_count=2
     )
     saturation = comparison_example._control_saturation_metrics(result, cycle_count=2)
 
@@ -3266,9 +3403,11 @@ def test_wheel_trace_absolute_reference_accounts_for_consumed_warmup():
         absolute_wheel_q_cycle_index=1,
     )
 
-    trace_reference, origin_reference, cycle_index = (
-        periodic_example._wheel_trace_absolute_reference(nmpc)
-    )
+    (
+        trace_reference,
+        origin_reference,
+        cycle_index,
+    ) = periodic_example._wheel_trace_absolute_reference(nmpc)
 
     assert trace_reference == pytest.approx(0.95 - 2.0 * np.pi)
     assert origin_reference == pytest.approx(0.95)
@@ -3335,7 +3474,11 @@ def test_receding_horizon_objective_uses_source_windows_not_dummy_merged_cost():
         SimpleNamespace(cost=None),
     ]
 
-    assert periodic_example._window_objective_values(solutions) == [1.5, 5.0, None]
+    assert periodic_example._window_objective_values(solutions) == [
+        1.5,
+        5.0,
+        None,
+    ]
 
 
 def test_endurance_cli_stops_on_failure_and_keeps_robust_irk_defaults():
@@ -3534,7 +3677,11 @@ def test_acados_dual_warm_start_can_reset_all_multipliers():
         solver, horizon=3, mode="reset", shift_stages=1
     )
 
-    assert summary == {"mode": "reset", "shift_stages": 0, "zeroed_tail_stages": 4}
+    assert summary == {
+        "mode": "reset",
+        "shift_stages": 0,
+        "zeroed_tail_stages": 4,
+    }
     assert all(not np.any(values) for values in solver.values.values())
 
 
@@ -3545,7 +3692,11 @@ def test_acados_dual_warm_start_can_shift_one_cycle_and_zero_tail():
         solver, horizon=3, mode="shift", shift_stages=1
     )
 
-    assert summary == {"mode": "shift", "shift_stages": 1, "zeroed_tail_stages": 1}
+    assert summary == {
+        "mode": "shift",
+        "shift_stages": 1,
+        "zeroed_tail_stages": 1,
+    }
     np.testing.assert_array_equal(
         [solver.values[(stage, "lam")][0] for stage in range(4)], [2, 3, 4, 0]
     )
@@ -3740,12 +3891,18 @@ def test_full_contact_stabilization_is_opt_in_on_both_clis():
     assert comparison_parser.parse_args(
         ["--full-contact-position-all-nodes"]
     ).full_contact_position_all_nodes
-    assert periodic_parser.parse_args(
-        ["--full-contact-position-tolerance", "2e-5"]
-    ).full_contact_position_tolerance == 2e-5
-    assert comparison_parser.parse_args(
-        ["--full-contact-position-tolerance", "2e-5"]
-    ).full_contact_position_tolerance == 2e-5
+    assert (
+        periodic_parser.parse_args(
+            ["--full-contact-position-tolerance", "2e-5"]
+        ).full_contact_position_tolerance
+        == 2e-5
+    )
+    assert (
+        comparison_parser.parse_args(
+            ["--full-contact-position-tolerance", "2e-5"]
+        ).full_contact_position_tolerance
+        == 2e-5
+    )
     assert periodic_parser.parse_args(
         ["--transfer-contact-manifold-projection"]
     ).transfer_contact_manifold_projection
@@ -3829,7 +3986,9 @@ def test_fatigue_benchmark_defaults_to_all_solvers_and_full_scaling():
     assert periodic_example.parse_objectives("") == {"fatigue"}
 
 
-def test_fatigue_only_objective_disables_terminal_wheel_regularization(monkeypatch):
+def test_fatigue_only_objective_disables_terminal_wheel_regularization(
+    monkeypatch,
+):
     class FakeObjectiveList:
         def __init__(self):
             self.entries = []
@@ -3944,10 +4103,7 @@ def test_benchmark_json_summary_contains_comparable_fatigue_metrics(tmp_path):
     )
     assert row["pulse_width_cycle_variation"]["available"] is True
     assert "cycle_100" in row["isolated_window_checkpoints"]
-    assert (
-        row["isolated_window_checkpoints"]["cycle_100"]["diagnostic_only"]
-        is True
-    )
+    assert row["isolated_window_checkpoints"]["cycle_100"]["diagnostic_only"] is True
     assert row["external_crank_power"]["role"] == "unavailable"
     assert row["cycle_boundary_wheel_angle"]["maximum_absolute_error_rad"] is not None
     assert row["stop"]["label"] == "completed_requested_horizon"
@@ -4319,8 +4475,7 @@ def test_github_acados_runner_uses_reference_and_option_profiles_sequentially():
 
     assert "acados_smoke_rhos:" in workflow
     assert re.search(
-        r"acados_smoke_rhos:\s+"
-        r"description:.*\s+required: true\s+default: \"100\"",
+        r"acados_smoke_rhos:\s+" r"description:.*\s+required: true\s+default: \"100\"",
         workflow,
     )
     assert "acados_option_rhos:" in workflow
@@ -4331,19 +4486,14 @@ def test_github_acados_runner_uses_reference_and_option_profiles_sequentially():
     assert "Run MadNLP MUMPS reduced Radau degree 5" in workflow
     assert "ipopt-radau5-reduced" in workflow
     assert "madnlp-mumps-radau5-reduced" in workflow
-    assert (
-        '"$BENCHMARK_CYCLES" "${{ inputs.compile_nlp_evaluators }}"'
-        in workflow
-    )
+    assert '"$BENCHMARK_CYCLES" "${{ inputs.compile_nlp_evaluators }}"' in workflow
     assert (
         "run_cycling_benchmark_case.sh ipopt ipopt full mumps collocation "
-        'benchmark-results "$BENCHMARK_CYCLES" false'
-        in workflow
+        'benchmark-results "$BENCHMARK_CYCLES" false' in workflow
     )
     assert (
         "run_cycling_benchmark_case.sh madnlp-mumps madnlp full mumps collocation "
-        'benchmark-results "$BENCHMARK_CYCLES" false'
-        in workflow
+        'benchmark-results "$BENCHMARK_CYCLES" false' in workflow
     )
     assert (
         "run_cycling_benchmark_case.sh madnlp-mumps madnlp reduced mumps collocation "
@@ -4352,12 +4502,11 @@ def test_github_acados_runner_uses_reference_and_option_profiles_sequentially():
     )
     assert (
         'if [[ "$BENCHMARK_SOLVER" == "madnlp" && '
-        '"$result" == *"madnlp-mumps-full/"* ]]'
-        in workflow
+        '"$result" == *"madnlp-mumps-full/"* ]]' in workflow
     )
     assert "specified structure of A does not correspond" in workflow
     assert 'case_requires_compile="$COMPILE_NLP_EVALUATORS"' in workflow
-    assert 'case_requires_compile=false' in workflow
+    assert "case_requires_compile=false" in workflow
     assert ".compiled_nlp_reuse.compiled_library_build_count == 1" in workflow
     assert ".compiled_nlp_reuse.graph_rebuild_detected == false" in workflow
     assert ".compiled_nlp_reuse.runtime_bounds_changed == true" in workflow
@@ -4369,18 +4518,17 @@ def test_github_acados_runner_uses_reference_and_option_profiles_sequentially():
     assert "inputs.cycles != 'screen' && inputs.cycles != 'acados'" in workflow
     assert "prepare-acados-stack:" in workflow
     assert (
-        "BIOPTIM_PRODUCTION_COMMIT: "
-        "efd59c39777c83f97058f8d6c1ef472f78f9925d"
+        "BIOPTIM_PRODUCTION_COMMIT: " "efd59c39777c83f97058f8d6c1ef472f78f9925d"
     ) in workflow
     assert (
-        workflow.count(
-            "bioptim_commit: efd59c39777c83f97058f8d6c1ef472f78f9925d"
-        )
-        == 3
+        workflow.count("bioptim_commit: efd59c39777c83f97058f8d6c1ef472f78f9925d") == 3
     )
     assert "a3499cab16d7605b8efa7255cf89f1af6a7c59c9" not in workflow
     assert "ACADOS_COMMIT: 59d93e17d2985fdd73fc58b8a83ed8f83a024171" in workflow
-    assert "ACADOS_INSTALL_SCRIPT_BLOB: 5ac8064ab613251e62560b5de8cbbb9550f5c5d0" in workflow
+    assert (
+        "ACADOS_INSTALL_SCRIPT_BLOB: 5ac8064ab613251e62560b5de8cbbb9550f5c5d0"
+        in workflow
+    )
     assert "for mechanics in full reduced" in workflow
     assert workflow.index("prepare_case reduced") < workflow.index("prepare_case full")
     assert (
@@ -4407,10 +4555,7 @@ def test_github_acados_runner_uses_reference_and_option_profiles_sequentially():
         "--acados-transfer-bound-homotopy-fractions "
         "0,0.125,0.25,0.375,0.5,0.625,0.75,0.875,1"
     ) in workflow
-    assert (
-        "--acados-transfer-bound-homotopy-min-fraction-step 0.001953125"
-        in workflow
-    )
+    assert "--acados-transfer-bound-homotopy-min-fraction-step 0.001953125" in workflow
     assert "--acados-transfer-bound-homotopy-max-refinements 16" in workflow
     assert "--acados-transfer-bound-homotopy-iterations 40" in workflow
     assert "--acados-transfer-bound-homotopy-solver-tolerance 1e-4" in workflow
@@ -4418,10 +4563,7 @@ def test_github_acados_runner_uses_reference_and_option_profiles_sequentially():
     assert "run_case sqp-feasibility-qp-irk" in workflow
     assert "--acados-search-direction-mode FEASIBILITY_QP" in workflow
     assert "SQP_WITH_FEASIBLE_QP IRK" in workflow
-    assert (
-        'run_case sqp-feasible-qp-irk "$mechanics" "$ACADOS_SMOKE_RHOS"'
-        in workflow
-    )
+    assert 'run_case sqp-feasible-qp-irk "$mechanics" "$ACADOS_SMOKE_RHOS"' in workflow
     assert "--acados-search-direction-mode BYRD_OMOJOKUN" in workflow
     assert "run_case sqp-rti-irk" in workflow
     assert "SQP_RTI IRK" in workflow
@@ -4432,7 +4574,7 @@ def test_github_acados_runner_uses_reference_and_option_profiles_sequentially():
     assert "--acados-globalization FIXED_STEP" in workflow
     assert "--acados-control-homotopy-release-final-radius" in workflow
     assert "run_case sqp-erk" in workflow
-    assert "--acados-stationarity-tolerance \"$stationarity\"" in workflow
+    assert '--acados-stationarity-tolerance "$stationarity"' in workflow
     assert "--acados-control-homotopy-window-growth 10" in workflow
     assert "--acados-control-homotopy-window-max-radius 1e-5" in workflow
     assert "run_case sqp-irk-active-set-guard reduced" in workflow
@@ -4446,9 +4588,18 @@ def test_github_acados_runner_uses_reference_and_option_profiles_sequentially():
         "matrix.solver == 'madnlp' && "
         "steps.benchmark-madnlp-stack-cache.outputs.cache-hit != 'true'"
     ) in workflow
-    assert 'echo "${variant}-${mechanics}" >> acados-smoke-results/expected-cases.txt' in workflow
-    assert "mapfile -t expected_cases < acados-smoke-results/expected-cases.txt" in workflow
-    assert "mapfile -t reference_cases < acados-smoke-results/reference-cases.txt" in workflow
+    assert (
+        'echo "${variant}-${mechanics}" >> acados-smoke-results/expected-cases.txt'
+        in workflow
+    )
+    assert (
+        "mapfile -t expected_cases < acados-smoke-results/expected-cases.txt"
+        in workflow
+    )
+    assert (
+        "mapfile -t reference_cases < acados-smoke-results/reference-cases.txt"
+        in workflow
+    )
     assert 'run_case sqp-irk-contact-position full "$ACADOS_OPTION_RHOS"' in workflow
     assert 'run_case sqp-irk-reference full "$ACADOS_SMOKE_RHOS"' in workflow
     assert "sqp-irk-reference-full" in workflow
@@ -4470,7 +4621,7 @@ def test_github_acados_runner_uses_reference_and_option_profiles_sequentially():
     assert "--acados-wheel-qdot-regularization-weight 0.1" in workflow
     assert "run_case sqp-irk-two-stage-cadence-reg-1 full" in workflow
     assert "run_case sqp-irk-cadence-reg-1-rollout-guard full" in workflow
-    assert "--acados-transfer-rollout-max-bound-violation 0.2" in workflow
+    assert "--shared-transfer-rollout-max-bound-violation 0.2" in workflow
     assert "run_case sqp-irk-two-stage-cadence-reg-1 reduced" in workflow
     assert "--acados-wheel-qdot-regularization-weight 1" in workflow
     assert "reference-full-feasible-seed.npz" in workflow
@@ -4493,11 +4644,8 @@ def test_github_acados_runner_uses_reference_and_option_profiles_sequentially():
     assert "sqp-irk-two-stage-cadence-reg-0p1" not in long_campaign
     assert "sqp-rti-irk" not in long_campaign
     assert "--shared-transfer-contact-projection" in workflow
-    assert (
-        "--shared-transfer-contact-projection-mode position_velocity"
-        in workflow
-    )
-    assert 'expected ${#expected_cases[@]} JSON files' in workflow
+    assert "--shared-transfer-contact-projection-mode position_velocity" in workflow
+    assert "expected ${#expected_cases[@]} JSON files" in workflow
     assert "expected 12 JSON files" not in workflow
     assert ".configurations.acados.n_windows > 5" in workflow
     assert ".validated_cycles == $expected" not in workflow
@@ -4513,8 +4661,8 @@ def test_github_acados_runner_uses_reference_and_option_profiles_sequentially():
         / "scripts"
         / "run_cycling_benchmark_case.sh"
     ).read_text(encoding="utf-8")
-    assert 'solver_options+=(--ipopt-c-compile)' in benchmark_runner
-    assert 'solver_options+=(--madnlp-c-compile)' in benchmark_runner
+    assert "solver_options+=(--ipopt-c-compile)" in benchmark_runner
+    assert "solver_options+=(--madnlp-c-compile)" in benchmark_runner
     assert (
         "initialization_options=(--no-optional-nlp-periodic-ipopt-hot-start)"
         in benchmark_runner
@@ -4537,7 +4685,7 @@ def test_github_acados_runner_uses_reference_and_option_profiles_sequentially():
     assert 'mktemp -d "$case_dir/codegen.XXXXXX"' in benchmark_runner
     assert 'pushd "$codegen_dir"' in benchmark_runner
     assert "--ipopt-enforce-start-constraints" in benchmark_runner
-    assert 'solver_options+=(--full-contact-position-tolerance 2e-5)' in (
+    assert "solver_options+=(--full-contact-position-tolerance 2e-5)" in (
         benchmark_runner
     )
     assert (
@@ -4547,7 +4695,9 @@ def test_github_acados_runner_uses_reference_and_option_profiles_sequentially():
     assert "--shared-transfer-phase-one" in benchmark_runner
     assert "\n    --transfer-phase-one\n" not in benchmark_runner
     assert '--reduced-cycling-profile "$workspace/benchmark-seed/' in benchmark_runner
-    assert "Compare IPOPT interpreted and compiled evaluators over 5 RHO" not in workflow
+    assert (
+        "Compare IPOPT interpreted and compiled evaluators over 5 RHO" not in workflow
+    )
     assert "cycling-compile-ablation-" not in workflow
     assert "Compare MadNLP MUMPS interpreted and compiled evaluators" not in workflow
     assert "Compile and reuse reduced IPOPT/MadNLP" in workflow
@@ -4591,10 +4741,7 @@ def test_github_acados_runner_uses_reference_and_option_profiles_sequentially():
 def test_benchmark_readme_tracks_every_active_bioptim_revision_and_patch():
     repository_root = Path(__file__).resolve().parents[2]
     workflow = (
-        repository_root
-        / ".github"
-        / "workflows"
-        / "cycling_solver_benchmark_linux.yml"
+        repository_root / ".github" / "workflows" / "cycling_solver_benchmark_linux.yml"
     ).read_text(encoding="utf-8")
     benchmark_readme = (
         repository_root / "docs" / "cycling_solver_benchmark" / "README.md"
@@ -4603,9 +4750,7 @@ def test_benchmark_readme_tracks_every_active_bioptim_revision_and_patch():
     pinned_revisions = set(
         re.findall(r"BIOPTIM_[A-Z_]+_COMMIT:\s*([0-9a-f]{40})", workflow)
     )
-    pinned_revisions.update(
-        re.findall(r"bioptim_commit:\s*([0-9a-f]{40})", workflow)
-    )
+    pinned_revisions.update(re.findall(r"bioptim_commit:\s*([0-9a-f]{40})", workflow))
     applied_patches = set(
         re.findall(r'\.github/patches/(bioptim-[^"\s]+\.patch)', workflow)
     )
@@ -4720,6 +4865,11 @@ def test_two_cycle_single_shot_checks_each_complete_turn():
     )
 
     assert summary["physical_success"] is True
+    assert summary["requested_cycles"] == 2
+    assert summary["exported_cycles"] == 2
+    assert summary["covered_cycles"] == 2
+    assert summary["validated_cycles"] == 2
+    assert summary["physically_validated_cycles"] == 2
     np.testing.assert_allclose(
         summary["diagnostics"]["cycle_progress_errors"], [0.0, 0.0]
     )
@@ -4962,7 +5112,11 @@ def test_reduced_theta_seed_is_recentered_on_absolute_cycle_targets():
     theta = np.array([[0.1, -3.0, -6.0, -9.0, -12.1]])
     omega = -np.ones_like(theta)
 
-    corrected, corrected_omega, audit = mhe_example.recenter_reduced_theta_seed(
+    (
+        corrected,
+        corrected_omega,
+        audit,
+    ) = mhe_example.recenter_reduced_theta_seed(
         theta,
         omega,
         nodes_per_cycle=2,
@@ -4995,9 +5149,7 @@ def test_collocation_warm_start_uses_radau_abscissae():
 
     expected_local = np.array([0.0, 0.15505102572168222, 0.6449489742783179, 1.0])
     np.testing.assert_allclose(grid[:4], expected_local / 2.0, atol=1e-14)
-    np.testing.assert_allclose(
-        grid[4:8], (1.0 + expected_local) / 2.0, atol=1e-14
-    )
+    np.testing.assert_allclose(grid[4:8], (1.0 + expected_local) / 2.0, atol=1e-14)
     assert grid[3] == grid[4]
     assert grid[-1] == 1.0
 
@@ -5011,18 +5163,14 @@ def test_physical_crank_velocity_uses_center_to_hand_kinematics():
         @staticmethod
         def marker(index):
             values = (
-                np.array([1.0, 0.0, 0.0])
-                if index == 0
-                else np.array([0.0, 0.0, 0.0])
+                np.array([1.0, 0.0, 0.0]) if index == 0 else np.array([0.0, 0.0, 0.0])
             )
             return lambda q, parameters: values
 
         @staticmethod
         def marker_velocity(index):
             values = (
-                np.array([0.0, -5.0, 0.0])
-                if index == 0
-                else np.array([0.0, 0.0, 0.0])
+                np.array([0.0, -5.0, 0.0]) if index == 0 else np.array([0.0, 0.0, 0.0])
             )
             return lambda q, qdot, parameters: values
 
@@ -5049,18 +5197,14 @@ def test_physical_crank_velocity_includes_all_collocation_points():
         @staticmethod
         def marker(index):
             values = (
-                np.array([1.0, 0.0, 0.0])
-                if index == 0
-                else np.array([0.0, 0.0, 0.0])
+                np.array([1.0, 0.0, 0.0]) if index == 0 else np.array([0.0, 0.0, 0.0])
             )
             return lambda q, parameters: values
 
         @staticmethod
         def marker_velocity(index):
             if index == 0:
-                return lambda q, qdot, parameters: np.array(
-                    [0.0, qdot[0], 0.0]
-                )
+                return lambda q, qdot, parameters: np.array([0.0, qdot[0], 0.0])
             return lambda q, qdot, parameters: np.zeros(3)
 
     controller = SimpleNamespace(
@@ -5102,18 +5246,14 @@ def test_physical_crank_velocity_ignores_pseudo_stages_in_direct_shooting():
         @staticmethod
         def marker(index):
             values = (
-                np.array([1.0, 0.0, 0.0])
-                if index == 0
-                else np.array([0.0, 0.0, 0.0])
+                np.array([1.0, 0.0, 0.0]) if index == 0 else np.array([0.0, 0.0, 0.0])
             )
             return lambda q, parameters: values
 
         @staticmethod
         def marker_velocity(index):
             if index == 0:
-                return lambda q, qdot, parameters: np.array(
-                    [0.0, qdot[0], 0.0]
-                )
+                return lambda q, qdot, parameters: np.array([0.0, qdot[0], 0.0])
             return lambda q, qdot, parameters: np.zeros(3)
 
     controller = SimpleNamespace(
@@ -5158,17 +5298,17 @@ def test_mechanical_audit_rejects_collocation_only_cadence_violation():
 
     omega = np.array([[-6.0, -10.0, -6.0, -6.0, -6.0, -6.0, -6.0, -6.0]])
     _, _, audit = periodic_example.audit_mechanical_trajectory(
-        {"q": np.zeros((3, omega.shape[1])), "qdot": np.vstack((omega, omega, omega))},
+        {
+            "q": np.zeros((3, omega.shape[1])),
+            "qdot": np.vstack((omega, omega, omega)),
+        },
         SimpleNamespace(kinematics=FakeKinematics()),
         velocity_tolerance_rad_s=0.1,
         cadence_node_stride=4,
     )
 
     assert audit["maximum_physical_crank_velocity_bound_violation_rad_s"] == 0.0
-    assert (
-        audit["maximum_shooting_node_crank_velocity_bound_violation_rad_s"]
-        == 0.0
-    )
+    assert audit["maximum_shooting_node_crank_velocity_bound_violation_rad_s"] == 0.0
     assert audit["maximum_all_node_crank_velocity_bound_violation_rad_s"] > 0.7
     assert audit["passes_physical_crank_velocity_bounds"] is False
     assert audit["passes_tolerance"] is False
@@ -5203,10 +5343,7 @@ def test_mechanical_audit_rejects_hidden_acados_interval_cadence_violation():
 
     assert audit["maximum_all_node_crank_velocity_bound_violation_rad_s"] == 0.0
     assert audit["interval_average_crank_velocity_available"] is True
-    assert (
-        audit["maximum_interval_average_crank_velocity_bound_violation_rad_s"]
-        > 0.37
-    )
+    assert audit["maximum_interval_average_crank_velocity_bound_violation_rad_s"] > 0.37
     assert audit["passes_physical_crank_velocity_bounds"] is False
     assert audit["passes_tolerance"] is False
 
@@ -5563,9 +5700,7 @@ def test_absolute_terminal_reference_is_recentered_after_loading_same_formulatio
             SimpleNamespace(
                 x_init={
                     "q": SimpleNamespace(
-                        init=np.array(
-                            [[0.0, 0.0], [0.0, 0.0], [loaded_start, -12.6]]
-                        )
+                        init=np.array([[0.0, 0.0], [0.0, 0.0], [loaded_start, -12.6]])
                     )
                 },
                 x_bounds={"q": q_bounds},
@@ -5673,7 +5808,9 @@ def test_continuation_source_inherits_requested_acados_tolerances(
     observed = {}
 
     monkeypatch.setattr(
-        periodic_example, "_continuation_cache_path", lambda _: tmp_path / "missing.npz"
+        periodic_example,
+        "_continuation_cache_path",
+        lambda _: tmp_path / "missing.npz",
     )
 
     def fake_solve_case(source_args, echo):
@@ -5783,7 +5920,9 @@ def test_proximal_phase_one_restores_initial_guess_when_defect_increases(
     assert len(sync_calls) == 2
 
 
-def test_proximal_phase_one_backtracks_to_respect_state_change_limit(monkeypatch):
+def test_proximal_phase_one_backtracks_to_respect_state_change_limit(
+    monkeypatch,
+):
     class Variables(dict):
         shape = 1
 
@@ -6019,7 +6158,15 @@ def test_one_cycle_solution_is_tiled_with_wheel_and_fatigue_drift():
     )
     np.testing.assert_allclose(
         nlp.x_init["q"].init[2],
-        [0.0, -2.0, -4.0, -2 * np.pi, -2.0 - 2 * np.pi, -4.0 - 2 * np.pi, -4 * np.pi],
+        [
+            0.0,
+            -2.0,
+            -4.0,
+            -2 * np.pi,
+            -2.0 - 2 * np.pi,
+            -4.0 - 2 * np.pi,
+            -4 * np.pi,
+        ],
     )
     np.testing.assert_allclose(
         nlp.x_init["F_Biceps"].init,
@@ -6085,7 +6232,9 @@ def test_unsafe_acados_option_is_initialized_on_each_solver_instance():
     assert second_solver._test_repeated_option == 0.25
 
 
-def test_acados_diagnostics_snapshot_is_independent_from_shared_solver(monkeypatch):
+def test_acados_diagnostics_snapshot_is_independent_from_shared_solver(
+    monkeypatch,
+):
     live_diagnostics = {"status": 0, "residuals": np.array([1.0, 2.0])}
     monkeypatch.setattr(
         periodic_example,
@@ -6117,7 +6266,13 @@ def test_codegen_signature_ignores_run_only_options():
     parser = periodic_example.build_argument_parser()
     reference = parser.parse_args([])
     longer_diagnostic_run = parser.parse_args(
-        ["--n-windows", "20", "--acados-diagnostics", "--codegen-tag", "diagnostic"]
+        [
+            "--n-windows",
+            "20",
+            "--acados-diagnostics",
+            "--codegen-tag",
+            "diagnostic",
+        ]
     )
 
     assert periodic_example._codegen_signature(
@@ -6145,7 +6300,9 @@ def test_codegen_names_normalize_user_tag_for_casadi():
     other_model, _ = periodic_example.build_codegen_names(other)
 
     assert re.fullmatch(r"[A-Za-z][A-Za-z0-9]*(?:_[A-Za-z0-9]+)*", unsafe_model)
-    assert Path(unsafe_directory).name.startswith("c_generated_code_ci_reduced_smoke_test_")
+    assert Path(unsafe_directory).name.startswith(
+        "c_generated_code_ci_reduced_smoke_test_"
+    )
     assert unsafe_model != other_model
 
 
@@ -6453,9 +6610,9 @@ def test_compiled_nlp_tracker_accepts_runtime_bound_changes_without_graph_rebuil
     assert summary["graph_rebuild_detected"] is False
     assert summary["unique_runtime_bound_vectors"] == 2
     assert summary["runtime_bounds_changed"] is True
-    assert "absolute_terminal_angle_via_terminal_state_bounds" in summary[
-        "runtime_inputs"
-    ]
+    assert (
+        "absolute_terminal_angle_via_terminal_state_bounds" in summary["runtime_inputs"]
+    )
 
 
 def test_compiled_nlp_tracker_detects_a_second_generated_solver():
@@ -7557,7 +7714,9 @@ def test_transfer_bound_homotopy_accepts_last_finite_maxiter_nlp_iterate(
         lambda periodic_nmpc, accepted_solution: None,
     )
     monkeypatch.setattr(
-        periodic_example, "reset_acados_solver_memory", lambda periodic_nmpc: True
+        periodic_example,
+        "reset_acados_solver_memory",
+        lambda periodic_nmpc: True,
     )
 
     summary = periodic_example.run_acados_transfer_bound_homotopy(
@@ -7597,9 +7756,7 @@ def test_transfer_bound_homotopy_rejects_stale_history_after_qp_failure(
     nmpc = SimpleNamespace(
         nlp=[
             SimpleNamespace(
-                x_init={
-                    "qdot": SimpleNamespace(init=np.array([[0.0, -4.0, -5.0]]))
-                },
+                x_init={"qdot": SimpleNamespace(init=np.array([[0.0, -4.0, -5.0]]))},
                 u_init={"u": SimpleNamespace(init=np.zeros((1, 2)))},
                 x_bounds={"qdot": bounds},
             )
@@ -7624,7 +7781,9 @@ def test_transfer_bound_homotopy_rejects_stale_history_after_qp_failure(
         },
     )
     monkeypatch.setattr(
-        periodic_example, "reset_acados_solver_memory", lambda periodic_nmpc: True
+        periodic_example,
+        "reset_acados_solver_memory",
+        lambda periodic_nmpc: True,
     )
 
     summary = periodic_example.run_acados_transfer_bound_homotopy(
@@ -7700,7 +7859,9 @@ def test_transfer_bound_homotopy_only_requires_stationarity_at_physical_stage(
         lambda periodic_nmpc, accepted_solution: None,
     )
     monkeypatch.setattr(
-        periodic_example, "reset_acados_solver_memory", lambda periodic_nmpc: True
+        periodic_example,
+        "reset_acados_solver_memory",
+        lambda periodic_nmpc: True,
     )
 
     summary = periodic_example.run_acados_transfer_bound_homotopy(
@@ -7717,12 +7878,8 @@ def test_transfer_bound_homotopy_only_requires_stationarity_at_physical_stage(
 
     assert summary["completed"] is False
     assert [stage["accepted"] for stage in summary["stages"]] == [True, False]
-    assert (
-        summary["stages"][0]["accepted_as_intermediate_primal_feasible"] is True
-    )
-    assert (
-        summary["stages"][1]["accepted_as_intermediate_primal_feasible"] is False
-    )
+    assert summary["stages"][0]["accepted_as_intermediate_primal_feasible"] is True
+    assert summary["stages"][1]["accepted_as_intermediate_primal_feasible"] is False
 
 
 def test_transfer_bound_homotopy_restores_best_stored_intermediate_iterate(
@@ -7790,7 +7947,9 @@ def test_transfer_bound_homotopy_restores_best_stored_intermediate_iterate(
         lambda *args: pytest.fail("The degraded final iterate must not be restored."),
     )
     monkeypatch.setattr(
-        periodic_example, "reset_acados_solver_memory", lambda periodic_nmpc: True
+        periodic_example,
+        "reset_acados_solver_memory",
+        lambda periodic_nmpc: True,
     )
 
     summary = periodic_example.run_acados_transfer_bound_homotopy(
@@ -7813,7 +7972,9 @@ def test_transfer_bound_homotopy_restores_best_stored_intermediate_iterate(
     np.testing.assert_allclose(state_guess.init[0, 0], 7.0)
 
 
-def test_transfer_bound_homotopy_backtracks_from_last_accepted_primal(monkeypatch):
+def test_transfer_bound_homotopy_backtracks_from_last_accepted_primal(
+    monkeypatch,
+):
     class FakeSolver:
         nlp_solver_max_iter = 100
 
@@ -7885,7 +8046,9 @@ def test_transfer_bound_homotopy_backtracks_from_last_accepted_primal(monkeypatc
         apply_solution,
     )
     monkeypatch.setattr(
-        periodic_example, "reset_acados_solver_memory", lambda periodic_nmpc: True
+        periodic_example,
+        "reset_acados_solver_memory",
+        lambda periodic_nmpc: True,
     )
 
     summary = periodic_example.run_acados_transfer_bound_homotopy(
@@ -8073,7 +8236,8 @@ def test_transferred_guess_is_projected_after_bounds_move():
     nmpc = SimpleNamespace(
         nlp=[
             SimpleNamespace(
-                x_init={"state": state_guess}, u_init={"control": control_guess}
+                x_init={"state": state_guess},
+                u_init={"control": control_guess},
             )
         ],
         _correct_init_guess_to_fit_bounds=correct,
@@ -8236,16 +8400,16 @@ def test_shared_transfer_rollout_cli_is_available_to_ipopt():
     assert comparison_args.acados_transfer_phase_one_max_qdot_change == 2
     assert comparison_args.acados_transfer_phase_one_max_fes_change == 3
     assert comparison_args.acados_transfer_bound_homotopy is True
-    assert comparison_args.acados_transfer_bound_homotopy_fractions == (0.0, 1.0)
+    assert comparison_args.acados_transfer_bound_homotopy_fractions == (
+        0.0,
+        1.0,
+    )
     assert comparison_args.acados_transfer_bound_homotopy_padding == 0.05
     assert comparison_args.acados_transfer_bound_homotopy_iterations == 20
     assert comparison_args.acados_transfer_bound_homotopy_tolerance == 1e-4
+    assert comparison_args.acados_transfer_bound_homotopy_solver_tolerance == 1e-4
     assert (
-        comparison_args.acados_transfer_bound_homotopy_solver_tolerance == 1e-4
-    )
-    assert (
-        comparison_args.acados_transfer_bound_homotopy_min_fraction_step
-        == 0.001953125
+        comparison_args.acados_transfer_bound_homotopy_min_fraction_step == 0.001953125
     )
     assert comparison_args.acados_transfer_bound_homotopy_max_refinements == 16
     assert comparison_args.shared_initial_phase_one is True
@@ -8424,7 +8588,12 @@ def test_full_dynamics_rhs_passes_numerical_timeseries_as_data():
     recorded = {}
 
     def dynamics(
-        time, states, controls, parameters, algebraic_states, numerical_timeseries
+        time,
+        states,
+        controls,
+        parameters,
+        algebraic_states,
+        numerical_timeseries,
     ):
         recorded["parameters"] = np.asarray(parameters)
         recorded["algebraic_states"] = np.asarray(algebraic_states)
