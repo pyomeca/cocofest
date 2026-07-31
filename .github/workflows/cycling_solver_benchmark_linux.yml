@@ -699,7 +699,7 @@ jobs:
                 --acados-search-direction-mode FEASIBILITY_QP
               )
             fi
-            if [[ "$variant" == "sqp-irk-two-stage" ]]; then
+            if [[ "$variant" == "sqp-irk-two-stage" || "$variant" == sqp-irk-two-stage-cadence-reg-* ]]; then
               # Reuse the already compiled SQP OCP. Between RHO solves, first
               # restore a feasible transferred trajectory with relaxed state
               # bounds, tighten those bounds to the physical problem, and only
@@ -713,6 +713,19 @@ jobs:
                 --acados-transfer-bound-homotopy-solver-tolerance 1e-4
                 --acados-transfer-bound-homotopy-min-fraction-step 0.001953125
                 --acados-transfer-bound-homotopy-max-refinements 16
+              )
+            fi
+            if [[ "$variant" == "sqp-irk-two-stage-cadence-reg-0p1" ]]; then
+              # Penalize cadence excursions without prescribing constant
+              # velocity.  The reported executed objective remains fatigue
+              # only, so the physical price of this guard stays observable.
+              solver_options+=(
+                --acados-wheel-qdot-regularization-weight 0.1
+              )
+            fi
+            if [[ "$variant" == "sqp-irk-two-stage-cadence-reg-1" ]]; then
+              solver_options+=(
+                --acados-wheel-qdot-regularization-weight 1
               )
             fi
             if [[ "$variant" == "sqp-irk-two-stage-adaptive" ]]; then
@@ -873,6 +886,8 @@ jobs:
             run_case sqp-irk-two-stage-adaptive full "$ACADOS_SMOKE_RHOS" SQP IRK 5 5
             run_case sqp-irk-two-stage-adaptive reduced "$ACADOS_SMOKE_RHOS" SQP IRK 5 5
             run_case sqp-irk-two-stage-cadence-guard reduced "$ACADOS_SMOKE_RHOS" SQP IRK 5 5
+            run_case sqp-irk-two-stage-cadence-reg-0p1 reduced "$ACADOS_SMOKE_RHOS" SQP IRK 5 5
+            run_case sqp-irk-two-stage-cadence-reg-1 reduced "$ACADOS_SMOKE_RHOS" SQP IRK 5 5
             run_case sqp-irk-fixed reduced "$ACADOS_OPTION_RHOS" SQP IRK 5 5
             run_case sqp-irk-anderson reduced "$ACADOS_OPTION_RHOS" SQP IRK 5 5
             run_case sqp-rti-irk reduced "$ACADOS_OPTION_RHOS" SQP_RTI IRK 5 5
