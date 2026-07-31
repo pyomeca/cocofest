@@ -3249,6 +3249,14 @@ def _load_warmup_cache(cache_path: Path) -> "_WarmupSolutionAdapter":
 def _common_initial_solution_metadata(args: argparse.Namespace) -> dict:
     """Describe the physical OCP represented by a shared target seed."""
 
+    terminal_homotopy_slacks = getattr(
+        args, "acados_terminal_wheel_q_homotopy_slacks", None
+    )
+    terminal_target_slack = (
+        float(terminal_homotopy_slacks[-1])
+        if terminal_homotopy_slacks
+        else float(args.acados_terminal_wheel_q_slack)
+    )
     return {
         "schema": "cocofest-common-periodic-initial-solution-v2",
         "model_formulation": args.model_formulation,
@@ -3270,7 +3278,17 @@ def _common_initial_solution_metadata(args: argparse.Namespace) -> dict:
             getattr(args, "full_contact_position_tolerance", 0.0)
         ),
         "first_node_wheel_q_slack": float(args.acados_wheel_q_slack),
-        "terminal_wheel_q_slack": float(args.acados_terminal_wheel_q_slack),
+        # Metadata describes the certified target problem, not the relaxed
+        # first continuation stage used to reach it.
+        "terminal_wheel_q_slack": terminal_target_slack,
+        "terminal_wheel_q_initial_slack": float(
+            args.acados_terminal_wheel_q_slack
+        ),
+        "terminal_wheel_q_homotopy_slacks": (
+            None
+            if terminal_homotopy_slacks is None
+            else [float(slack) for slack in terminal_homotopy_slacks]
+        ),
         "terminal_wheel_q_reference_mode": args.terminal_wheel_q_reference_mode,
         "pulse_width_scaling": float(args.pulse_width_scaling),
         "pulse_width_active_set": args.pulse_width_active_set,
@@ -3410,6 +3428,27 @@ def _validate_common_initial_solution_metadata(
                 # feasible subset of the same OCP.  It is therefore safe (and
                 # useful) for a consumer that releases these constraints.
                 continue
+            if field == "terminal_wheel_q_slack":
+                seed_slack = metadata.get(field)
+                consumer_slack = expected[field]
+                stricter_terminal_seed = (
+                    isinstance(seed_slack, (int, float, np.integer, np.floating))
+                    and not isinstance(seed_slack, bool)
+                    and isinstance(
+                        consumer_slack, (int, float, np.integer, np.floating)
+                    )
+                    and not isinstance(consumer_slack, bool)
+                    and np.isfinite(seed_slack)
+                    and np.isfinite(consumer_slack)
+                    and float(seed_slack) <= float(consumer_slack)
+                )
+                if stricter_terminal_seed:
+                    # The absolute target and reference mode are checked
+                    # separately.  A trajectory certified inside a tighter
+                    # band is therefore a valid seed for the relaxed first
+                    # stage of the terminal-bound homotopy.  The reverse
+                    # (looser producer -> stricter consumer) remains rejected.
+                    continue
             if field == "mechanical_formulation":
                 seed_states = seed.decision_states(to_merge=SolutionMerge.NODES)
                 bridge_is_supported = (

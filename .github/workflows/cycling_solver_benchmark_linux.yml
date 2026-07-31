@@ -1067,6 +1067,8 @@ jobs:
 
       - name: Require every ACADOS case without infrastructure errors
         if: always()
+        env:
+          ACADOS_HOMOTOPY_ONLY: ${{ inputs.cycles == 'acados_homotopy' }}
         run: |
           mapfile -t expected_cases < acados-smoke-results/expected-cases.txt
           if [[ "${#expected_cases[@]}" -lt 1 ]]; then
@@ -1094,8 +1096,12 @@ jobs:
           done
           extended_campaign="$(cat acados-smoke-results/extended-campaign.txt)"
           mapfile -t reference_cases < acados-smoke-results/reference-cases.txt
-          if [[ "${#reference_cases[@]}" -ne 2 ]]; then
-            echo "ACADOS: expected exactly two reference cases, found ${#reference_cases[@]}." >&2
+          expected_reference_count=2
+          if [[ "$ACADOS_HOMOTOPY_ONLY" == "true" ]]; then
+            expected_reference_count=1
+          fi
+          if [[ "${#reference_cases[@]}" -ne "$expected_reference_count" ]]; then
+            echo "ACADOS: expected ${expected_reference_count} reference case(s), found ${#reference_cases[@]}." >&2
             exit 1
           fi
           for case_name in "${reference_cases[@]}"; do

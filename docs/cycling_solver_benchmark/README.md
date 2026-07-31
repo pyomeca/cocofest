@@ -3650,3 +3650,70 @@ Le prochain gate full-horizon doit d'abord mesurer ces défauts pour full/MX et
 reduced/MX à deux cycles. Une phase-I ne sera introduite qu'après localisation
 du bloc dominant; augmenter encore le budget MadNLP sans cette information
 n'est pas justifié par les trois campagnes disponibles.
+
+### A/B ACADOS ciblé : contrat du slack terminal et baseline 20 RHO
+
+La campagne ciblée
+[`30629959714`](https://github.com/mickaelbegon/cocofest/actions/runs/30629959714)
+n'a pas encore évalué l'homotopie terminale. Le témoin Byrd–Omojokun a bien
+exécuté 20 RHO, mais le cas `0.01 → 0.005 → 0.002 rad` s'est arrêté avant la
+construction du solveur : le seed de référence certifié à `0.002 rad` était
+comparé au premier palier relâché `0.01 rad` et rejeté comme incompatible.
+Cela constituait une erreur de contrat, pas une non-convergence ACADOS.
+
+Le contrat distingue désormais trois quantités :
+
+- `terminal_wheel_q_initial_slack = 0.01 rad`, utilisé seulement pour le
+  premier OCP de continuation;
+- `terminal_wheel_q_homotopy_slacks = [0.01, 0.005, 0.002] rad`, qui décrit
+  le chemin numérique;
+- `terminal_wheel_q_slack = 0.002 rad`, qui reste la tolérance physique et la
+  valeur enregistrée comme cible dans les métadonnées du seed.
+
+Un seed dans une bande terminale plus stricte est admissible pour un
+consommateur temporairement plus relâché; l'inverse reste rejeté. Le garde-fou
+CI a également été corrigé : le mode ciblé attend une référence full, tandis
+que la campagne ACADOS générale continue d'en exiger deux, full et reduced.
+
+La baseline full/SX Byrd–Omojokun converge strictement jusqu'au RHO 13. Les
+RHO 14, 16, 18 et 20 atteignent 100 itérations; les RHO intermédiaires
+convergent, mais ne prolongent pas le préfixe certifié après le premier trou.
+
+| RHO en échec | Résidu dynamique/primal | Stationnarité | Temps mur |
+|---:|---:|---:|---:|
+| 14 | `1.002e-2` | `0.544` | `4.588 s` |
+| 16 | `8.985e-3` | `0.511` | `4.636 s` |
+| 18 | `1.530e-4` | `0.0855` | `4.473 s` |
+| 20 | `1.895e-4` | `0.0946` | `4.460 s` |
+
+Sur les 13 RHO certifiés, l'erreur angulaire absolue maximale vaut
+`0.001461 rad`, l'objectif de fatigue exécuté `132.646` et l'intégrale de
+fatigue normalisée `0.679696 cycle`. Les temps chauds publiés
+`0.655/1.217 s` (médiane/P90) ne portent que sur le préfixe RHO 2–13. Sur les
+20 tentatives, les valeurs deviennent `0.684/4.484 s`; la médiane des quatre
+échecs vaut `4.530 s`. De même, `window_objective_sum=343.31` inclut les
+fenêtres non certifiées et la régularisation de cadence : il ne doit pas être
+comparé à l'objectif physique de fatigue exécuté.
+
+| Muscle | Objectif fatigue | Fatigue cumulée | Capacité finale |
+|---|---:|---:|---:|
+| Biceps | `83.3012` | `0.301941` | `0.962934` |
+| Deltoïde antérieur | `30.0186` | `0.197538` | `0.985025` |
+| Deltoïde postérieur | `18.7623` | `0.156064` | `0.987336` |
+| Triceps | `0.563790` | `0.0241525` | `0.996867` |
+
+L'homotopie terminale reste pertinente comme A/B minimal, mais les logs
+montrent un signal plus fort : les échecs 14, 16 et 18 suivent un rollout IRK
+accepté puis une projection mécanique de `0.26–0.30 rad`, tandis que les RHO
+intermédiaires réussissent lorsque ce rollout est rejeté. Le relâchement
+terminal maximal n'est que `0.008 rad`. Si la relance ne prolonge pas le
+préfixe strict, le filtre de rollout déjà défini à `0.2` doit donc devenir le
+prochain témoin causal, avant d'ajouter des itérations.
+
+Enfin, la mesure exacte de la violation canonique `g(x_0)` doit être ajoutée
+dans l'interface Bioptim générique, après `solver_call_limits()` et avant le
+chronométrage du solveur. Elle devra évaluer les contraintes *shaked* et leurs
+bornes réelles; `inf_pr` au premier itéré interne ne lui est pas équivalent.
+Cette instrumentation sera partagée par IPOPT et MadNLP et permettra de
+localiser les défauts de collocation sans modifier le NLP ni polluer le temps
+de résolution.

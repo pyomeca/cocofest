@@ -1847,6 +1847,101 @@ def test_common_initial_solution_metadata_rejects_a_looser_start_seed(
         )
 
 
+def test_common_initial_solution_metadata_allows_a_stricter_terminal_seed(
+    tmp_path,
+):
+    args = SimpleNamespace(
+        model_formulation="periodic_node",
+        mechanical_formulation="full",
+        cycles_per_window=1,
+        stimulations_per_cycle=30,
+        objective="fatigue",
+        objective_shape="quadratic",
+        constant_crank_torque=0.0,
+        torque_application="constant",
+        enforce_start_constraints=False,
+        acados_wheel_q_slack=0.0,
+        acados_terminal_wheel_q_slack=0.01,
+        terminal_wheel_q_reference_mode="absolute_initial",
+        pulse_width_scaling=0.0025,
+        pulse_width_active_set="none",
+        ode_solver="collocation",
+        nlp_ordering_strategy="time_major",
+        solver="acados",
+        warmup_cycles_consumed=1,
+    )
+    metadata = periodic_example._common_initial_solution_metadata(args)
+    metadata["terminal_wheel_q_slack"] = 0.002
+    seed = periodic_example._WarmupSolutionAdapter({}, {}, metadata=metadata)
+
+    periodic_example._validate_common_initial_solution_metadata(
+        seed, args, tmp_path / "strict-terminal-common.npz"
+    )
+
+
+def test_common_initial_solution_metadata_records_the_terminal_homotopy_target():
+    args = SimpleNamespace(
+        model_formulation="periodic_node",
+        mechanical_formulation="full",
+        cycles_per_window=1,
+        stimulations_per_cycle=30,
+        objective="fatigue",
+        objective_shape="quadratic",
+        constant_crank_torque=0.0,
+        torque_application="constant",
+        enforce_start_constraints=False,
+        acados_wheel_q_slack=0.0,
+        acados_terminal_wheel_q_slack=0.01,
+        acados_terminal_wheel_q_homotopy_slacks=(0.01, 0.005, 0.002),
+        terminal_wheel_q_reference_mode="absolute_initial",
+        pulse_width_scaling=0.0025,
+        pulse_width_active_set="none",
+        ode_solver="collocation",
+        nlp_ordering_strategy="time_major",
+        solver="acados",
+        warmup_cycles_consumed=1,
+    )
+
+    metadata = periodic_example._common_initial_solution_metadata(args)
+
+    assert metadata["terminal_wheel_q_slack"] == 0.002
+    assert metadata["terminal_wheel_q_initial_slack"] == 0.01
+    assert metadata["terminal_wheel_q_homotopy_slacks"] == [0.01, 0.005, 0.002]
+
+
+def test_common_initial_solution_metadata_rejects_a_looser_terminal_seed(
+    tmp_path,
+):
+    args = SimpleNamespace(
+        model_formulation="periodic_node",
+        mechanical_formulation="full",
+        cycles_per_window=1,
+        stimulations_per_cycle=30,
+        objective="fatigue",
+        objective_shape="quadratic",
+        constant_crank_torque=0.0,
+        torque_application="constant",
+        enforce_start_constraints=False,
+        acados_wheel_q_slack=0.0,
+        acados_terminal_wheel_q_slack=0.002,
+        terminal_wheel_q_reference_mode="absolute_initial",
+        pulse_width_scaling=0.0025,
+        pulse_width_active_set="none",
+        ode_solver="collocation",
+        nlp_ordering_strategy="time_major",
+        solver="acados",
+        warmup_cycles_consumed=1,
+    )
+    metadata = periodic_example._common_initial_solution_metadata(args)
+    metadata["terminal_wheel_q_slack"] = 0.01
+    seed = periodic_example._WarmupSolutionAdapter({}, {}, metadata=metadata)
+
+    with pytest.raises(ValueError, match="terminal_wheel_q_slack"):
+        periodic_example._validate_common_initial_solution_metadata(
+            seed, args, tmp_path / "loose-terminal-common.npz"
+        )
+
+
 def test_common_initial_solution_metadata_allows_exact_reduced_to_full_lift(
     tmp_path,
 ):
@@ -5375,6 +5470,11 @@ def test_github_acados_runner_uses_reference_and_option_profiles_sequentially():
     assert (
         "mapfile -t reference_cases < acados-smoke-results/reference-cases.txt"
         in workflow
+    )
+    assert "expected_reference_count=2" in workflow
+    assert "expected_reference_count=1" in workflow
+    assert (
+        'if [[ "$ACADOS_HOMOTOPY_ONLY" == "true" ]]; then' in workflow
     )
     assert 'run_case sqp-irk-contact-position full "$ACADOS_OPTION_RHOS"' in workflow
     assert 'run_case sqp-irk-reference full "$ACADOS_SMOKE_RHOS"' in workflow
