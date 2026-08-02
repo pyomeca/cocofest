@@ -734,7 +734,7 @@ jobs:
                 --full-contact-position-all-nodes
               )
             fi
-            if [[ "$variant" == "sqp-irk-two-stage" || ( "$mechanics" == "reduced" && "$variant" == sqp-irk-two-stage-cadence-reg-* ) ]]; then
+            if [[ "$variant" == "sqp-irk-two-stage" || ( "$mechanics" == "reduced" && ( "$variant" == sqp-irk-two-stage-cadence-reg-* || "$variant" == sqp-irk-two-stage-fast-guard-* ) ) ]]; then
               # Reuse the already compiled SQP OCP. Between RHO solves, first
               # restore a feasible transferred trajectory with relaxed state
               # bounds, tighten those bounds to the physical problem, and only
@@ -764,6 +764,22 @@ jobs:
             if [[ "$variant" == "sqp-irk-two-stage-cadence-reg-1" || "$variant" == "sqp-irk-cadence-reg-1-rollout-guard" || "$variant" == "sqp-irk-cadence-reg-1-best-retry" || "$variant" == "sqp-byrd-omojokun-cadence-reg-1-irk" || "$variant" == "sqp-byrd-terminal-homotopy-cadence-reg-1-irk" || "$variant" == "sqp-byrd-rollout-accept-cadence-reg-1-irk" || "$variant" == "sqp-byrd-projected-selector-cadence-reg-1-irk" ]]; then
               solver_options+=(
                 --acados-wheel-qdot-regularization-weight 1
+              )
+            fi
+            if [[ "$variant" == "sqp-irk-two-stage-fast-guard-2p6" ]]; then
+              # Preserve the physical audit at +/-3 rad/s, but keep the
+              # optimized nodes 0.4 rad/s inside the fast-side bound. The
+              # slow-side bound remains unchanged because the observed hidden
+              # excursion is only toward faster negative rotation.
+              solver_options+=(
+                --acados-wheel-qdot-fast-bound-margin 2.6
+              )
+            fi
+            if [[ "$variant" == "sqp-irk-two-stage-fast-guard-2p55" ]]; then
+              # Add another 0.05 rad/s of robustness relative to the measured
+              # 0.376--0.403 rad/s inter-node excursion.
+              solver_options+=(
+                --acados-wheel-qdot-fast-bound-margin 2.55
               )
             fi
             if [[ "$variant" == "sqp-byrd-terminal-homotopy-cadence-reg-1-irk" ]]; then
@@ -967,6 +983,10 @@ jobs:
               run_case sqp-irk-light "$mechanics" "$ACADOS_OPTION_RHOS" SQP IRK 2 3
               run_case sqp-irk-phase-one "$mechanics" "$ACADOS_SMOKE_RHOS" SQP IRK 5 5
               run_case sqp-rti-irk-phase-one "$mechanics" "$ACADOS_OPTION_RHOS" SQP_RTI IRK 5 5
+            done
+            for mechanics in full reduced; do
+              run_case sqp-irk-two-stage-fast-guard-2p6 "$mechanics" "$ACADOS_SMOKE_RHOS" SQP IRK 5 5
+              run_case sqp-irk-two-stage-fast-guard-2p55 "$mechanics" "$ACADOS_SMOKE_RHOS" SQP IRK 5 5
             done
             run_case sqp-irk-active-set-guard reduced "$ACADOS_SMOKE_RHOS" SQP IRK 5 5
             run_case sqp-irk-contact full "$ACADOS_OPTION_RHOS" SQP IRK 5 5

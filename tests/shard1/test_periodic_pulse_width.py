@@ -6,7 +6,15 @@ import warnings
 from casadi import Function, SX, collocation_coeff, collocation_points
 from pathlib import Path
 from types import SimpleNamespace
-from bioptim import BoundsList, InitialGuessList, Node, SolutionMerge, Solver
+from bioptim import (
+    BoundsList,
+    InitialGuessList,
+    InterpolationType,
+    Node,
+    OdeSolver,
+    SolutionMerge,
+    Solver,
+)
 
 import examples.fes_multibody.cycling.cycling_pulse_width_mhe_acados_periodic as periodic_example
 import examples.fes_multibody.cycling.cycling_fes_solver_comparison as comparison_example
@@ -5678,6 +5686,10 @@ def test_github_acados_runner_uses_reference_and_option_profiles_sequentially():
     assert "Run IPOPT reduced Radau degree 6" in workflow
     assert "Run MadNLP MUMPS reduced Radau degree 4" in workflow
     assert "Run MadNLP MUMPS reduced Radau degree 6" in workflow
+    assert "sqp-irk-two-stage-fast-guard-2p6" in workflow
+    assert "sqp-irk-two-stage-fast-guard-2p55" in workflow
+    assert "--acados-wheel-qdot-fast-bound-margin 2.6" in workflow
+    assert "--acados-wheel-qdot-fast-bound-margin 2.55" in workflow
     assert "ipopt-radau5-reduced" in workflow
     assert "madnlp-mumps-radau5-reduced" in workflow
     assert "ipopt-radau5-full" in workflow
@@ -6245,6 +6257,63 @@ def test_regularized_mhe_cli_exposes_previous_window_targets_and_terminal_slack(
     assert args.wheel_qdot_bound_margin == 3.0
     assert args.acados_globalization == "FUNNEL_L1PEN_LINESEARCH"
     assert args.periodic_ipopt_refinement_each_window is False
+
+
+def test_acados_internal_wheel_speed_guard_keeps_physical_audit_margin_separate():
+    args = periodic_example.build_argument_parser().parse_args(
+        [
+            "--solver",
+            "acados",
+            "--wheel-qdot-bound-margin",
+            "3.0",
+            "--acados-wheel-qdot-fast-bound-margin",
+            "2.55",
+        ]
+    )
+
+    assert args.wheel_qdot_bound_margin == 3.0
+    assert periodic_example._effective_wheel_qdot_bound_margins(args) == (
+        2.55,
+        3.0,
+    )
+
+    comparison_args = comparison_example.build_cli().parse_args(
+        ["--acados-wheel-qdot-fast-bound-margin", "2.55"]
+    )
+    assert comparison_args.acados_wheel_qdot_fast_bound_margin == 2.55
+    assert comparison_args.acados_wheel_qdot_slow_bound_margin is None
+
+
+def test_reduced_wheel_speed_bounds_support_an_asymmetric_fast_guard(monkeypatch):
+    monkeypatch.setattr(
+        OcpFesMsk,
+        "set_x_bounds_fes",
+        staticmethod(lambda _model: (BoundsList(), InitialGuessList())),
+    )
+    x_init = InitialGuessList()
+    x_init.add(
+        "theta",
+        np.array([[0.0, -2.0 * np.pi]]),
+        interpolation=InterpolationType.EACH_FRAME,
+    )
+    x_init.add(
+        "omega",
+        np.array([[-2.0 * np.pi, -2.0 * np.pi]]),
+        interpolation=InterpolationType.EACH_FRAME,
+    )
+
+    bounds, _ = mhe_example.set_reduced_x_bounds(
+        model=SimpleNamespace(),
+        x_init=x_init,
+        n_shooting=1,
+        ode_solver=OdeSolver.RK4(),
+        init_file_path=None,
+        omega_fast_bound_margin=2.55,
+        omega_slow_bound_margin=3.0,
+    )
+
+    np.testing.assert_allclose(bounds["omega"].min, -2.0 * np.pi - 2.55)
+    np.testing.assert_allclose(bounds["omega"].max, -2.0 * np.pi + 3.0)
 
 
 def test_optional_nlp_cli_exposes_cross_solver_hot_start_and_tuning():

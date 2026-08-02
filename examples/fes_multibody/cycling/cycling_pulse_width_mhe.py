@@ -1002,6 +1002,12 @@ def prepare_nmpc(
         "wheel_qdot_regularization_target", -float(2 * np.pi)
     )
     wheel_qdot_bound_margin = simulation_conditions.get("wheel_qdot_bound_margin", 3.0)
+    wheel_qdot_fast_bound_margin = simulation_conditions.get(
+        "wheel_qdot_fast_bound_margin", wheel_qdot_bound_margin
+    )
+    wheel_qdot_slow_bound_margin = simulation_conditions.get(
+        "wheel_qdot_slow_bound_margin", wheel_qdot_bound_margin
+    )
     terminal_qdot_regularization_weight = simulation_conditions.get(
         "terminal_qdot_regularization_weight", 0.0
     )
@@ -1143,7 +1149,8 @@ def prepare_nmpc(
             n_shooting=window_n_shooting,
             ode_solver=ode_solver,
             init_file_path=initial_guess_path,
-            omega_bound_margin=wheel_qdot_bound_margin,
+            omega_fast_bound_margin=wheel_qdot_fast_bound_margin,
+            omega_slow_bound_margin=wheel_qdot_slow_bound_margin,
         )
     else:
         x_init = full_mechanical_init
@@ -1163,6 +1170,8 @@ def prepare_nmpc(
             ode_solver=ode_solver,
             init_file_path=initial_guess_path,
             wheel_qdot_bound_margin=wheel_qdot_bound_margin,
+            wheel_qdot_fast_bound_margin=wheel_qdot_fast_bound_margin,
+            wheel_qdot_slow_bound_margin=wheel_qdot_slow_bound_margin,
             coordinate_qdot_bounds=coordinate_qdot_bounds,
         )
 
@@ -1396,10 +1405,26 @@ def set_x_bounds(
     ode_solver: OdeSolver,
     init_file_path: str,
     wheel_qdot_bound_margin: float = 3.0,
+    wheel_qdot_fast_bound_margin: float | None = None,
+    wheel_qdot_slow_bound_margin: float | None = None,
     coordinate_qdot_bounds: tuple[np.ndarray, np.ndarray] | None = None,
 ) -> tuple[BoundsList, InitialGuessList]:
     if wheel_qdot_bound_margin <= 0:
         raise ValueError("wheel_qdot_bound_margin must be strictly positive.")
+    wheel_qdot_fast_bound_margin = (
+        wheel_qdot_bound_margin
+        if wheel_qdot_fast_bound_margin is None
+        else wheel_qdot_fast_bound_margin
+    )
+    wheel_qdot_slow_bound_margin = (
+        wheel_qdot_bound_margin
+        if wheel_qdot_slow_bound_margin is None
+        else wheel_qdot_slow_bound_margin
+    )
+    if wheel_qdot_fast_bound_margin <= 0:
+        raise ValueError("wheel_qdot_fast_bound_margin must be strictly positive.")
+    if wheel_qdot_slow_bound_margin <= 0:
+        raise ValueError("wheel_qdot_slow_bound_margin must be strictly positive.")
     # --- Set interpolation type according to ode_solver type --- #
     interpolation_type = InterpolationType.EACH_FRAME
     if ode_solver.is_direct_collocation:
@@ -1471,8 +1496,8 @@ def set_x_bounds(
     arm_qdot = [-10, 10]  # Arm min_max qdot bound in radiant
     forearm_qdot = [-14, 10]  # Forearm min_max qdot bound in radiant
     wheel_qdot = [
-        -2 * np.pi - wheel_qdot_bound_margin,
-        -2 * np.pi + wheel_qdot_bound_margin,
+        -2 * np.pi - wheel_qdot_fast_bound_margin,
+        -2 * np.pi + wheel_qdot_slow_bound_margin,
     ]  # Wheel min_max qdot bound in radiant
 
     # --- Second: set general bound values in radiant, CONSTANT_WITH_FIRST_AND_LAST_DIFFERENT mandatory for qdot --- #
@@ -1568,11 +1593,21 @@ def set_reduced_x_bounds(
     ode_solver: OdeSolver,
     init_file_path: str | os.PathLike | None,
     omega_bound_margin: float = 3.0,
+    omega_fast_bound_margin: float | None = None,
+    omega_slow_bound_margin: float | None = None,
 ) -> tuple[BoundsList, InitialGuessList]:
     """Set bounds for 20 Ding states and the reduced ``theta, omega`` pair."""
 
     if omega_bound_margin <= 0:
         raise ValueError("omega_bound_margin must be strictly positive.")
+    if omega_fast_bound_margin is None:
+        omega_fast_bound_margin = omega_bound_margin
+    if omega_slow_bound_margin is None:
+        omega_slow_bound_margin = omega_bound_margin
+    if omega_fast_bound_margin <= 0:
+        raise ValueError("omega_fast_bound_margin must be strictly positive.")
+    if omega_slow_bound_margin <= 0:
+        raise ValueError("omega_slow_bound_margin must be strictly positive.")
     interpolation_type = InterpolationType.EACH_FRAME
     state_intervals = n_shooting
     if ode_solver.is_direct_collocation:
@@ -1628,10 +1663,10 @@ def set_reduced_x_bounds(
     x_bounds.add(
         "omega",
         min_bound=np.array(
-            [[expected_omega - omega_bound_margin] * 3]
+            [[expected_omega - omega_fast_bound_margin] * 3]
         ),
         max_bound=np.array(
-            [[expected_omega + omega_bound_margin] * 3]
+            [[expected_omega + omega_slow_bound_margin] * 3]
         ),
         interpolation=InterpolationType.CONSTANT_WITH_FIRST_AND_LAST_DIFFERENT,
     )

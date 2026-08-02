@@ -1011,6 +1011,25 @@ def build_argument_parser() -> argparse.ArgumentParser:
         help="Symmetric wheel-speed bound around -2*pi, in rad/s.",
     )
     parser.add_argument(
+        "--acados-wheel-qdot-fast-bound-margin",
+        type=float,
+        default=None,
+        help=(
+            "Optional ACADOS-only lower/fast wheel-speed margin below -2*pi. "
+            "This tightens the OCP state bound without changing the physical "
+            "audit margin from --wheel-qdot-bound-margin."
+        ),
+    )
+    parser.add_argument(
+        "--acados-wheel-qdot-slow-bound-margin",
+        type=float,
+        default=None,
+        help=(
+            "Optional ACADOS-only upper/slow wheel-speed margin above -2*pi. "
+            "Defaults to the physical --wheel-qdot-bound-margin."
+        ),
+    )
+    parser.add_argument(
         "--terminal-qdot-regularization-weight",
         type=float,
         default=0.0,
@@ -3607,6 +3626,22 @@ def _adopt_common_initial_solution_warmup_cycles(
     return args.warmup_cycles_consumed
 
 
+def _effective_wheel_qdot_bound_margins(
+    args: argparse.Namespace,
+) -> tuple[float, float]:
+    """Return fast/slow OCP margins while keeping the physical audit separate."""
+
+    physical_margin = float(args.wheel_qdot_bound_margin)
+    if args.solver != "acados":
+        return physical_margin, physical_margin
+    fast_margin = getattr(args, "acados_wheel_qdot_fast_bound_margin", None)
+    slow_margin = getattr(args, "acados_wheel_qdot_slow_bound_margin", None)
+    return (
+        physical_margin if fast_margin is None else float(fast_margin),
+        physical_margin if slow_margin is None else float(slow_margin),
+    )
+
+
 def _continuation_cache_signature(args: argparse.Namespace) -> str:
     repository_root = Path(__file__).resolve().parents[3]
     payload = {
@@ -3630,6 +3665,8 @@ def _continuation_cache_signature(args: argparse.Namespace) -> str:
         "wheel_qdot_regularization_weight": args.wheel_qdot_regularization_weight,
         "wheel_qdot_regularization_target": args.wheel_qdot_regularization_target,
         "wheel_qdot_bound_margin": args.wheel_qdot_bound_margin,
+        "wheel_qdot_fast_bound_margin": _effective_wheel_qdot_bound_margins(args)[0],
+        "wheel_qdot_slow_bound_margin": _effective_wheel_qdot_bound_margins(args)[1],
         "terminal_qdot_regularization_weight": (
             args.terminal_qdot_regularization_weight
         ),
@@ -3728,6 +3765,8 @@ def _horizon_seed_cache_signature(args: argparse.Namespace) -> str:
         "wheel_qdot_regularization_weight": args.wheel_qdot_regularization_weight,
         "wheel_qdot_regularization_target": args.wheel_qdot_regularization_target,
         "wheel_qdot_bound_margin": args.wheel_qdot_bound_margin,
+        "wheel_qdot_fast_bound_margin": _effective_wheel_qdot_bound_margins(args)[0],
+        "wheel_qdot_slow_bound_margin": _effective_wheel_qdot_bound_margins(args)[1],
         "terminal_qdot_regularization_weight": (
             args.terminal_qdot_regularization_weight
         ),
@@ -3807,6 +3846,8 @@ def _codegen_signature(args: argparse.Namespace) -> str:
         "wheel_qdot_regularization_weight": args.wheel_qdot_regularization_weight,
         "wheel_qdot_regularization_target": args.wheel_qdot_regularization_target,
         "wheel_qdot_bound_margin": args.wheel_qdot_bound_margin,
+        "wheel_qdot_fast_bound_margin": _effective_wheel_qdot_bound_margins(args)[0],
+        "wheel_qdot_slow_bound_margin": _effective_wheel_qdot_bound_margins(args)[1],
         "terminal_qdot_regularization_weight": (
             args.terminal_qdot_regularization_weight
         ),
@@ -13824,6 +13865,23 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
         raise ValueError("--terminal-qdot-regularization-weight must be non-negative.")
     if args.wheel_qdot_bound_margin <= 0:
         raise ValueError("--wheel-qdot-bound-margin must be strictly positive.")
+    for option_name in (
+        "acados_wheel_qdot_fast_bound_margin",
+        "acados_wheel_qdot_slow_bound_margin",
+    ):
+        margin = getattr(args, option_name)
+        if margin is None:
+            continue
+        cli_name = "--" + option_name.replace("_", "-")
+        if args.solver != "acados":
+            raise ValueError(f"{cli_name} is only available with ACADOS.")
+        if margin <= 0:
+            raise ValueError(f"{cli_name} must be strictly positive.")
+        if margin > args.wheel_qdot_bound_margin:
+            raise ValueError(
+                f"{cli_name} cannot exceed --wheel-qdot-bound-margin because "
+                "the ACADOS internal bound must remain inside the physical audit bound."
+            )
 
     if args.acados_proximal_control_weights is not None:
         args.control_regularization_weight = args.acados_proximal_control_weights[0]
@@ -14124,6 +14182,8 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
         "wheel_qdot_regularization_weight": args.wheel_qdot_regularization_weight,
         "wheel_qdot_regularization_target": args.wheel_qdot_regularization_target,
         "wheel_qdot_bound_margin": args.wheel_qdot_bound_margin,
+        "wheel_qdot_fast_bound_margin": _effective_wheel_qdot_bound_margins(args)[0],
+        "wheel_qdot_slow_bound_margin": _effective_wheel_qdot_bound_margins(args)[1],
         "terminal_qdot_regularization_weight": (
             args.terminal_qdot_regularization_weight
         ),
@@ -14360,6 +14420,10 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
             f"wheel_qdot_regularization_target: {args.wheel_qdot_regularization_target}"
         )
         print(f"wheel_qdot_bound_margin: {args.wheel_qdot_bound_margin}")
+        print(
+            "wheel_qdot_internal_bound_margins_fast_slow: "
+            f"{_effective_wheel_qdot_bound_margins(args)}"
+        )
         print(
             "terminal_qdot_regularization_weight: "
             f"{args.terminal_qdot_regularization_weight}"

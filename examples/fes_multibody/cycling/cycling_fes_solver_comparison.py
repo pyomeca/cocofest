@@ -104,6 +104,8 @@ BENCHMARK_CONFIGURATION_FIELDS = (
     "pulse_width_active_margin",
     "wheel_qdot_regularization_target",
     "wheel_qdot_bound_margin",
+    "acados_wheel_qdot_fast_bound_margin",
+    "acados_wheel_qdot_slow_bound_margin",
     "acados_wheel_q_slack",
     "acados_wheel_qdot_slack",
     "acados_terminal_wheel_q_slack",
@@ -1299,6 +1301,8 @@ def _solver_config(
     wheel_qdot_regularization_weight: float,
     wheel_qdot_regularization_target: float,
     wheel_qdot_bound_margin: float,
+    acados_wheel_qdot_fast_bound_margin: float | None,
+    acados_wheel_qdot_slow_bound_margin: float | None,
     terminal_qdot_regularization_weight: float,
     terminal_qdot_regularization_target_source: str,
     first_node_wheel_q_slack: float,
@@ -1428,6 +1432,12 @@ def _solver_config(
             wheel_qdot_regularization_weight=wheel_qdot_regularization_weight,
             wheel_qdot_regularization_target=wheel_qdot_regularization_target,
             wheel_qdot_bound_margin=wheel_qdot_bound_margin,
+            acados_wheel_qdot_fast_bound_margin=(
+                acados_wheel_qdot_fast_bound_margin
+            ),
+            acados_wheel_qdot_slow_bound_margin=(
+                acados_wheel_qdot_slow_bound_margin
+            ),
             terminal_qdot_regularization_weight=(terminal_qdot_regularization_weight),
             terminal_qdot_regularization_target_source=(
                 terminal_qdot_regularization_target_source
@@ -1572,6 +1582,12 @@ def _solver_config(
             wheel_qdot_regularization_weight=wheel_qdot_regularization_weight,
             wheel_qdot_regularization_target=wheel_qdot_regularization_target,
             wheel_qdot_bound_margin=wheel_qdot_bound_margin,
+            acados_wheel_qdot_fast_bound_margin=(
+                acados_wheel_qdot_fast_bound_margin
+            ),
+            acados_wheel_qdot_slow_bound_margin=(
+                acados_wheel_qdot_slow_bound_margin
+            ),
             terminal_qdot_regularization_weight=(terminal_qdot_regularization_weight),
             terminal_qdot_regularization_target_source=(
                 terminal_qdot_regularization_target_source
@@ -3022,6 +3038,8 @@ def main(
     acados_wheel_qdot_regularization_weight: float | None = None,
     wheel_qdot_regularization_target: float = -float(2 * np.pi),
     wheel_qdot_bound_margin: float = 3.0,
+    acados_wheel_qdot_fast_bound_margin: float | None = None,
+    acados_wheel_qdot_slow_bound_margin: float | None = None,
     terminal_qdot_regularization_weight: float = 0.0,
     terminal_qdot_regularization_target_source: str = "previous",
     first_node_wheel_q_slack: float = 0.0,
@@ -3252,6 +3270,8 @@ def main(
         wheel_qdot_regularization_weight=wheel_qdot_regularization_weight,
         wheel_qdot_regularization_target=wheel_qdot_regularization_target,
         wheel_qdot_bound_margin=wheel_qdot_bound_margin,
+        acados_wheel_qdot_fast_bound_margin=None,
+        acados_wheel_qdot_slow_bound_margin=None,
         terminal_qdot_regularization_weight=terminal_qdot_regularization_weight,
         terminal_qdot_regularization_target_source=(
             terminal_qdot_regularization_target_source
@@ -3367,6 +3387,12 @@ def main(
         ),
         wheel_qdot_regularization_target=wheel_qdot_regularization_target,
         wheel_qdot_bound_margin=wheel_qdot_bound_margin,
+        acados_wheel_qdot_fast_bound_margin=(
+            acados_wheel_qdot_fast_bound_margin
+        ),
+        acados_wheel_qdot_slow_bound_margin=(
+            acados_wheel_qdot_slow_bound_margin
+        ),
         terminal_qdot_regularization_weight=terminal_qdot_regularization_weight,
         terminal_qdot_regularization_target_source=(
             terminal_qdot_regularization_target_source
@@ -4693,6 +4719,24 @@ def build_cli() -> argparse.ArgumentParser:
     )
     parser.add_argument("--wheel-qdot-bound-margin", type=float, default=3.0)
     parser.add_argument(
+        "--acados-wheel-qdot-fast-bound-margin",
+        type=float,
+        default=None,
+        help=(
+            "Tighten only the ACADOS lower/fast wheel-speed state bound; "
+            "the physical audit keeps --wheel-qdot-bound-margin."
+        ),
+    )
+    parser.add_argument(
+        "--acados-wheel-qdot-slow-bound-margin",
+        type=float,
+        default=None,
+        help=(
+            "Optional ACADOS upper/slow wheel-speed state margin; defaults "
+            "to the physical audit margin."
+        ),
+    )
+    parser.add_argument(
         "--terminal-qdot-regularization-weight", type=float, default=0.0
     )
     parser.add_argument(
@@ -5190,6 +5234,12 @@ if __name__ == "__main__":
         acados_wheel_qdot_regularization_weight=args.acados_wheel_qdot_regularization_weight,
         wheel_qdot_regularization_target=args.wheel_qdot_regularization_target,
         wheel_qdot_bound_margin=args.wheel_qdot_bound_margin,
+        acados_wheel_qdot_fast_bound_margin=(
+            args.acados_wheel_qdot_fast_bound_margin
+        ),
+        acados_wheel_qdot_slow_bound_margin=(
+            args.acados_wheel_qdot_slow_bound_margin
+        ),
         terminal_qdot_regularization_weight=(args.terminal_qdot_regularization_weight),
         terminal_qdot_regularization_target_source=(
             args.terminal_qdot_regularization_target_source

@@ -198,6 +198,15 @@ La conclusion est que le prochain levier doit améliorer le **primal transféré
 sur les équations discrètes**, et non ajouter un nouveau mécanisme de
 globalisation autour du même seed.
 
+Le run `30754413003` ajoute un défaut plus précis : les nœuds respectent
+presque la borne de cadence, mais la progression angulaire entre deux nœuds
+implique un dépassement rapide de `0.376–0.403 rad/s`. Deux écrans sont prêts :
+garde interne ACADOS asymétrique à `2.60`, puis `2.55 rad/s`, tout en gardant
+la marge physique et l'audit à `3.0 rad/s`. Les tests unitaires séparent ces
+deux notions. Si aucun écran ne passe cinq RHO, tester 60 nœuds avec
+move-blocking des 30 PW; augmenter seulement les sous-pas IRK ne contraint pas
+les stages internes.
+
 ### 3.5 Alpaqa et autres voies archivées
 
 - Alpaqa : intégration non fonctionnelle sur cette formulation.
