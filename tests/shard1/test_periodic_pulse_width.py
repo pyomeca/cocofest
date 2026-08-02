@@ -631,6 +631,16 @@ def test_high_accuracy_trace_rollout_reintegrates_controls_and_fatigue():
     )
 
 
+def test_solver_comparison_cli_exposes_high_accuracy_trace_audit():
+    parser = comparison_example.build_cli()
+
+    assert parser.parse_args([]).validate_integrator_maps is False
+    assert (
+        parser.parse_args(["--validate-integrator-maps"]).validate_integrator_maps
+        is True
+    )
+
+
 def test_wheel_periodicity_diagnostic_supports_reduced_theta_state():
     class Variables(dict):
         def __init__(self, values, shape):

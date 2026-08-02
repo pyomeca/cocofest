@@ -3157,6 +3157,7 @@ def main(
     warmup_state_comparison_limit: int = 12,
     state_comparison_limit: int = 12,
     print_traces: bool = False,
+    validate_integrator_maps: bool = False,
     ipopt_profile: str = "historical",
     ipopt_model_formulation: str | None = None,
     ipopt_torque_application: str | None = None,
@@ -3490,6 +3491,8 @@ def main(
         setattr(ipopt_args, name, value)
     ipopt_args.compact_rho_output = compact_rho_output
     acados_args.compact_rho_output = compact_rho_output
+    ipopt_args.validate_integrator_maps = validate_integrator_maps
+    acados_args.validate_integrator_maps = validate_integrator_maps
     acados_args.acados_integrator_type = acados_integrator_type
     acados_args.acados_collocation_type = acados_collocation_type
     acados_args.acados_sim_stages = acados_sim_stages
@@ -5042,6 +5045,14 @@ def build_cli() -> argparse.ArgumentParser:
     parser.add_argument("--warmup-state-comparison-limit", type=int, default=12)
     parser.add_argument("--print-traces", action="store_true")
     parser.add_argument(
+        "--validate-integrator-maps",
+        action="store_true",
+        help=(
+            "Reintegrate the exported RHO trace with the common high-accuracy "
+            "DOP853 audit used by the scientific collocation gate."
+        ),
+    )
+    parser.add_argument(
         "--output-json",
         default=None,
         help="Optional path for a compact JSON summary of every selected solver.",
@@ -5087,6 +5098,7 @@ if __name__ == "__main__":
         full_contact_position_all_nodes=(args.full_contact_position_all_nodes),
         n_threads=args.n_threads,
         compact_rho_output=args.compact_rho_output,
+        validate_integrator_maps=args.validate_integrator_maps,
         resistive_torque=args.resistive_torque,
         acados_dir=args.acados_dir,
         codegen_tag=args.codegen_tag,
