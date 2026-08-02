@@ -5786,6 +5786,8 @@ def test_github_acados_runner_uses_reference_and_option_profiles_sequentially():
     assert "sqp-irk-fast-guard-2p6-phase-one-all" in workflow
     assert "sqp-byrd-fast-guard-2p6" in workflow
     assert "--allow-partial-receding-horizon-solution-output" in workflow
+    assert "solver_options+=(--validate-integrator-maps)" in workflow
+    assert '--arg recovery_only "$ACADOS_RECOVERY_ONLY"' in workflow
     assert "ipopt-radau5-reduced" in workflow
     assert "madnlp-mumps-radau5-reduced" in workflow
     assert "ipopt-radau5-full" in workflow
@@ -5921,7 +5923,9 @@ def test_github_acados_runner_uses_reference_and_option_profiles_sequentially():
     assert "expected_reference_count=2" in workflow
     assert "expected_reference_count=1" in workflow
     assert '--arg homotopy_only "$ACADOS_HOMOTOPY_ONLY"' in workflow
-    assert '$extended == "true" and $homotopy_only != "true"' in workflow
+    assert '$extended == "true" and' in workflow
+    assert '$homotopy_only != "true" and' in workflow
+    assert '$recovery_only != "true"' in workflow
     assert (
         'if [[ "$ACADOS_HOMOTOPY_ONLY" == "true" ]]; then' in workflow
     )

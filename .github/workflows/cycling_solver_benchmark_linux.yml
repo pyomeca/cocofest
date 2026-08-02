@@ -814,6 +814,11 @@ jobs:
                 "$case_dir/validated-rho-trajectory.npz"
                 --allow-partial-receding-horizon-solution-output
               )
+              if [[ "$ACADOS_RECOVERY_ONLY" == "true" ]]; then
+                # Reintegrate the whole certified prefix with the same dense
+                # DOP853 audit before accepting a recovery-induced branch.
+                solver_options+=(--validate-integrator-maps)
+              fi
             fi
             if [[ "$variant" == "sqp-byrd-terminal-homotopy-cadence-reg-1-irk" ]]; then
               # The certified RHO seed lies within roughly 1e-8 rad of the
@@ -1225,10 +1230,13 @@ jobs:
             result="acados-smoke-results/${case_name}/result.json"
             jq -e \
               --arg extended "$extended_campaign" \
-              --arg homotopy_only "$ACADOS_HOMOTOPY_ONLY" '
+              --arg homotopy_only "$ACADOS_HOMOTOPY_ONLY" \
+              --arg recovery_only "$ACADOS_RECOVERY_ONLY" '
               (.configurations.acados.use_sx == true) and
               (
-                if $extended == "true" and $homotopy_only != "true"
+                if $extended == "true" and
+                   $homotopy_only != "true" and
+                   $recovery_only != "true"
                 then .configurations.acados.n_windows > 5
                 else true
                 end

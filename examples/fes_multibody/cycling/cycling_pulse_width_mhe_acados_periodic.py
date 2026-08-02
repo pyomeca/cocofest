@@ -15462,6 +15462,7 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
     transfer_qdot_projection_summaries = []
     transfer_mechanical_restoration_summaries = []
     transfer_ding_force_compensation_summaries = []
+    transfer_phase_one_summaries = []
     transfer_bound_homotopy_summaries = []
     transfer_sqp_restart_summaries = []
     maxiter_retry_summaries = []
@@ -16092,6 +16093,7 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
                     else args.acados_transfer_phase_one_lookback_nodes
                 ),
             )
+            phase_one_start = perf_counter()
             phase_one_summary = project_full_dynamics_initial_guess(
                 _nmpc,
                 proximity_weight=args.full_dynamics_phase_one_proximity_weight,
@@ -16107,6 +16109,9 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
                     else None
                 ),
             )
+            phase_one_summary["window"] = cycle_idx
+            phase_one_summary["wall_time_s"] = perf_counter() - phase_one_start
+            transfer_phase_one_summaries.append(phase_one_summary)
             if echo:
                 print(
                     "transfer_phase_one: "
@@ -16121,6 +16126,7 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
                     f"{phase_one_summary['state_change_by_block']} "
                     f"start_node={phase_one_summary['start_node']} "
                     f"mutable_blocks={phase_one_summary['mutable_blocks']} "
+                    f"wall_time_s={phase_one_summary['wall_time_s']:.6g} "
                     f"scaled_by_block_before="
                     f"{phase_one_summary['scaled_by_block_before']} "
                     f"scaled_by_block_after="
@@ -16819,6 +16825,8 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
         summary["compiled_nlp_reuse"] = compiled_nlp_tracker.summary()
         if cycle_boundary_homotopy_summary is not None:
             summary["cycle_boundary_homotopy_summary"] = cycle_boundary_homotopy_summary
+        if transfer_phase_one_summaries:
+            summary["transfer_phase_one_summaries"] = transfer_phase_one_summaries
         attach_exact_initial_nlp_audits(summary, nmpc)
         return summary
     if (
@@ -16890,6 +16898,8 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
         summary[
             "transfer_ding_force_compensation_summaries"
         ] = transfer_ding_force_compensation_summaries
+    if transfer_phase_one_summaries:
+        summary["transfer_phase_one_summaries"] = transfer_phase_one_summaries
     if transfer_bound_homotopy_summaries:
         summary["transfer_bound_homotopy_summaries"] = transfer_bound_homotopy_summaries
     if transfer_sqp_restart_summaries:
