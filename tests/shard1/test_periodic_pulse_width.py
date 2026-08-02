@@ -631,6 +631,41 @@ def test_high_accuracy_trace_rollout_reintegrates_controls_and_fatigue():
     )
 
 
+def test_high_accuracy_trace_rollout_selects_collocation_shooting_nodes():
+    class Variables(dict):
+        def __init__(self, values, shape):
+            super().__init__(values)
+            self.shape = shape
+
+    state_variables = Variables({"A_Test": SimpleNamespace(index=[0])}, shape=1)
+    control_variables = Variables({"u": SimpleNamespace(index=[0])}, shape=1)
+    nlp = SimpleNamespace(
+        states=state_variables,
+        controls=control_variables,
+        numerical_data_timeseries=None,
+        dynamics_func=lambda _time, _state, _control, _parameters, _algebraic, _data: np.array(
+            [-1.0]
+        ),
+    )
+    nmpc = SimpleNamespace(nlp=[nlp], cycle_duration=1.0, cycle_len=2)
+
+    # Radau-5 stores six state columns per shooting interval: one endpoint
+    # followed by five collocation stages.  Only columns 0, 6 and 12 are the
+    # shooting nodes against which the independent rollout must be compared.
+    diagnostic = periodic_example.high_accuracy_trace_rollout_diagnostics(
+        nmpc,
+        {"A_Test": np.linspace(10.0, 9.0, 13)[None, :]},
+        {"u": np.zeros((1, 2))},
+        cycle_count=1,
+        capacity_scales={"A_Test": 10.0},
+    )
+
+    assert diagnostic["available"] is True
+    assert diagnostic["state_node_stride"] == 6
+    assert diagnostic["maximum_absolute_endpoint_error"] < 1e-11
+    np.testing.assert_allclose(diagnostic["fatigue_auc_cycles"], 0.05, atol=1e-11)
+
+
 def test_solver_comparison_cli_exposes_high_accuracy_trace_audit():
     parser = comparison_example.build_cli()
 

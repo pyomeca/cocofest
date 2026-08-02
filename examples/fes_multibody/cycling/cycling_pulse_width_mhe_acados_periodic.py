@@ -8190,26 +8190,52 @@ def high_accuracy_trace_rollout_diagnostics(
     intervals_per_cycle = int(nmpc.cycle_len)
     expected_intervals = cycle_count * intervals_per_cycle
 
-    def stack_traces(traces, variables, expected_nodes, label):
+    def stack_traces(
+        traces,
+        variables,
+        expected_nodes,
+        label,
+        *,
+        allow_collocation_intermediates=False,
+    ):
         values = np.zeros((variables.shape, expected_nodes))
+        common_stride = None
         for key in variables.keys():
             if key not in traces:
                 raise ValueError(f"Missing {label} trace '{key}'.")
             trace = np.atleast_2d(np.asarray(traces[key], dtype=float))
+            stride = 1
+            if trace.shape[1] != expected_nodes and allow_collocation_intermediates:
+                interval_count = expected_nodes - 1
+                trace_interval_columns = trace.shape[1] - 1
+                stride, remainder = divmod(trace_interval_columns, interval_count)
+                if remainder == 0 and stride >= 1:
+                    trace = trace[:, ::stride]
             if trace.shape[1] != expected_nodes:
                 raise ValueError(
                     f"{label.capitalize()} trace '{key}' has {trace.shape[1]} "
                     f"nodes, expected {expected_nodes}."
                 )
+            if common_stride is None:
+                common_stride = stride
+            elif stride != common_stride:
+                raise ValueError(
+                    f"The exported {label} traces do not share one node layout "
+                    f"({common_stride} versus {stride} columns per interval)."
+                )
             values[variables[key].index, :] = trace
         if not np.all(np.isfinite(values)):
             raise ValueError(f"The exported {label} traces are not finite.")
-        return values
+        return values, int(common_stride or 1)
 
-    states = stack_traces(
-        state_traces, nlp.states, expected_intervals + 1, "state"
+    states, state_node_stride = stack_traces(
+        state_traces,
+        nlp.states,
+        expected_intervals + 1,
+        "state",
+        allow_collocation_intermediates=True,
     )
-    controls = stack_traces(
+    controls, _ = stack_traces(
         control_traces, nlp.controls, expected_intervals, "control"
     )
     dt = float(nmpc.cycle_duration) / intervals_per_cycle
@@ -8328,6 +8354,7 @@ def high_accuracy_trace_rollout_diagnostics(
         "absolute_tolerance": 1e-13,
         "cycle_count": int(cycle_count),
         "interval_count": int(expected_intervals),
+        "state_node_stride": state_node_stride,
         "reference_evaluations": int(reference_evaluations),
         "maximum_absolute_endpoint_error": maximum_absolute_endpoint_error,
         "maximum_scaled_endpoint_error": maximum_scaled_endpoint_error,
