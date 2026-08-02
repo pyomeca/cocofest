@@ -797,6 +797,20 @@ jobs:
                 --acados-wheel-qdot-fast-bound-margin 2.55
               )
             fi
+            if [[ "$mechanics" == "full" && "$variant" == sqp-irk-two-stage-fast-guard-* ]]; then
+              # Give MAXITER one genuine second chance on the same RHO from
+              # the best stored SQP iterate. If that retry fails, stop before
+              # Bioptim can advance the window with an uncertified solution.
+              # The 100-RHO 2.60 run otherwise alternated MAXITER/success from
+              # RHO 81 because the failed primal was shifted into the next OCP.
+              solver_options+=(
+                --acados-store-iterates
+                --acados-maxiter-retries 1
+                --acados-maxiter-retry-iterations 20
+                --acados-maxiter-retry-feasibility-tolerance 0.0025
+                --max-consecutive-failing 1
+              )
+            fi
             if [[ "$variant" == "sqp-byrd-terminal-homotopy-cadence-reg-1-irk" ]]; then
               # The certified RHO seed lies within roughly 1e-8 rad of the
               # strict terminal face. Restore a more interior primal before

@@ -350,6 +350,20 @@ la contrainte aux nœuds, pas aux stages IRK internes. Si l'excursion cachée
 persiste, l'étape rigoureuse suivante est un maillage à 60 nœuds avec 30 PW
 maintenues par paires, plutôt qu'une augmentation des sous-pas IRK qui n'ajoute
 aucune contrainte aux stages internes.
+
+La garde full 2.60 passe `30/30` RHO sur le run `30758998720` : statut ACADOS
+zéro à chaque fenêtre, audit physique complet, médiane chaude solveur
+`0.102 s` et mur `0.120 s` (`p90 = 0.209 s`). La vitesse moyenne minimale
+entre nœuds vaut `-9.145 rad/s`, encore `0.138 rad/s` à l'intérieur de la
+borne physique. À 100 RHO (`30759393829`), le préfixe strict atteint 80 RHO,
+puis les statuts alternent MAXITER/succès. Cette alternance n'est pas une
+preuve d'infaisabilité par fatigue : le premier MAXITER contient un meilleur
+itéré avec défaut dynamique `6.7e-6`, mais Bioptim avançait ensuite la fenêtre
+avec l'itéré final non certifié. Les variantes full utilisent désormais une
+seconde tentative sur le **même RHO** depuis le meilleur itéré stocké et
+s'arrêtent immédiatement si elle échoue; aucune fenêtre non certifiée ne doit
+alimenter la suivante. Ce retry doit être recertifié à 5 puis 100 RHO.
+
 Le mode workflow `cycles=acados_guard` rejoue uniquement les deux références
 et ces quatre cas full/reduced, sans reconstruire l'écran historique complet.
 
