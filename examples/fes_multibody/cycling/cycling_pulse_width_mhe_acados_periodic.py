@@ -5012,7 +5012,15 @@ def run_acados_control_homotopy(
                     periodic_nmpc, solution
                 )
             if not stage_accepted:
-                break
+                # Every following stage has strictly looser control bounds.
+                # A QP failure with controls fixed must therefore not prevent
+                # the first finite radius from being tried (the previous code
+                # reported that no finite radius was accepted without having
+                # evaluated one). Likewise, a larger radius may recover a
+                # failed smaller-radius subproblem from the original seed.
+                summaries[-1]["continued_to_more_relaxed_stage"] = bool(
+                    stage_index + 1 < len(stages)
+                )
     finally:
         periodic_nmpc._cocofest_fix_controls_to_warmup = False
         restore_pulse_width_control_bounds(periodic_nmpc)
@@ -13863,7 +13871,10 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
     args.acados_terminal_wheel_q_target_slack = _terminal_wheel_q_target_slack(args)
     if args.terminal_qdot_regularization_weight < 0:
         raise ValueError("--terminal-qdot-regularization-weight must be non-negative.")
-    if args.wheel_qdot_bound_margin <= 0:
+    if (
+        not np.isfinite(args.wheel_qdot_bound_margin)
+        or args.wheel_qdot_bound_margin <= 0
+    ):
         raise ValueError("--wheel-qdot-bound-margin must be strictly positive.")
     for option_name in (
         "acados_wheel_qdot_fast_bound_margin",
@@ -13875,7 +13886,7 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
         cli_name = "--" + option_name.replace("_", "-")
         if args.solver != "acados":
             raise ValueError(f"{cli_name} is only available with ACADOS.")
-        if margin <= 0:
+        if not np.isfinite(margin) or margin <= 0:
             raise ValueError(f"{cli_name} must be strictly positive.")
         if margin > args.wheel_qdot_bound_margin:
             raise ValueError(
@@ -14424,6 +14435,13 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
             "wheel_qdot_internal_bound_margins_fast_slow: "
             f"{_effective_wheel_qdot_bound_margins(args)}"
         )
+        if args.solver == "acados" and args.mechanical_formulation == "full":
+            fast_margin, slow_margin = _effective_wheel_qdot_bound_margins(args)
+            print(
+                "full_physical_crank_velocity_constraint_bounds_rad_s: "
+                f"({args.wheel_qdot_regularization_target - fast_margin}, "
+                f"{args.wheel_qdot_regularization_target + slow_margin})"
+            )
         print(
             "terminal_qdot_regularization_weight: "
             f"{args.terminal_qdot_regularization_weight}"

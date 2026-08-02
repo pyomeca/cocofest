@@ -10,7 +10,7 @@ on:
         default: ubuntu-24.04
         type: string
       cycles:
-        description: Number of RHO solves, "screen", "acados", "acados_homotopy", or "full_horizon"
+        description: Number of RHO solves, "screen", "acados", "acados_guard", "acados_homotopy", or "full_horizon"
         required: true
         default: "100"
         type: string
@@ -582,6 +582,7 @@ jobs:
           ACADOS_SMOKE_RHOS: ${{ inputs.acados_smoke_rhos }}
           ACADOS_OPTION_RHOS: ${{ inputs.acados_option_rhos }}
           ACADOS_HOMOTOPY_ONLY: ${{ inputs.cycles == 'acados_homotopy' }}
+          ACADOS_CADENCE_GUARD_ONLY: ${{ inputs.cycles == 'acados_guard' }}
           BENCHMARK_ASSISTANCE: ${{ inputs.crank_assistance_nm }}
           BENCHMARK_Q_SLACK: ${{ inputs.terminal_wheel_q_slack }}
           COCOFEST_BENCHMARK_COMMIT: ${{ github.sha }}
@@ -637,6 +638,20 @@ jobs:
                 --common-initial-solution-output
                 "$GITHUB_WORKSPACE/acados-smoke-results/reference-full-feasible-seed.npz"
               )
+            elif [[ "$variant" == "sqp-irk-reference" && "$mechanics" == "reduced" ]]; then
+              # Persist the first reduced ACADOS solution as well. Its shooting
+              # trajectory is a substantially closer seed for the tightened
+              # cadence boxes than the collocation bridge.
+              common_seed_options+=(
+                --common-initial-solution-output
+                "$GITHUB_WORKSPACE/acados-smoke-results/reference-reduced-feasible-seed.npz"
+              )
+            elif [[ "$variant" == sqp-irk-two-stage-fast-guard-* ]]; then
+              common_seed="$GITHUB_WORKSPACE/acados-smoke-results/reference-${mechanics}-feasible-seed.npz"
+              if [[ ! -f "$common_seed" ]]; then
+                echo "The cadence-guard case requires its preceding ACADOS reference seed." >&2
+                return 2
+              fi
             elif [[ ( "$variant" == "sqp-irk-two-stage-cadence-reg-1" || "$variant" == "sqp-irk-cadence-reg-1-rollout-guard" || "$variant" == "sqp-irk-cadence-reg-1-best-retry" || "$variant" == "sqp-byrd-omojokun-cadence-reg-1-irk" || "$variant" == "sqp-byrd-terminal-homotopy-cadence-reg-1-irk" || "$variant" == "sqp-byrd-rollout-accept-cadence-reg-1-irk" || "$variant" == "sqp-byrd-projected-selector-cadence-reg-1-irk" ) && "$mechanics" == "full" ]]; then
               common_seed="$GITHUB_WORKSPACE/acados-smoke-results/reference-full-feasible-seed.npz"
               if [[ ! -f "$common_seed" ]]; then
@@ -938,7 +953,21 @@ jobs:
             echo "$solver_exit" > "$case_dir/process-exit-code.txt"
           }
 
-          if [[ "$ACADOS_HOMOTOPY_ONLY" == "true" ]]; then
+          if [[ "$ACADOS_CADENCE_GUARD_ONLY" == "true" ]]; then
+            # Focused physical A/B: preserve the common references, then test
+            # only the two asymmetric fast-side cadence guards. This avoids
+            # rebuilding the broad historical option screen.
+            printf '%s\n' \
+              sqp-irk-reference-full \
+              sqp-irk-reference-reduced \
+              > acados-smoke-results/reference-cases.txt
+            run_case sqp-irk-reference full "$ACADOS_SMOKE_RHOS" SQP IRK 5 5
+            run_case sqp-irk-reference reduced "$ACADOS_SMOKE_RHOS" SQP IRK 5 5
+            for mechanics in full reduced; do
+              run_case sqp-irk-two-stage-fast-guard-2p6 "$mechanics" "$ACADOS_SMOKE_RHOS" SQP IRK 5 5
+              run_case sqp-irk-two-stage-fast-guard-2p55 "$mechanics" "$ACADOS_SMOKE_RHOS" SQP IRK 5 5
+            done
+          elif [[ "$ACADOS_HOMOTOPY_ONLY" == "true" ]]; then
             # Focused causal A/B: one feasible reference seed, then the same
             # Byrd configuration with and without terminal-bound tightening.
             # Avoid rebuilding the broad option screen already covered by the
@@ -1463,7 +1492,7 @@ jobs:
 
   benchmark:
     name: ${{ matrix.case_slug }} — sequential full/reduced
-    if: ${{ inputs.cycles != 'screen' && inputs.cycles != 'acados' && inputs.cycles != 'acados_homotopy' && inputs.cycles != 'full_horizon' }}
+    if: ${{ inputs.cycles != 'screen' && inputs.cycles != 'acados' && inputs.cycles != 'acados_guard' && inputs.cycles != 'acados_homotopy' && inputs.cycles != 'full_horizon' }}
     needs: prepare-seed
     runs-on: ${{ inputs.runner_label }}
     timeout-minutes: ${{ matrix.timeout_minutes }}
@@ -2271,7 +2300,7 @@ jobs:
 
   report:
     name: Aggregate Kevin benchmark
-    if: ${{ always() && inputs.cycles != 'screen' && inputs.cycles != 'acados' && inputs.cycles != 'acados_homotopy' && inputs.cycles != 'full_horizon' }}
+    if: ${{ always() && inputs.cycles != 'screen' && inputs.cycles != 'acados' && inputs.cycles != 'acados_guard' && inputs.cycles != 'acados_homotopy' && inputs.cycles != 'full_horizon' }}
     needs: [benchmark, acados-smoke]
     runs-on: ubuntu-24.04
     permissions:

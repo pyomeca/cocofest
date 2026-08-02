@@ -322,13 +322,36 @@ L'audit du run `30754413003` a aussi séparé une réussite aux nœuds d'une
 violation cachée entre nœuds : la vitesse moyenne d'intervalle dépasse la
 borne rapide de `0.376–0.403 rad/s`, alors que la vitesse nodale ne la dépasse
 presque pas. La nouvelle expérience ACADOS conserve la borne physique et
-l'audit à `-2*pi +/- 3 rad/s`, mais resserre uniquement la borne interne du
-côté rapide à `-2*pi-2.60`, puis `-2*pi-2.55 rad/s`. Le côté lent reste à
+l'audit à `-2*pi +/- 3 rad/s`, mais resserre uniquement le côté rapide de
+l'OCP à `-2*pi-2.60`, puis `-2*pi-2.55 rad/s`. Le côté lent reste à
 `-2*pi+3 rad/s`; une garde symétrique réduirait inutilement la faisabilité.
-Ces marges sont des candidats de CI, pas encore des réglages certifiés. Si
-elles échouent, l'étape rigoureuse suivante est un maillage à 60 nœuds avec
-30 PW maintenues par paires, plutôt qu'une augmentation des sous-pas IRK qui
-n'ajoute aucune contrainte aux stages internes.
+
+L'implémentation dépend de la formulation mécanique. En reduced, `omega` est
+la vitesse physique : la garde est donc une borne d'état. En full, `qdot[2]`
+est une vitesse généralisée relative et ne doit pas être confondue avec la
+cadence physique. La garde est appliquée à la contrainte non linéaire
+cinématique calculée à partir de la vitesse des marqueurs main et centre du
+pédalier. L'enveloppe large des trois `qdot` reste nécessaire au mouvement du
+bras sur la variété de contact.
+
+Le run `30757368286` n'était pas un test valide de cette garde full :
+l'enveloppe `qdot` réélargissait silencieusement l'ancienne boîte et les
+solutions 2.60/2.55 étaient identiques à la référence. Pour reduced, le pont
+de collocation était tronqué sur la nouvelle borne avant l'homotopie, ce qui
+faisait passer le défaut dynamique d'environ `0.0038` à `0.319 rad/s`; le
+stage à PW fixes échouait avant même qu'un rayon fini soit essayé. Le correctif
+utilise maintenant le premier tir ACADOS convergé de la même formulation comme
+seed et autorise l'homotopie à essayer les rayons plus larges après l'échec du
+stage fixe. Ces changements sont testés localement, mais les marges 2.60/2.55
+restent à recertifier avec ACADOS 0.5.5 en CI.
+
+Cette garde demeure heuristique : avec le tir multiple actuel, ACADOS impose
+la contrainte aux nœuds, pas aux stages IRK internes. Si l'excursion cachée
+persiste, l'étape rigoureuse suivante est un maillage à 60 nœuds avec 30 PW
+maintenues par paires, plutôt qu'une augmentation des sous-pas IRK qui n'ajoute
+aucune contrainte aux stages internes.
+Le mode workflow `cycles=acados_guard` rejoue uniquement les deux références
+et ces quatre cas full/reduced, sans reconstruire l'écran historique complet.
 
 ### 3.5 Choisir le solveur selon le niveau de garantie
 

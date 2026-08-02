@@ -1217,6 +1217,8 @@ def prepare_nmpc(
         ),
         physical_crank_velocity_target=wheel_qdot_regularization_target,
         physical_crank_velocity_margin=wheel_qdot_bound_margin,
+        physical_crank_velocity_fast_margin=wheel_qdot_fast_bound_margin,
+        physical_crank_velocity_slow_margin=wheel_qdot_slow_bound_margin,
         physical_crank_terminal_angle=cycling_info.get(
             "physical_crank_terminal_angle"
         ),
@@ -2106,6 +2108,8 @@ def set_constraints(
     enforce_physical_crank_velocity_bounds: bool = False,
     physical_crank_velocity_target: float = -2.0 * np.pi,
     physical_crank_velocity_margin: float = 3.0,
+    physical_crank_velocity_fast_margin: float | None = None,
+    physical_crank_velocity_slow_margin: float | None = None,
     physical_crank_terminal_angle: float | None = None,
 ):
     constraints = ConstraintList()
@@ -2192,28 +2196,49 @@ def set_constraints(
             raise ValueError(
                 "Reduced mechanics enforce cadence directly through omega bounds."
             )
-        if physical_crank_velocity_margin <= 0.0:
+        if (
+            not np.isfinite(physical_crank_velocity_margin)
+            or physical_crank_velocity_margin <= 0.0
+        ):
             raise ValueError(
                 "The physical crank-velocity margin must be positive."
+            )
+        if physical_crank_velocity_fast_margin is None:
+            physical_crank_velocity_fast_margin = physical_crank_velocity_margin
+        if physical_crank_velocity_slow_margin is None:
+            physical_crank_velocity_slow_margin = physical_crank_velocity_margin
+        if (
+            not np.isfinite(physical_crank_velocity_fast_margin)
+            or physical_crank_velocity_fast_margin <= 0.0
+        ):
+            raise ValueError(
+                "The physical fast-side crank-velocity margin must be positive."
+            )
+        if (
+            not np.isfinite(physical_crank_velocity_slow_margin)
+            or physical_crank_velocity_slow_margin <= 0.0
+        ):
+            raise ValueError(
+                "The physical slow-side crank-velocity margin must be positive."
             )
         constraints.add(
             physical_crank_velocity_all_collocation_points_constraint,
             node=Node.ALL_SHOOTING,
             min_bound=(
-                physical_crank_velocity_target - physical_crank_velocity_margin
+                physical_crank_velocity_target - physical_crank_velocity_fast_margin
             ),
             max_bound=(
-                physical_crank_velocity_target + physical_crank_velocity_margin
+                physical_crank_velocity_target + physical_crank_velocity_slow_margin
             ),
         )
         constraints.add(
             physical_crank_velocity_constraint,
             node=Node.END,
             min_bound=(
-                physical_crank_velocity_target - physical_crank_velocity_margin
+                physical_crank_velocity_target - physical_crank_velocity_fast_margin
             ),
             max_bound=(
-                physical_crank_velocity_target + physical_crank_velocity_margin
+                physical_crank_velocity_target + physical_crank_velocity_slow_margin
             ),
         )
         if physical_crank_terminal_angle is not None:

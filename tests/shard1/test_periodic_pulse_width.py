@@ -180,6 +180,10 @@ def test_full_cadence_constraint_covers_collocation_stages_and_terminal(
         model,
         enforce_start_constraints=False,
         enforce_physical_crank_velocity_bounds=True,
+        physical_crank_velocity_target=-2.0 * np.pi,
+        physical_crank_velocity_margin=3.0,
+        physical_crank_velocity_fast_margin=2.55,
+        physical_crank_velocity_slow_margin=3.0,
     )
 
     assert len(captured) == 2
@@ -187,8 +191,12 @@ def test_full_cadence_constraint_covers_collocation_stages_and_terminal(
         mhe_example.physical_crank_velocity_all_collocation_points_constraint
     )
     assert captured[0][1]["node"] == Node.ALL_SHOOTING
+    assert captured[0][1]["min_bound"] == pytest.approx(-2.0 * np.pi - 2.55)
+    assert captured[0][1]["max_bound"] == pytest.approx(-2.0 * np.pi + 3.0)
     assert captured[1][0] is mhe_example.physical_crank_velocity_constraint
     assert captured[1][1]["node"] == Node.END
+    assert captured[1][1]["min_bound"] == pytest.approx(-2.0 * np.pi - 2.55)
+    assert captured[1][1]["max_bound"] == pytest.approx(-2.0 * np.pi + 3.0)
 
 
 def test_full_transfer_contact_projection_preserves_bound_crank_states():
@@ -3627,6 +3635,81 @@ def test_control_homotopy_does_not_restart_a_linesearch_failure(monkeypatch):
     assert reset_calls == [1]
 
 
+def test_control_homotopy_tries_a_finite_radius_after_fixed_qp_failure(
+    monkeypatch,
+):
+    class FakeAcadosSolver:
+        def reset(self, reset_qp_solver_mem):
+            assert reset_qp_solver_mem == 1
+
+    class FakeSolver:
+        nlp_solver_max_iter = 50
+
+        def set_convergence_tolerance(self, value):
+            self.tolerance = value
+
+    bounds = SimpleNamespace(min=np.array([[0.1, 0.1]]), max=np.array([[0.6, 0.6]]))
+    nmpc = SimpleNamespace(
+        ocp_solver=SimpleNamespace(ocp_solver=FakeAcadosSolver()),
+        nlp=[
+            SimpleNamespace(
+                u_init={
+                    "last_pulse_width_Biceps": SimpleNamespace(
+                        init=np.array([[0.2, 0.4]])
+                    )
+                },
+                u_bounds={"last_pulse_width_Biceps": bounds},
+            )
+        ],
+    )
+    solutions = iter(
+        [
+            SimpleNamespace(
+                status=4,
+                residuals=np.array([150.0, 0.05, 0.0, 0.0]),
+                solver_time_to_optimize=1.0,
+                real_time_to_optimize=1.1,
+            ),
+            SimpleNamespace(
+                status=0,
+                residuals=np.zeros(4),
+                solver_time_to_optimize=2.0,
+                real_time_to_optimize=2.1,
+            ),
+        ]
+    )
+    monkeypatch.setattr(
+        periodic_example,
+        "snapshot_acados_diagnostics",
+        lambda result: {"residuals": result.residuals},
+    )
+    applied = []
+    monkeypatch.setattr(
+        periodic_example,
+        "apply_solution_directly_to_periodic_nmpc_initial_guess",
+        lambda _nmpc, result: applied.append(result.status),
+    )
+
+    summaries = periodic_example.run_acados_control_homotopy(
+        nmpc,
+        FakeSolver(),
+        radii=(1e-5,),
+        convergence_tolerance=2e-2,
+        fixed_control_tolerance=1e-8,
+        max_restarts=0,
+        stage_iterations=None,
+        echo=False,
+        solve_stage=lambda: next(solutions),
+    )
+
+    assert [(item["kind"], item["accepted"]) for item in summaries] == [
+        ("fixed", False),
+        ("radius", True),
+    ]
+    assert summaries[0]["continued_to_more_relaxed_stage"] is True
+    assert applied == [0]
+
+
 def test_control_homotopy_reuses_compiled_acados_options(monkeypatch):
     option_change_flags = []
     runtime_options = []
@@ -5691,6 +5774,8 @@ def test_github_acados_runner_uses_reference_and_option_profiles_sequentially():
     assert "sqp-irk-two-stage-fast-guard-2p55" in workflow
     assert "--acados-wheel-qdot-fast-bound-margin 2.6" in workflow
     assert "--acados-wheel-qdot-fast-bound-margin 2.55" in workflow
+    assert "inputs.cycles == 'acados_guard'" in workflow
+    assert "ACADOS_CADENCE_GUARD_ONLY" in workflow
     assert "ipopt-radau5-reduced" in workflow
     assert "madnlp-mumps-radau5-reduced" in workflow
     assert "ipopt-radau5-full" in workflow
@@ -5886,6 +5971,8 @@ def test_github_acados_runner_uses_reference_and_option_profiles_sequentially():
     assert "run_case sqp-irk-two-stage-cadence-reg-1 reduced" in workflow
     assert "--acados-wheel-qdot-regularization-weight 1" in workflow
     assert "reference-full-feasible-seed.npz" in workflow
+    assert "reference-reduced-feasible-seed.npz" in workflow
+    assert "The cadence-guard case requires its preceding ACADOS reference seed." in workflow
     assert "--common-initial-solution-output" in workflow
     assert '--common-initial-solution "$common_seed"' in workflow
     assert (
@@ -6334,6 +6421,8 @@ def test_full_wheel_speed_bounds_support_an_asymmetric_fast_guard(monkeypatch):
     )
 
     class FakeModel:
+        nb_qdot = 3
+
         @staticmethod
         def bounds_from_ranges(key):
             return Bounds(
@@ -6364,10 +6453,23 @@ def test_full_wheel_speed_bounds_support_an_asymmetric_fast_guard(monkeypatch):
         wheel_qdot_bound_margin=3.0,
         wheel_qdot_fast_bound_margin=2.55,
         wheel_qdot_slow_bound_margin=3.0,
+        coordinate_qdot_bounds=(
+            np.array([-30.0, -31.0, -40.0]),
+            np.array([30.0, 31.0, 40.0]),
+        ),
     )
 
-    np.testing.assert_allclose(bounds["qdot"].min[2], -2.0 * np.pi - 2.55)
-    np.testing.assert_allclose(bounds["qdot"].max[2], -2.0 * np.pi + 3.0)
+    # The lifted profile widens generalized-coordinate boxes. In full
+    # mechanics qdot[2] is not the physical crank speed, so the asymmetric
+    # cadence guard is imposed by the marker-based nonlinear constraint.
+    np.testing.assert_allclose(
+        bounds["qdot"].min[:2], [[-30.0] * 3, [-31.0] * 3]
+    )
+    np.testing.assert_allclose(
+        bounds["qdot"].max[:2], [[30.0] * 3, [31.0] * 3]
+    )
+    np.testing.assert_allclose(bounds["qdot"].min[2], -40.0)
+    np.testing.assert_allclose(bounds["qdot"].max[2], 40.0)
 
 
 def test_optional_nlp_cli_exposes_cross_solver_hot_start_and_tuning():
