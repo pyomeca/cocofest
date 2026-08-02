@@ -23,7 +23,7 @@ La CI ne dépend pas d'un nom de branche flottant. Elle clone le fork
 effectue les checkouts par SHA complet :
 
 - intégration multi-solveurs active :
-  `dad96b90d47c36126c1e97ec35f27c499abf4b12`;
+  `4179bf076b724fe6c4702739b3462e29ae4adef4`;
 - intégration Alpaqa archivée :
   `d84e7e43534360fc048e0be26a3bd69a2abc2d77`;
 - écran MadNLP/MUMPS historique, conservé uniquement pour diagnostic :
@@ -315,20 +315,22 @@ le **même** RHO.
 | Besoin | Solveur recommandé | État actuel |
 |---|---|---|
 | Chaîne robuste de 100 RHO | IPOPT/MUMPS reduced, SX, compilation persistante | `100/100`, environ `1.0 s` chaud sur Radau 3 |
-| Collocation du calcium raffinée | MadNLP/MUMPS reduced, Radau 5 | `5/5`, environ `1.99 s` chaud; endurance à recertifier |
-| Contrôle indépendant de l'optimum reduced | FATROP/collocation reduced | `100/100`, mais plus lent qu'IPOPT reduced |
+| Collocation du calcium raffinée | MadNLP/MUMPS reduced, Radau 6 | `5/5`; meilleure fidélité DOP853, endurance à recertifier |
+| Contrôle indépendant de l'optimum | FATROP/collocation full et reduced | full corrigé localement `1/1`; gate Linux requis |
 | Cible sous-seconde | ACADOS IRK | Environ `0.4–0.6 s`, mais préfixe physique limité à 13 RHO |
 
 MUMPS est le backend portable retenu pour IPOPT et MadNLP. PARDISO n'a pas
-apporté de gain à MadNLP et reste archivé. FATROP full reste bloqué par
-l'identification de structure des gaps. Alpaqa n'est pas fonctionnel sur cette
+apporté de gain à MadNLP et reste archivé. L'échec FATROP full venait du
+rangement global des contraintes multi-thread de collocation dans Bioptim,
+pas de la formulation : le correctif `4179bf07` les redistribue par stage et
+le vrai OCP full passe localement `1/1`. Alpaqa n'est pas fonctionnel sur cette
 formulation.
 
 Le meilleur résultat chaud brut n'est pas nécessairement la meilleure
 méthode. ACADOS est actuellement le plus rapide par fenêtre convergée, mais
-IPOPT reduced est le choix robuste pour une endurance complète. MadNLP devient
-le meilleur candidat pour la cible scientifique raffinée, car Radau 5 y a
-convergé là où IPOPT a stagné sur un RHO pourtant primalement faisable.
+IPOPT reduced est le choix robuste pour une endurance complète.
+MadNLP/MUMPS reduced Radau 6 devient le meilleur candidat provisoire pour la
+cible scientifique raffinée; le palier 30 doit encore confirmer sa robustesse.
 
 ## 4. Protocole de certification
 
@@ -398,9 +400,10 @@ devraient décrire la méthode, par exemple `legacy-radau3`,
 Les profils CLI `scientific-radau4`, `scientific-radau5` et
 `scientific-radau6` sont des contrats verrouillés : `periodic_node`, couple
 constant, SX, collocation Radau au degré annoncé et contraintes initiales
-actives. Une surcharge contradictoire est refusée. Seul Radau 5 porte le statut
-`candidate`; Radau 4 et 6 sont des diagnostics de raffinement. Le nom du profil
-ne remplace pas la certification de la fatigue, de l'AUC et des bornes internes.
+actives. Une surcharge contradictoire est refusée. Les noms historiques des
+profils ne constituent pas une certification : le rollout DOP853 du run
+`30754413003` déplace provisoirement la cible de Radau 5 vers Radau 6. La
+fatigue, l'AUC et les bornes internes restent les critères décisionnels.
 
 Le premier gate Linux 5 RHO du
 [run 30748390517](https://github.com/mickaelbegon/cocofest/actions/runs/30748390517)
@@ -443,7 +446,7 @@ résultats numériques et les artefacts sont complets. Le palier 30 reste bloqu�
 jusqu'à séparation de l'erreur de transcription et du changement de bassin
 optimal.
 
-Le prochain gate produit cette séparation directement. Chaque préfixe Radau
+Le gate suivant produit cette séparation directement. Chaque préfixe Radau
 scientifique est exporté sans perte dans `validated-rho-trajectory.npz`, puis
 ses PW sont rejouées avec une intégration continue DOP853 commune
 (`rtol=1e-11`, `atol=1e-13`). Le rollout ne se recale pas sur les états de
@@ -458,6 +461,19 @@ reduced, où la géométrie du pédalier est intégrée dans les coordonnées. E
 full, le rollout non projeté est un audit sévère du drift entre nœuds; ses
 métriques de fatigue ne sont comparables à reduced que si l'écart mécanique
 et la contrainte d'axe restent dans leurs tolérances.
+
+Le [run 30754413003](https://github.com/mickaelbegon/cocofest/actions/runs/30754413003)
+a exécuté ce rollout commun sur `5` RHO. Le drift relatif maximal des états
+mis à l'échelle vaut environ `4.2–4.4 %` en Radau 4, `1.95–2.17 %` en Radau 5,
+puis seulement `0.094 %` avec IPOPT/Radau 6 et `0.336 %` avec
+MadNLP/Radau 6. Les coûts de fatigue DOP853 reduced R6 valent respectivement
+`19.212590` et `19.198219`. MadNLP/Radau 6 résout les cinq fenêtres en
+`30.836 s`, contre `62.493 s` pour IPOPT. Radau 5 n'est donc plus la cible
+scientifique principale : MadNLP/MUMPS reduced Radau 6 est le compromis
+provisoire, à confirmer sur `30` RHO. Les résultats full et reduced convergés
+du même gate donnent une fatigue cumulée voisine (`0.163–0.164` cycle) et une
+capacité minimale proche de `0.98475`; le grand écart historique n'est pas
+reproduit sur ces cinq cycles.
 
 ## 6. Prochaine campagne recommandée
 

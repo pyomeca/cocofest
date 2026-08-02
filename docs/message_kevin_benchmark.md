@@ -32,7 +32,7 @@ Les changements importants sont :
 
 La branche Bioptim dédiée est
 `codex/cocofest-acados-v055-exploration`, au SHA
-`a3499cab16d7605b8efa7255cf89f1af6a7c59c9`. Elle utilise ACADOS 0.5.5 au
+`4179bf076b724fe6c4702739b3462e29ae4adef4`. Elle utilise ACADOS 0.5.5 au
 SHA `59d93e17d2985fdd73fc58b8a83ed8f83a024171` et contient les correctifs
 Bioptim pour les contraintes `Node.START`, le scaling ACADOS et le scaling
 FATROP. La branche Cocofest est `codex/acados-pr-refresh`.
@@ -82,13 +82,26 @@ est principalement portée par le Biceps, dont la capacité finale vaut environ
 `0.9004`; le coût instantané continue à augmenter, mais aucun des trois
 solveurs reduced n’échoue par fatigue avant le cycle 100.
 
+Depuis cette campagne Radau 3, le
+[gate scientifique 30754413003](https://github.com/mickaelbegon/cocofest/actions/runs/30754413003)
+a réintégré cinq RHO avec DOP853 (`rtol=1e-11`, `atol=1e-13`). Le drift
+normalisé reste autour de `4.2–4.4 %` en Radau 4 et `1.95–2.17 %` en Radau 5,
+mais tombe à `0.094 %` avec IPOPT/Radau 6 et `0.336 %` avec
+MadNLP/Radau 6. MadNLP/Radau 6 reduced prend `30.836 s` solveur pour les cinq
+RHO, contre `62.493 s` pour IPOPT, et donne un coût DOP853 de `19.198219`.
+Je recommande donc provisoirement MadNLP/MUMPS reduced Radau 6 pour la cible
+scientifique, sans annoncer encore une certification avant le palier 30.
+
 Il faut toutefois être très prudent avec le full. IPOPT résout 28 fenêtres sur
 30 et MadNLP 26 sur 30 lorsqu’elles sont regardées isolément, mais tous deux
 échouent au RHO 2. Leur préfixe strict reste donc limité à un cycle. ACADOS
 full retourne un statut NLP valide au premier RHO, mais l’audit détecte un
 résidu de vitesse tangentielle de `0.804 rad/s`; son préfixe physique est nul.
-FATROP full ne commence aucun solve : l’interface CasADi/FATROP refuse la
-structure de collocation, qui contient des dépendances hors bande.
+L'ancien échec FATROP full ne venait pas du modèle : Bioptim attachait au
+stage zéro les 120 lignes de la contrainte de cadence évaluée en multi-thread.
+Le nouveau SHA les redistribue par stage. Le vrai OCP full passe localement
+`1/1` (124 itérations, `14.344 s` solveur, audit physique valide); il faut
+encore le confirmer sur le prochain gate Linux avant de comparer son endurance.
 
 À 100 RHO, IPOPT et MadNLP résolvent respectivement 98 et 94 fenêtres
 isolées, mais leur préfixe strict reste toujours d’un seul cycle. Les solutions

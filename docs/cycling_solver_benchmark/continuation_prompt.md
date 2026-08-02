@@ -68,8 +68,10 @@ de la nouvelle fenêtre; si nécessaire, utiliser deux capsules précompilées,
 faisabilité puis fatigue. RTI vient seulement après une chaîne SQP robuste.
 
 Ne rouvre pas PARDISO/MadNLP, Alpaqa, FATROP/RK4 ou un surrogate neuronal sans
-un élément nouveau. MUMPS reste le backend MadNLP. FATROP reduced reste un
-contrôle indépendant; FATROP full est un échec d'interface, pas de physique.
+un élément nouveau. MUMPS reste le backend MadNLP. FATROP full n'est plus un
+échec attendu : Bioptim `4179bf07` corrige le rangement stage-wise et le smoke
+local passe `1/1`; il faut maintenant le certifier en Linux avec les mêmes
+audits que FATROP reduced.
 
 Utilise un second agent pour auditer les choix numériques, les critères de
 convergence du calcium et l'interprétation des résultats full/reduced. Fais les

@@ -44,8 +44,9 @@ Ils constituent l’historique antérieur à la campagne séquentielle stricte 5
 - MadNLP utilise exclusivement MUMPS, transmis à libMad sous le nom typé
   exact `MumpsSolver`. La CI échoue si libMad signale une option inconnue.
 - PARDISO et RK4 ne font pas partie de la campagne active. FATROP/collocation
-  reduced est certifié sur les paliers 5, 30 puis 100 RHO. FATROP full reste
-  diagnostique tant que l’interface n’accepte pas sa structure de collocation.
+  reduced est certifié sur les paliers 5, 30 puis 100 RHO. Le rangement
+  stage-wise de FATROP full est corrigé dans Bioptim `4179bf07`; le smoke
+  local full passe `1/1` et attend son gate Linux.
 - MadNLP full reste interprété. MadNLP reduced dispose maintenant d’un chemin
   C expérimental; la CI doit certifier un seul build, sa réutilisation et
   l’équivalence numérique avant qu’un gain de performance soit revendiqué.
@@ -70,11 +71,11 @@ provenance humaine.
 
 | Composant | Version Bioptim réellement utilisée |
 |---|---|
-| Construction et certification des seeds | `dad96b90d47c36126c1e97ec35f27c499abf4b12` |
-| IPOPT full/reduced | `dad96b90d47c36126c1e97ec35f27c499abf4b12` |
-| MadNLP/MUMPS full/reduced | `dad96b90d47c36126c1e97ec35f27c499abf4b12` |
-| FATROP/collocation full/reduced | `dad96b90d47c36126c1e97ec35f27c499abf4b12` |
-| ACADOS full/reduced et variantes | `dad96b90d47c36126c1e97ec35f27c499abf4b12` |
+| Construction et certification des seeds | `4179bf076b724fe6c4702739b3462e29ae4adef4` |
+| IPOPT full/reduced | `4179bf076b724fe6c4702739b3462e29ae4adef4` |
+| MadNLP/MUMPS full/reduced | `4179bf076b724fe6c4702739b3462e29ae4adef4` |
+| FATROP/collocation full/reduced | `4179bf076b724fe6c4702739b3462e29ae4adef4` |
+| ACADOS full/reduced et variantes | `4179bf076b724fe6c4702739b3462e29ae4adef4` |
 
 Ce commit appartient à la branche dédiée
 `codex/cocofest-acados-v055-exploration`. Il part exactement de
@@ -4222,3 +4223,57 @@ où `n` est le nombre de cycles. Cette réévaluation emploie les tolérances
 conserve aussi l'erreur maximale, absolue et normalisée, entre ce rollout
 continu et les nœuds optimisés. Le test unitaire analytique vérifie à la fois
 la propagation d'état et les deux quadratures.
+
+## 22. Rollout DOP853 et correction FATROP full (2 août 2026)
+
+Le [run 30754413003](https://github.com/mickaelbegon/cocofest/actions/runs/30754413003)
+est le premier gate qui réintègre réellement les trajectoires scientifiques
+exportées. Une erreur d'extraction des états de collocation, détectée d'abord
+en local, a été corrigée : pour `N=30`, Radau 5 fournit `181` colonnes, soit un
+nœud initial puis six colonnes par intervalle. L'audit infère maintenant ce
+stride (`5`, `6` ou `7` pour R4, R5 ou R6) et compare DOP853 uniquement aux
+nœuds de tir.
+
+| Solveur | Formulation | Degré | Préfixe | Temps solveur | Coût DOP853 | Drift normalisé maximal |
+|---|---|---:|---:|---:|---:|---:|
+| IPOPT | reduced | 4 | `5/5` | `12.045 s` | `19.292784` | `0.0437687` |
+| MadNLP | reduced | 4 | `5/5` | `17.659 s` | `19.291728` | `0.0422606` |
+| IPOPT | reduced | 5 | `5/5` | `124.856 s` | `19.277434` | `0.0216704` |
+| MadNLP | reduced | 5 | `5/5` | `19.013 s` | `19.273489` | `0.0217198` |
+| IPOPT | full | 5 | `5/5` | `171.368 s` | `19.200479` | `0.0199061` |
+| MadNLP | full | 5 | `5/5` | `100.761 s` | `19.273121` | `0.0195001` |
+| IPOPT | reduced | 6 | `5/5` | `62.493 s` | `19.212590` | `0.000936831` |
+| MadNLP | reduced | 6 | `5/5` | `30.836 s` | `19.198219` | `0.00335691` |
+
+R4 reste trop grossier (`4.2–4.4 %` de drift) et R5 conserve environ `2 %`
+d'écart continu. R6 abaisse cet audit à `0.094 %` avec IPOPT et `0.336 %`
+avec MadNLP. MadNLP/R6 reduced est donc la cible scientifique provisoire : il
+est environ deux fois plus rapide qu'IPOPT/R6 sur ce gate. Cette conclusion
+doit encore passer `30` RHO; elle remplace, sans effacer l'historique, la
+recommandation antérieure de Radau 5.
+
+Sur les cas NLP convergés, full et reduced donnent désormais une fatigue
+cumulée très voisine (`0.163–0.164` cycle) et une capacité minimale proche de
+`0.98475`. Le grand écart historique de fatigue n'apparaît donc pas sur ces
+cinq cycles; une campagne plus longue et un transfert des mêmes PW restent
+nécessaires pour conclure à l'équivalence.
+
+### 22.1 Cause exacte de l'échec FATROP full
+
+La formulation full ajoute une contrainte de cadence physique à tous les
+nœuds de tir. Avec Radau 3, elle retourne quatre lignes par intervalle, donc
+`4 x 30 = 120` lignes. En évaluation multi-thread, Bioptim aplatissait la
+sortie CasADi complète et attachait ces 120 lignes au stage zéro. FATROP
+détectait alors artificiellement une dépendance à l'état du stage précédent et
+refusait la structure de la matrice `A` avant le premier solve.
+
+Le commit Bioptim
+`4179bf076b724fe6c4702739b3462e29ae4adef4` redistribue les blocs mappés et
+leurs bornes vers leurs stages d'origine, uniquement pour les contraintes
+FATROP multi-thread. Il ajoute un contrôle de dimension des bornes et un test
+de régression à 30 intervalles. Les tests locaux donnent `14/14`; le vrai OCP
+FATROP full, SX, Radau 3, quatre threads, passe `1/1` en 124 itérations et
+`14.344 s` solveur sans compilation C. Le prochain gate Linux ne traite donc
+plus cet échec comme un contrôle négatif : FATROP full doit maintenant
+commencer au moins un RHO, ne produire aucune erreur d'infrastructure et
+passer les mêmes audits que les autres solveurs.

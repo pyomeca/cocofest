@@ -98,7 +98,7 @@ env:
   BIOPTIM_REPOSITORY: mickaelbegon/BiorbdOptim
   # Dedicated multi-solver integration branch:
   # codex/cocofest-acados-v055-exploration
-  BIOPTIM_PRODUCTION_COMMIT: dad96b90d47c36126c1e97ec35f27c499abf4b12
+  BIOPTIM_PRODUCTION_COMMIT: 4179bf076b724fe6c4702739b3462e29ae4adef4
   BIOPTIM_ALPAQA_COMMIT: d84e7e43534360fc048e0be26a3bd69a2abc2d77
   ACADOS_COMMIT: 59d93e17d2985fdd73fc58b8a83ed8f83a024171
   ACADOS_INSTALL_SCRIPT_BLOB: 5ac8064ab613251e62560b5de8cbbb9550f5c5d0
@@ -1459,7 +1459,7 @@ jobs:
             timeout_minutes: 300
             benchmark_rhos: ${{ inputs.cycles }}
             cycles_per_window: ${{ inputs.cycles_per_window }}
-            bioptim_commit: dad96b90d47c36126c1e97ec35f27c499abf4b12
+            bioptim_commit: 4179bf076b724fe6c4702739b3462e29ae4adef4
             integration_branch: codex/cocofest-acados-v055-exploration
             casadi_cxx_abi: 0
           - solver: madnlp
@@ -1469,7 +1469,7 @@ jobs:
             timeout_minutes: 420
             benchmark_rhos: ${{ inputs.cycles }}
             cycles_per_window: ${{ inputs.cycles_per_window }}
-            bioptim_commit: dad96b90d47c36126c1e97ec35f27c499abf4b12
+            bioptim_commit: 4179bf076b724fe6c4702739b3462e29ae4adef4
             integration_branch: codex/cocofest-acados-v055-exploration
             casadi_cxx_abi: 1
           - solver: fatrop
@@ -1479,7 +1479,7 @@ jobs:
             timeout_minutes: 420
             benchmark_rhos: ${{ inputs.cycles }}
             cycles_per_window: ${{ inputs.cycles_per_window }}
-            bioptim_commit: dad96b90d47c36126c1e97ec35f27c499abf4b12
+            bioptim_commit: 4179bf076b724fe6c4702739b3462e29ae4adef4
             integration_branch: codex/cocofest-acados-v055-exploration
             casadi_cxx_abi: 0
     env:
@@ -2012,20 +2012,6 @@ jobs:
             exit 1
           fi
           for result in "${results[@]}"; do
-            if [[ "$BENCHMARK_SOLVER" == "fatrop" && "$result" == *"fatrop-collocation-full/"* ]]; then
-              # The full constrained collocation Jacobian is outside the
-              # structure currently accepted by CasADi's FATROP interface.
-              # Keep this explicit negative control in the report without
-              # classifying the already documented incompatibility as a CI
-              # infrastructure failure.
-              jq -e '
-                .results[0] |
-                (.attempted_windows == 0) and
-                (.error | type == "string") and
-                (.error | contains("specified structure of A does not correspond"))
-              ' "$result"
-              continue
-            fi
             if [[ "$result" =~ -radau[456]- ]]; then
               jq -e '
                 .results[0] |
@@ -2090,7 +2076,7 @@ jobs:
       COCOFEST_BENCHMARK_COMMIT: ${{ github.sha }}
       # Job-level env entries cannot reference another env entry. Keep this
       # literal synchronized with BIOPTIM_PRODUCTION_COMMIT above.
-      BIOPTIM_BENCHMARK_COMMIT: dad96b90d47c36126c1e97ec35f27c499abf4b12
+      BIOPTIM_BENCHMARK_COMMIT: 4179bf076b724fe6c4702739b3462e29ae4adef4
       BIOPTIM_INTEGRATION_BRANCH: codex/cocofest-acados-v055-exploration
     defaults:
       run:

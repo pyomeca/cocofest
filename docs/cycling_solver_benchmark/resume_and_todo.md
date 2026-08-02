@@ -163,8 +163,10 @@ du dernier checkpoint certifié.
 - Reduced/SX/collocation : `100/100` et solution physiologique cohérente avec
   IPOPT reduced.
 - Plus lent qu'IPOPT reduced dans la campagne active.
-- Full : échec structurel avant le solve lors de l'identification des gaps de
-  collocation; ce n'est pas une preuve d'infaisabilité du problème.
+- Full : l'échec structurel était causé par l'aplatissement global des
+  contraintes multi-thread dans Bioptim. Le commit `4179bf07` les redistribue
+  par stage; le vrai OCP full passe localement `1/1`. Le gate Linux reste à
+  exécuter avant toute revendication d'endurance.
 - RK4 est abandonné.
 
 FATROP reste un excellent contrôle indépendant de l'optimum reduced, mais pas
@@ -241,8 +243,11 @@ prioritaire que si l'objectif est explicitement un horizon monolithique.
   croisé conserve les PW exactes plutôt que les valeurs JSON arrondies.
 - [x] Ajouter un rollout DOP853 continu des PW exportées, sans remise à zéro
   aux nœuds, avec quadrature commune du coût, de l'AUC et des quatre muscles.
-- [ ] Exécuter le nouveau gate et comparer les métriques DOP853 R5/R6 avant de
-  décider si un transfert suivi d'une réoptimisation est encore nécessaire.
+- [x] Exécuter le nouveau gate et comparer les métriques DOP853 R5/R6. Sur le
+  run `30754413003`, le drift tombe d'environ `2 %` en R5 à `0.094 %` avec
+  IPOPT/R6 et `0.336 %` avec MadNLP/R6; MadNLP/R6 devient la cible provisoire.
+- [ ] Transférer les mêmes PW entre R5/R6 et full/reduced si le gate 30 laisse
+  encore apparaître un écart de bassin optimal.
 - [ ] Lancer `5`, puis `30`, puis `100` RHO seulement lorsque le gate précédent
   est physiquement certifié.
 

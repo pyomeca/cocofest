@@ -5702,7 +5702,7 @@ def test_github_acados_runner_uses_reference_and_option_profiles_sequentially():
         'if [[ "$BENCHMARK_SOLVER" == "madnlp" && '
         '"$result" == *"madnlp-mumps-full/"* ]]' in workflow
     )
-    assert "specified structure of A does not correspond" in workflow
+    assert "specified structure of A does not correspond" not in workflow
     assert 'case_requires_compile="$COMPILE_NLP_EVALUATORS"' in workflow
     assert "case_requires_compile=false" in workflow
     assert '[[ "$result" == *-radau[456]-* ]]' in workflow
@@ -5717,10 +5717,10 @@ def test_github_acados_runner_uses_reference_and_option_profiles_sequentially():
     assert "inputs.cycles != 'screen' && inputs.cycles != 'acados'" in workflow
     assert "prepare-acados-stack:" in workflow
     assert (
-        "BIOPTIM_PRODUCTION_COMMIT: " "dad96b90d47c36126c1e97ec35f27c499abf4b12"
+        "BIOPTIM_PRODUCTION_COMMIT: " "4179bf076b724fe6c4702739b3462e29ae4adef4"
     ) in workflow
     assert (
-        workflow.count("bioptim_commit: dad96b90d47c36126c1e97ec35f27c499abf4b12") == 3
+        workflow.count("bioptim_commit: 4179bf076b724fe6c4702739b3462e29ae4adef4") == 3
     )
     assert "a3499cab16d7605b8efa7255cf89f1af6a7c59c9" not in workflow
     assert "ACADOS_COMMIT: 59d93e17d2985fdd73fc58b8a83ed8f83a024171" in workflow
