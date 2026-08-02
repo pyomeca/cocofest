@@ -805,7 +805,7 @@ jobs:
               # RHO 81 because the failed primal was shifted into the next OCP.
               solver_options+=(
                 --acados-store-iterates
-                --acados-maxiter-retries 1
+                --acados-maxiter-retries 2
                 --acados-maxiter-retry-iterations 20
                 --acados-maxiter-retry-feasibility-tolerance 0.0025
                 --max-consecutive-failing 1

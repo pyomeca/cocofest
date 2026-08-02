@@ -5776,7 +5776,7 @@ def test_github_acados_runner_uses_reference_and_option_profiles_sequentially():
     assert "--acados-wheel-qdot-fast-bound-margin 2.55" in workflow
     assert '"$mechanics" == "full" && "$variant" == sqp-irk-two-stage-fast-guard-*' in workflow
     assert "--acados-store-iterates" in workflow
-    assert "--acados-maxiter-retries 1" in workflow
+    assert "--acados-maxiter-retries 2" in workflow
     assert "--max-consecutive-failing 1" in workflow
     assert "inputs.cycles == 'acados_guard'" in workflow
     assert "ACADOS_CADENCE_GUARD_ONLY" in workflow

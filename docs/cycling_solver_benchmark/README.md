@@ -360,9 +360,11 @@ puis les statuts alternent MAXITER/succès. Cette alternance n'est pas une
 preuve d'infaisabilité par fatigue : le premier MAXITER contient un meilleur
 itéré avec défaut dynamique `6.7e-6`, mais Bioptim avançait ensuite la fenêtre
 avec l'itéré final non certifié. Les variantes full utilisent désormais une
-seconde tentative sur le **même RHO** depuis le meilleur itéré stocké et
-s'arrêtent immédiatement si elle échoue; aucune fenêtre non certifiée ne doit
-alimenter la suivante. Ce retry doit être recertifié à 5 puis 100 RHO.
+au plus deux tentatives supplémentaires sur le **même RHO**, chacune depuis
+le meilleur itéré stocké de la tentative précédente, puis s'arrêtent
+immédiatement si la seconde échoue; aucune fenêtre non certifiée ne doit
+alimenter la suivante. Le premier retry unique n'a pas dépassé le RHO 81;
+la seconde reprise bornée doit maintenant être recertifiée à 100 RHO.
 
 Le mode workflow `cycles=acados_guard` rejoue uniquement les deux références
 et ces quatre cas full/reduced, sans reconstruire l'écran historique complet.
