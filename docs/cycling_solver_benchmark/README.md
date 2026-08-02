@@ -293,6 +293,14 @@ reconstruire le graphe :
 Les artefacts doivent prouver qu'un seul hash de bibliothèque est utilisé et
 que les vecteurs de bornes changent réellement entre les RHO.
 
+Exception mesurée : FATROP full/SX génère un fichier C monolithique d'environ
+`201 Mo`. Clang est resté actif plus de 40 minutes sur macOS sans produire
+l'objet, puis deux runners Linux ont été arrêtés par l'infrastructure pendant
+la compilation GCC. Comme le vrai OCP full interprété résout localement le
+premier RHO en `14.344 s`, la matrice active garde FATROP full interprété et
+compile seulement FATROP reduced. Il s'agit du résultat du test de compilation,
+pas d'une hypothèse sur son gain.
+
 ### 3.4 Warm-start commun
 
 Le transfert recommandé est volontairement simple :

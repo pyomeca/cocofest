@@ -4277,3 +4277,14 @@ FATROP full, SX, Radau 3, quatre threads, passe `1/1` en 124 itérations et
 plus cet échec comme un contrôle négatif : FATROP full doit maintenant
 commencer au moins un RHO, ne produire aucune erreur d'infrastructure et
 passer les mêmes audits que les autres solveurs.
+
+La compilation C full a ensuite été testée explicitement. CasADi produit un
+`nlp.c` de `201 Mo`; sur macOS, Clang est resté actif plus de 40 minutes sans
+achever l'objet. Les tentatives 1 et 2 du
+[run 30756542173](https://github.com/mickaelbegon/cocofest/actions/runs/30756542173)
+ont toutes deux atteint cette compilation, puis les runners hébergés ont reçu
+un signal d'arrêt externe (`exit 143`) après environ cinq et sept minutes.
+Ce résultat ne remet pas en cause le correctif stage-wise, déjà validé par le
+solve interprété. La campagne conserve désormais FATROP full interprété et
+FATROP reduced compilé; la compilation monolithique full n'est pas un levier
+pratique sur ces machines.

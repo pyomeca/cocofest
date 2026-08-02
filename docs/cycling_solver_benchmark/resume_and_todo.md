@@ -167,6 +167,10 @@ du dernier checkpoint certifié.
   contraintes multi-thread dans Bioptim. Le commit `4179bf07` les redistribue
   par stage; le vrai OCP full passe localement `1/1`. Le gate Linux reste à
   exécuter avant toute revendication d'endurance.
+- Compilation full : non retenue. Le C CasADi fait environ `201 Mo`; Clang n'a
+  pas terminé après plus de 40 minutes et deux runners Linux ont été repris
+  pendant GCC. Le gate full est donc interprété; reduced reste compilé et
+  mesure la réutilisation persistante.
 - RK4 est abandonné.
 
 FATROP reste un excellent contrôle indépendant de l'optimum reduced, mais pas

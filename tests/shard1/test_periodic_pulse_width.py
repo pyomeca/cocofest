@@ -5712,6 +5712,15 @@ def test_github_acados_runner_uses_reference_and_option_profiles_sequentially():
         in workflow
     )
     assert (
+        "run_cycling_benchmark_case.sh fatrop-collocation fatrop full fatrop collocation "
+        'benchmark-results "$BENCHMARK_CYCLES" false sx none' in workflow
+    )
+    assert (
+        "run_cycling_benchmark_case.sh fatrop-collocation fatrop reduced fatrop collocation "
+        'benchmark-results "$BENCHMARK_CYCLES" "${{ inputs.compile_nlp_evaluators }}"'
+        in workflow
+    )
+    assert (
         'if [[ "$BENCHMARK_SOLVER" == "madnlp" && '
         '"$result" == *"madnlp-mumps-full/"* ]]' in workflow
     )
