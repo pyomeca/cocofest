@@ -1,8 +1,8 @@
 # Point de reprise du benchmark RHO
 
 État consolidé au 2 août 2026 sur la branche
-`codex/acados-pr-refresh`. Le HEAD précédant cette mise à jour documentaire est
-`2aa3633374074f5da7c2e6800a2bfd166bbe6b7b`.
+`codex/acados-pr-refresh`. Le dernier SHA Cocofest exécuté par la campagne
+ACADOS 100 RHO est `3857ddf6c55bf2583f14fa84e333f719439c574a`.
 
 Ce document répond à deux questions :
 
@@ -178,10 +178,13 @@ le meilleur chemin de production actuel.
 
 ### 3.4 ACADOS 0.5.5
 
-ACADOS est le seul candidat ayant régulièrement résolu une fenêtre en environ
-`0.4–0.6 s`. Il n'est toutefois pas robuste sur la chaîne : le meilleur
-préfixe physique full reste limité à 13 RHO, avec des échecs aux RHO 14, 16,
-18 et 20.
+La formulation full avec garde de cadence asymétrique à `2.60 rad/s` est le
+seul candidat ayant régulièrement résolu une fenêtre très sous la seconde.
+Elle certifie `30/30`, puis `80/100` RHO : médiane solveur `0.102 s`, médiane
+murale effective `0.121 s` et `p90 = 0.304 s` sur le run `30760775027`.
+L'ancien préfixe limité à 13 RHO provenait notamment d'une contrainte de
+cadence full appliquée à la mauvaise variable mécanique et ne décrit plus
+l'état actuel.
 
 Les analyses suivantes ont été menées :
 
@@ -198,18 +201,27 @@ préservation des duals est instable. L'homotopie multiplie le temps effectif
 sans prolonger le préfixe. Le rollout IRK concurrent ajoute environ `0.245 s`
 par transfert et est rejeté dans la plupart des cas.
 
+La chaîne s'arrête proprement au RHO 81. Son meilleur itéré est presque
+faisable (`6.74e-6` de défaut dynamique), mais sa stationnarité `1.56e-3`
+reste au-dessus de la tolérance. Deux reprises primal-dual depuis cet itéré
+reproduisent exactement le même échec; répéter ce retry est donc inutile. La
+configuration active en conserve un seul pour diagnostiquer et empêcher la
+propagation d'une solution MAXITER.
+
 La conclusion est que le prochain levier doit améliorer le **primal transféré
-sur les équations discrètes**, et non ajouter un nouveau mécanisme de
-globalisation autour du même seed.
+sur les équations discrètes** ou fournir une restauration avec un objectif
+distinct, et non ajouter un nouveau mécanisme de globalisation autour du même
+seed.
 
 Le run `30754413003` ajoute un défaut plus précis : les nœuds respectent
 presque la borne de cadence, mais la progression angulaire entre deux nœuds
 implique un dépassement rapide de `0.376–0.403 rad/s`. Deux écrans sont prêts :
 garde interne ACADOS asymétrique à `2.60`, puis `2.55 rad/s`, tout en gardant
 la marge physique et l'audit à `3.0 rad/s`. Les tests unitaires séparent ces
-deux notions. Si aucun écran ne passe cinq RHO, tester 60 nœuds avec
-move-blocking des 30 PW; augmenter seulement les sous-pas IRK ne contraint pas
-les stages internes.
+deux notions. La garde 2.60 passe 80 RHO; 2.55 échoue au premier. Pour rendre
+la garantie inter-nœuds plus rigoureuse, tester 60 nœuds avec move-blocking
+des 30 PW; augmenter seulement les sous-pas IRK ne contraint pas les stages
+internes.
 
 ### 3.5 Alpaqa et autres voies archivées
 
@@ -308,6 +320,11 @@ invalide.
 
 ### P1 — Refaire le transfert ACADOS sur la dynamique discrète
 
+- [x] Ne jamais avancer après un statut MAXITER; rejouer et arrêter au même
+  RHO si la reprise échoue.
+- [x] Tester deux reprises successives du meilleur itéré. Elles sont
+  déterministes et n'étendent pas le préfixe de 80 RHO; revenir à une seule
+  reprise diagnostique.
 - [ ] Construire une projection qui minimise directement les défauts de
   tir/collocation de la nouvelle fenêtre, avec priorité aux états mécaniques et
   au calcium.
@@ -321,7 +338,7 @@ invalide.
 - [ ] Réintégrer densément chaque intervalle accepté pour vérifier cadence et
   calcium entre les nœuds.
 
-Critère de sortie intermédiaire : franchir le RHO 14 sans relâcher les
+Critère de sortie intermédiaire : franchir le RHO 81 sans relâcher les
 contraintes physiques. Critère final : `100/100` avec médiane effective sous
 `1 s`.
 

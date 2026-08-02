@@ -4288,3 +4288,55 @@ Ce résultat ne remet pas en cause le correctif stage-wise, déjà validé par l
 solve interprété. La campagne conserve désormais FATROP full interprété et
 FATROP reduced compilé; la compilation monolithique full n'est pas un levier
 pratique sur ces machines.
+
+## 23. Garde ACADOS full et arrêt certifié au RHO 81 (2 août 2026)
+
+La garde de cadence full a d'abord été corrigée conceptuellement. `qdot[2]`
+est une vitesse généralisée relative et non la vitesse physique du pédalier;
+la borner directement déformait le mouvement du bras. La borne asymétrique
+est désormais appliquée à la vitesse cinématique calculée par les marqueurs,
+tandis que la formulation reduced borne directement son état `omega`.
+
+La garde full `2.60 rad/s` passe `30/30` RHO sur le
+[run 30758998720](https://github.com/mickaelbegon/cocofest/actions/runs/30758998720),
+avec une médiane solveur de `0.102 s`, une médiane murale de `0.120 s` et
+aucune violation de la borne physique entre les nœuds. Sur 100 RHO, le premier
+essai avançait encore après un MAXITER et créait une alternance artificielle
+échec/succès. Le wrapper a donc été modifié pour reprendre le **même RHO**
+depuis le meilleur itéré stocké et s'arrêter immédiatement en cas d'échec.
+
+Le [run 30760775027](https://github.com/mickaelbegon/cocofest/actions/runs/30760775027)
+donne le résultat final de cette ablation :
+
+| Cas ACADOS | Préfixe strict | Premier échec | Médiane effective | P90 effectif |
+|---|---:|---:|---:|---:|
+| full, garde 2.60 | `80/100` | `81` | `0.121 s` | `0.304 s` |
+| full, garde 2.55 | `0/100` | `1` | n/a | n/a |
+| reduced, garde 2.60 | `1/100` | `2` | n/a | n/a |
+| reduced, garde 2.55 | `1/100` | `2` | n/a | n/a |
+
+Le préfixe certifié de 80 RHO a un coût de fatigue exécuté de `1221.912531`
+et une AUC cumulée de `4.986474` cycles. Ces valeurs ne doivent pas être
+comparées à une somme sur 100 RHO : les 20 cycles non certifiés sont exclus.
+
+| Muscle | Fatigue normalisée cumulée (cycles) | Contribution au coût | Capacité finale |
+|---|---:|---:|---:|
+| Biceps | `2.436994` | `922.176986` | `0.946691` |
+| Deltoïde antérieur | `1.129059` | `159.774681` | `0.987116` |
+| Deltoïde postérieur | `0.763575` | `73.209989` | `0.991524` |
+| Triceps | `0.656846` | `66.750875` | `0.986370` |
+
+Au RHO 81 full/2.60, le meilleur itéré de la résolution nominale a pour
+résidus `[stationnarité, dynamique, inégalité, complémentarité] =
+[1.56e-3, 6.74e-6, 6.99e-15, 4.97e-10]`. Deux reprises primal-dual de 20
+itérations reviennent exactement à ce même point initial puis divergent vers
+le même itéré final (`2.30e-2`, `1.05e-3`, `1.59e-7`, `6.15e-8`). La seconde
+reprise ajoute environ `0.84 s` sans information nouvelle. La campagne active
+revient donc à une seule reprise bornée.
+
+Cette expérience exclut la simple répétition du même SQP comme solution. La
+prochaine ablation doit générer une primale distincte : capsule de restauration
+de faisabilité avec objectif dédié, projection sur les équations discrètes,
+ou solveur de secours au même RHO. Aucun de ces mécanismes ne pourra alimenter
+le RHO suivant avant d'avoir passé le statut natif et tous les audits
+physiques.

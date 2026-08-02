@@ -359,12 +359,21 @@ borne physique. À 100 RHO (`30759393829`), le préfixe strict atteint 80 RHO,
 puis les statuts alternent MAXITER/succès. Cette alternance n'est pas une
 preuve d'infaisabilité par fatigue : le premier MAXITER contient un meilleur
 itéré avec défaut dynamique `6.7e-6`, mais Bioptim avançait ensuite la fenêtre
-avec l'itéré final non certifié. Les variantes full utilisent désormais une
-au plus deux tentatives supplémentaires sur le **même RHO**, chacune depuis
-le meilleur itéré stocké de la tentative précédente, puis s'arrêtent
-immédiatement si la seconde échoue; aucune fenêtre non certifiée ne doit
-alimenter la suivante. Le premier retry unique n'a pas dépassé le RHO 81;
-la seconde reprise bornée doit maintenant être recertifiée à 100 RHO.
+avec l'itéré final non certifié.
+
+Le [run 30760775027](https://github.com/mickaelbegon/cocofest/actions/runs/30760775027)
+confirme ce diagnostic avec arrêt strict au premier échec. La garde 2.60
+certifie `80/100` RHO, avec une médiane chaude solveur de `0.102 s`, une
+médiane murale effective de `0.121 s` et un `p90` de `0.304 s`. Au RHO 81,
+le meilleur itéré a une stationnarité de `1.56e-3` et un défaut dynamique de
+`6.74e-6`, mais la solution finale après MAXITER remonte à `2.30e-2` et
+`1.05e-3`. Deux reprises primal-dual de 20 itérations depuis le meilleur
+itéré produisent exactement la même trajectoire : la seconde n'apporte donc
+aucune information et ajoute environ `0.84 s`. La configuration active garde
+une seule reprise bornée, puis s'arrête sans jamais alimenter le RHO suivant
+avec une fenêtre non certifiée. Une seconde chance utile devra partir d'une
+**primale différente**, créée par une restauration de faisabilité ou une
+capsule ACADOS dédiée.
 
 Le mode workflow `cycles=acados_guard` rejoue uniquement les deux références
 et ces quatre cas full/reduced, sans reconstruire l'écran historique complet.
@@ -376,7 +385,7 @@ et ces quatre cas full/reduced, sans reconstruire l'écran historique complet.
 | Chaîne robuste de 100 RHO | IPOPT/MUMPS reduced, SX, compilation persistante | `100/100`, environ `1.0 s` chaud sur Radau 3 |
 | Collocation du calcium raffinée | MadNLP/MUMPS reduced, Radau 6 | `5/5`; meilleure fidélité DOP853, endurance à recertifier |
 | Contrôle indépendant de l'optimum | FATROP/collocation full et reduced | full corrigé localement `1/1`; gate Linux requis |
-| Cible sous-seconde | ACADOS IRK | Environ `0.4–0.6 s`, mais préfixe physique limité à 13 RHO |
+| Cible sous-seconde | ACADOS IRK full, garde 2.60 | `80/100`; médiane effective `0.121 s`, premier échec au RHO 81 |
 
 MUMPS est le backend portable retenu pour IPOPT et MadNLP. PARDISO n'a pas
 apporté de gain à MadNLP et reste archivé. L'échec FATROP full venait du
