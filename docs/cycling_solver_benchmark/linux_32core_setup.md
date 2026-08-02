@@ -643,14 +643,19 @@ la lecture du préfixe physique de chaque solveur.
 2. Installation de `cocofest-rho32` et smoke tests IPOPT/FATROP/ACADOS.
 3. Construction de la seed commune.
 4. Installation de `cocofest-madnlp32` et smoke test `MumpsSolver`.
-5. Un RHO reduced Radau 3 et Radau 5 avec IPOPT et MadNLP.
-6. Gate CI 5 RHO sur le runner `linux-32core`.
-7. Inspection des JSON, du calcium, de la force passive et des temps.
-8. Gate 30 seulement si le gate 5 est scientifiquement certifié.
+5. Reproduire le gate reduced Radau 4/5/6 avec IPOPT et MadNLP.
+6. Reproduire le contrôle full/reduced Radau 5 avec les mêmes seeds.
+7. Transférer les PW R5 vers R6 et R6 vers R5, sans réoptimisation initiale.
+8. Réintégrer ces mêmes PW avec un intégrateur dense commun.
+9. Gate 30 seulement si le gate 5 est scientifiquement certifié.
 
-La première décision expérimentale est de vérifier si Radau 5 atteint le
-critère de convergence du calcium. La campagne 100 RHO et le sweep de threads
-viennent après cette réponse, pas avant.
+Le calcium isolé a déjà établi que Radau 4 est trop imprécis (`0.4518 %`),
+alors que Radau 5 (`0.01730 %`) et Radau 6 (`0.000415 %`) passent ce test. Le
+gate couplé sur cinq RHO montre néanmoins un écart R5--R6 reproductible de
+`0.343–0.398 %` sur la fatigue et de `0.580–0.645 %` sur l'AUC. La première
+décision expérimentale sur la machine 32 cœurs est donc de séparer erreur de
+transcription et changement de bassin par transfert croisé et réintégration
+dense. La campagne 30/100 RHO et le sweep de threads viennent ensuite.
 
 ## 16. Références d'installation
 

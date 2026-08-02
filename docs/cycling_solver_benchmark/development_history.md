@@ -4121,3 +4121,104 @@ La campagne suivante corrige quatre limites de ce premier audit :
 Radau 5 reste un candidat, pas une référence certifiée. Le palier 30 n'est pas
 lancé avant un nouveau `5/5` strict et une réintégration haute précision des
 mêmes contrôles R5/R6.
+
+## 21. Second gate Radau : convergence corrigée, certification refusée (2 août 2026)
+
+Le [run 30750686602](https://github.com/mickaelbegon/cocofest/actions/runs/30750686602)
+répète l'audit avec quatre corrections : profils R4/R5/R6 réellement distincts,
+contraintes initiales sérialisées, raffinement sur la transcription cible et
+transfert des duals désactivé. Les cas full et reduced R5 sont aussi exécutés
+sur la même machine que les diagnostics reduced R4 et R6.
+
+| Solveur | Formulation | Degré | Préfixe strict | Temps solveur | Fatigue | AUC |
+|---|---|---:|---:|---:|---:|---:|
+| IPOPT | reduced | 4 | `5/5` | `9.016 s` | `19.293936` | `0.163850852` |
+| IPOPT | reduced | 5 | `5/5` | `99.775 s` | `19.278440` | `0.163844716` |
+| IPOPT | reduced | 6 | `5/5` | `52.618 s` | `19.212516` | `0.162900357` |
+| IPOPT | full | 5 | `5/5` | `137.598 s` | `19.201350` | `0.162898912` |
+| MadNLP | reduced | 4 | `5/5` | `17.535 s` | `19.292878` | `0.163852661` |
+| MadNLP | reduced | 5 | `5/5` | `18.700 s` | `19.274491` | `0.163824097` |
+| MadNLP | reduced | 6 | `5/5` | `30.682 s` | `19.198141` | `0.162773826` |
+| MadNLP | full | 5 | `5/5` | `99.587 s` | `19.274118` | `0.163824215` |
+
+### 21.1 Effet du warm-start IPOPT
+
+IPOPT/R5 passe de `1/5` à `5/5`. Les itérations par RHO sont
+`1692, 140, 64, 71, 65`; le RHO 2 qui plafonnait auparavant à 2 000 tombe à
+140. Les duals de la transcription précédente polluaient donc la stationnarité
+malgré une excellente faisabilité primale. Le premier RHO reste cher, et le
+raffinement initial est actuellement résolu une seconde fois dans la boucle;
+sa solution pourra être réutilisée directement si l'on souhaite réduire le
+temps initial, qui n'est pas le critère principal de cette campagne.
+
+### 21.2 Radau 4 est utile, mais insuffisant comme méthode finale
+
+R4 est nettement plus rapide et reste proche de R5 sur l'optimum couplé :
+`0.0804 %` de fatigue et `0.00374 %` d'AUC avec IPOPT, `0.0954 %` et
+`0.01744 %` avec MadNLP. Il échoue néanmoins au test indépendant du calcium
+isolé avec `0.4518 %` d'erreur. Il demeure donc un excellent diagnostic de
+coût-précision, mais ne remplace pas R5 pour la cible scientifique.
+
+### 21.3 Le raffinement R5--R6 change le recrutement
+
+L'écart R5--R6 vaut `0.3431 %` sur la fatigue et `0.5797 %` sur l'AUC avec
+IPOPT, puis `0.3977 %` et `0.6452 %` avec MadNLP. La cohérence entre solveurs
+rend peu probable une simple erreur numérique propre à l'un d'eux.
+
+Au cycle 1, la norme RMS de la différence entre les 120 PW R5 et R6 vaut
+`11.109 µs` pour IPOPT et `11.379 µs` pour MadNLP; le maximum vaut
+respectivement `105.365 µs` et `105.964 µs`. Le Biceps porte l'essentiel de
+cet écart, suivi du Triceps. Aux cycles 2 à 5, la RMS globale descend entre
+`1.2` et `3.0 µs`, mais l'écart de fatigue déjà créé s'accumule. Comparer
+uniquement la capacité terminale minimale aurait masqué ce phénomène.
+
+### 21.4 Full et reduced ne désignent pas toujours le même bassin
+
+En reduced R5, IPOPT et MadNLP s'accordent à `0.0205 %` sur la fatigue et
+`0.0126 %` sur l'AUC. Avec MadNLP, full et reduced s'accordent encore mieux :
+`0.00194 %` sur la fatigue et `0.000072 %` sur l'AUC. Cela appuie fortement
+l'équivalence de la réduction mécanique dans ce bassin.
+
+Avec IPOPT, le full atteint au contraire une fatigue `0.400 %` plus basse que
+le reduced et se rapproche du résultat R6. La différence full entre IPOPT et
+MadNLP vient surtout du Biceps et du Triceps; les deux deltoïdes s'accordent à
+moins de `0.03 %`. Avant toute conclusion physique sur la réduction, il faut
+donc résoudre chaque transcription depuis les contrôles de l'autre branche et
+réintégrer exactement les mêmes PW avec un intégrateur dense commun.
+
+### 21.5 Pourquoi le run est rouge
+
+Les résultats numériques ci-dessus sont tous strictement valides. Le job
+IPOPT et le job MadNLP ont échoué seulement dans le contrôle final des
+artefacts : lorsque `compile_nlp_evaluators=true`, le script exigeait aussi la
+compilation des audits scientifiques full et reduced, alors que ces cas sont
+volontairement interprétés et que la compilation est testée séparément. Le
+filtre ne désactivait l'exigence que pour les chemins `*-radau[456]-reduced/`.
+Il est corrigé pour tous les chemins `*-radau[456]-*`.
+
+Conclusion : R4 doit rester dans les campagnes courtes, R5 reste le candidat
+principal, R6 reste le témoin de raffinement, et aucun palier 30 ne doit être
+lancé avant le transfert croisé et la réintégration dense.
+
+Les futurs cas `scientific-radau4/5/6` exportent désormais leur préfixe complet
+certifié dans `validated-rho-trajectory.npz`. L'artefact contient les états,
+les contrôles exacts, les métadonnées de transcription et le certificat des
+coutures entre RHO. Il évite de reconstruire un seed depuis les checkpoints
+JSON et constitue l'entrée du prochain transfert croisé.
+
+Le même cas calcule aussi `high_accuracy_trace_rollout`. À partir du premier
+état certifié, DOP853 réintègre les 30 intervalles de chaque cycle en chaîne,
+sans recaler le nouvel état sur le nœud de collocation. Deux quadratures sont
+ajoutées par muscle :
+
+```math
+I_m=\int \left(1-\frac{A_m}{A_{m,0}}\right)\,\mathrm d n,
+\qquad
+J_m=10^4\int \left(1-\frac{A_m}{A_{m,0}}\right)^2\,\mathrm d n,
+```
+
+où `n` est le nombre de cycles. Cette réévaluation emploie les tolérances
+`rtol=1e-11` et `atol=1e-13` pour tous les degrés et les deux solveurs. Le JSON
+conserve aussi l'erreur maximale, absolue et normalisée, entre ce rollout
+continu et les nœuds optimisés. Le test unitaire analytique vérifie à la fois
+la propagation d'état et les deux quadratures.

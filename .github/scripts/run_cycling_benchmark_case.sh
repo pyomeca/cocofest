@@ -25,6 +25,7 @@ case_dir="${workspace}/${case_root}/${case_slug}-${mechanics}"
 result="$case_dir/result.json"
 solver_options=()
 initialization_options=(--no-optional-nlp-periodic-ipopt-hot-start)
+trajectory_options=()
 solver_tolerance=1e-6
 
 if ! [[ "$collocation_degree" =~ ^[2-9]$ ]]; then
@@ -43,6 +44,17 @@ case "$target_refinement" in
   auto|true|false) ;;
   *) echo "TARGET_REFINEMENT must be auto, true, or false; got '$target_refinement'." >&2; exit 2 ;;
 esac
+
+if [[ "$ipopt_profile" =~ ^scientific[-_]radau[456]$ ]]; then
+  # Keep the complete certified primal, not only compact JSON checkpoints.
+  # The next scientific gate reuses these exact PW vectors across R4/R5/R6
+  # and full/reduced before any re-optimization.
+  trajectory_options+=(
+    --validate-integrator-maps
+    --receding-horizon-solution-output
+    "$case_dir/validated-rho-trajectory.npz"
+  )
+fi
 
 if [[ "$target_refinement" == "true" ]]; then
   initialization_options=(--optional-nlp-periodic-ipopt-hot-start)
@@ -190,6 +202,7 @@ python "$workspace/examples/fes_multibody/cycling/cycling_fes_solver_comparison.
   --compact-rho-output \
   --print-traces \
   --output-json "$result" \
+  "${trajectory_options[@]}" \
   "${solver_options[@]}" \
   2>&1 | tee "$case_dir/solver.log"
 solver_exit="${PIPESTATUS[0]}"

@@ -2773,6 +2773,9 @@ def solver_overview_rows(results: dict[str, dict]) -> list[dict]:
                 "isolated_window_checkpoints": (
                     isolated_window_checkpoint_snapshots(result)
                 ),
+                "high_accuracy_trace_rollout": result.get(
+                    "high_accuracy_trace_rollout"
+                ),
                 "pulse_width_cycle_variation": pulse_width_cycle_variation(
                     result, performance["validated_cycles"]
                 ),

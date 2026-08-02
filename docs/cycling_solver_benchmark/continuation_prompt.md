@@ -26,17 +26,24 @@ Il faut accélérer le problème corrigé, pas reproduire un ancien coût obtenu
 avec une erreur de modèle ou une discrétisation insuffisante.
 
 Objectif de cette reprise :
-- créer un profil explicite scientific-radau5 ou irk-refined;
-- conserver 30 décisions de PW par cycle, mais raffiner l'intégration interne
-  des états musculaires;
-- enregistrer dans chaque JSON la force passive, le degré de collocation, les
-  étages/sous-pas, les SHA et le hash de la bibliothèque compilée;
-- ajouter un test analytique du calcium périodique;
+- conserver les profils verrouillés scientific-radau4/5/6 et vérifier leur
+  hash distinct;
+- partir du gate Linux 30750686602 : IPOPT et MadNLP passent `5/5`, mais
+  R5--R6 diffère encore de `0.343–0.398 %` sur la fatigue et de
+  `0.580–0.645 %` sur l'AUC;
+- ne pas retenir Radau 4 comme méthode finale : son erreur calcique isolée est
+  `0.4518 %`, malgré son intérêt comme témoin rapide;
+- transférer les contrôles R4/R5/R6 entre transcriptions et les PW full/reduced
+  entre formulations;
+- réintégrer exactement les mêmes PW avec un intégrateur dense commun avant
+  toute nouvelle optimisation;
 - comparer IPOPT/MUMPS et MadNLP/MUMPS reduced sur le même NLP raffiné;
-- conserver IPOPT full comme contrôle scientifique apparié;
+- conserver les contrôles full Radau 5 IPOPT et MadNLP : MadNLP full/reduced
+  s'accorde à `0.00194 %`, mais IPOPT full trouve une branche `0.400 %` plus
+  basse que son reduced;
 - ne jamais propager le terminal d'un RHO non certifié;
-- exécuter les gates 1, 5, 30 puis 100 RHO, sans lancer le suivant avant
-  validation du précédent;
+- garder le gate 30 bloqué jusqu'à ce que le transfert croisé et la
+  réintégration dense expliquent l'écart R5--R6;
 - mesurer construction, compilation, préparation, temps solveur et temps mural
   chaud séparément;
 - reporter coût, fatigue exécutée, AUC et capacité finale pour les quatre

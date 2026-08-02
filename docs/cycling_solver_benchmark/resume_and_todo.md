@@ -81,10 +81,12 @@ fidèle à la dynamique calcique. ERK est exclu avec les réglages testés. La
 bonne approche est de garder les 30 décisions de PW tout en augmentant la
 résolution interne des états, par Radau 5 ou sous-pas IRK.
 
-MadNLP/MUMPS Radau 5 a convergé `5/5`, avec une médiane chaude proche de
-`1.99 s`. IPOPT Radau 5 a produit des points primalement faisables, mais un
-RHO est resté non optimal après 2000 puis 5000 itérations. Le raffinement
-n'est donc pas encore certifié à 30 ou 100 RHO.
+MadNLP/MUMPS et IPOPT/MUMPS Radau 5 convergent maintenant tous deux `5/5`.
+La désactivation des duals transférés a ramené le RHO 2 IPOPT de 2 000 à 140
+itérations. La convergence solveur n'est cependant pas une certification de
+la transcription : R5--R6 diffère encore de `0.343–0.398 %` sur la fatigue et
+de `0.580–0.645 %` sur l'AUC. Le raffinement n'est donc pas certifié à 30 ou
+100 RHO.
 
 ### 2.4 La réduction mécanique est validée pour le régime testé
 
@@ -229,8 +231,18 @@ prioritaire que si l'objectif est explicitement un horizon monolithique.
 - [x] Exécuter le premier gate Linux 5 RHO Radau 4/5/6. Il réfute la
   certification immédiate : MadNLP Radau 5--6 diffère de `0.3977 %` sur la
   fatigue et de `0.6452 %` sur l'AUC; IPOPT Radau 5 ne valide que `1/5`.
+- [x] Refaire le gate avec raffinement cible, duals coupés, profils hashés et
+  contrôle full. IPOPT et MadNLP passent `5/5`, mais reproduisent l'écart
+  R5--R6; le problème n'était donc pas seulement la convergence d'IPOPT.
 - [ ] Transférer R4 vers R5 et R6 vers R5, puis réintégrer les mêmes PW avec un
   intégrateur haute précision pour distinguer discrétisation et bassin local.
+- [x] Exporter automatiquement la trajectoire complète certifiée de chaque cas
+  scientifique sous `validated-rho-trajectory.npz`, afin que le transfert
+  croisé conserve les PW exactes plutôt que les valeurs JSON arrondies.
+- [x] Ajouter un rollout DOP853 continu des PW exportées, sans remise à zéro
+  aux nœuds, avec quadrature commune du coût, de l'AUC et des quatre muscles.
+- [ ] Exécuter le nouveau gate et comparer les métriques DOP853 R5/R6 avant de
+  décider si un transfert suivi d'une réoptimisation est encore nécessaire.
 - [ ] Lancer `5`, puis `30`, puis `100` RHO seulement lorsque le gate précédent
   est physiquement certifié.
 
@@ -238,12 +250,14 @@ Critère de sortie proposé : erreur relative du calcium inférieure à `0.1 %`,
 variation de fatigue et d'AUC inférieure à `0.1 %` au raffinement suivant, et
 aucune violation interne des bornes.
 
-Gate Linux disponible : MadNLP converge strictement sur les trois degrés. R4
-et R5 sont proches (`0.0954 %` fatigue, `0.0174 %` AUC), mais R5 et R6 ne le
-sont pas (`0.3977 %`, `0.6452 %`). IPOPT R5 atteint 2 000 itérations au RHO 2
-malgré une violation primale de seulement `1.63e-10`. Le prochain gate utilise
-un raffinement IPOPT préalable sur la transcription cible, désactive les duals
-transférés pour l'audit et ajoute le contrôle full Radau 5 apparié.
+Gate Linux disponible : les deux solveurs convergent strictement sur les trois
+degrés. R4 et R5 sont proches (`0.080–0.095 %` fatigue), mais R5 et R6 ne le
+sont pas (`0.343–0.398 %` fatigue, `0.580–0.645 %` AUC). Les PW diffèrent
+surtout au premier cycle sur le Biceps et le Triceps. En Radau 5, IPOPT et
+MadNLP reduced s'accordent à `0.0205 %`, et MadNLP full/reduced à `0.00194 %`.
+IPOPT full trouve toutefois une branche de fatigue `0.400 %` plus basse que
+son reduced : la prochaine étape est un transfert croisé des mêmes contrôles,
+pas un palier d'endurance plus long.
 
 ### P1 — Établir la nouvelle baseline de performance
 

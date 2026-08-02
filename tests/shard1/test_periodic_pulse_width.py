@@ -593,6 +593,44 @@ def test_high_accuracy_integrator_diagnostic_handles_time_dependent_dynamics():
     assert max(row["rk4_vs_reference"] for row in rows) < 1e-12
 
 
+def test_high_accuracy_trace_rollout_reintegrates_controls_and_fatigue():
+    class Variables(dict):
+        def __init__(self, values, shape):
+            super().__init__(values)
+            self.shape = shape
+
+    state_variables = Variables({"A_Test": SimpleNamespace(index=[0])}, shape=1)
+    control_variables = Variables({"u": SimpleNamespace(index=[0])}, shape=1)
+    nlp = SimpleNamespace(
+        states=state_variables,
+        controls=control_variables,
+        numerical_data_timeseries=None,
+        dynamics_func=lambda _time, _state, _control, _parameters, _algebraic, _data: np.array(
+            [-1.0]
+        ),
+    )
+    nmpc = SimpleNamespace(nlp=[nlp], cycle_duration=1.0, cycle_len=2)
+
+    diagnostic = periodic_example.high_accuracy_trace_rollout_diagnostics(
+        nmpc,
+        {"A_Test": np.array([[10.0, 9.5, 9.0]])},
+        {"u": np.zeros((1, 2))},
+        cycle_count=1,
+        capacity_scales={"A_Test": 10.0},
+    )
+
+    assert diagnostic["available"] is True
+    assert diagnostic["interval_count"] == 2
+    assert diagnostic["maximum_absolute_endpoint_error"] < 1e-11
+    np.testing.assert_allclose(diagnostic["fatigue_auc_cycles"], 0.05, atol=1e-11)
+    np.testing.assert_allclose(
+        diagnostic["executed_fatigue_objective"], 100.0 / 3.0, atol=1e-9
+    )
+    np.testing.assert_allclose(
+        diagnostic["muscle_fatigue"][0]["final_capacity_ratio"], 0.9
+    )
+
+
 def test_wheel_periodicity_diagnostic_supports_reduced_theta_state():
     class Variables(dict):
         def __init__(self, values, shape):
@@ -5622,6 +5660,7 @@ def test_github_acados_runner_uses_reference_and_option_profiles_sequentially():
     assert "specified structure of A does not correspond" in workflow
     assert 'case_requires_compile="$COMPILE_NLP_EVALUATORS"' in workflow
     assert "case_requires_compile=false" in workflow
+    assert '[[ "$result" == *-radau[456]-* ]]' in workflow
     assert ".compiled_nlp_reuse.compiled_library_build_count == 1" in workflow
     assert ".compiled_nlp_reuse.graph_rebuild_detected == false" in workflow
     assert ".compiled_nlp_reuse.runtime_bounds_changed == true" in workflow
@@ -5837,6 +5876,11 @@ def test_github_acados_runner_uses_reference_and_option_profiles_sequentially():
     assert 'ipopt_profile="${12:-periodic_collocation}"' in benchmark_runner
     assert 'dual_warm_start="${13:-auto}"' in benchmark_runner
     assert 'target_refinement="${14:-auto}"' in benchmark_runner
+    assert 'trajectory_options=()' in benchmark_runner
+    assert '[[ "$ipopt_profile" =~ ^scientific[-_]radau[456]$ ]]' in benchmark_runner
+    assert '--receding-horizon-solution-output' in benchmark_runner
+    assert '"$case_dir/validated-rho-trajectory.npz"' in benchmark_runner
+    assert '"${trajectory_options[@]}"' in benchmark_runner
     assert "BENCHMARK_MAX_ITER=5000 bash" not in workflow
     assert '--ipopt-collocation-degree "$collocation_degree"' in benchmark_runner
     assert '--ipopt-profile "$ipopt_profile"' in benchmark_runner

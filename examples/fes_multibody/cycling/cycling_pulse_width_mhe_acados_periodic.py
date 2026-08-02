@@ -8164,6 +8164,182 @@ def high_accuracy_integrator_map_diagnostics(
     return rows
 
 
+def high_accuracy_trace_rollout_diagnostics(
+    nmpc,
+    state_traces: dict[str, np.ndarray],
+    control_traces: dict[str, np.ndarray],
+    *,
+    cycle_count: int,
+    capacity_scales: dict[str, float],
+    objective_weight: float = 10_000.0,
+) -> dict:
+    """Reintegrate an exported RHO prefix with one common DOP853 reference.
+
+    Unlike a collocation-defect check, this rollout never resets the reference
+    state at an optimized shooting node.  It therefore scores the exact same
+    PW sequence independently of the Radau degree that produced it.  Time is
+    reset at every RHO because the periodic-node OCP represents one crank cycle
+    per window while the Ding states remain continuous across windows.
+    """
+
+    from scipy.integrate import solve_ivp
+
+    if cycle_count < 1:
+        raise ValueError("cycle_count must be strictly positive.")
+    nlp = nmpc.nlp[0]
+    intervals_per_cycle = int(nmpc.cycle_len)
+    expected_intervals = cycle_count * intervals_per_cycle
+
+    def stack_traces(traces, variables, expected_nodes, label):
+        values = np.zeros((variables.shape, expected_nodes))
+        for key in variables.keys():
+            if key not in traces:
+                raise ValueError(f"Missing {label} trace '{key}'.")
+            trace = np.atleast_2d(np.asarray(traces[key], dtype=float))
+            if trace.shape[1] != expected_nodes:
+                raise ValueError(
+                    f"{label.capitalize()} trace '{key}' has {trace.shape[1]} "
+                    f"nodes, expected {expected_nodes}."
+                )
+            values[variables[key].index, :] = trace
+        if not np.all(np.isfinite(values)):
+            raise ValueError(f"The exported {label} traces are not finite.")
+        return values
+
+    states = stack_traces(
+        state_traces, nlp.states, expected_intervals + 1, "state"
+    )
+    controls = stack_traces(
+        control_traces, nlp.controls, expected_intervals, "control"
+    )
+    dt = float(nmpc.cycle_duration) / intervals_per_cycle
+
+    capacity_rows = []
+    for key in sorted(k for k in nlp.states.keys() if k.startswith("A_")):
+        scale = capacity_scales.get(key)
+        if scale is None or not np.isfinite(float(scale)) or float(scale) <= 0:
+            raise ValueError(f"Missing positive fatigue capacity scale for '{key}'.")
+        indexes = np.asarray(nlp.states[key].index).reshape(-1)
+        if indexes.size != 1:
+            raise ValueError(f"Fatigue capacity state '{key}' must be scalar.")
+        capacity_rows.append((key, int(indexes[0]), float(scale)))
+
+    n_states = states.shape[0]
+    n_capacities = len(capacity_rows)
+    augmented = np.concatenate(
+        (states[:, 0], np.zeros(2 * n_capacities, dtype=float))
+    )
+    maximum_absolute_endpoint_error = 0.0
+    maximum_scaled_endpoint_error = 0.0
+    maximum_absolute_by_state = {key: 0.0 for key in nlp.states.keys()}
+    reference_evaluations = 0
+    state_scales = np.maximum(
+        np.maximum(np.ptp(states, axis=1), np.max(np.abs(states), axis=1)), 1.0
+    )
+    # An absolute crank angle grows by 2*pi every RHO; scaling it by its final
+    # magnitude would make the same local drift look artificially smaller on
+    # longer prefixes.
+    for position_key in _phase_one_state_keys(nlp)["q"]:
+        state_scales[
+            np.asarray(nlp.states[position_key].index).reshape(-1)
+        ] = 2.0 * np.pi
+    for key, _, scale in capacity_rows:
+        state_scales[np.asarray(nlp.states[key].index).reshape(-1)] = scale
+
+    for interval in range(expected_intervals):
+        local_node = interval % intervals_per_cycle
+        interval_start = local_node * dt
+        numerical_timeseries = _numerical_timeseries_at_node(nlp, local_node)
+        control = controls[:, interval]
+
+        def augmented_rhs(time, values):
+            state = values[:n_states]
+            state_rhs = _full_dynamics_rhs(
+                nlp,
+                time,
+                dt,
+                state,
+                control,
+                numerical_timeseries,
+            )
+            normalized_fatigue = np.asarray(
+                [1.0 - state[index] / scale for _, index, scale in capacity_rows]
+            )
+            # Express both integrals in crank cycles, not seconds.
+            auc_rhs = normalized_fatigue / float(nmpc.cycle_duration)
+            objective_rhs = np.square(normalized_fatigue) / float(
+                nmpc.cycle_duration
+            )
+            return np.concatenate((state_rhs, auc_rhs, objective_rhs))
+
+        reference = solve_ivp(
+            augmented_rhs,
+            (interval_start, interval_start + dt),
+            augmented,
+            method="DOP853",
+            rtol=1e-11,
+            atol=1e-13,
+        )
+        if not reference.success:
+            raise RuntimeError(
+                "High-accuracy trace integration failed at interval "
+                f"{interval}: {reference.message}"
+            )
+        augmented = reference.y[:, -1]
+        reference_evaluations += int(reference.nfev)
+        endpoint_error = augmented[:n_states] - states[:, interval + 1]
+        maximum_absolute_endpoint_error = max(
+            maximum_absolute_endpoint_error,
+            float(np.max(np.abs(endpoint_error))),
+        )
+        maximum_scaled_endpoint_error = max(
+            maximum_scaled_endpoint_error,
+            float(np.max(np.abs(endpoint_error) / state_scales)),
+        )
+        for key in nlp.states.keys():
+            indexes = np.asarray(nlp.states[key].index).reshape(-1)
+            maximum_absolute_by_state[key] = max(
+                maximum_absolute_by_state[key],
+                float(np.max(np.abs(endpoint_error[indexes]))),
+            )
+
+    auc_values = augmented[n_states : n_states + n_capacities]
+    objective_values = augmented[n_states + n_capacities :]
+    muscle_fatigue = []
+    for row_index, (key, state_index, scale) in enumerate(capacity_rows):
+        muscle_fatigue.append(
+            {
+                "muscle": key.removeprefix("A_"),
+                "state_key": key,
+                "executed_fatigue_objective": float(
+                    objective_weight * objective_values[row_index]
+                ),
+                "cumulative_normalized_fatigue_cycles": float(
+                    auc_values[row_index]
+                ),
+                "final_capacity_ratio": float(augmented[state_index] / scale),
+            }
+        )
+
+    return {
+        "available": True,
+        "method": "DOP853_continuous_RHO_trace",
+        "relative_tolerance": 1e-11,
+        "absolute_tolerance": 1e-13,
+        "cycle_count": int(cycle_count),
+        "interval_count": int(expected_intervals),
+        "reference_evaluations": int(reference_evaluations),
+        "maximum_absolute_endpoint_error": maximum_absolute_endpoint_error,
+        "maximum_scaled_endpoint_error": maximum_scaled_endpoint_error,
+        "maximum_absolute_endpoint_error_by_state": maximum_absolute_by_state,
+        "executed_fatigue_objective": float(
+            objective_weight * np.sum(objective_values)
+        ),
+        "fatigue_auc_cycles": float(np.sum(auc_values)),
+        "muscle_fatigue": muscle_fatigue,
+    }
+
+
 def solution_trace_comparisons(
     reference_solution, candidate_solution, *, controls: bool
 ) -> list[dict]:
@@ -16668,6 +16844,24 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
     attach_exact_initial_nlp_audits(summary, nmpc)
     if build_mechanical_audit_profile:
         attach_mechanical_equivalence_audit(summary, reduced_cycling_dynamics)
+    if args.validate_integrator_maps:
+        covered_cycles = int(summary.get("covered_cycles") or 0)
+        if covered_cycles > 0:
+            summary["high_accuracy_trace_rollout"] = (
+                high_accuracy_trace_rollout_diagnostics(
+                    nmpc,
+                    summary.get("state_traces") or {},
+                    summary.get("control_traces") or {},
+                    cycle_count=covered_cycles,
+                    capacity_scales=fatigue_capacity_scales,
+                )
+            )
+        else:
+            summary["high_accuracy_trace_rollout"] = {
+                "available": False,
+                "reason": "no_strictly_validated_cycle",
+                "cycle_count": 0,
+            }
     if args.receding_horizon_solution_output is not None:
         rho_output_path = (
             Path(args.receding_horizon_solution_output).expanduser().resolve()

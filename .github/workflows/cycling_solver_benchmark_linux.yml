@@ -2051,7 +2051,9 @@ jobs:
             if [[ "$BENCHMARK_SOLVER" == "madnlp" && "$result" == *"madnlp-mumps-full/"* ]]; then
               case_requires_compile=false
             fi
-            if [[ "$result" == *-radau[456]-reduced/* ]]; then
+            # The scientific Radau audit times interpreted evaluators in both
+            # full and reduced mechanics; compilation is a separate ablation.
+            if [[ "$result" == *-radau[456]-* ]]; then
               case_requires_compile=false
             fi
             if [[ "$case_requires_compile" == "true" ]]; then

@@ -172,9 +172,10 @@ premier degré testé qui le satisfait; Radau 6 sert de témoin de raffinement.
 Le premier gate couplé IPOPT/reduced sur un RHO a convergé physiquement pour
 les trois degrés. Radau 4, 5 et 6 ont demandé respectivement `10.50 s`,
 `18.05 s` et `32.78 s` sur le même Mac non compilé à un thread. Entre Radau 5
-et 6, l'écart vaut `0.0316 %` sur la fatigue exécutée et `0.1022 %` sur son
-AUC. Cette dernière valeur est juste au-dessus du seuil provisoire : Radau 5
-reste donc un candidat, à confirmer sur cinq RHO Linux, et non une méthode déjà
+et 6, l'écart valait `0.0316 %` sur la fatigue exécutée et `0.1022 %` sur son
+AUC. Le gate Linux apparié sur cinq RHO confirme que cet écart ne disparaît
+pas : selon le solveur, il atteint `0.343–0.398 %` sur la fatigue et
+`0.580–0.645 %` sur l'AUC. Radau 5 reste donc un candidat, pas une méthode
 certifiée.
 
 La cible recommandée est de conserver 30 décisions de PW par cycle tout en
@@ -401,14 +402,62 @@ actives. Une surcharge contradictoire est refusée. Seul Radau 5 porte le statut
 `candidate`; Radau 4 et 6 sont des diagnostics de raffinement. Le nom du profil
 ne remplace pas la certification de la fatigue, de l'AUC et des bornes internes.
 
-Le gate Linux 5 RHO du
+Le premier gate Linux 5 RHO du
 [run 30748390517](https://github.com/mickaelbegon/cocofest/actions/runs/30748390517)
 n'a **pas** certifié Radau 5. MadNLP/MUMPS converge sur `5/5`, mais l'écart
 Radau 5--6 atteint `0.3977 %` sur la fatigue exécutée et `0.6452 %` sur l'AUC,
 au-dessus du seuil provisoire de `0.1 %`. IPOPT/Radau 5 s'arrête au préfixe
 strict `1/5` : le RHO 2 est primalement faisable, mais atteint 2 000 itérations.
-Le palier 30 reste donc bloqué jusqu'à séparation de l'erreur de transcription
-et du changement de bassin optimal.
+
+Le second gate du
+[run 30750686602](https://github.com/mickaelbegon/cocofest/actions/runs/30750686602)
+désactive le transfert des duals et raffine d'abord la transcription cible.
+IPOPT/Radau 5 passe alors de `1/5` à `5/5`; le RHO 2 tombe de 2 000 à 140
+itérations. Le changement corrige donc un problème de warm-start, mais ne
+change pas la conclusion scientifique :
+
+| Solveur, reduced | R4--R5 fatigue | R4--R5 AUC | R5--R6 fatigue | R5--R6 AUC |
+|---|---:|---:|---:|---:|
+| IPOPT/MUMPS | `0.0804 %` | `0.00374 %` | `0.3431 %` | `0.5797 %` |
+| MadNLP/MUMPS | `0.0954 %` | `0.01744 %` | `0.3977 %` | `0.6452 %` |
+
+Les PW R5 et R6 diffèrent surtout au premier cycle : l'écart RMS sur les 120
+PW vaut environ `11.1–11.4 µs`, avec un maximum de `105–106 µs` porté par le
+Biceps. Il tombe ensuite autour de `1.2–3.0 µs` RMS, mais la fatigue accumule
+la différence de recrutement. La répétition du même patron avec IPOPT et
+MadNLP indique un changement de branche optimale ou une sensibilité de la
+transcription couplée, et non un artefact propre à un solveur.
+
+Le contrôle full/reduced Radau 5 affine le diagnostic. MadNLP obtient des
+fatigues pratiquement identiques (`0.00194 %` d'écart), tandis qu'IPOPT trouve
+en full une branche plus basse de `0.400 %` que son reduced. Les deux solveurs
+s'accordent pourtant en reduced à `0.0205 %`. La réduction mécanique n'est
+donc pas mise en défaut par le résultat MadNLP; il faut d'abord transférer et
+réintégrer les mêmes PW entre full, reduced, R5 et R6 avant d'attribuer les
+écarts au modèle.
+
+Le statut rouge du run vient uniquement d'une erreur du contrôle CI : le gate
+exigeait à tort une bibliothèque C pour le cas scientifique full, alors que
+cette ablation chronomètre volontairement les évaluateurs interprétés. Les
+résultats numériques et les artefacts sont complets. Le palier 30 reste bloqué
+jusqu'à séparation de l'erreur de transcription et du changement de bassin
+optimal.
+
+Le prochain gate produit cette séparation directement. Chaque préfixe Radau
+scientifique est exporté sans perte dans `validated-rho-trajectory.npz`, puis
+ses PW sont rejouées avec une intégration continue DOP853 commune
+(`rtol=1e-11`, `atol=1e-13`). Le rollout ne se recale pas sur les états de
+collocation aux nœuds. Il rapporte le coût de fatigue, l'AUC, les quatre
+muscles et l'écart aux états transcrits. Si les PW R5 et R6 restent différentes
+mais donnent le même classement sous DOP853, l'écart vient principalement du
+bassin de recrutement; si le classement change fortement, la transcription
+reste le facteur dominant.
+
+La comparaison DOP853 qui décide R5/R6 doit être lue d'abord en mécanique
+reduced, où la géométrie du pédalier est intégrée dans les coordonnées. En
+full, le rollout non projeté est un audit sévère du drift entre nœuds; ses
+métriques de fatigue ne sont comparables à reduced que si l'écart mécanique
+et la contrainte d'axe restent dans leurs tolérances.
 
 ## 6. Prochaine campagne recommandée
 
