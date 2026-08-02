@@ -16,6 +16,25 @@ Pour déplacer la campagne sur un nouveau calculateur, utiliser le
 [prompt de continuation](continuation_prompt.md) et la
 [procédure Linux 32 cœurs](linux_32core_setup.md).
 
+## Versions reproductibles du workflow actif
+
+La CI ne dépend pas d'un nom de branche flottant. Elle clone le fork
+[`mickaelbegon/BiorbdOptim`](https://github.com/mickaelbegon/BiorbdOptim) et
+effectue les checkouts par SHA complet :
+
+- intégration multi-solveurs active :
+  `dad96b90d47c36126c1e97ec35f27c499abf4b12`;
+- intégration Alpaqa archivée :
+  `d84e7e43534360fc048e0be26a3bd69a2abc2d77`;
+- écran MadNLP/MUMPS historique, conservé uniquement pour diagnostic :
+  `346eb1d445e6ba67010b96c6f16ba830185119e7`.
+
+Le détail des anciennes révisions, des branches de provenance et des patchs
+Bioptim se trouve dans
+[l'historique des développements](development_history.md). Le workflow
+[`cycling_solver_benchmark_linux.yml`](../../.github/workflows/cycling_solver_benchmark_linux.yml)
+reste la source de vérité exécutable.
+
 ## Réponse courte
 
 Pour obtenir aujourd'hui la meilleure combinaison de robustesse et de vitesse :
@@ -135,12 +154,28 @@ Dans le cas périodique isolé déjà testé :
 | Solution analytique | `0.162982158353` |
 | ACADOS IRK, 4 étages et 5 sous-pas | `0.162982158637` |
 | Collocation Radau degré 3 | `0.152573519058` |
+| Collocation Radau degré 4 | `0.163718500354` |
+| Collocation Radau degré 5 | `0.162953961548` |
+| Collocation Radau degré 6 | `0.162982834340` |
 | ACADOS ERK testé | `0.232903256` |
 
 Radau degré 3 reproduit exactement sa propre transcription, mais cette
 transcription sous-estime ici la valeur analytique de `6.39 %`. ERK est encore
 moins fidèle. Retrouver l'un de ces deux résultats ne constitue donc pas une
 validation du calcium.
+
+Les erreurs relatives des degrés 4, 5 et 6 sont respectivement `+0.4518 %`,
+`-0.01730 %` et `+0.000415 %`. Radau 4 est donc un témoin coût-précision utile,
+mais il ne satisfait pas le seuil scientifique de `0.1 %`. Radau 5 est le
+premier degré testé qui le satisfait; Radau 6 sert de témoin de raffinement.
+
+Le premier gate couplé IPOPT/reduced sur un RHO a convergé physiquement pour
+les trois degrés. Radau 4, 5 et 6 ont demandé respectivement `10.50 s`,
+`18.05 s` et `32.78 s` sur le même Mac non compilé à un thread. Entre Radau 5
+et 6, l'écart vaut `0.0316 %` sur la fatigue exécutée et `0.1022 %` sur son
+AUC. Cette dernière valeur est juste au-dessus du seuil provisoire : Radau 5
+reste donc un candidat, à confirmer sur cinq RHO Linux, et non une méthode déjà
+certifiée.
 
 La cible recommandée est de conserver 30 décisions de PW par cycle tout en
 raffinant l'intégration des états entre deux décisions. Deux voies sont
@@ -359,6 +394,12 @@ porter le nom `reference` dans les nouveaux artefacts. Les nouveaux noms
 devraient décrire la méthode, par exemple `legacy-radau3`,
 `scientific-radau5` ou `irk-refined`.
 
+Le profil CLI `scientific-radau5` est maintenant un contrat verrouillé :
+`periodic_node`, couple constant, SX, collocation Radau degré 5 et contraintes
+initiales actives. Une surcharge contradictoire est refusée. Son statut JSON
+reste cependant `candidate`; le nom du profil ne remplace pas la certification
+de la fatigue, de l'AUC et des bornes internes.
+
 ## 6. Prochaine campagne recommandée
 
 La prochaine comparaison utile ne consiste pas à accélérer davantage la
@@ -368,7 +409,7 @@ scientifique commune :
 1. force passive active et testée après toute copie ou mise à jour du modèle;
 2. mécanique reduced validée contre full sur les mêmes PW et états Ding;
 3. 30 décisions de PW, mais calcium intégré avec Radau 5 ou IRK sous-pas;
-4. étude de convergence temporelle et réintégration dense;
+4. étude courte Radau 3/4/5/6, puis réintégration dense;
 5. IPOPT/MUMPS et MadNLP/MUMPS comparés sur cette même transcription;
 6. ACADOS comparé seulement après alignement des contraintes internes;
 7. paliers 5, 30 et 100, puis prolongation vers 300 et 1000 RHO pour atteindre

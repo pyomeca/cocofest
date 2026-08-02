@@ -4022,3 +4022,58 @@ actuel ne corrige pas la rupture au RHO 14. Une prochaine itération ne sera
 pertinente que si le rollout est rendu beaucoup moins coûteux ou remplacé par
 une projection qui cible directement les contraintes dynamiques de la
 transcription ACADOS.
+
+## 19. Profil scientifique Radau et audit calcique (2 août 2026)
+
+La transcription Radau degré 5 auparavant activée par une simple surcharge du
+profil générique dispose maintenant du nom public `scientific-radau5`. Ce
+profil verrouille `periodic_node`, le couple constant, SX, Radau degré 5 et les
+contraintes initiales. IPOPT, MadNLP et FATROP héritent du même objet de
+transcription; toute surcharge contradictoire du profil scientifique est
+refusée avant la construction de l'OCP.
+
+Un audit indépendant a reconstruit l'opérateur de collocation du sous-système
+calcique, avec six stimulations retenues, sans utiliser la solution du NLP :
+
+| Transcription | $C_N$ périodique | Erreur relative |
+|---|---:|---:|
+| Analytique | `0.1629821583533315` | — |
+| Radau 3 | `0.1525735190581417` | `-6.3864 %` |
+| Radau 4 | `0.1637185003543043` | `+0.4518 %` |
+| Radau 5 | `0.1629539615482148` | `-0.01730 %` |
+| Radau 6 | `0.1629828343398534` | `+0.000415 %` |
+
+Radau 4 est ajouté à la campagne courte comme point coût-précision, mais ne
+franchit pas le seuil de `0.1 %`. Radau 5 est le premier degré testé qui le
+franchit; Radau 6 reste le témoin du raffinement suivant. La CI optionnelle
+exécute donc successivement les degrés 4, 5 et 6 sur la même machine IPOPT,
+puis sur la même machine MadNLP, avec des artefacts séparés. Un échec d'un
+degré ne masque pas les deux autres.
+
+Les JSON enregistrent désormais le profil et son hash, son intégrité, un
+statut scientifique distinct, la formulation et les constantes du calcium,
+les relations force-longueur, force-vitesse et passive, le nombre d'états Ding
+et les 30 décisions de PW. Le statut initial de `scientific-radau5` demeure
+`candidate` : seul le calcium isolé est certifié. La fatigue, l'AUC, les bornes
+denses et l'équivalence full/reduced doivent encore passer les gates RHO.
+
+### Gate local IPOPT reduced, un RHO
+
+Les degrés 4, 5 et 6 ont ensuite été exécutés successivement sur le même Mac,
+avec MUMPS, SX, un thread, sans compilation C, assistance nulle et le même seed
+historique projeté. Les trois résolutions sont solver-success et
+physical-success :
+
+| Degré | Itérations | Temps solveur | Coût fenêtre | Fatigue exécutée | AUC fatigue |
+|---:|---:|---:|---:|---:|---:|
+| 4 | 153 | `10.505 s` | `3.71819550` | `3.60479056` | `0.02963546` |
+| 5 | 278 | `18.055 s` | `3.71319287` | `3.59991324` | `0.02953306` |
+| 6 | 469 | `32.782 s` | `3.71202114` | `3.59877577` | `0.02950292` |
+
+Par rapport au degré 6, Radau 5 diffère de `0.0316 %` sur le coût et la fatigue
+exécutée, mais de `0.1022 %` sur l'AUC, juste au-dessus du seuil provisoire de
+`0.1 %`. Radau 4 diffère déjà de Radau 5 de `0.135 %` sur la fatigue et de
+`0.347 %` sur l'AUC. Ce gate confirme donc l'intérêt de tester Radau 4, mais ne
+justifie pas de le retenir. Il confirme aussi que Radau 5 doit encore être
+évalué sur cinq RHO avant certification : un seul RHO et des temps macOS non
+compilés ne permettent pas de conclure sur la performance Linux chaude.

@@ -1,6 +1,6 @@
 # Point de reprise du benchmark RHO
 
-État consolidé au 31 juillet 2026 sur la branche
+État consolidé au 2 août 2026 sur la branche
 `codex/acados-pr-refresh`. Le HEAD précédant cette mise à jour documentaire est
 `2aa3633374074f5da7c2e6800a2bfd166bbe6b7b`.
 
@@ -217,20 +217,28 @@ prioritaire que si l'objectif est explicitement un horizon monolithique.
 
 ### P0 — Définir et certifier le problème scientifique corrigé
 
-- [ ] Ajouter un profil nommé `scientific-radau5` ou `irk-refined`, distinct
-  de `legacy-radau3`.
-- [ ] Enregistrer explicitement dans chaque JSON le statut de la force passive,
+- [x] Ajouter le profil verrouillé `scientific-radau5`, distinct de la
+  transcription diagnostique Radau 3.
+- [x] Enregistrer explicitement dans chaque JSON le statut de la force passive,
   le degré de collocation, le nombre d'étages et les sous-pas.
-- [ ] Ajouter un test isolé du calcium périodique contre la valeur analytique.
-- [ ] Découpler les 30 décisions de PW de la résolution interne des états.
-- [ ] Effectuer une étude de convergence Radau 3, Radau 5 et raffinement
-  suivant, avec erreur calcium, fatigue, AUC et temps.
+- [x] Ajouter un test isolé du calcium périodique contre la valeur analytique.
+- [x] Conserver 30 décisions de PW indépendamment du degré de collocation des
+  états.
+- [x] Certifier le calcium isolé aux degrés Radau 3/4/5/6. Radau 4 a une erreur
+  de `0.4518 %`, Radau 5 de `0.01730 %` et Radau 6 de `0.000415 %`.
+- [ ] Compléter l'étude Radau 3/4/5/6 sur le RHO couplé avec fatigue, AUC et
+  temps. Les degrés 4 et 6 restent des témoins courts; Radau 5 est le candidat.
 - [ ] Lancer `5`, puis `30`, puis `100` RHO seulement lorsque le gate précédent
   est physiquement certifié.
 
 Critère de sortie proposé : erreur relative du calcium inférieure à `0.1 %`,
 variation de fatigue et d'AUC inférieure à `0.1 %` au raffinement suivant, et
 aucune violation interne des bornes.
+
+Gate local disponible : IPOPT/reduced a convergé sur `1/1` RHO aux degrés 4,
+5 et 6. Radau 5 diffère de Radau 6 de `0.0316 %` sur la fatigue exécutée, mais
+de `0.1022 %` sur l'AUC. Le gate cinq RHO Linux reste donc nécessaire avant de
+cocher l'étude couplée.
 
 ### P1 — Établir la nouvelle baseline de performance
 

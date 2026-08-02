@@ -3,7 +3,7 @@ import numpy as np
 import pytest
 import re
 import warnings
-from casadi import Function, SX
+from casadi import Function, SX, collocation_coeff, collocation_points
 from pathlib import Path
 from types import SimpleNamespace
 from bioptim import BoundsList, InitialGuessList, Node, SolutionMerge, Solver
@@ -422,6 +422,66 @@ def test_periodic_node_data_reconstructs_exact_within_interval_decay():
     expected = stage_data[0] * np.exp(-local_time / model.tauc)
 
     np.testing.assert_allclose(observed, expected)
+
+
+def _periodic_cn_collocation_fixed_point(model, degree: int) -> float:
+    """Evaluate the same one-interval Radau map used by direct collocation."""
+
+    interval = 1.0 / 30.0
+    tau = model.tauc
+    amplitude = model.post_stimulation_amplitude()
+    points = collocation_points(degree, "radau")
+    coefficients, continuity, _ = collocation_coeff(points)
+    coefficients = np.asarray(coefficients, dtype=float)
+    continuity = np.asarray(continuity, dtype=float).reshape(-1)
+
+    stage_matrix = np.zeros((degree, degree))
+    for equation in range(degree):
+        for stage in range(1, degree + 1):
+            stage_matrix[equation, stage - 1] = coefficients[stage, equation]
+            if stage == equation + 1:
+                stage_matrix[equation, stage - 1] += interval / tau
+
+    def step(initial_cn: float) -> float:
+        right_hand_side = np.array(
+            [
+                -coefficients[0, equation] * initial_cn
+                + (interval / tau)
+                * amplitude
+                * np.exp(-points[equation] * interval / tau)
+                for equation in range(degree)
+            ]
+        )
+        stages = np.linalg.solve(stage_matrix, right_hand_side)
+        return float(
+            continuity[0] * initial_cn
+            + np.dot(continuity[1:], stages)
+        )
+
+    affine_offset = step(0.0)
+    affine_gain = step(1.0) - affine_offset
+    return affine_offset / (1.0 - affine_gain)
+
+
+def test_scientific_radau5_resolves_periodic_calcium_against_exact_solution():
+    model = DingModelPulseWidthFrequencyWithFatiguePeriodicNode(
+        muscle_name="Biceps",
+        stim_time=[0.0, 1 / 30],
+        sum_stim_truncation=6,
+    )
+
+    exact = model.periodic_cn_fixed_point()
+    radau3 = _periodic_cn_collocation_fixed_point(model, 3)
+    radau4 = _periodic_cn_collocation_fixed_point(model, 4)
+    radau5 = _periodic_cn_collocation_fixed_point(model, 5)
+    radau6 = _periodic_cn_collocation_fixed_point(model, 6)
+
+    assert exact == pytest.approx(0.1629821583533315, abs=1e-14)
+    assert abs(radau3 / exact - 1.0) > 0.06
+    assert 4e-3 < abs(radau4 / exact - 1.0) < 5e-3
+    assert abs(radau5 / exact - 1.0) < 1e-3
+    assert abs(radau6 / exact - 1.0) < 1e-3
+    assert abs(radau5 / radau6 - 1.0) < 1e-3
 
 
 def test_periodic_node_pulse_width_does_not_change_calcium_derivative():
@@ -4958,6 +5018,12 @@ def test_benchmark_json_summary_contains_comparable_fatigue_metrics(tmp_path):
     result["args"].max_ipopt_iterations = 2000
     result["args"].wheel_qdot_regularization_target = -2.0 * np.pi
     result["args"].wheel_qdot_bound_margin = 3.0
+    result["args"].benchmark_profile = "scientific-radau5"
+    result["args"].profile_integrity = True
+    result["args"].scientific_status = "candidate"
+    result["args"].calcium_analytical_periodic_value = 0.1629821583533315
+    result["args"].ding_sum_stim_truncation = 6
+    result["args"].activate_passive_force_relationship = True
     result["acados_maxiter_retry_summaries"] = [
         {"window": 13, "retry_status": 2}
     ]
@@ -4979,6 +5045,18 @@ def test_benchmark_json_summary_contains_comparable_fatigue_metrics(tmp_path):
         "wheel_qdot_regularization_target"
     ] == pytest.approx(-2.0 * np.pi)
     assert payload["configurations"]["madnlp"]["wheel_qdot_bound_margin"] == 3.0
+    assert payload["configurations"]["madnlp"]["benchmark_profile"] == (
+        "scientific-radau5"
+    )
+    assert payload["configurations"]["madnlp"]["profile_integrity"] is True
+    assert payload["configurations"]["madnlp"]["scientific_status"] == "candidate"
+    assert payload["configurations"]["madnlp"][
+        "calcium_analytical_periodic_value"
+    ] == pytest.approx(0.1629821583533315)
+    assert payload["configurations"]["madnlp"]["ding_sum_stim_truncation"] == 6
+    assert payload["configurations"]["madnlp"][
+        "activate_passive_force_relationship"
+    ] is True
     row = payload["results"][0]
     assert row["solver"] == "madnlp"
     assert row["success"] is True
@@ -5472,8 +5550,13 @@ def test_github_acados_runner_uses_reference_and_option_profiles_sequentially():
     assert "refined_collocation_rhos:" in workflow
     assert "Run IPOPT reduced Radau degree 5" in workflow
     assert "Run MadNLP MUMPS reduced Radau degree 5" in workflow
+    assert "Run IPOPT reduced Radau degree 4" in workflow
+    assert "Run IPOPT reduced Radau degree 6" in workflow
+    assert "Run MadNLP MUMPS reduced Radau degree 4" in workflow
+    assert "Run MadNLP MUMPS reduced Radau degree 6" in workflow
     assert "ipopt-radau5-reduced" in workflow
     assert "madnlp-mumps-radau5-reduced" in workflow
+    assert workflow.count("5 scientific-radau5") == 2
     assert '"$BENCHMARK_CYCLES" "${{ inputs.compile_nlp_evaluators }}"' in workflow
     assert (
         "run_cycling_benchmark_case.sh ipopt ipopt full mumps collocation "
@@ -5707,8 +5790,13 @@ def test_github_acados_runner_uses_reference_and_option_profiles_sequentially():
     assert '"${initialization_options[@]}"' in benchmark_runner
     assert '--fatrop-state-scaling "$fatrop_state_scaling"' in benchmark_runner
     assert 'collocation_degree="${11:-3}"' in benchmark_runner
+    assert 'ipopt_profile="${12:-periodic_collocation}"' in benchmark_runner
     assert "BENCHMARK_MAX_ITER=5000 bash" not in workflow
     assert '--ipopt-collocation-degree "$collocation_degree"' in benchmark_runner
+    assert '--ipopt-profile "$ipopt_profile"' in benchmark_runner
+    assert '.benchmark_profile == "scientific-radau5"' in benchmark_runner
+    assert ".activate_passive_force_relationship == true" in benchmark_runner
+    assert ".control_decisions_per_cycle == 30" in benchmark_runner
     assert 'case "$graph_mode" in' in benchmark_runner
     assert "The endurance benchmark is SX-only" in benchmark_runner
     assert "libMAD WARNING: option linear_solver is of unknown type" in (
@@ -10100,6 +10188,49 @@ def test_periodic_collocation_ipopt_profile_is_available():
     )
     assert periodic_args.periodic_ipopt_refinement_ode_solver == "collocation"
     assert comparison_args.periodic_ipopt_refinement_ode_solver == "collocation"
+
+
+def test_scientific_radau5_profile_is_fixed_and_shared_by_nlp_solvers(monkeypatch):
+    captured = {}
+
+    def fake_run(solver_name, args, **_):
+        captured[solver_name] = args
+        return {}
+
+    monkeypatch.setattr(comparison_example, "_run_benchmark_case", fake_run)
+    monkeypatch.setattr(comparison_example, "print_solver_overview", lambda _: None)
+
+    cli_args = comparison_example.build_cli().parse_args(
+        ["--benchmark-profile", "scientific-radau5"]
+    )
+    assert cli_args.ipopt_profile == "scientific-radau5"
+
+    comparison_example.main(
+        solvers=("ipopt", "madnlp"),
+        n_windows=1,
+        ipopt_profile="scientific-radau5",
+    )
+
+    for solver_name in ("ipopt", "madnlp"):
+        args = captured[solver_name]
+        assert args.benchmark_profile == "scientific-radau5"
+        assert args.transcription_profile == "scientific-radau5"
+        assert args.profile_integrity is True
+        assert args.scientific_status == "candidate"
+        assert args.model_formulation == "periodic_node"
+        assert args.ode_solver == "collocation"
+        assert args.collocation_degree == 5
+        assert args.collocation_method == "radau"
+        assert args.use_sx is True
+        assert args.enforce_start_constraints is True
+
+    with pytest.raises(ValueError, match="fixed scientific contract"):
+        comparison_example.main(
+            solvers=("ipopt",),
+            n_windows=1,
+            ipopt_profile="scientific-radau5",
+            ipopt_collocation_degree=3,
+        )
 
 
 def test_comparison_cli_accepts_acados_best_iterate_retry_options():

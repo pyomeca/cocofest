@@ -8,6 +8,7 @@ periodic formulation. The default objective is fatigue only.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import platform
@@ -56,6 +57,13 @@ BENCHMARK_SOLVERS = ("ipopt", "acados", "fatrop", "madnlp")
 BENCHMARK_STIMULATION_PATTERN_CYCLES = (10, 30, 100)
 BENCHMARK_CONFIGURATION_FIELDS = (
     "solver",
+    "benchmark_profile",
+    "transcription_profile",
+    "ipopt_profile",
+    "profile_version",
+    "profile_hash",
+    "profile_integrity",
+    "scientific_status",
     "single_shot",
     "objective",
     "objective_shape",
@@ -73,6 +81,19 @@ BENCHMARK_CONFIGURATION_FIELDS = (
     "ode_solver",
     "collocation_degree",
     "collocation_method",
+    "calcium_forcing_formulation",
+    "calcium_initialization_regime",
+    "calcium_tau_s",
+    "calcium_stimulation_interval_s",
+    "calcium_post_stimulation_amplitude",
+    "calcium_analytical_periodic_value",
+    "ding_sum_stim_truncation",
+    "ding_states_per_muscle",
+    "muscle_names",
+    "control_decisions_per_cycle",
+    "activate_force_length_relationship",
+    "activate_force_velocity_relationship",
+    "activate_passive_force_relationship",
     "use_sx",
     "nlp_ordering_strategy",
     "state_scaling",
@@ -246,7 +267,31 @@ IPOPT_PROFILE_DEFAULTS = {
         "disable_periodic_fes_warmup_projection": False,
         "fatigue_warmstart_mode": None,
     },
+    "scientific_radau5": {
+        "model_formulation": "periodic_node",
+        "torque_application": "constant",
+        "ode_solver": "collocation",
+        "rk_steps": 1,
+        "collocation_degree": 5,
+        "collocation_method": "radau",
+        "use_sx": True,
+        "enforce_start_constraints": True,
+        "disable_standard_ipopt_warmup": False,
+        "disable_periodic_fes_warmup_projection": False,
+        "fatigue_warmstart_mode": None,
+    },
 }
+IPOPT_PROFILE_VERSION = 1
+
+
+def _profile_hash(profile: str) -> str:
+    contract = {
+        "name": profile,
+        "version": IPOPT_PROFILE_VERSION,
+        "defaults": IPOPT_PROFILE_DEFAULTS[profile],
+    }
+    encoded = json.dumps(contract, sort_keys=True, separators=(",", ":")).encode()
+    return hashlib.sha256(encoded).hexdigest()
 
 
 def _namespace_from_cli(**overrides) -> argparse.Namespace:
@@ -1290,7 +1335,7 @@ def _solver_config(
         if normalized_profile not in IPOPT_PROFILE_DEFAULTS:
             raise ValueError(
                 "--ipopt-profile must be 'historical', 'periodic_collocation', "
-                "or 'acados_like'."
+                "'scientific_radau5', or 'acados_like'."
             )
 
         defaults = IPOPT_PROFILE_DEFAULTS[normalized_profile]
@@ -1302,8 +1347,18 @@ def _solver_config(
         if fatigue_warmstart_default is None:
             fatigue_warmstart_default = acados_fatigue_warmstart_mode
 
-        return _namespace_from_cli(
+        solver_args = _namespace_from_cli(
             solver="ipopt",
+            benchmark_profile=normalized_profile.replace("_", "-"),
+            ipopt_profile=normalized_profile,
+            transcription_profile=normalized_profile.replace("_", "-"),
+            profile_version=IPOPT_PROFILE_VERSION,
+            profile_hash=_profile_hash(normalized_profile),
+            scientific_status=(
+                "candidate"
+                if normalized_profile == "scientific_radau5"
+                else "diagnostic"
+            ),
             single_shot=single_shot,
             model_formulation=_pick(
                 ipopt_model_formulation, defaults["model_formulation"]
@@ -1418,6 +1473,39 @@ def _solver_config(
                 ipopt_disable_historical_initial_guess
             ),
         )
+        contract_fields = (
+            ("model_formulation", "model_formulation"),
+            ("torque_application", "torque_application"),
+            ("ode_solver", "ode_solver"),
+            ("rk_steps", "rk_steps"),
+            ("collocation_degree", "collocation_degree"),
+            ("collocation_method", "collocation_method"),
+            ("use_sx", "use_sx"),
+            ("enforce_start_constraints", "enforce_start_constraints"),
+            ("disable_standard_ipopt_warmup", "disable_standard_ipopt_warmup"),
+            (
+                "disable_periodic_fes_warmup_projection",
+                "disable_periodic_fes_warmup_projection",
+            ),
+            ("acados_fatigue_warmstart_mode", "fatigue_warmstart_mode"),
+        )
+        mismatches = {
+            attribute: (getattr(solver_args, attribute), defaults[default_key])
+            for attribute, default_key in contract_fields
+            if defaults[default_key] is not None
+            and getattr(solver_args, attribute) != defaults[default_key]
+        }
+        solver_args.profile_integrity = not mismatches
+        if normalized_profile == "scientific_radau5" and mismatches:
+            details = ", ".join(
+                f"{key}={observed!r} (expected {expected!r})"
+                for key, (observed, expected) in mismatches.items()
+            )
+            raise ValueError(
+                "The scientific-radau5 profile is a fixed scientific "
+                f"contract and cannot be overridden: {details}."
+            )
+        return solver_args
 
     if solver_name == "acados":
         return _namespace_from_cli(
@@ -3329,6 +3417,18 @@ def main(
     acados_args.acados_collocation_type = acados_collocation_type
     acados_args.acados_sim_stages = acados_sim_stages
     acados_args.acados_sim_steps = acados_sim_steps
+    acados_args.ipopt_profile = None
+    acados_args.benchmark_profile = "acados-runtime"
+    acados_args.transcription_profile = (
+        f"acados-{acados_integrator_type.lower()}-"
+        f"{acados_sim_stages}stage-{acados_sim_steps}step"
+    )
+    acados_args.profile_version = 1
+    acados_args.profile_hash = hashlib.sha256(
+        acados_args.transcription_profile.encode()
+    ).hexdigest()
+    acados_args.profile_integrity = True
+    acados_args.scientific_status = "candidate"
     acados_args.acados_newton_iter = acados_newton_iter
     acados_args.periodic_ipopt_refinement_ode_solver = (
         periodic_ipopt_refinement_ode_solver
@@ -3588,6 +3688,7 @@ def main(
     ipopt_label = {
         "historical": "historical reference",
         "periodic_collocation": "periodic-collocation bridge",
+        "scientific_radau5": "scientific Radau-5",
         "acados_like": "ACADOS-like diagnostic",
     }[normalized_ipopt_profile]
     solver_args = {
@@ -4277,10 +4378,14 @@ def build_cli() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--ipopt-profile",
+        "--benchmark-profile",
+        dest="ipopt_profile",
         choices=(
             "historical",
             "periodic_collocation",
             "periodic-collocation",
+            "scientific_radau5",
+            "scientific-radau5",
             "acados_like",
             "acados-like",
         ),
@@ -4288,7 +4393,8 @@ def build_cli() -> argparse.ArgumentParser:
         help=(
             "Base IPOPT configuration. 'historical' keeps the robust reference "
             "problem; 'periodic_collocation' isolates the periodic dynamics and "
-            "constant torque with robust collocation; 'acados_like' additionally "
+            "constant torque with robust collocation; 'scientific_radau5' fixes "
+            "the corrected SX/Radau-5 scientific contract; 'acados_like' additionally "
             "switches IPOPT to the explicit RK setup used to diagnose ACADOS."
         ),
     )

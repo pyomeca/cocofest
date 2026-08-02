@@ -360,7 +360,7 @@ def test_configuration_comparability_is_scoped_by_mechanical_formulation():
     assert mismatches[0]["reference_case"] == "ipopt/reduced"
 
 
-def test_numerical_transcription_choices_do_not_change_physical_comparability():
+def test_numerical_transcription_choices_are_reported_as_non_comparable():
     def entry(solver, ode_solver, state_scaling):
         return {
             "configuration": {
@@ -377,7 +377,33 @@ def test_numerical_transcription_choices_do_not_change_physical_comparability():
         entry("fatrop", "rk4", "none"),
     ]
 
-    assert summary.configuration_mismatches(entries) == []
+    mismatches = summary.configuration_mismatches(entries)
+
+    assert [item["field"] for item in mismatches] == ["ode_solver"]
+
+
+def test_calcium_and_passive_force_contracts_are_required_for_comparability():
+    def entry(solver, calcium_formulation, passive_force):
+        return {
+            "configuration": {
+                "mechanical_formulation": "reduced",
+                "calcium_forcing_formulation": calcium_formulation,
+                "activate_passive_force_relationship": passive_force,
+            },
+            "result": {"solver": solver},
+        }
+
+    mismatches = summary.configuration_mismatches(
+        [
+            entry("ipopt", "exact_exponential_periodic_node", True),
+            entry("madnlp", "continuous_periodic_surrogate", False),
+        ]
+    )
+
+    assert [item["field"] for item in mismatches] == [
+        "calcium_forcing_formulation",
+        "activate_passive_force_relationship",
+    ]
 
 
 def test_graph_type_is_a_required_comparability_field():

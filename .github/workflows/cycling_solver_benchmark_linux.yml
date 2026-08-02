@@ -65,12 +65,12 @@ on:
         default: "5"
         type: string
       refined_collocation_validation:
-        description: Run reduced IPOPT and MadNLP with Radau degree 5 to audit the stiff calcium transcription
+        description: Run reduced IPOPT and MadNLP with Radau degrees 4, 5, and 6 to audit the stiff calcium transcription
         required: true
         default: false
         type: boolean
       refined_collocation_rhos:
-        description: RHO count for the optional reduced Radau degree-5 audit
+        description: RHO count per case for the optional reduced Radau 4/5/6 audit
         required: true
         default: "5"
         type: string
@@ -1779,13 +1779,28 @@ jobs:
           if-no-files-found: warn
           retention-days: 30
 
+      - name: Run IPOPT reduced Radau degree 4
+        if: ${{ matrix.solver == 'ipopt' && inputs.refined_collocation_validation }}
+        continue-on-error: true
+        run: bash .github/scripts/run_cycling_benchmark_case.sh ipopt-radau4 ipopt reduced mumps collocation benchmark-results "$REFINED_COLLOCATION_RHOS" false sx none 4 periodic_collocation
+      - name: Checkpoint IPOPT reduced Radau degree 4
+        if: ${{ always() && matrix.solver == 'ipopt' && inputs.refined_collocation_validation }}
+        continue-on-error: true
+        uses: actions/upload-artifact@v7
+        with:
+          name: cycling-fatigue-linux-ipopt-radau4-reduced-${{ github.run_id }}
+          path: benchmark-results/ipopt-radau4-reduced/
+          if-no-files-found: warn
+          retention-days: 30
+
       - name: Run IPOPT reduced Radau degree 5
         if: ${{ matrix.solver == 'ipopt' && inputs.refined_collocation_validation }}
+        continue-on-error: true
         # Degree 5 is a transcription audit, not a real-time candidate.
         # Run 30595640543 remained at maxiter even after 5000 iterations while
         # primal-feasible. Keep the bounded 2000-iteration diagnostic instead
         # of spending another five minutes without extending the strict prefix.
-        run: bash .github/scripts/run_cycling_benchmark_case.sh ipopt-radau5 ipopt reduced mumps collocation benchmark-results "$REFINED_COLLOCATION_RHOS" false sx none 5
+        run: bash .github/scripts/run_cycling_benchmark_case.sh ipopt-radau5 ipopt reduced mumps collocation benchmark-results "$REFINED_COLLOCATION_RHOS" false sx none 5 scientific-radau5
       - name: Checkpoint IPOPT reduced Radau degree 5
         if: ${{ always() && matrix.solver == 'ipopt' && inputs.refined_collocation_validation }}
         continue-on-error: true
@@ -1793,6 +1808,20 @@ jobs:
         with:
           name: cycling-fatigue-linux-ipopt-radau5-reduced-${{ github.run_id }}
           path: benchmark-results/ipopt-radau5-reduced/
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Run IPOPT reduced Radau degree 6
+        if: ${{ matrix.solver == 'ipopt' && inputs.refined_collocation_validation }}
+        continue-on-error: true
+        run: bash .github/scripts/run_cycling_benchmark_case.sh ipopt-radau6 ipopt reduced mumps collocation benchmark-results "$REFINED_COLLOCATION_RHOS" false sx none 6 periodic_collocation
+      - name: Checkpoint IPOPT reduced Radau degree 6
+        if: ${{ always() && matrix.solver == 'ipopt' && inputs.refined_collocation_validation }}
+        continue-on-error: true
+        uses: actions/upload-artifact@v7
+        with:
+          name: cycling-fatigue-linux-ipopt-radau6-reduced-${{ github.run_id }}
+          path: benchmark-results/ipopt-radau6-reduced/
           if-no-files-found: warn
           retention-days: 30
 
@@ -1822,9 +1851,24 @@ jobs:
           if-no-files-found: warn
           retention-days: 30
 
+      - name: Run MadNLP MUMPS reduced Radau degree 4
+        if: ${{ matrix.solver == 'madnlp' && inputs.refined_collocation_validation }}
+        continue-on-error: true
+        run: bash .github/scripts/run_cycling_benchmark_case.sh madnlp-mumps-radau4 madnlp reduced mumps collocation benchmark-results "$REFINED_COLLOCATION_RHOS" false sx none 4 periodic_collocation
+      - name: Checkpoint MadNLP MUMPS reduced Radau degree 4
+        if: ${{ always() && matrix.solver == 'madnlp' && inputs.refined_collocation_validation }}
+        continue-on-error: true
+        uses: actions/upload-artifact@v7
+        with:
+          name: cycling-fatigue-linux-madnlp-mumps-radau4-reduced-${{ github.run_id }}
+          path: benchmark-results/madnlp-mumps-radau4-reduced/
+          if-no-files-found: warn
+          retention-days: 30
+
       - name: Run MadNLP MUMPS reduced Radau degree 5
         if: ${{ matrix.solver == 'madnlp' && inputs.refined_collocation_validation }}
-        run: bash .github/scripts/run_cycling_benchmark_case.sh madnlp-mumps-radau5 madnlp reduced mumps collocation benchmark-results "$REFINED_COLLOCATION_RHOS" false sx none 5
+        continue-on-error: true
+        run: bash .github/scripts/run_cycling_benchmark_case.sh madnlp-mumps-radau5 madnlp reduced mumps collocation benchmark-results "$REFINED_COLLOCATION_RHOS" false sx none 5 scientific-radau5
       - name: Checkpoint MadNLP MUMPS reduced Radau degree 5
         if: ${{ always() && matrix.solver == 'madnlp' && inputs.refined_collocation_validation }}
         continue-on-error: true
@@ -1832,6 +1876,20 @@ jobs:
         with:
           name: cycling-fatigue-linux-madnlp-mumps-radau5-reduced-${{ github.run_id }}
           path: benchmark-results/madnlp-mumps-radau5-reduced/
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Run MadNLP MUMPS reduced Radau degree 6
+        if: ${{ matrix.solver == 'madnlp' && inputs.refined_collocation_validation }}
+        continue-on-error: true
+        run: bash .github/scripts/run_cycling_benchmark_case.sh madnlp-mumps-radau6 madnlp reduced mumps collocation benchmark-results "$REFINED_COLLOCATION_RHOS" false sx none 6 periodic_collocation
+      - name: Checkpoint MadNLP MUMPS reduced Radau degree 6
+        if: ${{ always() && matrix.solver == 'madnlp' && inputs.refined_collocation_validation }}
+        continue-on-error: true
+        uses: actions/upload-artifact@v7
+        with:
+          name: cycling-fatigue-linux-madnlp-mumps-radau6-reduced-${{ github.run_id }}
+          path: benchmark-results/madnlp-mumps-radau6-reduced/
           if-no-files-found: warn
           retention-days: 30
 
@@ -1907,7 +1965,7 @@ jobs:
           if [[ "${{ inputs.refined_collocation_validation }}" == "true" ]] && \
              [[ "$BENCHMARK_SOLVER" == "ipopt" || "$BENCHMARK_SOLVER" == "madnlp" ]]
           then
-            expected=$((expected + 1))
+            expected=$((expected + 3))
           fi
           mapfile -t results < <(find benchmark-results -name result.json -type f | sort)
           if [[ "${#results[@]}" -ne "$expected" ]]; then
@@ -1943,7 +2001,7 @@ jobs:
             if [[ "$BENCHMARK_SOLVER" == "madnlp" && "$result" == *"madnlp-mumps-full/"* ]]; then
               case_requires_compile=false
             fi
-            if [[ "$result" == *"-radau5-reduced/"* ]]; then
+            if [[ "$result" == *-radau[456]-reduced/* ]]; then
               case_requires_compile=false
             fi
             if [[ "$case_requires_compile" == "true" ]]; then

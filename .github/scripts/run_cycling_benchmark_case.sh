@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-if [[ "$#" -lt 5 || "$#" -gt 11 ]]; then
-  echo "usage: $0 CASE SOLVER MECHANICS BACKEND ODE [ROOT] [WINDOWS] [COMPILE] [GRAPH] [FATROP_SCALING] [COLLOCATION_DEGREE]" >&2
+if [[ "$#" -lt 5 || "$#" -gt 12 ]]; then
+  echo "usage: $0 CASE SOLVER MECHANICS BACKEND ODE [ROOT] [WINDOWS] [COMPILE] [GRAPH] [FATROP_SCALING] [COLLOCATION_DEGREE] [IPOPT_PROFILE]" >&2
   exit 2
 fi
 
@@ -17,6 +17,7 @@ compile_mode="${8:-false}"
 graph_mode="${9:-sx}"
 fatrop_state_scaling="${10:-none}"
 collocation_degree="${11:-3}"
+ipopt_profile="${12:-periodic_collocation}"
 workspace="${GITHUB_WORKSPACE:?GITHUB_WORKSPACE is required}"
 case_dir="${workspace}/${case_root}/${case_slug}-${mechanics}"
 result="$case_dir/result.json"
@@ -28,6 +29,10 @@ if ! [[ "$collocation_degree" =~ ^[2-9]$ ]]; then
   echo "COLLOCATION_DEGREE must be an integer between 2 and 9, got '$collocation_degree'." >&2
   exit 2
 fi
+case "$ipopt_profile" in
+  historical|periodic_collocation|periodic-collocation|scientific_radau5|scientific-radau5|acados_like|acados-like) ;;
+  *) echo "IPOPT_PROFILE is not supported: '$ipopt_profile'." >&2; exit 2 ;;
+esac
 
 mkdir -p "$case_dir"
 # CasADi emits fixed filenames such as nlp.c/nlp.so in the current directory.
@@ -135,7 +140,7 @@ heartbeat_pid=$!
 python "$workspace/examples/fes_multibody/cycling/cycling_fes_solver_comparison.py" \
   --solvers "$solver" \
   --objective fatigue \
-  --ipopt-profile periodic_collocation \
+  --ipopt-profile "$ipopt_profile" \
   --ipopt-enforce-start-constraints \
   --cycles-per-window "$BENCHMARK_CYCLES_PER_WINDOW" \
   --stimulations-per-cycle 30 \
@@ -181,6 +186,21 @@ if [[ -f "$result" ]] && ! jq -e --arg solver "$solver" \
   '.configurations[$solver].use_sx == true' "$result" >/dev/null
 then
   echo "The generated result is not SX even though the benchmark is SX-only." >&2
+  exit 1
+fi
+
+if [[ -f "$result" && "$ipopt_profile" == "scientific-radau5" ]] && \
+  ! jq -e --arg solver "$solver" '
+    .configurations[$solver] |
+    (.benchmark_profile == "scientific-radau5") and
+    (.profile_integrity == true) and
+    (.scientific_status == "candidate") and
+    (.collocation_degree == 5) and
+    (.activate_passive_force_relationship == true) and
+    (.control_decisions_per_cycle == 30)
+  ' "$result" >/dev/null
+then
+  echo "The scientific-radau5 result does not satisfy its serialized contract." >&2
   exit 1
 fi
 

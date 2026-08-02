@@ -2887,6 +2887,10 @@ def _warmup_cache_signature(
             args.wheel_qdot_regularization_target,
         )["role"],
         "torque_application": args.torque_application,
+        "activate_passive_force_relationship": getattr(
+            args, "activate_passive_force_relationship", True
+        ),
+        "ding_sum_stim_truncation": getattr(args, "ding_sum_stim_truncation", 6),
         "state_scaling": args.state_scaling,
         "pulse_width_scaling": args.pulse_width_scaling,
         "warmup_ipopt_linear_solver": _warmup_ipopt_linear_solver(args),
@@ -2947,6 +2951,16 @@ def _standard_warmup_metadata(args: argparse.Namespace) -> dict:
         "signed_crank_torque_nm": float(args.constant_crank_torque),
         "crank_torque_role": torque["role"],
         "torque_application": str(args.torque_application),
+        "producer_ode_solver": str(args.ode_solver),
+        "producer_collocation_degree": (
+            None
+            if getattr(args, "collocation_degree", None) is None
+            else int(args.collocation_degree)
+        ),
+        "producer_collocation_method": getattr(args, "collocation_method", None),
+        "activate_passive_force_relationship": bool(
+            getattr(args, "activate_passive_force_relationship", True)
+        ),
     }
 
 
@@ -3159,6 +3173,10 @@ def _periodic_ipopt_refinement_cache_path(
         "kind": "periodic_ipopt_refinement",
         "cache_version": int(cache_version),
         "model_formulation": args.model_formulation,
+        "activate_passive_force_relationship": getattr(
+            args, "activate_passive_force_relationship", True
+        ),
+        "ding_sum_stim_truncation": getattr(args, "ding_sum_stim_truncation", 6),
         "mechanical_formulation": args.mechanical_formulation,
         "cycles_per_window": args.cycles_per_window,
         "stimulations_per_cycle": args.stimulations_per_cycle,
@@ -3369,6 +3387,30 @@ def _common_initial_solution_metadata(args: argparse.Namespace) -> dict:
         "pulse_width_maximum_s": 0.0006,
         "warmup_cycles_consumed": int(getattr(args, "warmup_cycles_consumed", 0)),
         "ode_solver": args.ode_solver,
+        "producer_transcription_profile": getattr(
+            args, "transcription_profile", None
+        ),
+        "producer_collocation_degree": (
+            None
+            if getattr(args, "collocation_degree", None) is None
+            else int(args.collocation_degree)
+        ),
+        "producer_collocation_method": getattr(args, "collocation_method", None),
+        "calcium_forcing_formulation": getattr(
+            args, "calcium_forcing_formulation", None
+        ),
+        "ding_sum_stim_truncation": int(
+            getattr(args, "ding_sum_stim_truncation", 6)
+        ),
+        "activate_force_length_relationship": bool(
+            getattr(args, "activate_force_length_relationship", True)
+        ),
+        "activate_force_velocity_relationship": bool(
+            getattr(args, "activate_force_velocity_relationship", True)
+        ),
+        "activate_passive_force_relationship": bool(
+            getattr(args, "activate_passive_force_relationship", True)
+        ),
         "nlp_ordering_strategy": getattr(args, "nlp_ordering_strategy", None),
         "producer_solver": args.solver,
     }
@@ -3659,6 +3701,10 @@ def _horizon_seed_cache_signature(args: argparse.Namespace) -> str:
         "cache_version": 5,
         "nmpc_builder_version": 2,
         "model_formulation": args.model_formulation,
+        "activate_passive_force_relationship": getattr(
+            args, "activate_passive_force_relationship", True
+        ),
+        "ding_sum_stim_truncation": getattr(args, "ding_sum_stim_truncation", 6),
         "cycles_per_window": args.cycles_per_window,
         "stimulations_per_cycle": args.stimulations_per_cycle,
         "objective": args.objective,
@@ -3734,7 +3780,12 @@ def _codegen_signature(args: argparse.Namespace) -> str:
         "problem_builder_version": 2,
         "nmpc_builder_version": 2,
         "solver": args.solver,
+        "transcription_profile": getattr(args, "transcription_profile", None),
         "model_formulation": args.model_formulation,
+        "activate_passive_force_relationship": getattr(
+            args, "activate_passive_force_relationship", True
+        ),
+        "ding_sum_stim_truncation": getattr(args, "ding_sum_stim_truncation", 6),
         "torque_application": args.torque_application,
         "cycles_per_window": args.cycles_per_window,
         "stimulations_per_cycle": args.stimulations_per_cycle,
@@ -13745,6 +13796,54 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
         periodic_cn_sum_approximation=args.model_formulation == "periodic",
         periodic_node_forcing=args.model_formulation == "periodic_node",
     )
+    args.activate_force_length_relationship = bool(
+        model.activate_force_length_relationship
+    )
+    args.activate_force_velocity_relationship = bool(
+        model.activate_force_velocity_relationship
+    )
+    args.activate_passive_force_relationship = bool(
+        model.activate_passive_force_relationship
+    )
+    args.calcium_forcing_formulation = {
+        "standard": "finite_stimulation_history",
+        "periodic": "continuous_periodic_surrogate",
+        "periodic_node": "exact_exponential_periodic_node",
+    }[args.model_formulation]
+    ding_truncations = {
+        int(muscle_model.sum_stim_truncation)
+        for muscle_model in model.muscles_dynamics_model
+    }
+    if len(ding_truncations) != 1:
+        raise ValueError(
+            "All muscles must use the same Ding stimulation-history truncation "
+            "for a comparable benchmark."
+        )
+    args.ding_sum_stim_truncation = ding_truncations.pop()
+    muscle_models = model.muscles_dynamics_model
+    args.muscle_names = [muscle_model.muscle_name for muscle_model in muscle_models]
+    args.ding_states_per_muscle = int(muscle_models[0].nb_state)
+    args.control_decisions_per_cycle = int(args.stimulations_per_cycle)
+    calcium_time_constants = {float(muscle_model.tauc) for muscle_model in muscle_models}
+    if len(calcium_time_constants) != 1:
+        raise ValueError(
+            "All muscles must use the same calcium time constant for the "
+            "periodic-calcium benchmark audit."
+        )
+    args.calcium_tau_s = calcium_time_constants.pop()
+    args.calcium_stimulation_interval_s = cycle_duration / args.stimulations_per_cycle
+    if args.model_formulation == "periodic_node":
+        args.calcium_initialization_regime = "steady_periodic_after_warmup"
+        args.calcium_post_stimulation_amplitude = float(
+            muscle_models[0].post_stimulation_amplitude()
+        )
+        args.calcium_analytical_periodic_value = float(
+            muscle_models[0].periodic_cn_fixed_point()
+        )
+    else:
+        args.calcium_initialization_regime = "finite_history_transient"
+        args.calcium_post_stimulation_amplitude = None
+        args.calcium_analytical_periodic_value = None
     fatigue_capacity_scales = {
         f"A_{muscle_model.muscle_name}": float(muscle_model.a_scale)
         for muscle_model in model.muscles_dynamics_model

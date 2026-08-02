@@ -107,6 +107,36 @@ class DingModelPulseWidthFrequencyWithFatiguePeriodicNode(
         recent_sum = sum(decay**age for age in range(count - 1))
         return float(decay ** (count - 1) + self.stimulation_increment() * recent_sum)
 
+    def periodic_cn_fixed_point(
+        self, retained_stimulations: int | None = None
+    ) -> float:
+        """Return the exact periodic ``Cn`` value at stimulation boundaries.
+
+        Between two equally spaced stimulations, the calcium-history forcing
+        and ``Cn`` share the same time constant.  If ``H_0`` is the history
+        amplitude immediately after a pulse and ``h`` the stimulation period,
+        exact integration gives
+
+        ``Cn(h) = exp(-h/tauc) * (Cn(0) + H_0 * h/tauc)``.
+
+        Enforcing ``Cn(h) = Cn(0)`` yields the value below.  This closed-form
+        reference is intentionally independent of the OCP transcription and
+        can therefore certify collocation or IRK refinements.
+        """
+
+        if self._stim_interval is None:
+            raise ValueError(
+                "stim_interval is required for periodic-node calcium forcing."
+            )
+        decay = float(np.exp(-self._stim_interval / self.tauc))
+        amplitude = self.post_stimulation_amplitude(retained_stimulations)
+        return float(
+            decay
+            * amplitude
+            * (self._stim_interval / self.tauc)
+            / (1.0 - decay)
+        )
+
     def calcium_history(self, time: MX, numerical_timeseries: MX) -> MX:
         post_stimulation_amplitude = numerical_timeseries[0]
         interval_start_time = numerical_timeseries[1]
