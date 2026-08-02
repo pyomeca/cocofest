@@ -7,6 +7,7 @@ from casadi import Function, SX, collocation_coeff, collocation_points
 from pathlib import Path
 from types import SimpleNamespace
 from bioptim import (
+    Bounds,
     BoundsList,
     InitialGuessList,
     InterpolationType,
@@ -6314,6 +6315,50 @@ def test_reduced_wheel_speed_bounds_support_an_asymmetric_fast_guard(monkeypatch
 
     np.testing.assert_allclose(bounds["omega"].min, -2.0 * np.pi - 2.55)
     np.testing.assert_allclose(bounds["omega"].max, -2.0 * np.pi + 3.0)
+
+
+def test_full_wheel_speed_bounds_support_an_asymmetric_fast_guard(monkeypatch):
+    monkeypatch.setattr(
+        OcpFesMsk,
+        "set_x_bounds_fes",
+        staticmethod(lambda _model: (BoundsList(), InitialGuessList())),
+    )
+
+    class FakeModel:
+        @staticmethod
+        def bounds_from_ranges(key):
+            return Bounds(
+                key,
+                min_bound=np.full((3, 3), -20.0),
+                max_bound=np.full((3, 3), 20.0),
+                interpolation=InterpolationType.CONSTANT_WITH_FIRST_AND_LAST_DIFFERENT,
+            )
+
+    x_init = InitialGuessList()
+    x_init.add(
+        "q",
+        np.array([[0.0, 0.0], [1.0, 1.0], [0.0, -2.0 * np.pi]]),
+        interpolation=InterpolationType.EACH_FRAME,
+    )
+    x_init.add(
+        "qdot",
+        np.tile(np.array([[0.0], [0.0], [-2.0 * np.pi]]), (1, 2)),
+        interpolation=InterpolationType.EACH_FRAME,
+    )
+
+    bounds, _ = mhe_example.set_x_bounds(
+        model=FakeModel(),
+        x_init=x_init,
+        n_shooting=1,
+        ode_solver=OdeSolver.RK4(),
+        init_file_path=None,
+        wheel_qdot_bound_margin=3.0,
+        wheel_qdot_fast_bound_margin=2.55,
+        wheel_qdot_slow_bound_margin=3.0,
+    )
+
+    np.testing.assert_allclose(bounds["qdot"].min[2], -2.0 * np.pi - 2.55)
+    np.testing.assert_allclose(bounds["qdot"].max[2], -2.0 * np.pi + 3.0)
 
 
 def test_optional_nlp_cli_exposes_cross_solver_hot_start_and_tuning():
