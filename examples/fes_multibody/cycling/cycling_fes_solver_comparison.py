@@ -2800,6 +2800,9 @@ def solver_overview_rows(results: dict[str, dict]) -> list[dict]:
                 "acados_maxiter_retry_summaries": (
                     result.get("acados_maxiter_retry_summaries") or []
                 ),
+                "transfer_phase_one_summaries": (
+                    result.get("transfer_phase_one_summaries") or []
+                ),
                 "terminal_wheel_bound_summaries": (
                     result.get("terminal_wheel_bound_summaries") or []
                 ),

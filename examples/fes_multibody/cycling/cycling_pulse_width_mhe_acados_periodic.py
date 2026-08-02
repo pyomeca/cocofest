@@ -8239,6 +8239,31 @@ def high_accuracy_trace_rollout_diagnostics(
     intervals_per_cycle = int(nmpc.cycle_len)
     expected_intervals = cycle_count * intervals_per_cycle
 
+    control_trace_columns = {}
+    for key in nlp.controls.keys():
+        if key not in control_traces:
+            raise ValueError(f"Missing control trace '{key}'.")
+        control_trace_columns[key] = np.atleast_2d(
+            np.asarray(control_traces[key], dtype=float)
+        ).shape[1]
+    available_control_intervals = set(control_trace_columns.values())
+    if len(available_control_intervals) != 1:
+        raise ValueError(
+            "The exported control traces do not share one interval count "
+            f"({control_trace_columns})."
+        )
+    available_control_intervals = int(next(iter(available_control_intervals)))
+    excess_control_intervals = available_control_intervals - expected_intervals
+    if (
+        excess_control_intervals < 0
+        or excess_control_intervals % intervals_per_cycle != 0
+    ):
+        raise ValueError(
+            "The exported controls contain "
+            f"{available_control_intervals} intervals, which cannot represent "
+            f"the requested {expected_intervals}-interval strict RHO prefix."
+        )
+
     def stack_traces(
         traces,
         variables,
@@ -8254,12 +8279,30 @@ def high_accuracy_trace_rollout_diagnostics(
                 raise ValueError(f"Missing {label} trace '{key}'.")
             trace = np.atleast_2d(np.asarray(traces[key], dtype=float))
             stride = 1
-            if trace.shape[1] != expected_nodes and allow_collocation_intermediates:
+            if allow_collocation_intermediates:
                 interval_count = expected_nodes - 1
                 trace_interval_columns = trace.shape[1] - 1
-                stride, remainder = divmod(trace_interval_columns, interval_count)
-                if remainder == 0 and stride >= 1:
-                    trace = trace[:, ::stride]
+                # A failed final RHO may remain in the raw Bioptim trace even
+                # though ``cycle_count`` denotes only the strict prefix.  The
+                # controls have one column per attempted interval and thus
+                # remove the ambiguity between collocation intermediates and
+                # an extra failed window in the state trace.
+                stride, remainder = divmod(
+                    trace_interval_columns, available_control_intervals
+                )
+                if remainder != 0 or stride < 1:
+                    raise ValueError(
+                        f"State trace '{key}' has {trace.shape[1]} columns, "
+                        "which is incompatible with the "
+                        f"{available_control_intervals} exported control intervals."
+                    )
+                last_required_column = interval_count * stride + 1
+                trace = trace[:, :last_required_column:stride]
+            elif (
+                trace.shape[1] >= expected_nodes
+                and (trace.shape[1] - expected_nodes) % intervals_per_cycle == 0
+            ):
+                trace = trace[:, :expected_nodes]
             if trace.shape[1] != expected_nodes:
                 raise ValueError(
                     f"{label.capitalize()} trace '{key}' has {trace.shape[1]} "
