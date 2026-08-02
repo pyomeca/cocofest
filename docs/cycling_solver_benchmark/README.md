@@ -377,6 +377,11 @@ capsule ACADOS dédiée.
 
 Le mode workflow `cycles=acados_guard` rejoue uniquement les deux références
 et ces quatre cas full/reduced, sans reconstruire l'écran historique complet.
+Le mode `cycles=acados_recovery` va plus loin au premier échec full : sur une
+seule machine, il compare le shift courant, une Phase-I mécanique, une Phase-I
+sur tous les états et `SQP_WITH_FEASIBLE_QP`/Byrd--Omojokun. Chaque cas exporte
+son préfixe certifié exact dans `validated-rho-trajectory.npz`; une méthode de
+récupération ne peut donc pas masquer un échec en avançant la fenêtre.
 
 ### 3.5 Choisir le solveur selon le niveau de garantie
 

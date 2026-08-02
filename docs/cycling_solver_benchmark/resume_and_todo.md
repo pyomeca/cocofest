@@ -328,6 +328,8 @@ invalide.
 - [ ] Construire une projection qui minimise directement les défauts de
   tir/collocation de la nouvelle fenêtre, avec priorité aux états mécaniques et
   au calcium.
+- [ ] Exécuter le mode apparié `acados_recovery` : baseline, Phase-I mécanique,
+  Phase-I complète et Byrd--Omojokun, tous avec export du préfixe exact.
 - [ ] Conserver l'angle absolu et la variété de contact pendant cette
   projection.
 - [ ] Comparer le candidat projeté au shift simple avant le solve, sans payer

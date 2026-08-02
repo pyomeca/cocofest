@@ -5774,12 +5774,18 @@ def test_github_acados_runner_uses_reference_and_option_profiles_sequentially():
     assert "sqp-irk-two-stage-fast-guard-2p55" in workflow
     assert "--acados-wheel-qdot-fast-bound-margin 2.6" in workflow
     assert "--acados-wheel-qdot-fast-bound-margin 2.55" in workflow
-    assert '"$mechanics" == "full" && "$variant" == sqp-irk-two-stage-fast-guard-*' in workflow
+    assert '"$mechanics" == "full" && "$variant" == *fast-guard*' in workflow
     assert "--acados-store-iterates" in workflow
     assert "--acados-maxiter-retries 1" in workflow
     assert "--max-consecutive-failing 1" in workflow
     assert "inputs.cycles == 'acados_guard'" in workflow
     assert "ACADOS_CADENCE_GUARD_ONLY" in workflow
+    assert "inputs.cycles == 'acados_recovery'" in workflow
+    assert "ACADOS_RECOVERY_ONLY" in workflow
+    assert "sqp-irk-fast-guard-2p6-phase-one-mechanical" in workflow
+    assert "sqp-irk-fast-guard-2p6-phase-one-all" in workflow
+    assert "sqp-byrd-fast-guard-2p6" in workflow
+    assert "--allow-partial-receding-horizon-solution-output" in workflow
     assert "ipopt-radau5-reduced" in workflow
     assert "madnlp-mumps-radau5-reduced" in workflow
     assert "ipopt-radau5-full" in workflow
