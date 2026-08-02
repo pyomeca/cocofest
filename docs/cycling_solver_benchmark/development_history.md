@@ -4340,3 +4340,113 @@ de faisabilité avec objectif dédié, projection sur les équations discrètes,
 ou solveur de secours au même RHO. Aucun de ces mécanismes ne pourra alimenter
 le RHO suivant avant d'avoir passé le statut natif et tous les audits
 physiques.
+
+## 24. Phase-I mécanique ACADOS sur 100 RHO (2 août 2026)
+
+Le premier run de récupération `30762278354` avait produit les cinq
+trajectoires, mais son audit DOP853 rejetait baseline et Byrd avant
+l'intégration : leurs tableaux bruts contenaient 81 fenêtres tentées, alors
+que le préfixe strict n'en couvrait que 80. La longueur de la trace d'états
+seule ne permet pas de distinguer une fenêtre échouée des points internes de
+collocation.
+
+Le correctif utilise désormais les contrôles comme horloge : ils ont exactement
+une colonne par intervalle tenté. Pour une trace d'états de longueur
+$1+sN_{\mathrm{tenté}}$, le stride $s$ est calculé par
+
+```math
+s = \frac{n_{x,\mathrm{colonnes}}-1}{N_{u,\mathrm{colonnes}}},
+```
+
+puis seuls les $1+sN_{\mathrm{valide}}$ premiers points sont conservés. Deux
+tests couvrent le tir direct ($s=1$) et une collocation Radau 5 ($s=6$), dans
+les deux cas avec une fenêtre échouée complète après le préfixe.
+
+Le [run 30763188906](https://github.com/mickaelbegon/cocofest/actions/runs/30763188906)
+est vert et produit tous les audits attendus :
+
+| Cas full, garde rapide `2.60 rad/s` | Préfixe | Premier échec | Médiane solveur | Médiane effective | P90 effectif |
+|---|---:|---:|---:|---:|---:|
+| SQP, shift simple | `80/100` | 81 | `0.103349 s` | `0.122531 s` | `0.306835 s` |
+| Byrd--Omojokun | `80/100` | 81 | `0.114742 s` | `0.133942 s` | `0.313698 s` |
+| SQP, Phase-I mécanique | `100/100` | aucun | `0.104531 s` | `0.123212 s` | `0.291465 s` |
+| SQP, Phase-I tous états | `100/100` | aucun | `0.228300 s` | `0.246861 s` | `0.288542 s` |
+
+Le temps effectif ci-dessus n'inclut historiquement que la résolution. Cette
+omission est importante pour les variantes Phase-I. L'appariement par numéro
+de fenêtre donne :
+
+| Phase-I | Appels | Acceptés | Temps Phase-I total | Médiane en ligne complète | P90 | Maximum |
+|---|---:|---:|---:|---:|---:|---:|
+| mécanique | 99 | 34 | `60.435536 s` | `0.738795 s` | `0.909435 s` | `0.962952 s` |
+| tous états | 99 | 99 | `20.072944 s` | `0.449824 s` | `0.491347 s` | `0.533335 s` |
+
+Une nouvelle métrique JSON additionne donc explicitement
+`effective_wall_time_s` et `transfer_phase_one.wall_time_s` pour le même RHO.
+Elle évite de présenter `0.123 s` comme temps de production de la Phase-I
+mécanique. Malgré ce coût, les 100 fenêtres restent sous une seconde. Les
+modifications mécaniques ne sont acceptées qu'aux fenêtres `1--2`, `18--35`
+et `86--99`; les 65 autres projections paient environ `0.61 s` avant d'être
+rejetées. Un écran causal moins cher est le prochain levier de performance.
+
+### 24.1 Pourquoi la Phase-I mécanique est retenue
+
+La projection mécanique rend mutables seulement `q` et `qdot`. Sa variation
+maximale acceptée vaut `0.165 rad` sur `q` et `1.539 rad/s` sur `qdot`; la
+variation des blocs Ding vaut exactement zéro. La Phase-I complète change au
+contraire le bloc Ding jusqu'à `33.459` et entraîne ACADOS dans une autre
+branche. Les deux méthodes résolvent ensuite exactement le même OCP physique,
+mais leur initialisation ne sélectionne pas le même minimum local.
+
+| Cas | Coût OCP | Coût DOP853 | Écart relatif | AUC OCP | AUC DOP853 | Drift normalisé maximal |
+|---|---:|---:|---:|---:|---:|---:|
+| shift simple, 80 RHO | `1221.912531` | `1224.066333` | `+0.176265 %` | `4.986474` | `4.989085` | `0.406468` |
+| Byrd, 80 RHO | `1221.912402` | `1224.066991` | `+0.176329 %` | `4.986474` | `4.989085` | `0.406336` |
+| Phase-I mécanique, 100 RHO | `1117.125655` | `1121.126863` | `+0.358170 %` | `5.660181` | `5.666577` | `2.855990` |
+| Phase-I complète, 100 RHO | `1323.274766` | `1369.845973` | `+3.519391 %` | `5.984171` | `6.043867` | `109.278524` |
+
+Byrd ne change pratiquement ni la trajectoire, ni le coût, ni le RHO d'échec;
+il ajoute environ `11 ms` à la médiane chaude. Il est rejeté pour ce problème.
+La Phase-I complète est également rejetée : son temps de projection plus court
+ne compense ni le doublement du temps solveur, ni le déplacement des états
+Ding, ni le drift continu.
+
+Pour la Phase-I mécanique, la décomposition musculaire à 100 RHO est :
+
+| Muscle | AUC OCP (cycles) | AUC DOP853 | Coût OCP | Coût DOP853 | Capacité finale OCP |
+|---|---:|---:|---:|---:|---:|
+| Biceps | `2.597618` | `2.603200` | `772.944018` | `776.781693` | `0.958444` |
+| Deltoïde antérieur | `1.381041` | `1.381041` | `191.527495` | `191.527507` | `0.987682` |
+| Deltoïde postérieur | `0.928239` | `0.928242` | `86.770833` | `86.771405` | `0.992005` |
+| Triceps | `0.753284` | `0.754094` | `65.883308` | `66.046257` | `0.988285` |
+
+Le Biceps explique l'essentiel de l'écart DOP853, suivi du Triceps. Les deux
+deltoïdes sont presque invariants. Au cycle 10, les PW Phase-I mécanique et
+shift simple sont identiques à la précision d'impression. Au cycle 30, la
+branche a changé : RMS `92.841 µs`, maximum `438.265 µs` pour le Biceps, puis
+RMS `15.217 µs`, maximum `82.463 µs` pour le Triceps. Il s'agit donc d'un
+changement d'ensemble actif, pas d'une petite correction continue des PW.
+
+### 24.2 Limite scientifique restante
+
+Le rollout DOP853 actuel part du premier état et enchaîne 100 cycles sans
+jamais reprojeter la contrainte holonome. Sur la mécanique full redondante,
+l'erreur maximale est portée par `q` (`17.945`) et `qdot` (`16.751`), alors
+que l'AUC de fatigue ne change que de `0.113 %`. Ce test est utile pour révéler
+le drift global, mais il ne correspond pas exactement à un RHO qui reçoit un
+nouvel état certifié à chaque cycle.
+
+La Phase-I mécanique est donc la première méthode ACADOS à satisfaire
+simultanément `100/100` et moins d'une seconde par RHO, mais elle n'est pas
+encore la référence scientifique. La prochaine ablation doit conserver les
+mêmes PW et comparer :
+
+1. DOP853 full continu, déjà disponible;
+2. DOP853 full remis à l'état certifié au début de chaque RHO;
+3. replay des mêmes PW dans la mécanique reduced;
+4. si nécessaire, full avec stabilisation ou projection de la contrainte de
+   pédalier.
+
+Ce découpage dira si le drift vient de la transcription IRK, de l'accumulation
+dans les coordonnées redondantes ou d'une différence réelle entre full et
+reduced.

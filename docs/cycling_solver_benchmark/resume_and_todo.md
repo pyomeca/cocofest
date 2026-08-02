@@ -208,10 +208,23 @@ reproduisent exactement le même échec; répéter ce retry est donc inutile. La
 configuration active en conserve un seul pour diagnostiquer et empêcher la
 propagation d'une solution MAXITER.
 
-La conclusion est que le prochain levier doit améliorer le **primal transféré
-sur les équations discrètes** ou fournir une restauration avec un objectif
-distinct, et non ajouter un nouveau mécanisme de globalisation autour du même
-seed.
+Le run apparié `30763188906` a depuis testé ce levier. Byrd--Omojokun reproduit
+le même préfixe `80/100`, tandis qu'une Phase-I qui ne projette que `q/qdot`
+atteint `100/100`. Elle préserve exactement les 20 états Ding du shift dans le
+guess et ne change pas l'OCP final. Son temps chaud complet, projection
+incluse, vaut `0.739 s` en médiane, `0.909 s` au P90 et `0.963 s` au maximum.
+La projection coûte `60.436 s` sur 99 transferts et n'est acceptée que 34 fois;
+une présélection moins coûteuse reste donc possible.
+
+La Phase-I sur tous les états atteint aussi `100/100` et semble plus rapide
+(`0.450 s` médian, projection incluse), mais elle modifie les états Ding du
+guess jusqu'à `33.46`, double presque le temps solveur et dégrade fortement le
+rollout DOP853 : `+3.519 %` sur le coût et drift normalisé maximal `109.3`.
+Elle est rejetée. Pour la Phase-I mécanique, les écarts DOP853 sont beaucoup
+plus faibles (`+0.358 %` coût, `+0.113 %` AUC), mais le drift mécanique full
+atteint encore `2.856` après 100 cycles sans reprojection de contact. Le
+`100/100` certifie donc le solveur et les nœuds, pas encore la trajectoire
+continue full.
 
 Le run `30754413003` ajoute un défaut plus précis : les nœuds respectent
 presque la borne de cadence, mais la progression angulaire entre deux nœuds
@@ -325,24 +338,31 @@ invalide.
 - [x] Tester deux reprises successives du meilleur itéré. Elles sont
   déterministes et n'étendent pas le préfixe de 80 RHO; revenir à une seule
   reprise diagnostique.
-- [ ] Construire une projection qui minimise directement les défauts de
-  tir/collocation de la nouvelle fenêtre, avec priorité aux états mécaniques et
-  au calcium.
-- [ ] Exécuter le mode apparié `acados_recovery` : baseline, Phase-I mécanique,
+- [x] Construire une projection proximale des états mécaniques `q/qdot` de la
+  nouvelle fenêtre, tout en préservant exactement le shift du calcium et des
+  autres états Ding.
+- [x] Exécuter le mode apparié `acados_recovery` : baseline, Phase-I mécanique,
   Phase-I complète et Byrd--Omojokun, tous avec export du préfixe exact.
-- [ ] Conserver l'angle absolu et la variété de contact pendant cette
-  projection.
-- [ ] Comparer le candidat projeté au shift simple avant le solve, sans payer
-  systématiquement un rollout complet.
+- [ ] Auditer explicitement l'angle absolu et la variété de contact du
+  **candidat Phase-I** avant le solve. L'OCP final les impose et les 100
+  solutions les respectent, mais le critère d'acceptation de la projection ne
+  les certifie pas encore séparément.
+- [ ] Ajouter un écran bon marché avant la Phase-I mécanique : elle coûte
+  actuellement environ `0.61 s` à chacun des 99 transferts, mais 65 candidats
+  sur 99 sont finalement rejetés.
 - [ ] Si nécessaire, précompiler deux capsules synchronisées : restauration de
   faisabilité puis objectif de fatigue.
 - [ ] N'évaluer RTI qu'après plusieurs chaînes SQP complètes certifiées.
-- [ ] Réintégrer densément chaque intervalle accepté pour vérifier cadence et
+- [x] Réintégrer densément chaque intervalle accepté pour vérifier cadence et
   calcium entre les nœuds.
+- [ ] Ajouter en complément un rollout DOP853 remis à l'état certifié au début
+  de chaque RHO, puis rejouer les mêmes PW en mécanique reduced. Le rollout
+  full global actuel accumule le drift de la contrainte de pédalier sur 100
+  cycles et ne permet pas encore d'attribuer l'écart à ACADOS seul.
 
-Critère de sortie intermédiaire : franchir le RHO 81 sans relâcher les
-contraintes physiques. Critère final : `100/100` avec médiane effective sous
-`1 s`.
+Le critère intermédiaire est atteint : le RHO 81 est franchi sans relâcher les
+contraintes et le solveur passe `100/100` sous `1 s` projection incluse. Le
+critère final exige maintenant l'audit continu full/reduced des mêmes PW.
 
 ### P2 — Recertifier full contre reduced sur le modèle corrigé
 

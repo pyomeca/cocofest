@@ -60,12 +60,17 @@ Sur la machine 32 cœurs :
 - exécuter les solveurs successivement sur une machine unique pour éviter la
   contention, avec artefacts séparés.
 
-Pour ACADOS, ne relance pas les options déjà réfutées sans nouvelle hypothèse :
-homotopie terminale actuelle, retry primal, retry primal-dual, conservation
-globale des duals et rollout IRK concurrent n'ont pas franchi le RHO 14. La
-prochaine piste utile est une projection du primal sur la dynamique discrète
-de la nouvelle fenêtre; si nécessaire, utiliser deux capsules précompilées,
-faisabilité puis fatigue. RTI vient seulement après une chaîne SQP robuste.
+Pour ACADOS, partir du résultat certifié aux nœuds du run `30763188906` : la
+garde full `2.60` avec Phase-I mécanique atteint `100/100`, avec `0.739 s` de
+médiane et `0.909 s` au P90 lorsque le coût de projection est inclus. Ne pas
+remplacer ce temps par la seule médiane solveur (`0.105 s`). Byrd--Omojokun et
+le shift simple restent limités à 80 RHO; la Phase-I sur tous les états est
+rejetée parce qu'elle déplace les états Ding et produit un fort drift DOP853.
+La prochaine piste est un audit apparié des mêmes PW : rollout full remis à
+l'état certifié à chaque RHO, replay reduced, puis stabilisation/projection du
+contact full si nécessaire. Ajouter ensuite un écran bon marché avant la
+Phase-I mécanique, puisque 65 projections sur 99 sont rejetées après calcul.
+RTI vient seulement après cette certification continue.
 
 Ne rouvre pas PARDISO/MadNLP, Alpaqa, FATROP/RK4 ou un surrogate neuronal sans
 un élément nouveau. MUMPS reste le backend MadNLP. FATROP full n'est plus un

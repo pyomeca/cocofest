@@ -714,6 +714,44 @@ def test_high_accuracy_trace_rollout_truncates_a_failed_window_after_valid_prefi
     assert diagnostic["maximum_absolute_endpoint_error"] < 1e-11
 
 
+def test_high_accuracy_trace_rollout_truncates_collocation_failed_window():
+    class Variables(dict):
+        def __init__(self, values, shape):
+            super().__init__(values)
+            self.shape = shape
+
+    state_variables = Variables({"A_Test": SimpleNamespace(index=[0])}, shape=1)
+    control_variables = Variables({"u": SimpleNamespace(index=[0])}, shape=1)
+    nlp = SimpleNamespace(
+        states=state_variables,
+        controls=control_variables,
+        numerical_data_timeseries=None,
+        dynamics_func=lambda _time, _state, _control, _parameters, _algebraic, _data: np.array(
+            [-1.0]
+        ),
+    )
+    nmpc = SimpleNamespace(nlp=[nlp], cycle_duration=1.0, cycle_len=2)
+    valid_collocation_cycle = np.linspace(10.0, 9.0, 13)
+    failed_collocation_cycle = np.full(12, 456.0)
+
+    diagnostic = periodic_example.high_accuracy_trace_rollout_diagnostics(
+        nmpc,
+        {
+            "A_Test": np.concatenate(
+                (valid_collocation_cycle, failed_collocation_cycle)
+            )[None, :]
+        },
+        {"u": np.zeros((1, 4))},
+        cycle_count=1,
+        capacity_scales={"A_Test": 10.0},
+    )
+
+    assert diagnostic["cycle_count"] == 1
+    assert diagnostic["interval_count"] == 2
+    assert diagnostic["state_node_stride"] == 6
+    assert diagnostic["maximum_absolute_endpoint_error"] < 1e-11
+
+
 def test_solver_comparison_cli_exposes_high_accuracy_trace_audit():
     parser = comparison_example.build_cli()
 
@@ -3866,6 +3904,46 @@ def test_benchmark_separates_attempted_and_validated_prefix_objectives():
 
     assert row["window_objective_sum"] == 103.0
     assert row["validated_prefix_window_objective_sum"] == 1.0
+
+
+def test_benchmark_hot_rho_timing_includes_transfer_phase_one_cost():
+    result = _benchmark_result([0, 0, 0], solver_success=True, success=True)
+    result.update(
+        window_solutions=[
+            SimpleNamespace(
+                status=0,
+                solver_time_to_optimize=0.1,
+                real_time_to_optimize=0.2,
+            )
+            for _ in range(3)
+        ],
+        window_feasibility=[{"passes_tolerance": True} for _ in range(3)],
+        transfer_phase_one_summaries=[
+            {"window": 1, "wall_time_s": 0.3, "accepted": True},
+            {"window": 2, "wall_time_s": 0.4, "accepted": False},
+        ],
+    )
+
+    row = comparison_example.solver_overview_rows({"acados": result})[0]
+
+    assert row["attempted_rho_effective_plus_phase_one_wall_time_sum_s"] == (
+        pytest.approx(1.3)
+    )
+    assert row["hot_effective_plus_phase_one_wall_time_median_s"] == pytest.approx(
+        0.55
+    )
+    assert row["hot_effective_plus_phase_one_wall_time_p90_s"] == pytest.approx(
+        0.59
+    )
+    assert row["hot_effective_plus_phase_one_wall_time_max_s"] == pytest.approx(0.6)
+    assert row["transfer_phase_one_timing"] == {
+        "count": 2,
+        "accepted_count": 1,
+        "total_wall_time_s": pytest.approx(0.7),
+        "median_wall_time_s": pytest.approx(0.35),
+        "p90_wall_time_s": pytest.approx(0.39),
+        "max_wall_time_s": pytest.approx(0.4),
+    }
 
 
 def test_benchmark_excludes_nlp_cycles_after_external_physical_failure():

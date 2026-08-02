@@ -2669,10 +2669,65 @@ def solver_overview_rows(results: dict[str, dict]) -> list[dict]:
             for window in window_rows[1 : performance["successful_prefix_windows"]]
             if window["validated"] and window["effective_wall_time_s"] is not None
         ]
+        phase_one_summaries = result.get("transfer_phase_one_summaries") or []
+        phase_one_wall_time_by_window = {}
+        for phase_one_summary in phase_one_summaries:
+            phase_one_window = phase_one_summary.get("window")
+            phase_one_wall_time = _finite_float(phase_one_summary.get("wall_time_s"))
+            if phase_one_window is None or phase_one_wall_time is None:
+                continue
+            phase_one_window = int(phase_one_window)
+            phase_one_wall_time_by_window[phase_one_window] = (
+                phase_one_wall_time_by_window.get(phase_one_window, 0.0)
+                + phase_one_wall_time
+            )
+        attempted_effective_plus_phase_one_wall_times = [
+            window["effective_wall_time_s"]
+            + phase_one_wall_time_by_window.get(int(window["window"]), 0.0)
+            for window in window_rows
+            if window["effective_wall_time_s"] is not None
+        ]
+        strict_hot_effective_plus_phase_one_wall_times = [
+            window["effective_wall_time_s"]
+            + phase_one_wall_time_by_window.get(int(window["window"]), 0.0)
+            for window in window_rows[1 : performance["successful_prefix_windows"]]
+            if window["validated"] and window["effective_wall_time_s"] is not None
+        ]
+        finite_phase_one_wall_times = list(phase_one_wall_time_by_window.values())
+        transfer_phase_one_timing = {
+            "count": len(phase_one_summaries),
+            "accepted_count": sum(
+                bool(phase_one_summary.get("accepted"))
+                for phase_one_summary in phase_one_summaries
+            ),
+            "total_wall_time_s": (
+                float(sum(finite_phase_one_wall_times))
+                if finite_phase_one_wall_times
+                else 0.0
+            ),
+            "median_wall_time_s": (
+                float(np.median(finite_phase_one_wall_times))
+                if finite_phase_one_wall_times
+                else None
+            ),
+            "p90_wall_time_s": (
+                float(np.percentile(finite_phase_one_wall_times, 90))
+                if finite_phase_one_wall_times
+                else None
+            ),
+            "max_wall_time_s": (
+                float(max(finite_phase_one_wall_times))
+                if finite_phase_one_wall_times
+                else None
+            ),
+        }
         end_to_end_wall_time = _finite_float(result.get("end_to_end_wall_time_s"))
         preparation_time = _finite_float(result.get("initial_guess_preparation_time_s"))
         unattributed_wall_time = (
-            end_to_end_wall_time - preparation_time - attempted_effective_wall_time
+            end_to_end_wall_time
+            - preparation_time
+            - attempted_effective_wall_time
+            - sum(finite_phase_one_wall_times)
             if end_to_end_wall_time is not None and preparation_time is not None
             else None
         )
@@ -2735,6 +2790,9 @@ def solver_overview_rows(results: dict[str, dict]) -> list[dict]:
                 "attempted_rho_effective_wall_time_sum_s": (
                     attempted_effective_wall_time
                 ),
+                "attempted_rho_effective_plus_phase_one_wall_time_sum_s": (
+                    float(sum(attempted_effective_plus_phase_one_wall_times))
+                ),
                 "feasibility_restoration": restoration_timing,
                 "unattributed_wall_time_s": unattributed_wall_time,
                 "validated_solver_time_s": performance["successful_solver_time_s"],
@@ -2755,6 +2813,27 @@ def solver_overview_rows(results: dict[str, dict]) -> list[dict]:
                     None
                     if not strict_hot_effective_wall_times
                     else float(np.percentile(strict_hot_effective_wall_times, 90))
+                ),
+                "hot_effective_plus_phase_one_wall_time_median_s": (
+                    None
+                    if not strict_hot_effective_plus_phase_one_wall_times
+                    else float(
+                        np.median(strict_hot_effective_plus_phase_one_wall_times)
+                    )
+                ),
+                "hot_effective_plus_phase_one_wall_time_p90_s": (
+                    None
+                    if not strict_hot_effective_plus_phase_one_wall_times
+                    else float(
+                        np.percentile(
+                            strict_hot_effective_plus_phase_one_wall_times, 90
+                        )
+                    )
+                ),
+                "hot_effective_plus_phase_one_wall_time_max_s": (
+                    None
+                    if not strict_hot_effective_plus_phase_one_wall_times
+                    else float(max(strict_hot_effective_plus_phase_one_wall_times))
                 ),
                 "min_A_capacity_ratio": _minimum_a_capacity_ratio(fatigue),
                 "max_mean_normalized_fatigue": mean_fatigue,
@@ -2801,8 +2880,9 @@ def solver_overview_rows(results: dict[str, dict]) -> list[dict]:
                     result.get("acados_maxiter_retry_summaries") or []
                 ),
                 "transfer_phase_one_summaries": (
-                    result.get("transfer_phase_one_summaries") or []
+                    phase_one_summaries
                 ),
+                "transfer_phase_one_timing": transfer_phase_one_timing,
                 "terminal_wheel_bound_summaries": (
                     result.get("terminal_wheel_bound_summaries") or []
                 ),

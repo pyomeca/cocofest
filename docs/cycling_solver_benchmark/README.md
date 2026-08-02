@@ -383,6 +383,47 @@ sur tous les états et `SQP_WITH_FEASIBLE_QP`/Byrd--Omojokun. Chaque cas exporte
 son préfixe certifié exact dans `validated-rho-trajectory.npz`; une méthode de
 récupération ne peut donc pas masquer un échec en avançant la fenêtre.
 
+Le [run 30763188906](https://github.com/mickaelbegon/cocofest/actions/runs/30763188906)
+valide ce protocole sur 100 RHO sans assistance. Le résultat opérationnel est
+la **Phase-I mécanique** : elle atteint `100/100`, alors que le shift simple et
+Byrd--Omojokun s'arrêtent tous deux à `80/100`. La projection ne rend mutables
+que `q` et `qdot`; elle conserve donc exactement le shift des 20 états Ding
+dans le guess transmis à ACADOS.
+
+| ACADOS full, garde 2.60 | Préfixe | Médiane solveur | Médiane en ligne, Phase-I incluse | P90 en ligne | Maximum en ligne |
+|---|---:|---:|---:|---:|---:|
+| Shift simple | `80/100` | `0.103 s` | `0.123 s` | `0.307 s` | `0.419 s` |
+| Byrd--Omojokun | `80/100` | `0.115 s` | `0.134 s` | `0.314 s` | `0.426 s` |
+| Phase-I mécanique | `100/100` | `0.105 s` | `0.739 s` | `0.909 s` | `0.963 s` |
+| Phase-I sur tous les états | `100/100` | `0.228 s` | `0.450 s` | `0.491 s` | `0.533 s` |
+
+Les temps « en ligne » additionnent la préparation Phase-I et le temps mural
+effectif de la résolution du même RHO; ils excluent construction, compilation
+et audit DOP853 hors ligne. La Phase-I mécanique est appelée 99 fois, coûte
+`60.436 s` au total et n'accepte une modification que 34 fois. Elle reste donc
+sous la cible d'une seconde, mais son écran d'acceptation peut encore être
+accéléré. La Phase-I complète accepte 99 modifications sur 99 et ne coûte que
+`20.073 s`, mais elle déplace les états Ding du guess jusqu'à `33.46` en unités
+physiques et mène à une autre branche; ce n'est pas un gain numérique gratuit.
+
+| Cas | Coût aux nœuds | Coût DOP853 | Écart | AUC aux nœuds | AUC DOP853 | Drift normalisé maximal |
+|---|---:|---:|---:|---:|---:|---:|
+| Shift simple, 80 RHO | `1221.913` | `1224.066` | `+0.176 %` | `4.98647` | `4.98908` | `0.406` |
+| Byrd, 80 RHO | `1221.912` | `1224.067` | `+0.176 %` | `4.98647` | `4.98909` | `0.406` |
+| Phase-I mécanique, 100 RHO | `1117.126` | `1121.127` | `+0.358 %` | `5.66018` | `5.66658` | `2.856` |
+| Phase-I complète, 100 RHO | `1323.275` | `1369.846` | `+3.519 %` | `5.98417` | `6.04387` | `109.279` |
+
+Le `100/100` mécanique est donc une certification du solveur et des nœuds,
+pas encore une certification continue de la mécanique full. Le rollout DOP853
+enchaîne les 100 cycles sans reprojection de la contrainte de pédalier; son
+drift est dominé par `q` et `qdot`. L'écart de fatigue reste beaucoup plus
+petit, mais dépasse encore légèrement le seuil scientifique provisoire de
+`0.1 %` sur l'AUC (`0.113 %`). La prochaine validation doit rejouer les mêmes
+PW dans la mécanique reduced et ajouter un audit DOP853 local à chaque RHO ou
+une stabilisation/projection du contact full. La Phase-I complète est rejetée
+comme baseline : son drift et son écart de coût sont un ordre de grandeur trop
+grands.
+
 ### 3.5 Choisir le solveur selon le niveau de garantie
 
 | Besoin | Solveur recommandé | État actuel |
@@ -390,7 +431,7 @@ récupération ne peut donc pas masquer un échec en avançant la fenêtre.
 | Chaîne robuste de 100 RHO | IPOPT/MUMPS reduced, SX, compilation persistante | `100/100`, environ `1.0 s` chaud sur Radau 3 |
 | Collocation du calcium raffinée | MadNLP/MUMPS reduced, Radau 6 | `5/5`; meilleure fidélité DOP853, endurance à recertifier |
 | Contrôle indépendant de l'optimum | FATROP/collocation full et reduced | full corrigé localement `1/1`; gate Linux requis |
-| Cible sous-seconde | ACADOS IRK full, garde 2.60 | `80/100`; médiane effective `0.121 s`, premier échec au RHO 81 |
+| Cible sous-seconde | ACADOS IRK full, garde 2.60, Phase-I mécanique | `100/100`; médiane en ligne `0.739 s`, P90 `0.909 s`; audit continu full encore provisoire |
 
 MUMPS est le backend portable retenu pour IPOPT et MadNLP. PARDISO n'a pas
 apporté de gain à MadNLP et reste archivé. L'échec FATROP full venait du
@@ -400,8 +441,9 @@ le vrai OCP full passe localement `1/1`. Alpaqa n'est pas fonctionnel sur cette
 formulation.
 
 Le meilleur résultat chaud brut n'est pas nécessairement la meilleure
-méthode. ACADOS est actuellement le plus rapide par fenêtre convergée, mais
-IPOPT reduced est le choix robuste pour une endurance complète.
+méthode. ACADOS avec Phase-I mécanique est désormais le candidat temps réel
+sur 100 RHO, mais IPOPT reduced reste le choix scientifique robuste tant que
+le replay continu full/reduced des mêmes PW n'est pas certifié.
 MadNLP/MUMPS reduced Radau 6 devient le meilleur candidat provisoire pour la
 cible scientifique raffinée; le palier 30 doit encore confirmer sa robustesse.
 
