@@ -54,7 +54,7 @@ except ImportError:
 
 EXAMPLE_DIR = Path(__file__).resolve().parent
 BENCHMARK_SOLVERS = ("ipopt", "acados", "fatrop", "madnlp")
-BENCHMARK_STIMULATION_PATTERN_CYCLES = (10, 30, 100)
+BENCHMARK_STIMULATION_PATTERN_CYCLES = (1, 2, 3, 4, 5, 10, 30, 100)
 BENCHMARK_CONFIGURATION_FIELDS = (
     "solver",
     "benchmark_profile",
@@ -95,6 +95,7 @@ BENCHMARK_CONFIGURATION_FIELDS = (
     "activate_force_velocity_relationship",
     "activate_passive_force_relationship",
     "use_sx",
+    "enforce_start_constraints",
     "nlp_ordering_strategy",
     "state_scaling",
     "pulse_width_scaling",
@@ -273,6 +274,32 @@ IPOPT_PROFILE_DEFAULTS = {
         "ode_solver": "collocation",
         "rk_steps": 1,
         "collocation_degree": 5,
+        "collocation_method": "radau",
+        "use_sx": True,
+        "enforce_start_constraints": True,
+        "disable_standard_ipopt_warmup": False,
+        "disable_periodic_fes_warmup_projection": False,
+        "fatigue_warmstart_mode": None,
+    },
+    "scientific_radau4": {
+        "model_formulation": "periodic_node",
+        "torque_application": "constant",
+        "ode_solver": "collocation",
+        "rk_steps": 1,
+        "collocation_degree": 4,
+        "collocation_method": "radau",
+        "use_sx": True,
+        "enforce_start_constraints": True,
+        "disable_standard_ipopt_warmup": False,
+        "disable_periodic_fes_warmup_projection": False,
+        "fatigue_warmstart_mode": None,
+    },
+    "scientific_radau6": {
+        "model_formulation": "periodic_node",
+        "torque_application": "constant",
+        "ode_solver": "collocation",
+        "rk_steps": 1,
+        "collocation_degree": 6,
         "collocation_method": "radau",
         "use_sx": True,
         "enforce_start_constraints": True,
@@ -1335,7 +1362,8 @@ def _solver_config(
         if normalized_profile not in IPOPT_PROFILE_DEFAULTS:
             raise ValueError(
                 "--ipopt-profile must be 'historical', 'periodic_collocation', "
-                "'scientific_radau5', or 'acados_like'."
+                "'scientific_radau4', 'scientific_radau5', "
+                "'scientific_radau6', or 'acados_like'."
             )
 
         defaults = IPOPT_PROFILE_DEFAULTS[normalized_profile]
@@ -1496,13 +1524,13 @@ def _solver_config(
             and getattr(solver_args, attribute) != defaults[default_key]
         }
         solver_args.profile_integrity = not mismatches
-        if normalized_profile == "scientific_radau5" and mismatches:
+        if normalized_profile.startswith("scientific_radau") and mismatches:
             details = ", ".join(
                 f"{key}={observed!r} (expected {expected!r})"
                 for key, (observed, expected) in mismatches.items()
             )
             raise ValueError(
-                "The scientific-radau5 profile is a fixed scientific "
+                f"The {normalized_profile.replace('_', '-')} profile is a fixed scientific "
                 f"contract and cannot be overridden: {details}."
             )
         return solver_args
@@ -2506,6 +2534,39 @@ def _first_failed_rho(
     return first_failed_rho
 
 
+def _prefix_fatigue_checkpoints(result: dict, validated_cycles: int) -> dict:
+    """Report like-for-like cumulative fatigue at the standard RHO checkpoints."""
+
+    checkpoints = {}
+    for cycle in BENCHMARK_STIMULATION_PATTERN_CYCLES:
+        if cycle > validated_cycles:
+            continue
+        fatigue_rows = _fatigue_metrics(result, cycle)
+        a_rows = [row for row in fatigue_rows if row["key"].startswith("A_")]
+        muscle_rows = _executed_fatigue_objective_by_muscle(result, cycle)
+        checkpoints[f"cycle_{cycle}"] = {
+            "cycle": cycle,
+            "executed_fatigue_objective": _executed_fatigue_objective(result, cycle),
+            "fatigue_auc_cycles": float(
+                sum(
+                    row["fatigue_auc_cycles"]
+                    for row in a_rows
+                    if row["fatigue_auc_cycles"] is not None
+                )
+            ),
+            "min_A_capacity_ratio": min(
+                (
+                    row["relative_final"]
+                    for row in a_rows
+                    if row["relative_final"] is not None
+                ),
+                default=None,
+            ),
+            "muscle_fatigue": muscle_rows,
+        }
+    return checkpoints
+
+
 def solver_overview_rows(results: dict[str, dict]) -> list[dict]:
     """Build JSON-safe fatigue and timing outcomes for every selected backend."""
 
@@ -2602,6 +2663,11 @@ def solver_overview_rows(results: dict[str, dict]) -> list[dict]:
         status = _effective_status(result)
         if status is None and result.get("window_statuses"):
             status = result["window_statuses"][-1]
+        validated_prefix_objectives = [
+            window["objective"]
+            for window in window_rows[: performance["successful_prefix_windows"]]
+            if window["validated"] and window["objective"] is not None
+        ]
         rows.append(
             {
                 "solver": solver_name,
@@ -2632,6 +2698,11 @@ def solver_overview_rows(results: dict[str, dict]) -> list[dict]:
                 "maximum_consecutive_failures": maximum_consecutive_failures,
                 "objective": _finite_float(result.get("objective")),
                 "window_objective_sum": _finite_float(result.get("objective")),
+                "validated_prefix_window_objective_sum": (
+                    float(sum(validated_prefix_objectives))
+                    if validated_prefix_objectives
+                    else None
+                ),
                 "executed_fatigue_objective": _executed_fatigue_objective(
                     result, performance["validated_cycles"]
                 ),
@@ -2674,6 +2745,9 @@ def solver_overview_rows(results: dict[str, dict]) -> list[dict]:
                 "fatigue_auc_cycles": fatigue_auc if a_rows else None,
                 "muscle_fatigue": muscle_fatigue,
                 "fatigue_by_state": fatigue,
+                "prefix_fatigue_checkpoints": _prefix_fatigue_checkpoints(
+                    result, performance["validated_cycles"]
+                ),
                 "external_crank_power": external_crank_power,
                 "cycle_boundary_wheel_angle": cycle_boundary_wheel_angle,
                 "mechanical_equivalence_audit": result.get(
@@ -3688,7 +3762,9 @@ def main(
     ipopt_label = {
         "historical": "historical reference",
         "periodic_collocation": "periodic-collocation bridge",
+        "scientific_radau4": "scientific Radau-4 diagnostic",
         "scientific_radau5": "scientific Radau-5",
+        "scientific_radau6": "scientific Radau-6 diagnostic",
         "acados_like": "ACADOS-like diagnostic",
     }[normalized_ipopt_profile]
     solver_args = {
@@ -4384,8 +4460,12 @@ def build_cli() -> argparse.ArgumentParser:
             "historical",
             "periodic_collocation",
             "periodic-collocation",
+            "scientific_radau4",
+            "scientific-radau4",
             "scientific_radau5",
             "scientific-radau5",
+            "scientific_radau6",
+            "scientific-radau6",
             "acados_like",
             "acados-like",
         ),
@@ -4393,8 +4473,9 @@ def build_cli() -> argparse.ArgumentParser:
         help=(
             "Base IPOPT configuration. 'historical' keeps the robust reference "
             "problem; 'periodic_collocation' isolates the periodic dynamics and "
-            "constant torque with robust collocation; 'scientific_radau5' fixes "
-            "the corrected SX/Radau-5 scientific contract; 'acados_like' additionally "
+            "constant torque with robust collocation; the scientific Radau-4/5/6 "
+            "profiles fix the corrected SX contracts (Radau-5 is the candidate; "
+            "4 and 6 are diagnostics); 'acados_like' additionally "
             "switches IPOPT to the explicit RK setup used to diagnose ACADOS."
         ),
     )

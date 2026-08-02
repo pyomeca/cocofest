@@ -576,7 +576,8 @@ gh workflow run cycling_solver_benchmark_linux.yml \
   -f acados_smoke_rhos=5 \
   -f acados_option_rhos=5 \
   -f refined_collocation_validation=true \
-  -f refined_collocation_rhos=5
+  -f refined_collocation_rhos=5 \
+  -f collocation_diagnostic_rhos=5
 ```
 
 ### Gate 30 RHO
@@ -597,7 +598,8 @@ gh workflow run cycling_solver_benchmark_linux.yml \
   -f acados_smoke_rhos=30 \
   -f acados_option_rhos=5 \
   -f refined_collocation_validation=true \
-  -f refined_collocation_rhos=30
+  -f refined_collocation_rhos=30 \
+  -f collocation_diagnostic_rhos=5
 ```
 
 ### Gate 100 RHO
@@ -618,7 +620,8 @@ gh workflow run cycling_solver_benchmark_linux.yml \
   -f acados_smoke_rhos=100 \
   -f acados_option_rhos=5 \
   -f refined_collocation_validation=true \
-  -f refined_collocation_rhos=100
+  -f refined_collocation_rhos=100 \
+  -f collocation_diagnostic_rhos=5
 ```
 
 Après chaque lancement :

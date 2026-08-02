@@ -394,11 +394,21 @@ porter le nom `reference` dans les nouveaux artefacts. Les nouveaux noms
 devraient décrire la méthode, par exemple `legacy-radau3`,
 `scientific-radau5` ou `irk-refined`.
 
-Le profil CLI `scientific-radau5` est maintenant un contrat verrouillé :
-`periodic_node`, couple constant, SX, collocation Radau degré 5 et contraintes
-initiales actives. Une surcharge contradictoire est refusée. Son statut JSON
-reste cependant `candidate`; le nom du profil ne remplace pas la certification
-de la fatigue, de l'AUC et des bornes internes.
+Les profils CLI `scientific-radau4`, `scientific-radau5` et
+`scientific-radau6` sont des contrats verrouillés : `periodic_node`, couple
+constant, SX, collocation Radau au degré annoncé et contraintes initiales
+actives. Une surcharge contradictoire est refusée. Seul Radau 5 porte le statut
+`candidate`; Radau 4 et 6 sont des diagnostics de raffinement. Le nom du profil
+ne remplace pas la certification de la fatigue, de l'AUC et des bornes internes.
+
+Le gate Linux 5 RHO du
+[run 30748390517](https://github.com/mickaelbegon/cocofest/actions/runs/30748390517)
+n'a **pas** certifié Radau 5. MadNLP/MUMPS converge sur `5/5`, mais l'écart
+Radau 5--6 atteint `0.3977 %` sur la fatigue exécutée et `0.6452 %` sur l'AUC,
+au-dessus du seuil provisoire de `0.1 %`. IPOPT/Radau 5 s'arrête au préfixe
+strict `1/5` : le RHO 2 est primalement faisable, mais atteint 2 000 itérations.
+Le palier 30 reste donc bloqué jusqu'à séparation de l'erreur de transcription
+et du changement de bassin optimal.
 
 ## 6. Prochaine campagne recommandée
 
@@ -409,7 +419,8 @@ scientifique commune :
 1. force passive active et testée après toute copie ou mise à jour du modèle;
 2. mécanique reduced validée contre full sur les mêmes PW et états Ding;
 3. 30 décisions de PW, mais calcium intégré avec Radau 5 ou IRK sous-pas;
-4. étude courte Radau 3/4/5/6, puis réintégration dense;
+4. étude courte Radau 3/4/5/6, transfert croisé des solutions, puis
+   réintégration dense commune;
 5. IPOPT/MUMPS et MadNLP/MUMPS comparés sur cette même transcription;
 6. ACADOS comparé seulement après alignement des contraintes internes;
 7. paliers 5, 30 et 100, puis prolongation vers 300 et 1000 RHO pour atteindre

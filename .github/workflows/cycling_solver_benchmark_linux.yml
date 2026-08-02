@@ -70,7 +70,12 @@ on:
         default: false
         type: boolean
       refined_collocation_rhos:
-        description: RHO count per case for the optional reduced Radau 4/5/6 audit
+        description: RHO count for the Radau-5 candidate (full and reduced)
+        required: true
+        default: "5"
+        type: string
+      collocation_diagnostic_rhos:
+        description: Short RHO count for the reduced Radau-4/6 discretization controls
         required: true
         default: "5"
         type: string
@@ -1488,6 +1493,7 @@ jobs:
       BENCHMARK_Q_SLACK: ${{ inputs.terminal_wheel_q_slack }}
       BENCHMARK_MAX_ITER: ${{ inputs.solver_max_iterations }}
       REFINED_COLLOCATION_RHOS: ${{ inputs.refined_collocation_rhos }}
+      COLLOCATION_DIAGNOSTIC_RHOS: ${{ inputs.collocation_diagnostic_rhos }}
       BENCHMARK_SOLVER: ${{ matrix.solver }}
       COCOFEST_BENCHMARK_COMMIT: ${{ github.sha }}
       BIOPTIM_BENCHMARK_COMMIT: ${{ matrix.bioptim_commit }}
@@ -1747,6 +1753,10 @@ jobs:
               echo "refined_collocation_rhos must be a strictly positive integer." >&2
               exit 1
             fi
+            if ! [[ "$COLLOCATION_DIAGNOSTIC_RHOS" =~ ^[1-9][0-9]*$ ]]; then
+              echo "collocation_diagnostic_rhos must be a strictly positive integer." >&2
+              exit 1
+            fi
           fi
 
       - name: Run IPOPT full
@@ -1766,6 +1776,20 @@ jobs:
           if-no-files-found: warn
           retention-days: 30
 
+      - name: Run IPOPT scientific Radau-5 full
+        if: ${{ matrix.solver == 'ipopt' && inputs.refined_collocation_validation }}
+        continue-on-error: true
+        run: bash .github/scripts/run_cycling_benchmark_case.sh ipopt-radau5 ipopt full mumps collocation benchmark-results "$REFINED_COLLOCATION_RHOS" false sx none 5 scientific-radau5 off true
+      - name: Checkpoint IPOPT scientific Radau-5 full
+        if: ${{ always() && matrix.solver == 'ipopt' && inputs.refined_collocation_validation }}
+        continue-on-error: true
+        uses: actions/upload-artifact@v7
+        with:
+          name: cycling-fatigue-linux-ipopt-radau5-full-${{ github.run_id }}
+          path: benchmark-results/ipopt-radau5-full/
+          if-no-files-found: warn
+          retention-days: 30
+
       - name: Run IPOPT reduced
         if: matrix.solver == 'ipopt'
         run: bash .github/scripts/run_cycling_benchmark_case.sh ipopt ipopt reduced mumps collocation benchmark-results "$BENCHMARK_CYCLES" "${{ inputs.compile_nlp_evaluators }}"
@@ -1782,7 +1806,7 @@ jobs:
       - name: Run IPOPT reduced Radau degree 4
         if: ${{ matrix.solver == 'ipopt' && inputs.refined_collocation_validation }}
         continue-on-error: true
-        run: bash .github/scripts/run_cycling_benchmark_case.sh ipopt-radau4 ipopt reduced mumps collocation benchmark-results "$REFINED_COLLOCATION_RHOS" false sx none 4 periodic_collocation
+        run: bash .github/scripts/run_cycling_benchmark_case.sh ipopt-radau4 ipopt reduced mumps collocation benchmark-results "$COLLOCATION_DIAGNOSTIC_RHOS" false sx none 4 scientific-radau4 off true
       - name: Checkpoint IPOPT reduced Radau degree 4
         if: ${{ always() && matrix.solver == 'ipopt' && inputs.refined_collocation_validation }}
         continue-on-error: true
@@ -1796,11 +1820,10 @@ jobs:
       - name: Run IPOPT reduced Radau degree 5
         if: ${{ matrix.solver == 'ipopt' && inputs.refined_collocation_validation }}
         continue-on-error: true
-        # Degree 5 is a transcription audit, not a real-time candidate.
-        # Run 30595640543 remained at maxiter even after 5000 iterations while
-        # primal-feasible. Keep the bounded 2000-iteration diagnostic instead
-        # of spending another five minutes without extending the strict prefix.
-        run: bash .github/scripts/run_cycling_benchmark_case.sh ipopt-radau5 ipopt reduced mumps collocation benchmark-results "$REFINED_COLLOCATION_RHOS" false sx none 5 scientific-radau5
+        # The first Linux audit reached maxiter from the generic seed while
+        # remaining primal-feasible. Refine once on the target transcription,
+        # exclude that preparation from hot timing, and do not transfer duals.
+        run: bash .github/scripts/run_cycling_benchmark_case.sh ipopt-radau5 ipopt reduced mumps collocation benchmark-results "$REFINED_COLLOCATION_RHOS" false sx none 5 scientific-radau5 off true
       - name: Checkpoint IPOPT reduced Radau degree 5
         if: ${{ always() && matrix.solver == 'ipopt' && inputs.refined_collocation_validation }}
         continue-on-error: true
@@ -1814,7 +1837,7 @@ jobs:
       - name: Run IPOPT reduced Radau degree 6
         if: ${{ matrix.solver == 'ipopt' && inputs.refined_collocation_validation }}
         continue-on-error: true
-        run: bash .github/scripts/run_cycling_benchmark_case.sh ipopt-radau6 ipopt reduced mumps collocation benchmark-results "$REFINED_COLLOCATION_RHOS" false sx none 6 periodic_collocation
+        run: bash .github/scripts/run_cycling_benchmark_case.sh ipopt-radau6 ipopt reduced mumps collocation benchmark-results "$COLLOCATION_DIAGNOSTIC_RHOS" false sx none 6 scientific-radau6 off true
       - name: Checkpoint IPOPT reduced Radau degree 6
         if: ${{ always() && matrix.solver == 'ipopt' && inputs.refined_collocation_validation }}
         continue-on-error: true
@@ -1838,6 +1861,20 @@ jobs:
           if-no-files-found: warn
           retention-days: 30
 
+      - name: Run MadNLP MUMPS scientific Radau-5 full
+        if: ${{ matrix.solver == 'madnlp' && inputs.refined_collocation_validation }}
+        continue-on-error: true
+        run: bash .github/scripts/run_cycling_benchmark_case.sh madnlp-mumps-radau5 madnlp full mumps collocation benchmark-results "$REFINED_COLLOCATION_RHOS" false sx none 5 scientific-radau5 off true
+      - name: Checkpoint MadNLP MUMPS scientific Radau-5 full
+        if: ${{ always() && matrix.solver == 'madnlp' && inputs.refined_collocation_validation }}
+        continue-on-error: true
+        uses: actions/upload-artifact@v7
+        with:
+          name: cycling-fatigue-linux-madnlp-mumps-radau5-full-${{ github.run_id }}
+          path: benchmark-results/madnlp-mumps-radau5-full/
+          if-no-files-found: warn
+          retention-days: 30
+
       - name: Run MadNLP MUMPS reduced
         if: matrix.solver == 'madnlp'
         run: bash .github/scripts/run_cycling_benchmark_case.sh madnlp-mumps madnlp reduced mumps collocation benchmark-results "$BENCHMARK_CYCLES" "${{ inputs.compile_nlp_evaluators }}"
@@ -1854,7 +1891,7 @@ jobs:
       - name: Run MadNLP MUMPS reduced Radau degree 4
         if: ${{ matrix.solver == 'madnlp' && inputs.refined_collocation_validation }}
         continue-on-error: true
-        run: bash .github/scripts/run_cycling_benchmark_case.sh madnlp-mumps-radau4 madnlp reduced mumps collocation benchmark-results "$REFINED_COLLOCATION_RHOS" false sx none 4 periodic_collocation
+        run: bash .github/scripts/run_cycling_benchmark_case.sh madnlp-mumps-radau4 madnlp reduced mumps collocation benchmark-results "$COLLOCATION_DIAGNOSTIC_RHOS" false sx none 4 scientific-radau4 off true
       - name: Checkpoint MadNLP MUMPS reduced Radau degree 4
         if: ${{ always() && matrix.solver == 'madnlp' && inputs.refined_collocation_validation }}
         continue-on-error: true
@@ -1868,7 +1905,7 @@ jobs:
       - name: Run MadNLP MUMPS reduced Radau degree 5
         if: ${{ matrix.solver == 'madnlp' && inputs.refined_collocation_validation }}
         continue-on-error: true
-        run: bash .github/scripts/run_cycling_benchmark_case.sh madnlp-mumps-radau5 madnlp reduced mumps collocation benchmark-results "$REFINED_COLLOCATION_RHOS" false sx none 5 scientific-radau5
+        run: bash .github/scripts/run_cycling_benchmark_case.sh madnlp-mumps-radau5 madnlp reduced mumps collocation benchmark-results "$REFINED_COLLOCATION_RHOS" false sx none 5 scientific-radau5 off true
       - name: Checkpoint MadNLP MUMPS reduced Radau degree 5
         if: ${{ always() && matrix.solver == 'madnlp' && inputs.refined_collocation_validation }}
         continue-on-error: true
@@ -1882,7 +1919,7 @@ jobs:
       - name: Run MadNLP MUMPS reduced Radau degree 6
         if: ${{ matrix.solver == 'madnlp' && inputs.refined_collocation_validation }}
         continue-on-error: true
-        run: bash .github/scripts/run_cycling_benchmark_case.sh madnlp-mumps-radau6 madnlp reduced mumps collocation benchmark-results "$REFINED_COLLOCATION_RHOS" false sx none 6 periodic_collocation
+        run: bash .github/scripts/run_cycling_benchmark_case.sh madnlp-mumps-radau6 madnlp reduced mumps collocation benchmark-results "$COLLOCATION_DIAGNOSTIC_RHOS" false sx none 6 scientific-radau6 off true
       - name: Checkpoint MadNLP MUMPS reduced Radau degree 6
         if: ${{ always() && matrix.solver == 'madnlp' && inputs.refined_collocation_validation }}
         continue-on-error: true
@@ -1965,7 +2002,9 @@ jobs:
           if [[ "${{ inputs.refined_collocation_validation }}" == "true" ]] && \
              [[ "$BENCHMARK_SOLVER" == "ipopt" || "$BENCHMARK_SOLVER" == "madnlp" ]]
           then
-            expected=$((expected + 3))
+            # Radau-5 is run full and reduced; Radau-4/6 remain short reduced
+            # controls of the discretization error.
+            expected=$((expected + 4))
           fi
           mapfile -t results < <(find benchmark-results -name result.json -type f | sort)
           if [[ "${#results[@]}" -ne "$expected" ]]; then
@@ -1986,6 +2025,17 @@ jobs:
                 (.error | contains("specified structure of A does not correspond"))
               ' "$result"
               continue
+            fi
+            if [[ "$result" =~ -radau[456]- ]]; then
+              jq -e '
+                .results[0] |
+                (.success == true) and
+                (.validated_cycles == .requested_cycles) and
+                (.first_failed_rho == null)
+              ' "$result" || {
+                echo "Scientific collocation gate is not strict-successful: $result" >&2
+                exit 1
+              }
             fi
             jq -e '
               (.configurations | to_entries | all(.value.use_sx == true)) and

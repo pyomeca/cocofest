@@ -3629,6 +3629,39 @@ def test_benchmark_compares_only_the_successful_prefix():
     assert limited["control_traces"]["last_pulse_width_Biceps"].shape == (1, 4)
 
 
+def test_benchmark_separates_attempted_and_validated_prefix_objectives():
+    result = _benchmark_result([0, 1, 0])
+    result.update(
+        objective=103.0,
+        window_objectives=[1.0, 2.0, 100.0],
+        window_iterations=[10, 20, 30],
+        window_solutions=[
+            SimpleNamespace(
+                status=status,
+                solver_time_to_optimize=0.1,
+                real_time_to_optimize=0.2,
+            )
+            for status in (0, 1, 0)
+        ],
+        window_feasibility=[
+            {"passes_tolerance": True},
+            {"passes_tolerance": True},
+            {"passes_tolerance": True},
+        ],
+        attempted_windows=3,
+        successful_windows=2,
+        solver_time_s=0.3,
+        wall_time_s=0.6,
+        end_to_end_wall_time_s=0.6,
+        initial_guess_preparation_time_s=0.0,
+    )
+
+    row = comparison_example.solver_overview_rows({"ipopt": result})[0]
+
+    assert row["window_objective_sum"] == 103.0
+    assert row["validated_prefix_window_objective_sum"] == 1.0
+
+
 def test_benchmark_excludes_nlp_cycles_after_external_physical_failure():
     result = _benchmark_result([0, 0, 0], solver_success=True, success=False)
     result["physical_success"] = False
@@ -5024,6 +5057,7 @@ def test_benchmark_json_summary_contains_comparable_fatigue_metrics(tmp_path):
     result["args"].calcium_analytical_periodic_value = 0.1629821583533315
     result["args"].ding_sum_stim_truncation = 6
     result["args"].activate_passive_force_relationship = True
+    result["args"].enforce_start_constraints = True
     result["acados_maxiter_retry_summaries"] = [
         {"window": 13, "retry_status": 2}
     ]
@@ -5057,6 +5091,7 @@ def test_benchmark_json_summary_contains_comparable_fatigue_metrics(tmp_path):
     assert payload["configurations"]["madnlp"][
         "activate_passive_force_relationship"
     ] is True
+    assert payload["configurations"]["madnlp"]["enforce_start_constraints"] is True
     row = payload["results"][0]
     assert row["solver"] == "madnlp"
     assert row["success"] is True
@@ -5078,6 +5113,11 @@ def test_benchmark_json_summary_contains_comparable_fatigue_metrics(tmp_path):
     assert row["cycle_boundary_wheel_angle"]["maximum_absolute_error_rad"] is not None
     assert row["stop"]["label"] == "completed_requested_horizon"
     assert row["fatigue_by_state"]
+    assert set(row["prefix_fatigue_checkpoints"]) == {
+        "cycle_1",
+        "cycle_2",
+        "cycle_3",
+    }
     assert row["control_saturation"][0]["upper_fraction"] > 0
     assert [window["status"] for window in row["windows"]] == [0, 0]
     assert [window["rho"] for window in row["windows"]] == [1, 2]
@@ -5548,6 +5588,7 @@ def test_github_acados_runner_uses_reference_and_option_profiles_sequentially():
     assert "compile_nlp_evaluators:" in workflow
     assert "refined_collocation_validation:" in workflow
     assert "refined_collocation_rhos:" in workflow
+    assert "collocation_diagnostic_rhos:" in workflow
     assert "Run IPOPT reduced Radau degree 5" in workflow
     assert "Run MadNLP MUMPS reduced Radau degree 5" in workflow
     assert "Run IPOPT reduced Radau degree 4" in workflow
@@ -5556,7 +5597,10 @@ def test_github_acados_runner_uses_reference_and_option_profiles_sequentially():
     assert "Run MadNLP MUMPS reduced Radau degree 6" in workflow
     assert "ipopt-radau5-reduced" in workflow
     assert "madnlp-mumps-radau5-reduced" in workflow
-    assert workflow.count("5 scientific-radau5") == 2
+    assert "ipopt-radau5-full" in workflow
+    assert "madnlp-mumps-radau5-full" in workflow
+    assert "Scientific collocation gate is not strict-successful" in workflow
+    assert workflow.count("5 scientific-radau5") == 4
     assert '"$BENCHMARK_CYCLES" "${{ inputs.compile_nlp_evaluators }}"' in workflow
     assert (
         "run_cycling_benchmark_case.sh ipopt ipopt full mumps collocation "
@@ -5791,12 +5835,15 @@ def test_github_acados_runner_uses_reference_and_option_profiles_sequentially():
     assert '--fatrop-state-scaling "$fatrop_state_scaling"' in benchmark_runner
     assert 'collocation_degree="${11:-3}"' in benchmark_runner
     assert 'ipopt_profile="${12:-periodic_collocation}"' in benchmark_runner
+    assert 'dual_warm_start="${13:-auto}"' in benchmark_runner
+    assert 'target_refinement="${14:-auto}"' in benchmark_runner
     assert "BENCHMARK_MAX_ITER=5000 bash" not in workflow
     assert '--ipopt-collocation-degree "$collocation_degree"' in benchmark_runner
     assert '--ipopt-profile "$ipopt_profile"' in benchmark_runner
-    assert '.benchmark_profile == "scientific-radau5"' in benchmark_runner
+    assert ".benchmark_profile == $profile" in benchmark_runner
     assert ".activate_passive_force_relationship == true" in benchmark_runner
     assert ".control_decisions_per_cycle == 30" in benchmark_runner
+    assert ".enforce_start_constraints == true" in benchmark_runner
     assert 'case "$graph_mode" in' in benchmark_runner
     assert "The endurance benchmark is SX-only" in benchmark_runner
     assert "libMAD WARNING: option linear_solver is of unknown type" in (
@@ -10223,6 +10270,26 @@ def test_scientific_radau5_profile_is_fixed_and_shared_by_nlp_solvers(monkeypatc
         assert args.collocation_method == "radau"
         assert args.use_sx is True
         assert args.enforce_start_constraints is True
+
+    diagnostic_hashes = set()
+    for profile, degree, status in (
+        ("scientific-radau4", 4, "diagnostic"),
+        ("scientific-radau6", 6, "diagnostic"),
+    ):
+        captured.clear()
+        comparison_example.main(
+            solvers=("ipopt", "madnlp"),
+            n_windows=1,
+            ipopt_profile=profile,
+        )
+        for solver_name in ("ipopt", "madnlp"):
+            args = captured[solver_name]
+            assert args.collocation_degree == degree
+            assert args.profile_integrity is True
+            assert args.scientific_status == status
+            assert args.enforce_start_constraints is True
+            diagnostic_hashes.add(args.profile_hash)
+    assert len(diagnostic_hashes) == 2
 
     with pytest.raises(ValueError, match="fixed scientific contract"):
         comparison_example.main(

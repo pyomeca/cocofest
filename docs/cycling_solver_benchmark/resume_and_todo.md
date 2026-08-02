@@ -226,8 +226,11 @@ prioritaire que si l'objectif est explicitement un horizon monolithique.
   états.
 - [x] Certifier le calcium isolé aux degrés Radau 3/4/5/6. Radau 4 a une erreur
   de `0.4518 %`, Radau 5 de `0.01730 %` et Radau 6 de `0.000415 %`.
-- [ ] Compléter l'étude Radau 3/4/5/6 sur le RHO couplé avec fatigue, AUC et
-  temps. Les degrés 4 et 6 restent des témoins courts; Radau 5 est le candidat.
+- [x] Exécuter le premier gate Linux 5 RHO Radau 4/5/6. Il réfute la
+  certification immédiate : MadNLP Radau 5--6 diffère de `0.3977 %` sur la
+  fatigue et de `0.6452 %` sur l'AUC; IPOPT Radau 5 ne valide que `1/5`.
+- [ ] Transférer R4 vers R5 et R6 vers R5, puis réintégrer les mêmes PW avec un
+  intégrateur haute précision pour distinguer discrétisation et bassin local.
 - [ ] Lancer `5`, puis `30`, puis `100` RHO seulement lorsque le gate précédent
   est physiquement certifié.
 
@@ -235,10 +238,12 @@ Critère de sortie proposé : erreur relative du calcium inférieure à `0.1 %`,
 variation de fatigue et d'AUC inférieure à `0.1 %` au raffinement suivant, et
 aucune violation interne des bornes.
 
-Gate local disponible : IPOPT/reduced a convergé sur `1/1` RHO aux degrés 4,
-5 et 6. Radau 5 diffère de Radau 6 de `0.0316 %` sur la fatigue exécutée, mais
-de `0.1022 %` sur l'AUC. Le gate cinq RHO Linux reste donc nécessaire avant de
-cocher l'étude couplée.
+Gate Linux disponible : MadNLP converge strictement sur les trois degrés. R4
+et R5 sont proches (`0.0954 %` fatigue, `0.0174 %` AUC), mais R5 et R6 ne le
+sont pas (`0.3977 %`, `0.6452 %`). IPOPT R5 atteint 2 000 itérations au RHO 2
+malgré une violation primale de seulement `1.63e-10`. Le prochain gate utilise
+un raffinement IPOPT préalable sur la transcription cible, désactive les duals
+transférés pour l'audit et ajoute le contrôle full Radau 5 apparié.
 
 ### P1 — Établir la nouvelle baseline de performance
 

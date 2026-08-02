@@ -4077,3 +4077,47 @@ exécutée, mais de `0.1022 %` sur l'AUC, juste au-dessus du seuil provisoire de
 justifie pas de le retenir. Il confirme aussi que Radau 5 doit encore être
 évalué sur cinq RHO avant certification : un seul RHO et des temps macOS non
 compilés ne permettent pas de conclure sur la performance Linux chaude.
+
+## 20. Gate Linux Radau 4/5/6 sur cinq RHO (2 août 2026)
+
+Le [run 30748390517](https://github.com/mickaelbegon/cocofest/actions/runs/30748390517)
+a exécuté les trois degrés successivement sur la machine IPOPT, puis sur la
+machine MadNLP. Tous les cas emploient SX, MUMPS, `periodic_node`, les
+contraintes initiales, l'assistance nulle, les 20 états Ding, 30 PW par cycle
+et les relations force-longueur, force-vitesse et force passive.
+
+| Solveur | Degré | Préfixe strict | Temps solveur total | Fatigue exécutée | AUC |
+|---|---:|---:|---:|---:|---:|
+| IPOPT | 4 | `5/5` | `13.675 s` | `19.295326` | `0.163857046` |
+| IPOPT | 5 | `1/5` | `255.593 s` | `3.607367` | `0.029685917` |
+| IPOPT | 6 | `5/5` | `416.809 s` | `19.211866` | `0.162894317` |
+| MadNLP | 4 | `5/5` | `17.769 s` | `19.292878` | `0.163852661` |
+| MadNLP | 5 | `5/5` | `18.983 s` | `19.274491` | `0.163824097` |
+| MadNLP | 6 | `5/5` | `30.228 s` | `19.198141` | `0.162773826` |
+
+MadNLP fournit la seule comparaison entièrement stricte sur les trois degrés.
+R4--R5 diffère de `0.0954 %` sur la fatigue et `0.0174 %` sur l'AUC, alors que
+R5--R6 diffère de `0.3977 %` et `0.6452 %`. La capacité minimale finale reste
+presque identique; elle masque le changement de recrutement, surtout visible
+sur le Biceps et le Triceps. La convergence isolée du calcium ne suffit donc
+pas à certifier l'optimum couplé.
+
+IPOPT/R5 converge au RHO 1 après 1 692 itérations, puis atteint la limite de
+2 000 au RHO 2. Cette seconde fenêtre reste très faisable (`inf_pr = 4.07e-11`,
+violation maximale `1.63e-10`) mais n'est pas stationnaire et son objectif
+reste supérieur à celui de MadNLP. Les RHO 3 à 5 convergent numériquement, mais
+sont correctement exclus du préfixe strict : aucune métrique d'endurance ne
+doit les réintégrer.
+
+La campagne suivante corrige quatre limites de ce premier audit :
+
+1. profils verrouillés et hash distincts pour Radau 4, 5 et 6;
+2. sérialisation explicite de `enforce_start_constraints`;
+3. raffinement IPOPT préalable sur chaque transcription cible et duals coupés
+   pendant l'audit;
+4. checkpoints de PW et de fatigue aux cycles 1 à 5, plus contrôle full Radau 5
+   apparié.
+
+Radau 5 reste un candidat, pas une référence certifiée. Le palier 30 n'est pas
+lancé avant un nouveau `5/5` strict et une réintégration haute précision des
+mêmes contrôles R5/R6.

@@ -36,6 +36,7 @@ COMPARABILITY_FIELDS = (
     "crank_torque_role",
     "primal_feasibility_threshold",
     "use_sx",
+    "enforce_start_constraints",
 )
 DEFAULT_EXPECTED_SOLVERS = ("ipopt", "madnlp")
 DEFAULT_EXPECTED_CASES = (

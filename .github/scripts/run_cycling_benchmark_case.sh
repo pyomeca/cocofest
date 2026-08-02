@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-if [[ "$#" -lt 5 || "$#" -gt 12 ]]; then
-  echo "usage: $0 CASE SOLVER MECHANICS BACKEND ODE [ROOT] [WINDOWS] [COMPILE] [GRAPH] [FATROP_SCALING] [COLLOCATION_DEGREE] [IPOPT_PROFILE]" >&2
+if [[ "$#" -lt 5 || "$#" -gt 14 ]]; then
+  echo "usage: $0 CASE SOLVER MECHANICS BACKEND ODE [ROOT] [WINDOWS] [COMPILE] [GRAPH] [FATROP_SCALING] [COLLOCATION_DEGREE] [IPOPT_PROFILE] [DUAL_WARM_START] [TARGET_REFINEMENT]" >&2
   exit 2
 fi
 
@@ -18,6 +18,8 @@ graph_mode="${9:-sx}"
 fatrop_state_scaling="${10:-none}"
 collocation_degree="${11:-3}"
 ipopt_profile="${12:-periodic_collocation}"
+dual_warm_start="${13:-auto}"
+target_refinement="${14:-auto}"
 workspace="${GITHUB_WORKSPACE:?GITHUB_WORKSPACE is required}"
 case_dir="${workspace}/${case_root}/${case_slug}-${mechanics}"
 result="$case_dir/result.json"
@@ -30,9 +32,21 @@ if ! [[ "$collocation_degree" =~ ^[2-9]$ ]]; then
   exit 2
 fi
 case "$ipopt_profile" in
-  historical|periodic_collocation|periodic-collocation|scientific_radau5|scientific-radau5|acados_like|acados-like) ;;
+  historical|periodic_collocation|periodic-collocation|scientific_radau4|scientific-radau4|scientific_radau5|scientific-radau5|scientific_radau6|scientific-radau6|acados_like|acados-like) ;;
   *) echo "IPOPT_PROFILE is not supported: '$ipopt_profile'." >&2; exit 2 ;;
 esac
+case "$dual_warm_start" in
+  auto|off|constraints|bounds|all) ;;
+  *) echo "DUAL_WARM_START must be auto, off, constraints, bounds, or all; got '$dual_warm_start'." >&2; exit 2 ;;
+esac
+case "$target_refinement" in
+  auto|true|false) ;;
+  *) echo "TARGET_REFINEMENT must be auto, true, or false; got '$target_refinement'." >&2; exit 2 ;;
+esac
+
+if [[ "$target_refinement" == "true" ]]; then
+  initialization_options=(--optional-nlp-periodic-ipopt-hot-start)
+fi
 
 mkdir -p "$case_dir"
 # CasADi emits fixed filenames such as nlp.c/nlp.so in the current directory.
@@ -49,14 +63,20 @@ case "$graph_mode" in
 esac
 
 if [[ "$solver" == "ipopt" ]]; then
+  if [[ "$dual_warm_start" == "auto" ]]; then
+    dual_warm_start="bounds"
+  fi
   solver_options+=(
     --ipopt-max-iter "$BENCHMARK_MAX_ITER"
-    --ipopt-dual-warm-start-mode bounds
+    --ipopt-dual-warm-start-mode "$dual_warm_start"
   )
   if [[ "$compile_mode" == "true" ]]; then
     solver_options+=(--ipopt-c-compile)
   fi
 elif [[ "$solver" == "fatrop" ]]; then
+  if [[ "$dual_warm_start" == "auto" ]]; then
+    dual_warm_start="off"
+  fi
   case "$fatrop_state_scaling" in
     none|full) ;;
     *) echo "FATROP_SCALING must be 'none' or 'full', got '$fatrop_state_scaling'." >&2; exit 2 ;;
@@ -66,7 +86,7 @@ elif [[ "$solver" == "fatrop" ]]; then
     --fatrop-structure-detection auto
     --fatrop-bound-tightening-factor 1e-8
     --fatrop-state-scaling "$fatrop_state_scaling"
-    --fatrop-dual-warm-start-mode off
+    --fatrop-dual-warm-start-mode "$dual_warm_start"
   )
   if [[ "$compile_mode" == "true" ]]; then
     solver_options+=(--fatrop-c-compile)
@@ -81,17 +101,22 @@ elif [[ "$solver" == "fatrop" ]]; then
     )
   fi
 elif [[ "$solver" == "madnlp" ]]; then
+  if [[ "$dual_warm_start" == "auto" ]]; then
+    dual_warm_start="off"
+  fi
   solver_tolerance=1e-8
   # The common seed is intentionally solver-independent, but the non-convex
   # one-cycle IPOPT validation can select a PW branch that is difficult for
   # MadNLP. Refine that same seed once with the target transcription before
   # timing the compiled MadNLP RHO loop. This setup cost remains reported in
   # initial_guess_preparation_time_s and does not rebuild the MadNLP graph.
-  initialization_options=(--optional-nlp-periodic-ipopt-hot-start)
+  if [[ "$target_refinement" == "auto" ]]; then
+    initialization_options=(--optional-nlp-periodic-ipopt-hot-start)
+  fi
   solver_options+=(
     --madnlp-max-iter "$BENCHMARK_MAX_ITER"
     --madnlp-linear-solver "$backend"
-    --madnlp-dual-warm-start-mode off
+    --madnlp-dual-warm-start-mode "$dual_warm_start"
   )
   if [[ "$compile_mode" == "true" ]]; then
     solver_options+=(--madnlp-c-compile)
@@ -189,19 +214,31 @@ then
   exit 1
 fi
 
-if [[ -f "$result" && "$ipopt_profile" == "scientific-radau5" ]] && \
-  ! jq -e --arg solver "$solver" '
+if [[ -f "$result" && "$ipopt_profile" =~ ^scientific[-_]radau[456]$ ]]
+then
+  normalized_profile="${ipopt_profile//_/-}"
+  scientific_status="diagnostic"
+  if [[ "$collocation_degree" == "5" ]]; then
+    scientific_status="candidate"
+  fi
+  if ! jq -e \
+    --arg solver "$solver" \
+    --arg profile "$normalized_profile" \
+    --arg status "$scientific_status" \
+    --argjson degree "$collocation_degree" '
     .configurations[$solver] |
-    (.benchmark_profile == "scientific-radau5") and
+    (.benchmark_profile == $profile) and
     (.profile_integrity == true) and
-    (.scientific_status == "candidate") and
-    (.collocation_degree == 5) and
+    (.scientific_status == $status) and
+    (.collocation_degree == $degree) and
+    (.enforce_start_constraints == true) and
     (.activate_passive_force_relationship == true) and
     (.control_decisions_per_cycle == 30)
   ' "$result" >/dev/null
-then
-  echo "The scientific-radau5 result does not satisfy its serialized contract." >&2
-  exit 1
+  then
+    echo "The $normalized_profile result does not satisfy its serialized contract." >&2
+    exit 1
+  fi
 fi
 
 # Numerical non-convergence belongs in result.json and must not prevent later
