@@ -10,7 +10,7 @@ on:
         default: ubuntu-24.04
         type: string
       cycles:
-        description: Number of RHO solves, "screen", "acados", "acados_guard", "acados_recovery", "acados_homotopy", or "full_horizon"
+        description: Number of RHO solves, or "screen", "acados", "acados_guard", "acados_recovery", "acados_homotopy", "acados_reduced_100", "radau5_100", "fatigue_endurance", or "full_horizon"
         required: true
         default: "100"
         type: string
@@ -78,6 +78,16 @@ on:
         description: Short RHO count for the reduced Radau-4/6 discretization controls
         required: true
         default: "5"
+        type: string
+      radau5_endurance_rhos:
+        description: Certified full/reduced Radau-5 RHO count for each NLP solver
+        required: true
+        default: "100"
+        type: string
+      fatigue_endurance_max_rhos:
+        description: Maximum reduced compiled RHO count before a two-failure fatigue-endurance outcome
+        required: true
+        default: "1000"
         type: string
 
 permissions:
@@ -375,7 +385,7 @@ jobs:
 
   prepare-acados-stack:
     name: Prepare the cached ACADOS numerical stack
-    if: ${{ inputs.cycles != 'screen' && inputs.cycles != 'full_horizon' && inputs.cycles_per_window == '1' }}
+    if: ${{ inputs.cycles != 'screen' && inputs.cycles != 'full_horizon' && inputs.cycles != 'radau5_100' && inputs.cycles_per_window == '1' }}
     needs: prepare-seed
     runs-on: ${{ inputs.runner_label }}
     timeout-minutes: 120
@@ -488,7 +498,7 @@ jobs:
 
   acados-smoke:
     name: ACADOS — sequential full/reduced and option screen
-    if: ${{ inputs.cycles != 'screen' && inputs.cycles != 'full_horizon' && inputs.cycles_per_window == '1' }}
+    if: ${{ inputs.cycles != 'screen' && inputs.cycles != 'full_horizon' && inputs.cycles != 'radau5_100' && inputs.cycles_per_window == '1' }}
     needs: [prepare-seed, prepare-acados-stack]
     runs-on: ${{ inputs.runner_label }}
     timeout-minutes: 240
@@ -579,11 +589,13 @@ jobs:
       - name: Run ACADOS full/reduced and solver options sequentially
         env:
           PYTHONPATH: ${{ github.workspace }}
-          ACADOS_SMOKE_RHOS: ${{ inputs.acados_smoke_rhos }}
+          ACADOS_SMOKE_RHOS: ${{ inputs.cycles == 'fatigue_endurance' && inputs.fatigue_endurance_max_rhos || inputs.acados_smoke_rhos }}
           ACADOS_OPTION_RHOS: ${{ inputs.acados_option_rhos }}
           ACADOS_HOMOTOPY_ONLY: ${{ inputs.cycles == 'acados_homotopy' }}
           ACADOS_CADENCE_GUARD_ONLY: ${{ inputs.cycles == 'acados_guard' }}
           ACADOS_RECOVERY_ONLY: ${{ inputs.cycles == 'acados_recovery' }}
+          ACADOS_REDUCED_100_ONLY: ${{ inputs.cycles == 'acados_reduced_100' }}
+          ACADOS_FATIGUE_ENDURANCE_ONLY: ${{ inputs.cycles == 'fatigue_endurance' }}
           BENCHMARK_ASSISTANCE: ${{ inputs.crank_assistance_nm }}
           BENCHMARK_Q_SLACK: ${{ inputs.terminal_wheel_q_slack }}
           COCOFEST_BENCHMARK_COMMIT: ${{ github.sha }}
@@ -809,11 +821,17 @@ jobs:
                 --acados-maxiter-retries 1
                 --acados-maxiter-retry-iterations 20
                 --acados-maxiter-retry-feasibility-tolerance 0.0025
-                --max-consecutive-failing 1
                 --receding-horizon-solution-output
                 "$case_dir/validated-rho-trajectory.npz"
                 --allow-partial-receding-horizon-solution-output
               )
+              if [[ "$ACADOS_FATIGUE_ENDURANCE_ONLY" != "true" ]]; then
+                # The normal 100-RHO guard is a strict certification run: do
+                # not shift an uncertified state into a later RHO.  The
+                # dedicated endurance campaign intentionally retains the two
+                # observed failed attempts as its physiological endpoint.
+                solver_options+=(--max-consecutive-failing 1)
+              fi
               if [[ "$ACADOS_RECOVERY_ONLY" == "true" ]]; then
                 # Reintegrate the whole certified prefix with the same dense
                 # DOP853 audit before accepting a recovery-induced branch.
@@ -984,7 +1002,26 @@ jobs:
             echo "$solver_exit" > "$case_dir/process-exit-code.txt"
           }
 
-          if [[ "$ACADOS_RECOVERY_ONLY" == "true" ]]; then
+          if [[ "$ACADOS_FATIGUE_ENDURANCE_ONLY" == "true" ]]; then
+            # This is the only full-ACADOS endurance member: IRK/SQP with the
+            # validated asymmetric 2.60 rad/s fast-side guard and a mechanical
+            # Phase-I repair.  A double failure is recorded as an outcome and
+            # evaluated from the certified prefix below, not as a CI crash.
+            printf '%s\n' \
+              sqp-irk-reference-full \
+              > acados-smoke-results/reference-cases.txt
+            run_case sqp-irk-reference full 1 SQP IRK 5 5
+            run_case sqp-irk-fast-guard-2p6-phase-one-mechanical full "$ACADOS_SMOKE_RHOS" SQP IRK 5 5
+          elif [[ "$ACADOS_REDUCED_100_ONLY" == "true" ]]; then
+            # Keep the dedicated reduced 100-RHO measurement compact: create
+            # the ACADOS-native reduced seed once, then time the strongest
+            # tested bound-restoration/cadence regularization configuration.
+            printf '%s\n' \
+              sqp-irk-reference-reduced \
+              > acados-smoke-results/reference-cases.txt
+            run_case sqp-irk-reference reduced 1 SQP IRK 5 5
+            run_case sqp-irk-two-stage-cadence-reg-0p1 reduced "$ACADOS_SMOKE_RHOS" SQP IRK 5 5
+          elif [[ "$ACADOS_RECOVERY_ONLY" == "true" ]]; then
             # Paired recovery experiment for the first certified failure at
             # RHO 81. Build the reference seed once, then compare genuinely
             # different transferred primals and ACADOS search directions on
@@ -1119,7 +1156,8 @@ jobs:
                 "| Hot RHO + Phase-I max (s) | \(.hot_effective_plus_phase_one_wall_time_max_s) |",
                 "| Conditional MAXITER retries | \((.acados_maxiter_retry_summaries // []) | length) |",
                 "| First failed RHO | \(.first_failed_rho) |",
-                "| Stop | \(.stop.label) |"
+                "| Stop | \(.stop.label) |",
+                "| Endurance outcome | \(.fatigue_endurance_outcome.label) |"
               ' "$result"
             } >> "$GITHUB_STEP_SUMMARY"
           done < <(find acados-smoke-results -name result.json -type f | sort)
@@ -1128,7 +1166,7 @@ jobs:
         if: always()
         run: |
           output="acados-smoke-results/acados-option-screen.csv"
-          echo "case,nlp_solver,search_direction,dual_warm_start_mode,integrator,sim_steps,newton_iter,reset_solver,qp_warm_start,anderson,anderson_threshold,byrd_slack_factor,terminal_q_homotopy_slacks,terminal_q_homotopy_each_window,store_iterates,maxiter_retries,maxiter_retry_iterations,maxiter_retry_feasibility_tolerance,maxiter_retry_triggered_windows,transfer_bound_homotopy,homotopy_min_fraction_step,homotopy_max_refinements,active_set_guard_radius_s,active_set_guard_margin_nodes,active_set_threshold_above_pd0_s,all_node_contact,all_node_contact_position,solver_success,physical_success,success,mechanical_audit_passed,nlp_validated_cycles,physically_validated_cycles,validated_cycles,attempted_rho,solve_hot_median_s,effective_hot_median_s,effective_hot_p90_s,phase_one_total_s,effective_plus_phase_one_hot_median_s,effective_plus_phase_one_hot_p90_s,effective_plus_phase_one_hot_max_s,restoration_total_s,executed_fatigue_objective,minimum_capacity_ratio,first_failed_rho" > "$output"
+          echo "case,nlp_solver,search_direction,dual_warm_start_mode,integrator,sim_steps,newton_iter,reset_solver,qp_warm_start,anderson,anderson_threshold,byrd_slack_factor,terminal_q_homotopy_slacks,terminal_q_homotopy_each_window,store_iterates,maxiter_retries,maxiter_retry_iterations,maxiter_retry_feasibility_tolerance,maxiter_retry_triggered_windows,transfer_bound_homotopy,homotopy_min_fraction_step,homotopy_max_refinements,active_set_guard_radius_s,active_set_guard_margin_nodes,active_set_threshold_above_pd0_s,all_node_contact,all_node_contact_position,solver_success,physical_success,success,mechanical_audit_passed,nlp_validated_cycles,physically_validated_cycles,validated_cycles,attempted_rho,solve_hot_median_s,effective_hot_median_s,effective_hot_p90_s,phase_one_total_s,effective_plus_phase_one_hot_median_s,effective_plus_phase_one_hot_p90_s,effective_plus_phase_one_hot_max_s,restoration_total_s,executed_fatigue_objective,minimum_capacity_ratio,first_failed_rho,endurance_outcome" > "$output"
           while IFS= read -r result; do
             case_name="$(basename "$(dirname "$result")")"
             jq -r --arg case "$case_name" '
@@ -1180,7 +1218,8 @@ jobs:
                 .feasibility_restoration.total_wall_time_s,
                 .executed_fatigue_objective,
                 .min_A_capacity_ratio,
-                .first_failed_rho
+                .first_failed_rho,
+                .fatigue_endurance_outcome.label
               ] | @csv
             ' "$result" >> "$output"
           done < <(find acados-smoke-results -name result.json -type f | sort)
@@ -1199,6 +1238,8 @@ jobs:
         env:
           ACADOS_HOMOTOPY_ONLY: ${{ inputs.cycles == 'acados_homotopy' }}
           ACADOS_RECOVERY_ONLY: ${{ inputs.cycles == 'acados_recovery' }}
+          ACADOS_REDUCED_100_ONLY: ${{ inputs.cycles == 'acados_reduced_100' }}
+          ACADOS_FATIGUE_ENDURANCE_ONLY: ${{ inputs.cycles == 'fatigue_endurance' }}
         run: |
           mapfile -t expected_cases < acados-smoke-results/expected-cases.txt
           if [[ "${#expected_cases[@]}" -lt 1 ]]; then
@@ -1227,7 +1268,8 @@ jobs:
           extended_campaign="$(cat acados-smoke-results/extended-campaign.txt)"
           mapfile -t reference_cases < acados-smoke-results/reference-cases.txt
           expected_reference_count=2
-          if [[ "$ACADOS_HOMOTOPY_ONLY" == "true" || "$ACADOS_RECOVERY_ONLY" == "true" ]]; then
+          if [[ "$ACADOS_HOMOTOPY_ONLY" == "true" || "$ACADOS_RECOVERY_ONLY" == "true" || \
+                "$ACADOS_REDUCED_100_ONLY" == "true" || "$ACADOS_FATIGUE_ENDURANCE_ONLY" == "true" ]]; then
             expected_reference_count=1
           fi
           if [[ "${#reference_cases[@]}" -ne "$expected_reference_count" ]]; then
@@ -1255,6 +1297,16 @@ jobs:
               )
             ' "$result"
           done
+          if [[ "$ACADOS_FATIGUE_ENDURANCE_ONLY" == "true" ]]; then
+            result="acados-smoke-results/sqp-irk-fast-guard-2p6-phase-one-mechanical-full/result.json"
+            jq -e '
+              .results[0] |
+              (.fatigue_endurance_outcome.accepted == true)
+            ' "$result" || {
+              echo "ACADOS endurance stop was not supported by fatigue/recruitment evidence." >&2
+              exit 1
+            }
+          fi
 
   screen-options:
     name: Option screen — ${{ matrix.solver }}
@@ -1548,7 +1600,7 @@ jobs:
 
   benchmark:
     name: ${{ matrix.case_slug }} — sequential full/reduced
-    if: ${{ inputs.cycles != 'screen' && inputs.cycles != 'acados' && inputs.cycles != 'acados_guard' && inputs.cycles != 'acados_recovery' && inputs.cycles != 'acados_homotopy' && inputs.cycles != 'full_horizon' }}
+    if: ${{ inputs.cycles != 'screen' && inputs.cycles != 'acados' && inputs.cycles != 'acados_guard' && inputs.cycles != 'acados_recovery' && inputs.cycles != 'acados_homotopy' && inputs.cycles != 'acados_reduced_100' && inputs.cycles != 'full_horizon' }}
     needs: prepare-seed
     runs-on: ${{ inputs.runner_label }}
     timeout-minutes: ${{ matrix.timeout_minutes }}
@@ -1562,7 +1614,7 @@ jobs:
             case_slug: ipopt
             benchmark_mode: main
             timeout_minutes: 300
-            benchmark_rhos: ${{ inputs.cycles }}
+            benchmark_rhos: ${{ inputs.cycles == 'radau5_100' && inputs.radau5_endurance_rhos || inputs.cycles == 'fatigue_endurance' && inputs.fatigue_endurance_max_rhos || inputs.cycles }}
             cycles_per_window: ${{ inputs.cycles_per_window }}
             bioptim_commit: 4179bf076b724fe6c4702739b3462e29ae4adef4
             integration_branch: codex/cocofest-acados-v055-exploration
@@ -1572,7 +1624,7 @@ jobs:
             case_slug: madnlp
             benchmark_mode: main
             timeout_minutes: 420
-            benchmark_rhos: ${{ inputs.cycles }}
+            benchmark_rhos: ${{ inputs.cycles == 'radau5_100' && inputs.radau5_endurance_rhos || inputs.cycles == 'fatigue_endurance' && inputs.fatigue_endurance_max_rhos || inputs.cycles }}
             cycles_per_window: ${{ inputs.cycles_per_window }}
             bioptim_commit: 4179bf076b724fe6c4702739b3462e29ae4adef4
             integration_branch: codex/cocofest-acados-v055-exploration
@@ -1582,7 +1634,7 @@ jobs:
             case_slug: fatrop-collocation
             benchmark_mode: main
             timeout_minutes: 420
-            benchmark_rhos: ${{ inputs.cycles }}
+            benchmark_rhos: ${{ inputs.cycles == 'radau5_100' && inputs.radau5_endurance_rhos || inputs.cycles == 'fatigue_endurance' && inputs.fatigue_endurance_max_rhos || inputs.cycles }}
             cycles_per_window: ${{ inputs.cycles_per_window }}
             bioptim_commit: 4179bf076b724fe6c4702739b3462e29ae4adef4
             integration_branch: codex/cocofest-acados-v055-exploration
@@ -1865,7 +1917,7 @@ jobs:
           fi
 
       - name: Run IPOPT full
-        if: matrix.solver == 'ipopt'
+        if: ${{ matrix.solver == 'ipopt' && inputs.cycles != 'radau5_100' && inputs.cycles != 'fatigue_endurance' }}
         # Compiling the full 26-state collocation NLP repeatedly terminates the
         # hosted runner with SIGTERM 143 before any artifact can be checkpointed.
         # Keep the scientific full reference interpreted; the reduced case
@@ -1896,7 +1948,7 @@ jobs:
           retention-days: 30
 
       - name: Run IPOPT reduced
-        if: matrix.solver == 'ipopt'
+        if: ${{ matrix.solver == 'ipopt' && inputs.cycles != 'radau5_100' && inputs.cycles != 'fatigue_endurance' }}
         run: bash .github/scripts/run_cycling_benchmark_case.sh ipopt ipopt reduced mumps collocation benchmark-results "$BENCHMARK_CYCLES" "${{ inputs.compile_nlp_evaluators }}"
       - name: Checkpoint IPOPT reduced
         if: ${{ always() && matrix.solver == 'ipopt' }}
@@ -1954,7 +2006,7 @@ jobs:
           retention-days: 30
 
       - name: Run MadNLP MUMPS full
-        if: matrix.solver == 'madnlp'
+        if: ${{ matrix.solver == 'madnlp' && inputs.cycles != 'radau5_100' && inputs.cycles != 'fatigue_endurance' }}
         run: bash .github/scripts/run_cycling_benchmark_case.sh madnlp-mumps madnlp full mumps collocation benchmark-results "$BENCHMARK_CYCLES" false
       - name: Checkpoint MadNLP MUMPS full
         if: ${{ always() && matrix.solver == 'madnlp' }}
@@ -1981,7 +2033,7 @@ jobs:
           retention-days: 30
 
       - name: Run MadNLP MUMPS reduced
-        if: matrix.solver == 'madnlp'
+        if: ${{ matrix.solver == 'madnlp' && inputs.cycles != 'radau5_100' && inputs.cycles != 'fatigue_endurance' }}
         run: bash .github/scripts/run_cycling_benchmark_case.sh madnlp-mumps madnlp reduced mumps collocation benchmark-results "$BENCHMARK_CYCLES" "${{ inputs.compile_nlp_evaluators }}"
       - name: Checkpoint MadNLP MUMPS reduced
         if: ${{ always() && matrix.solver == 'madnlp' }}
@@ -2036,7 +2088,7 @@ jobs:
           retention-days: 30
 
       - name: Run FATROP collocation full
-        if: matrix.solver == 'fatrop'
+        if: ${{ matrix.solver == 'fatrop' && inputs.cycles != 'radau5_100' && inputs.cycles != 'fatigue_endurance' }}
         # The full SX graph generates a roughly 200 MB monolithic C file.
         # Clang remained active for more than 40 minutes on macOS and two
         # hosted Linux runners were reclaimed during GCC compilation. The
@@ -2054,7 +2106,7 @@ jobs:
           retention-days: 30
 
       - name: Run FATROP collocation reduced
-        if: matrix.solver == 'fatrop'
+        if: ${{ matrix.solver == 'fatrop' && inputs.cycles != 'radau5_100' && inputs.cycles != 'fatigue_endurance' }}
         run: bash .github/scripts/run_cycling_benchmark_case.sh fatrop-collocation fatrop reduced fatrop collocation benchmark-results "$BENCHMARK_CYCLES" "${{ inputs.compile_nlp_evaluators }}" sx none
       - name: Checkpoint FATROP collocation reduced
         if: ${{ always() && matrix.solver == 'fatrop' }}
@@ -2063,6 +2115,37 @@ jobs:
         with:
           name: cycling-fatigue-linux-fatrop-collocation-reduced-${{ github.run_id }}
           path: benchmark-results/fatrop-collocation-reduced/
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Run 100-RHO Radau-5 full
+        if: ${{ inputs.cycles == 'radau5_100' }}
+        # This is an accuracy/endurance comparison, not a code-generation
+        # study.  Keep full and reduced interpreted so degree five alone is
+        # the changed variable; compiled reduced Radau-3 is measured below.
+        continue-on-error: true
+        run: bash .github/scripts/run_cycling_benchmark_case.sh "${{ matrix.case_slug }}-radau5-100" "${{ matrix.solver }}" full "${{ matrix.backend }}" collocation benchmark-results "$BENCHMARK_CYCLES" false sx none 5 scientific-radau5 off true
+
+      - name: Run 100-RHO Radau-5 reduced
+        if: ${{ inputs.cycles == 'radau5_100' }}
+        continue-on-error: true
+        run: bash .github/scripts/run_cycling_benchmark_case.sh "${{ matrix.case_slug }}-radau5-100" "${{ matrix.solver }}" reduced "${{ matrix.backend }}" collocation benchmark-results "$BENCHMARK_CYCLES" false sx none 5 scientific-radau5 off true
+
+      - name: Run compiled reduced Radau-3 fatigue endurance
+        if: ${{ inputs.cycles == 'fatigue_endurance' }}
+        # A numerical stop is serialized, checkpointed, and classified from
+        # its certified prefix.  The post-job gate accepts only horizon
+        # completion or a two-failure endpoint with fatigue evidence.
+        continue-on-error: true
+        run: bash .github/scripts/run_cycling_benchmark_case.sh "${{ matrix.case_slug }}-radau3-fatigue-endurance" "${{ matrix.solver }}" reduced "${{ matrix.backend }}" collocation benchmark-results "$BENCHMARK_CYCLES" true sx none 3 periodic_collocation auto auto
+
+      - name: Checkpoint campaign-specific results
+        if: ${{ always() && (inputs.cycles == 'radau5_100' || inputs.cycles == 'fatigue_endurance') }}
+        continue-on-error: true
+        uses: actions/upload-artifact@v7
+        with:
+          name: cycling-fatigue-linux-${{ matrix.solver }}-${{ inputs.cycles }}-${{ github.run_id }}
+          path: benchmark-results/
           if-no-files-found: warn
           retention-days: 30
 
@@ -2090,7 +2173,8 @@ jobs:
                 "| Hot RHO P90 (s) | \(.hot_wall_time_p90_s) |",
                 "| First failed RHO | \(.first_failed_rho) |",
                 "| Minimum A/A_scale | \(.min_A_capacity_ratio) |",
-                "| Stop | \(.stop.label) |"
+                "| Stop | \(.stop.label) |",
+                "| Endurance outcome | \(.fatigue_endurance_outcome.label) |"
               ' "$result"
             } >> "$GITHUB_STEP_SUMMARY"
           done < <(find benchmark-results -name result.json -type f | sort)
@@ -2101,15 +2185,18 @@ jobs:
         env:
           BENCHMARK_SOLVER: ${{ matrix.solver }}
           BENCHMARK_MODE: ${{ matrix.benchmark_mode }}
+          BENCHMARK_CAMPAIGN: ${{ inputs.cycles }}
           COMPILE_NLP_EVALUATORS: ${{ inputs.compile_nlp_evaluators }}
         run: |
           case "$BENCHMARK_SOLVER" in
-            ipopt) expected=2 ;;
-            madnlp) expected=2 ;;
-            fatrop) expected=2 ;;
+            ipopt|madnlp|fatrop) expected=2 ;;
             *) echo "Unexpected benchmark solver: $BENCHMARK_SOLVER" >&2; exit 1 ;;
           esac
-          if [[ "${{ inputs.refined_collocation_validation }}" == "true" ]] && \
+          if [[ "$BENCHMARK_CAMPAIGN" == "fatigue_endurance" ]]; then
+            expected=1
+          elif [[ "$BENCHMARK_CAMPAIGN" == "radau5_100" ]]; then
+            expected=2
+          elif [[ "${{ inputs.refined_collocation_validation }}" == "true" ]] && \
              [[ "$BENCHMARK_SOLVER" == "ipopt" || "$BENCHMARK_SOLVER" == "madnlp" ]]
           then
             # Radau-5 is run full and reduced; Radau-4/6 remain short reduced
@@ -2130,6 +2217,15 @@ jobs:
                 (.first_failed_rho == null)
               ' "$result" || {
                 echo "Scientific collocation gate is not strict-successful: $result" >&2
+                exit 1
+              }
+            fi
+            if [[ "$BENCHMARK_CAMPAIGN" == "fatigue_endurance" ]]; then
+              jq -e '
+                .results[0] |
+                (.fatigue_endurance_outcome.accepted == true)
+              ' "$result" || {
+                echo "Endurance endpoint lacks the required fatigue evidence: $result" >&2
                 exit 1
               }
             fi

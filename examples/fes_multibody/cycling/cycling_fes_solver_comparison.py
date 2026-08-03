@@ -961,6 +961,59 @@ def _stop_classification(result: dict) -> dict:
     }
 
 
+def _fatigue_endurance_outcome(
+    *,
+    success: bool,
+    validated_cycles: int,
+    requested_cycles: int | None,
+    maximum_consecutive_failures: int,
+    minimum_capacity_ratio: float | None,
+    control_saturation: list[dict],
+) -> dict:
+    """Classify an endurance run without turning numerical exhaustion into CI noise.
+
+    Two consecutive uncertified windows are *not* by themselves proof of a
+    physiological limit: they can also reveal a numerical defect.  We call an
+    early stop fatigue-limited only when the executed, certified prefix also
+    shows a loss of Ding force capacity and a material use of the upper pulse-
+    width bounds.  The resulting label deliberately remains a ``candidate``:
+    it is an observed endpoint for comparison, not a claim that the optimizer
+    has mathematically proved muscle exhaustion.
+    """
+
+    if success and (
+        requested_cycles is None or validated_cycles >= requested_cycles
+    ):
+        return {
+            "label": "completed_endurance_horizon",
+            "accepted": True,
+            "evidence": ["requested_horizon_certified"],
+        }
+
+    evidence = []
+    if maximum_consecutive_failures >= 2:
+        evidence.append("two_consecutive_uncertified_windows")
+    if minimum_capacity_ratio is not None and minimum_capacity_ratio < 1.0 - 1e-9:
+        evidence.append("ding_force_capacity_decreased")
+    if any(row.get("upper_fraction", 0.0) >= 0.1 for row in control_saturation):
+        evidence.append("pulse_width_upper_bound_active")
+
+    fatigue_limited = set(evidence) == {
+        "two_consecutive_uncertified_windows",
+        "ding_force_capacity_decreased",
+        "pulse_width_upper_bound_active",
+    }
+    return {
+        "label": (
+            "fatigue_limited_candidate"
+            if fatigue_limited
+            else "unconfirmed_endurance_stop"
+        ),
+        "accepted": fatigue_limited,
+        "evidence": evidence,
+    }
+
+
 def _shared_stop_classification(ipopt_result: dict, acados_result: dict) -> dict:
     ipopt = _stop_classification(ipopt_result)
     acados = _stop_classification(acados_result)
@@ -2634,6 +2687,7 @@ def solver_overview_rows(results: dict[str, dict]) -> list[dict]:
         saturation = _control_saturation_metrics(
             result, performance["validated_cycles"]
         )
+        minimum_capacity_ratio = _minimum_a_capacity_ratio(fatigue)
         a_rows = [row for row in fatigue if row["key"].startswith("A_")]
         mean_fatigue = max(
             (
@@ -2835,7 +2889,7 @@ def solver_overview_rows(results: dict[str, dict]) -> list[dict]:
                     if not strict_hot_effective_plus_phase_one_wall_times
                     else float(max(strict_hot_effective_plus_phase_one_wall_times))
                 ),
-                "min_A_capacity_ratio": _minimum_a_capacity_ratio(fatigue),
+                "min_A_capacity_ratio": minimum_capacity_ratio,
                 "max_mean_normalized_fatigue": mean_fatigue,
                 "fatigue_auc_cycles": fatigue_auc if a_rows else None,
                 "muscle_fatigue": muscle_fatigue,
@@ -2857,6 +2911,15 @@ def solver_overview_rows(results: dict[str, dict]) -> list[dict]:
                     "by_state": {},
                 },
                 "control_saturation": saturation,
+                "fatigue_endurance_outcome": _fatigue_endurance_outcome(
+                    success=bool(result.get("success")),
+                    validated_cycles=performance["validated_cycles"],
+                    requested_cycles=result.get("requested_cycles")
+                    or result.get("requested_windows"),
+                    maximum_consecutive_failures=maximum_consecutive_failures,
+                    minimum_capacity_ratio=minimum_capacity_ratio,
+                    control_saturation=saturation,
+                ),
                 "pulse_width_active_set_summary": result.get(
                     "pulse_width_active_set_summary"
                 )

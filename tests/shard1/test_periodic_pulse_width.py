@@ -4699,6 +4699,30 @@ def test_completed_endurance_horizon_uses_all_covered_cycles():
     )
 
 
+def test_endurance_outcome_requires_capacity_and_recruitment_evidence():
+    accepted = comparison_example._fatigue_endurance_outcome(
+        success=False,
+        validated_cycles=120,
+        requested_cycles=1000,
+        maximum_consecutive_failures=2,
+        minimum_capacity_ratio=0.83,
+        control_saturation=[{"upper_fraction": 0.2}],
+    )
+    rejected = comparison_example._fatigue_endurance_outcome(
+        success=False,
+        validated_cycles=120,
+        requested_cycles=1000,
+        maximum_consecutive_failures=2,
+        minimum_capacity_ratio=0.83,
+        control_saturation=[{"upper_fraction": 0.0}],
+    )
+
+    assert accepted["label"] == "fatigue_limited_candidate"
+    assert accepted["accepted"] is True
+    assert rejected["label"] == "unconfirmed_endurance_stop"
+    assert rejected["accepted"] is False
+
+
 def test_receding_horizon_window_count_includes_single_cycle_horizons():
     assert periodic_example.receding_horizon_window_count(3, 1) == 3
     assert periodic_example.receding_horizon_window_count(30, 2) == 29

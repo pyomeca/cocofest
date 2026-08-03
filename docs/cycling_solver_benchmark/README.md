@@ -35,6 +35,44 @@ Bioptim se trouve dans
 [`cycling_solver_benchmark_linux.yml`](../../.github/workflows/cycling_solver_benchmark_linux.yml)
 reste la source de vérité exécutable.
 
+### Campagnes CI d'endurance
+
+Le champ `cycles` du workflow distingue maintenant trois campagnes longues,
+afin de ne pas mélanger précision de transcription, vitesse et perte de
+capacité musculaire :
+
+| Valeur de `cycles` | Cas exécutés | Critère de sortie |
+|---|---|---|
+| `radau5_100` | IPOPT/MUMPS, MadNLP/MUMPS et FATROP, chacun en full et reduced, Radau 5, 100 RHO | certification stricte des 100 RHO; fonctions interprétées pour isoler l'effet du degré |
+| `acados_reduced_100` | ACADOS SQP-IRK reduced, 100 RHO, après un seed ACADOS-native | résultat sérialisé et audité, y compris si la chaîne s'arrête avant 100 |
+| `fatigue_endurance` | IPOPT, MadNLP/MUMPS et FATROP reduced, SX et compilés, Radau 3; ACADOS SQP-IRK full avec garde rapide `2.60` et Phase-I mécanique | horizon atteint ou arrêt candidat de fatigue après deux fenêtres non certifiées consécutives |
+
+La dernière campagne emploie `fatigue_endurance_max_rhos` (par défaut `1000`)
+comme garde-fou, non comme une durée physiologique imposée. Un arrêt avant ce
+plafond ne passe pas automatiquement : il doit associer (i) deux fenêtres RHO
+consécutives non certifiées, (ii) une baisse observée de la capacité `A/A_scale`
+des muscles de Ding, et (iii) une activation notable de la borne supérieure de
+PW. Il est alors rapporté comme `fatigue_limited_candidate`, donc comme un
+outcome expérimental important et non comme une erreur d'infrastructure. Sans
+ces trois indices, il reste `unconfirmed_endurance_stop` et fait échouer le
+gate : une non-convergence numérique ne doit pas être renommée fatigue.
+
+Exemples de lancement manuel :
+
+```bash
+gh workflow run cycling_solver_benchmark_linux.yml \
+  --ref codex/acados-pr-refresh \
+  -f cycles=radau5_100 -f radau5_endurance_rhos=100
+
+gh workflow run cycling_solver_benchmark_linux.yml \
+  --ref codex/acados-pr-refresh \
+  -f cycles=acados_reduced_100 -f acados_smoke_rhos=100
+
+gh workflow run cycling_solver_benchmark_linux.yml \
+  --ref codex/acados-pr-refresh \
+  -f cycles=fatigue_endurance -f fatigue_endurance_max_rhos=1000
+```
+
 ## Réponse courte
 
 Pour obtenir aujourd'hui la meilleure combinaison de robustesse et de vitesse :
