@@ -10,7 +10,7 @@ on:
         default: ubuntu-24.04
         type: string
       cycles:
-        description: Number of RHO solves, or "screen", "acados", "acados_guard", "acados_recovery", "acados_homotopy", "acados_reduced_100", "radau5_100", "fatigue_endurance", or "full_horizon"
+        description: Number of RHO solves, or "screen", "acados", "acados_guard", "acados_recovery", "acados_homotopy", "acados_reduced_100", "radau5_100", "fatigue_endurance", "fatigue_endurance_radau5", or "full_horizon"
         required: true
         default: "100"
         type: string
@@ -87,7 +87,7 @@ on:
       fatigue_endurance_max_rhos:
         description: Maximum reduced compiled RHO count before a two-failure fatigue-endurance outcome
         required: true
-        default: "1000"
+        default: "2000"
         type: string
 
 permissions:
@@ -385,7 +385,7 @@ jobs:
 
   prepare-acados-stack:
     name: Prepare the cached ACADOS numerical stack
-    if: ${{ inputs.cycles != 'screen' && inputs.cycles != 'full_horizon' && inputs.cycles != 'radau5_100' && inputs.cycles_per_window == '1' }}
+    if: ${{ inputs.cycles != 'screen' && inputs.cycles != 'full_horizon' && inputs.cycles != 'radau5_100' && inputs.cycles != 'fatigue_endurance_radau5' && inputs.cycles_per_window == '1' }}
     needs: prepare-seed
     runs-on: ${{ inputs.runner_label }}
     timeout-minutes: 120
@@ -498,7 +498,7 @@ jobs:
 
   acados-smoke:
     name: ACADOS — sequential full/reduced and option screen
-    if: ${{ inputs.cycles != 'screen' && inputs.cycles != 'full_horizon' && inputs.cycles != 'radau5_100' && inputs.cycles_per_window == '1' }}
+    if: ${{ inputs.cycles != 'screen' && inputs.cycles != 'full_horizon' && inputs.cycles != 'radau5_100' && inputs.cycles != 'fatigue_endurance_radau5' && inputs.cycles_per_window == '1' }}
     needs: [prepare-seed, prepare-acados-stack]
     runs-on: ${{ inputs.runner_label }}
     timeout-minutes: 240
@@ -660,10 +660,12 @@ jobs:
                 "$GITHUB_WORKSPACE/acados-smoke-results/reference-reduced-feasible-seed.npz"
               )
             elif [[ "$variant" == *fast-guard* ]]; then
-              common_seed="$GITHUB_WORKSPACE/acados-smoke-results/reference-${mechanics}-feasible-seed.npz"
-              if [[ ! -f "$common_seed" ]]; then
-                echo "The cadence-guard case requires its preceding ACADOS reference seed." >&2
-                return 2
+              if [[ "$ACADOS_FATIGUE_ENDURANCE_ONLY" != "true" ]]; then
+                common_seed="$GITHUB_WORKSPACE/acados-smoke-results/reference-${mechanics}-feasible-seed.npz"
+                if [[ ! -f "$common_seed" ]]; then
+                  echo "The cadence-guard case requires its preceding ACADOS reference seed." >&2
+                  return 2
+                fi
               fi
             elif [[ ( "$variant" == "sqp-irk-two-stage-cadence-reg-1" || "$variant" == "sqp-irk-cadence-reg-1-rollout-guard" || "$variant" == "sqp-irk-cadence-reg-1-best-retry" || "$variant" == "sqp-byrd-omojokun-cadence-reg-1-irk" || "$variant" == "sqp-byrd-terminal-homotopy-cadence-reg-1-irk" || "$variant" == "sqp-byrd-rollout-accept-cadence-reg-1-irk" || "$variant" == "sqp-byrd-projected-selector-cadence-reg-1-irk" ) && "$mechanics" == "full" ]]; then
               common_seed="$GITHUB_WORKSPACE/acados-smoke-results/reference-full-feasible-seed.npz"
@@ -965,6 +967,7 @@ jobs:
               --crank-assistance "$BENCHMARK_ASSISTANCE" \
               --primal-feasibility-threshold 1e-5 \
               --max-consecutive-failing 2 \
+              --retry-failed-rho-without-advance \
               --standard-warmup-seed .github/benchmark-seeds/legacy-resistive-0p22-warmup.npz \
               --legacy-standard-warmup-seed-signed-torque 0.22 \
               --standard-warmup-seed-continuation \
@@ -1007,10 +1010,11 @@ jobs:
             # validated asymmetric 2.60 rad/s fast-side guard and a mechanical
             # Phase-I repair.  A double failure is recorded as an outcome and
             # evaluated from the certified prefix below, not as a CI crash.
-            printf '%s\n' \
-              sqp-irk-reference-full \
-              > acados-smoke-results/reference-cases.txt
-            run_case sqp-irk-reference full 1 SQP IRK 5 5
+            # Do not construct an ACADOS-native full seed first: its unguarded
+            # IRK rollout is precisely what violates the continuous cadence
+            # audit. The guarded OCP starts directly from the validated common
+            # reduced-to-full bridge.
+            : > acados-smoke-results/reference-cases.txt
             run_case sqp-irk-fast-guard-2p6-phase-one-mechanical full "$ACADOS_SMOKE_RHOS" SQP IRK 5 5
           elif [[ "$ACADOS_REDUCED_100_ONLY" == "true" ]]; then
             # Keep the dedicated reduced 100-RHO measurement compact: create
@@ -1268,8 +1272,10 @@ jobs:
           extended_campaign="$(cat acados-smoke-results/extended-campaign.txt)"
           mapfile -t reference_cases < acados-smoke-results/reference-cases.txt
           expected_reference_count=2
-          if [[ "$ACADOS_HOMOTOPY_ONLY" == "true" || "$ACADOS_RECOVERY_ONLY" == "true" || \
-                "$ACADOS_REDUCED_100_ONLY" == "true" || "$ACADOS_FATIGUE_ENDURANCE_ONLY" == "true" ]]; then
+          if [[ "$ACADOS_FATIGUE_ENDURANCE_ONLY" == "true" ]]; then
+            expected_reference_count=0
+          elif [[ "$ACADOS_HOMOTOPY_ONLY" == "true" || "$ACADOS_RECOVERY_ONLY" == "true" || \
+                  "$ACADOS_REDUCED_100_ONLY" == "true" ]]; then
             expected_reference_count=1
           fi
           if [[ "${#reference_cases[@]}" -ne "$expected_reference_count" ]]; then
@@ -1281,12 +1287,14 @@ jobs:
             jq -e \
               --arg extended "$extended_campaign" \
               --arg homotopy_only "$ACADOS_HOMOTOPY_ONLY" \
-              --arg recovery_only "$ACADOS_RECOVERY_ONLY" '
+              --arg recovery_only "$ACADOS_RECOVERY_ONLY" \
+              --arg reduced_100_only "$ACADOS_REDUCED_100_ONLY" '
               (.configurations.acados.use_sx == true) and
               (
                 if $extended == "true" and
                    $homotopy_only != "true" and
-                   $recovery_only != "true"
+                   $recovery_only != "true" and
+                   $reduced_100_only != "true"
                 then .configurations.acados.n_windows > 5
                 else true
                 end
@@ -1614,7 +1622,7 @@ jobs:
             case_slug: ipopt
             benchmark_mode: main
             timeout_minutes: 300
-            benchmark_rhos: ${{ inputs.cycles == 'radau5_100' && inputs.radau5_endurance_rhos || inputs.cycles == 'fatigue_endurance' && inputs.fatigue_endurance_max_rhos || inputs.cycles }}
+            benchmark_rhos: ${{ inputs.cycles == 'radau5_100' && inputs.radau5_endurance_rhos || (inputs.cycles == 'fatigue_endurance' || inputs.cycles == 'fatigue_endurance_radau5') && inputs.fatigue_endurance_max_rhos || inputs.cycles }}
             cycles_per_window: ${{ inputs.cycles_per_window }}
             bioptim_commit: 4179bf076b724fe6c4702739b3462e29ae4adef4
             integration_branch: codex/cocofest-acados-v055-exploration
@@ -1624,7 +1632,7 @@ jobs:
             case_slug: madnlp
             benchmark_mode: main
             timeout_minutes: 420
-            benchmark_rhos: ${{ inputs.cycles == 'radau5_100' && inputs.radau5_endurance_rhos || inputs.cycles == 'fatigue_endurance' && inputs.fatigue_endurance_max_rhos || inputs.cycles }}
+            benchmark_rhos: ${{ inputs.cycles == 'radau5_100' && inputs.radau5_endurance_rhos || (inputs.cycles == 'fatigue_endurance' || inputs.cycles == 'fatigue_endurance_radau5') && inputs.fatigue_endurance_max_rhos || inputs.cycles }}
             cycles_per_window: ${{ inputs.cycles_per_window }}
             bioptim_commit: 4179bf076b724fe6c4702739b3462e29ae4adef4
             integration_branch: codex/cocofest-acados-v055-exploration
@@ -1634,7 +1642,7 @@ jobs:
             case_slug: fatrop-collocation
             benchmark_mode: main
             timeout_minutes: 420
-            benchmark_rhos: ${{ inputs.cycles == 'radau5_100' && inputs.radau5_endurance_rhos || inputs.cycles == 'fatigue_endurance' && inputs.fatigue_endurance_max_rhos || inputs.cycles }}
+            benchmark_rhos: ${{ inputs.cycles == 'radau5_100' && inputs.radau5_endurance_rhos || (inputs.cycles == 'fatigue_endurance' || inputs.cycles == 'fatigue_endurance_radau5') && inputs.fatigue_endurance_max_rhos || inputs.cycles }}
             cycles_per_window: ${{ inputs.cycles_per_window }}
             bioptim_commit: 4179bf076b724fe6c4702739b3462e29ae4adef4
             integration_branch: codex/cocofest-acados-v055-exploration
@@ -2139,8 +2147,16 @@ jobs:
         continue-on-error: true
         run: bash .github/scripts/run_cycling_benchmark_case.sh "${{ matrix.case_slug }}-radau3-fatigue-endurance" "${{ matrix.solver }}" reduced "${{ matrix.backend }}" collocation benchmark-results "$BENCHMARK_CYCLES" true sx none 3 periodic_collocation auto auto
 
+      - name: Run compiled reduced Radau-5 fatigue endurance
+        if: ${{ inputs.cycles == 'fatigue_endurance_radau5' && (matrix.solver == 'ipopt' || matrix.solver == 'madnlp') }}
+        # This is deliberately reduced-only: it answers whether the robust
+        # Radau-5 transcription reaches a fatigue endpoint without conflating
+        # it with the full mechanical lift or FATROP's separate limitation.
+        continue-on-error: true
+        run: bash .github/scripts/run_cycling_benchmark_case.sh "${{ matrix.case_slug }}-radau5-fatigue-endurance" "${{ matrix.solver }}" reduced "${{ matrix.backend }}" collocation benchmark-results "$BENCHMARK_CYCLES" true sx none 5 scientific-radau5 auto auto
+
       - name: Checkpoint campaign-specific results
-        if: ${{ always() && (inputs.cycles == 'radau5_100' || inputs.cycles == 'fatigue_endurance') }}
+        if: ${{ always() && (inputs.cycles == 'radau5_100' || inputs.cycles == 'fatigue_endurance' || inputs.cycles == 'fatigue_endurance_radau5') }}
         continue-on-error: true
         uses: actions/upload-artifact@v7
         with:
@@ -2194,6 +2210,12 @@ jobs:
           esac
           if [[ "$BENCHMARK_CAMPAIGN" == "fatigue_endurance" ]]; then
             expected=1
+          elif [[ "$BENCHMARK_CAMPAIGN" == "fatigue_endurance_radau5" ]]; then
+            if [[ "$BENCHMARK_SOLVER" == "fatrop" ]]; then
+              expected=0
+            else
+              expected=1
+            fi
           elif [[ "$BENCHMARK_CAMPAIGN" == "radau5_100" ]]; then
             expected=2
           elif [[ "${{ inputs.refined_collocation_validation }}" == "true" ]] && \
@@ -2209,7 +2231,7 @@ jobs:
             exit 1
           fi
           for result in "${results[@]}"; do
-            if [[ "$result" =~ -radau[456]- ]]; then
+            if [[ "$result" =~ -radau[456]- && "$BENCHMARK_CAMPAIGN" != "fatigue_endurance_radau5" ]]; then
               jq -e '
                 .results[0] |
                 (.success == true) and
@@ -2220,7 +2242,7 @@ jobs:
                 exit 1
               }
             fi
-            if [[ "$BENCHMARK_CAMPAIGN" == "fatigue_endurance" ]]; then
+            if [[ "$BENCHMARK_CAMPAIGN" == "fatigue_endurance" || "$BENCHMARK_CAMPAIGN" == "fatigue_endurance_radau5" ]]; then
               jq -e '
                 .results[0] |
                 (.fatigue_endurance_outcome.accepted == true)
@@ -2452,7 +2474,7 @@ jobs:
 
   report:
     name: Aggregate Kevin benchmark
-    if: ${{ always() && inputs.cycles != 'screen' && inputs.cycles != 'acados' && inputs.cycles != 'acados_guard' && inputs.cycles != 'acados_recovery' && inputs.cycles != 'acados_homotopy' && inputs.cycles != 'full_horizon' }}
+    if: ${{ always() && inputs.cycles != 'screen' && inputs.cycles != 'acados' && inputs.cycles != 'acados_guard' && inputs.cycles != 'acados_recovery' && inputs.cycles != 'acados_homotopy' && inputs.cycles != 'acados_reduced_100' && inputs.cycles != 'radau5_100' && inputs.cycles != 'fatigue_endurance' && inputs.cycles != 'fatigue_endurance_radau5' && inputs.cycles != 'full_horizon' }}
     needs: [benchmark, acados-smoke]
     runs-on: ubuntu-24.04
     permissions:

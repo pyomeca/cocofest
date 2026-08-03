@@ -2474,6 +2474,16 @@ def build_argument_parser() -> argparse.ArgumentParser:
         help="Maximum number of consecutive failing MHE windows tolerated before stopping.",
     )
     parser.add_argument(
+        "--retry-failed-rho-without-advance",
+        action="store_true",
+        help=(
+            "Keep the last certified RHO state and retry the same window after "
+            "a failed solve. This prevents a failed primal from being shifted "
+            "into the next RHO; use with max-consecutive-failing=2 for a "
+            "two-attempt endurance endpoint."
+        ),
+    )
+    parser.add_argument(
         "--codegen-tag",
         type=str,
         default=None,
@@ -4437,6 +4447,22 @@ def _control_bounds_summary(nmpc) -> dict[str, dict[str, float]]:
 
 def _status_is_success(status) -> bool:
     return status == 0
+
+
+def _rho_solution_is_certified(status, feasibility: dict | None) -> bool:
+    """Return whether a RHO result is safe to propagate to the next window.
+
+    A primal can be numerically feasible even when the NLP backend reports a
+    non-success status (for example after an iteration limit).  It is not a
+    certified warm start in that case: the endurance protocol deliberately
+    retries the *same* RHO and never shifts it forward.
+    """
+
+    return bool(
+        _status_is_success(status)
+        and feasibility is not None
+        and feasibility.get("passes_tolerance", False)
+    )
 
 
 def select_acados_dual_warm_start_mode(
@@ -15614,12 +15640,87 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
         if args.solver == "acados" and horizon_seed_cache_path is not None:
             cache_first_successful_window(_nmpc, solution)
 
+    retry_same_rho_summaries = []
+    original_advance_window = nmpc.advance_window
+
+    def advance_only_certified_window(self, solution, *advance_args, **advance_kwargs):
+        """Do not contaminate the next RHO with an uncertified primal.
+
+        Bioptim's generic RHO loop shifts every returned solution, including a
+        failed one.  For an endurance endpoint this turns a single failed RHO
+        into later, unrelated solves.  Keep the current bounds and primal when
+        requested, so the loop's next iteration is a second attempt at the
+        same physical RHO from the last certified state.
+        """
+
+        snapshot_completed_window(self, solution)
+        feasibility = getattr(solution, "_cocofest_feasibility_summary", {})
+        certified = _rho_solution_is_certified(solution.status, feasibility)
+        self._cocofest_retry_same_rho_pending = bool(
+            args.retry_failed_rho_without_advance and not certified
+        )
+        if self._cocofest_retry_same_rho_pending:
+            retry_same_rho_summaries.append(
+                {
+                    "attempt_window": int(self.total_optimization_run) + 1,
+                    "native_status": _native_solver_status(self),
+                    "status": int(solution.status),
+                    "primal_feasible": bool(feasibility.get("passes_tolerance")),
+                    "advanced": False,
+                }
+            )
+            if echo:
+                print(
+                    "rho_retry_without_advance: "
+                    f"attempt_window={self.total_optimization_run + 1} "
+                    f"status={solution.status}"
+                )
+            return None
+        self._cocofest_retry_same_rho_pending = False
+        # ``snapshot_completed_window`` is normally called by our custom
+        # ``advance_window_bounds_states`` hook.  We already called it above
+        # to decide whether this solution is certifiable; suppress that hook
+        # for this one normal advance so compiled-source observations remain
+        # exactly one per solver call.
+        original_before_window_advance = self.before_window_advance
+        self.before_window_advance = None
+        try:
+            return original_advance_window(solution, *advance_args, **advance_kwargs)
+        finally:
+            self.before_window_advance = original_before_window_advance
+
+    if args.retry_failed_rho_without_advance:
+        nmpc.advance_window = MethodType(advance_only_certified_window, nmpc)
     nmpc.before_window_advance = snapshot_completed_window
     consecutive_physical_failures = 0
 
     def update_functions(_nmpc, cycle_idx, _sol):
         nonlocal transfer_failure_window, consecutive_physical_failures
         print(f"window {cycle_idx}")
+        if _sol is not None and getattr(
+            _nmpc, "_cocofest_retry_same_rho_pending", False
+        ):
+            # ``advance_window`` deliberately left the bounds and initial
+            # primal untouched.  Do not run any cyclic-transfer operation on
+            # the failed solution: the next solver call must see the exact
+            # same RHO, not a shifted or projected variant of it.
+            feasibility = getattr(_sol, "_cocofest_feasibility_summary", None)
+            if not _rho_solution_is_certified(_sol.status, feasibility):
+                consecutive_physical_failures += 1
+            else:
+                consecutive_physical_failures = 0
+            continue_solving = (
+                cycle_idx < requested_window_solves
+                and consecutive_physical_failures < args.max_consecutive_failing
+            )
+            if echo:
+                print(
+                    "rho_retry_without_advance_next: "
+                    f"attempt_window={cycle_idx + 1} "
+                    f"consecutive_failures={consecutive_physical_failures} "
+                    f"continue={continue_solving}"
+                )
+            return continue_solving
         contact_projection = getattr(_nmpc, "last_transfer_contact_projection", None)
         if contact_projection is not None:
             contact_projection = {"window": cycle_idx, **contact_projection}
@@ -16981,6 +17082,8 @@ def solve_case(args: argparse.Namespace, echo: bool = True) -> dict:
         ] = inter_window_proximal_control_summaries
     if transfer_failure_window is not None:
         summary["transfer_failure_window"] = transfer_failure_window
+    if retry_same_rho_summaries:
+        summary["retry_same_rho_summaries"] = retry_same_rho_summaries
     if inter_window_terminal_wheel_bound_summaries:
         summary[
             "inter_window_terminal_wheel_bound_summaries"

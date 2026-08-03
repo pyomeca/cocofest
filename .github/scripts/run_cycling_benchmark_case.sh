@@ -187,6 +187,7 @@ python "$workspace/examples/fes_multibody/cycling/cycling_fes_solver_comparison.
   --nlp-tolerance "$solver_tolerance" \
   --primal-feasibility-threshold 1e-5 \
   --max-consecutive-failing 2 \
+  --retry-failed-rho-without-advance \
   --standard-warmup-seed "$workspace/.github/benchmark-seeds/legacy-resistive-0p22-warmup.npz" \
   --legacy-standard-warmup-seed-signed-torque 0.22 \
   --standard-warmup-seed-continuation \

@@ -1154,6 +1154,24 @@ def test_acados_conditional_maxiter_retry_options_are_parsed():
     assert args.acados_maxiter_retry_feasibility_tolerance == pytest.approx(0.0025)
 
 
+def test_rho_retry_without_advance_is_opt_in_and_certification_requires_status_zero():
+    parser = periodic_example.build_argument_parser()
+
+    assert parser.parse_args([]).retry_failed_rho_without_advance is False
+    assert parser.parse_args(
+        ["--retry-failed-rho-without-advance"]
+    ).retry_failed_rho_without_advance is True
+    assert periodic_example._rho_solution_is_certified(
+        0, {"passes_tolerance": True}
+    )
+    assert not periodic_example._rho_solution_is_certified(
+        1, {"passes_tolerance": True}
+    )
+    assert not periodic_example._rho_solution_is_certified(
+        0, {"passes_tolerance": False}
+    )
+
+
 def test_acados_maxiter_retry_candidate_requires_nearly_feasible_history():
     diagnostics = {
         "res_stat_all": np.array([20.0, 0.2, 0.3]),
@@ -5926,7 +5944,7 @@ def test_github_acados_runner_uses_reference_and_option_profiles_sequentially():
     assert "ipopt-radau5-full" in workflow
     assert "madnlp-mumps-radau5-full" in workflow
     assert "Scientific collocation gate is not strict-successful" in workflow
-    assert workflow.count("5 scientific-radau5") == 4
+    assert workflow.count("5 scientific-radau5") == 7
     assert '"$BENCHMARK_CYCLES" "${{ inputs.compile_nlp_evaluators }}"' in workflow
     assert (
         "run_cycling_benchmark_case.sh ipopt ipopt full mumps collocation "
@@ -5957,7 +5975,7 @@ def test_github_acados_runner_uses_reference_and_option_profiles_sequentially():
     assert "specified structure of A does not correspond" not in workflow
     assert 'case_requires_compile="$COMPILE_NLP_EVALUATORS"' in workflow
     assert "case_requires_compile=false" in workflow
-    assert '[[ "$result" == *-radau[456]-* ]]' in workflow
+    assert '[[ "$result" =~ -radau[456]-' in workflow
     assert ".compiled_nlp_reuse.compiled_library_build_count == 1" in workflow
     assert ".compiled_nlp_reuse.graph_rebuild_detected == false" in workflow
     assert ".compiled_nlp_reuse.runtime_bounds_changed == true" in workflow
@@ -6035,6 +6053,9 @@ def test_github_acados_runner_uses_reference_and_option_profiles_sequentially():
     assert "--acados-transfer-active-set-guard-margin 1" in workflow
     assert "--acados-transfer-active-set-threshold 1e-6" in workflow
     assert "--max-consecutive-failing 2" in workflow
+    assert "--retry-failed-rho-without-advance" in workflow
+    assert "fatigue_endurance_radau5" in workflow
+    assert "Run compiled reduced Radau-5 fatigue endurance" in workflow
     assert "cycling-acados-smoke-${{ github.run_id }}" in workflow
     assert workflow.count("name: Save the MadNLP numerical stack") == 2
     assert (

@@ -37,7 +37,7 @@ reste la source de vérité exécutable.
 
 ### Campagnes CI d'endurance
 
-Le champ `cycles` du workflow distingue maintenant trois campagnes longues,
+Le champ `cycles` du workflow distingue maintenant quatre campagnes longues,
 afin de ne pas mélanger précision de transcription, vitesse et perte de
 capacité musculaire :
 
@@ -46,8 +46,10 @@ capacité musculaire :
 | `radau5_100` | IPOPT/MUMPS, MadNLP/MUMPS et FATROP, chacun en full et reduced, Radau 5, 100 RHO | certification stricte des 100 RHO; fonctions interprétées pour isoler l'effet du degré |
 | `acados_reduced_100` | ACADOS SQP-IRK reduced, 100 RHO, après un seed ACADOS-native | résultat sérialisé et audité, y compris si la chaîne s'arrête avant 100 |
 | `fatigue_endurance` | IPOPT, MadNLP/MUMPS et FATROP reduced, SX et compilés, Radau 3; ACADOS SQP-IRK full avec garde rapide `2.60` et Phase-I mécanique | horizon atteint ou arrêt candidat de fatigue après deux fenêtres non certifiées consécutives |
+| `fatigue_endurance_radau5` | IPOPT/MUMPS et MadNLP/MUMPS reduced, SX et compilés, Radau 5 | même contrat d'endurance, afin de vérifier que le stop MadNLP R3 n'est pas un artefact de transcription |
 
-La dernière campagne emploie `fatigue_endurance_max_rhos` (par défaut `1000`)
+Les campagnes d'endurance emploient `fatigue_endurance_max_rhos` (par défaut
+`2000`)
 comme garde-fou, non comme une durée physiologique imposée. Un arrêt avant ce
 plafond ne passe pas automatiquement : il doit associer (i) deux fenêtres RHO
 consécutives non certifiées, (ii) une baisse observée de la capacité `A/A_scale`
@@ -56,6 +58,12 @@ PW. Il est alors rapporté comme `fatigue_limited_candidate`, donc comme un
 outcome expérimental important et non comme une erreur d'infrastructure. Sans
 ces trois indices, il reste `unconfirmed_endurance_stop` et fait échouer le
 gate : une non-convergence numérique ne doit pas être renommée fatigue.
+
+Après une solution non certifiée, le wrapper RHO ne décale désormais plus les
+bornes, les états ni le primal. La seconde chance repart exactement du dernier
+checkpoint certifié et résout donc le **même RHO**. Cela élimine le faux motif
+« échec puis succès » observé avec MadNLP R3, où Bioptim avançait auparavant
+une solution non convergée avant le second essai.
 
 Exemples de lancement manuel :
 
@@ -70,7 +78,11 @@ gh workflow run cycling_solver_benchmark_linux.yml \
 
 gh workflow run cycling_solver_benchmark_linux.yml \
   --ref codex/acados-pr-refresh \
-  -f cycles=fatigue_endurance -f fatigue_endurance_max_rhos=1000
+  -f cycles=fatigue_endurance -f fatigue_endurance_max_rhos=2000
+
+gh workflow run cycling_solver_benchmark_linux.yml \
+  --ref codex/acados-pr-refresh \
+  -f cycles=fatigue_endurance_radau5 -f fatigue_endurance_max_rhos=2000
 ```
 
 ## Réponse courte
