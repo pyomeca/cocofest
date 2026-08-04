@@ -4,6 +4,12 @@
   <img src="https://i.imgur.com/Gsj0JtN.jpeg" alt="">
 </p>
 
+> \[!IMPORTANT]
+>
+> This branch contains the simulation results from the **Maximizing Task Endurance through Muscle Fatigue Minimization
+> with Consideration of Muscle Fatigability and Task Contribution: an in-Silico FES Study of Handcycling** article.
+> The shared data is located in the example/fes_multibody/cycling/article_dataset folder.
+
 # Cocofest
 
 An Open-Source Python Package for Functional Electrical Stimulation (FES) Optimization in Optimal Control.<br/>
