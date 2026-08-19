@@ -44,29 +44,29 @@ neurological impairment. Applying coordinated electrical pulses to muscles elici
 reaching, and grasping. FES rehabilitation mostly relies on empirical settings, as responses to stimulation vary across
 populations and muscles. Empirical settings often cause overstimulation and premature fatigue [@ibitoye2016strategies],
 shortening rehabilitation sessions and diminishing therapeutic benefit. Consequently, advanced control approaches like
-optimal control-driven FES are gaining interest in personalizing and improving FES rehabilitation efficiency, meanwhile
+optimal control–driven FES are gaining interest in personalizing and improving FES rehabilitation efficiency, meanwhile
 delaying muscle fatigue [@co2025optimal]. To address this need, we designed `Cocofest` (Custom Optimal COntrol for
-Functional Electrical STimulation), an open-source Python package for optimal control-driven FES. `Cocofest` provides a
+Functional Electrical STimulation), an open-source Python package for optimal control–driven FES. `Cocofest` provides a
 framework to generate personalized pulse trains (Fig. 1) based on nonlinear dynamics models for FES, for
 several musculoskeletal models and motor tasks. The package includes over 10 examples, covering optimization of
-FES-related pulse train parameters (including frequency, pulse width, pulse intensity), FES model parameters
-identification from in-vivo measurements, and long duration predictive simulations.
+FES-related pulse-train parameters (including frequency, pulse width, pulse intensity), FES model parameters
+identification from in-vivo measurements, and long-duration predictive simulations.
 
 ![Pulse train parameters that can be optimized in Cocofest](pulse_train.png){ width=90% }
 
 
 # Statement of Need
 
-Since the pioneer study on optimal control-driven FES [@hunt1997feedback], no code has been shared in the field,
+Since the pioneer study on optimal control–driven FES [@hunt1997feedback], no code has been shared in the field,
 limiting objective comparison and replicability across studies. The lack of open-source practice led to an absence of
 consensus on how to choose nonlinear dynamics for FES, and which cost functions to use for dedicated clinical needs,
 hindering standardization and cumulative progress [@co2025optimal]. To address these challenges and support collective
 scientific progress, `Cocofest` fulfills the following four needs:
 
-Firstly, the relationship between the pulse train parameters (e.g., frequency, pulse width and intensity; Fig. 1) and
+Firstly, the relationship between the pulse-train parameters (e.g., frequency, pulse width and intensity; Fig. 1) and
 the resulting muscle force, joint torque, and muscle fatigue can be modeled with different nonlinear dynamics
 [@ding2003mathematical; @veltink1992nonlinear]. Gathering them within a unified package would facilitate comparison for
-more informed modelling choices.
+more informed modeling choices.
 
 Secondly, no study has compared different optimal control problem (OCP) formulations applied to FES, due to OCP
 implementation challenges [@co2025optimal]. Easily customizable OCP formulation, involving objective functions, models,
@@ -100,6 +100,7 @@ is expected to accelerate the increase of technology readiness level by strength
 # State of the Field
 
 Several open-source toolkits support optimal control computations for musculoskeletal biomechanics, such as:
+
 - `OpenSim Moco` [@dembia2020opensim], a C++ OpenSim extension that enables motion tracking and prediction using efficient
 direct-collocation formulations coupled to nonlinear programming solvers. 
 - `SCONE` [@geijtenbeek2019], a C++/C predictive-simulation environment for human and animal motion that optimizes
@@ -107,7 +108,7 @@ neuromusculoskeletal controllers to achieve task-level objectives (e.g., stable 
 - `Bioptim` [@michaud2022bioptim], a Python optimal-control framework for biomechanics that supports both direct collocation
 and multiple shooting, with flexible interfaces to nonlinear programming solvers.
 
-However, these toolkits are not tailored for FES. They control muscle activation as a piecewise linear/constant
+However, these toolkits are not tailored for FES. They control muscle activation as a piecewise-linear/constant
 excitation, whereas FES requires optimizing deliverable stimulation patterns under device and safety constraints. As a
 result, they lack reusable, validated components for the stimulation-to-force pathway and fatigue/recovery dynamics,
 limiting reproducible comparison of FES models and slowing translation to practical stimulation design. `Cocofest`
@@ -124,10 +125,10 @@ Bioptim, an open-source optimization framework for biomechanical problems [@mich
 enables easy OCP customization including cost functions, bounds, constraints, transcription methods (e.g., direct
 collocation), integration methods, and solving methods (e.g., full- and receding-horizon OCPs).
 
-In conventional Hill-type muscle model, muscle force ($F_m$) is the product of $a$ the muscle activation, $F_{max}$ the
-maximal isometric muscle force, $f_l$ the force-length, $f_v$ the force-velocity and $f_{pas}$ the passive force-length
-relationship: $F_m(t) = a(t)\, F_{\max}\, f_l(\tilde{l}_m)\, f_v(\tilde{v}_m) + f_{pas}(\tilde{l}_m)$. `Cocofest`
-replaces $a(t)$ × $F_{max}$ by the force obtained using FES models. This approach allows motions driven-FES simulations,
+In a conventional Hill-type muscle model, muscle force ($F_m$) is the product of $a$ the muscle activation, $F_{\mathrm{max}}$ the
+maximal isometric muscle force, $f_l$ the force-length, $f_v$ the force-velocity and $f_{\mathrm{pas}}$ the passive force-length
+relationship: $F_m(t) = a(t)\, F_{\mathrm{max}}\, f_l(\tilde{l}_m)\, f_v(\tilde{v}_m) + f_{\mathrm{pas}}(\tilde{l}_m)$. `Cocofest`
+replaces $a(t)$ × $F_{\mathrm{max}}$ by the force obtained using FES models. This approach allows motions driven–FES simulations,
 meanwhile benefiting from musculoskeletal model properties (e.g., muscle insertion, inertial parameters).
 
 `Cocofest` was developed to maintain a consistent structure between classes and functions to facilitate the OCP
