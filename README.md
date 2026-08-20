@@ -19,7 +19,7 @@ Supports predictive musculoskeletal simulation driven by FES, moving time horizo
 [![Docs](https://img.shields.io/readthedocs/cocofest?style=for-the-badge&label=Docs&logo=readthedocs)](https://cocofest.readthedocs.io/en/latest/)<br/>
 [![Discord](https://img.shields.io/discord/1340640457327247460.svg?label=chat&logo=discord&color=7289DA&style=for-the-badge)](https://discord.gg/s3g2ATpvDs)
 [![Licence](https://img.shields.io/github/license/pyomeca/cocofest.svg?style=for-the-badge)](https://opensource.org/licenses/MIT)
-
+[![JOSS](https://img.shields.io/badge/JOSS-10.21105%2Fjoss.10669-brightgreen?style=for-the-badge)](https://doi.org/10.21105/joss.10669)<br/>
 </div>
 
 <details>
@@ -36,7 +36,7 @@ Supports predictive musculoskeletal simulation driven by FES, moving time horizo
   - [Summation truncation](#summation-truncation)
 - [Other](#other)
   - [Want to contribute?](#want-to-contribute)
-  - [Contributors](#contributors)
+  - [Collaborators and contributors](#collaborators-and-contributors)
   - [Citing](#citing)
   - [Cited in](#cited-in)
   - [Other related projects](#other-related-projects)
@@ -432,18 +432,41 @@ Feel free to check our [contributing guidelines](docs/contributing.md) to get st
 
 Don't know where to start? [Issues](https://github.com/pyomeca/cocofest/issues) tagged with "Good first issues" are a great place to begin!
 
-<a id="contributors"></a>
-## 🤝 Contributors
+<a id="collaborators-and-contributors"></a>
+## 🤝 Collaborators and contributors
 
 <a href="https://github.com/Kev1CO"><img src="https://avatars.githubusercontent.com/u/78259038?v=4" title="Kev1CO" width="50" height="50"></a>
 <a href="https://github.com/Ipuch"><img src="https://avatars.githubusercontent.com/u/40755537?v=4" title="Ipuch" width="50" height="50"></a>
+<a href="https://github.com/fmoissenet"><img src="https://avatars.githubusercontent.com/u/14890048?v=4" title="fmoissenet" width="50" height="50"></a>
+<a href="https://github.com/mickaelbegon"><img src="https://avatars.githubusercontent.com/u/37242672?v=4" title="mickaelbegon" width="50" height="50"></a>
 <a href="https://github.com/Florine353"><img src="https://avatars.githubusercontent.com/u/112490846?v=4" title="Florine353" width="50" height="50"></a>
 
 <a id="citing"></a>
 ## 📝 Citing
-The `Cocofest` companion paper is not published yet (submitted to JOSS). <br>
-Meanwhile, if you use `Cocofest`, please cite the software directly via its Zenodo archive:
-[10.5281/zenodo.17068808](https://doi.org/10.5281/zenodo.17068808)
+If you use `Cocofest` in your research, please cite the associated paper:
+
+```
+Co et al., (2026). Cocofest: an Open-Source Python Package for Optimal-Control-Driven Functional Electrical Stimulation. Journal of Open Source Software, 11(124), 10669, https://doi.org/10.21105/joss.10669
+```
+
+<details>
+  <summary><kbd>BibTeX</kbd></summary>
+
+```bibtex
+@article{Co2026,
+  doi = {10.21105/joss.10669},
+  url = {https://doi.org/10.21105/joss.10669},
+  year = {2026},
+  publisher = {The Open Journal},
+  volume = {11},
+  number = {124},
+  pages = {10669},
+  author = {Kevin Co and Pierre Puchaud and Florent Moissenet and Micka{\"e}l Begon},
+  title = {Cocofest: an Open-Source Python Package for Optimal-Control-Driven Functional Electrical Stimulation},
+  journal = {Journal of Open Source Software}
+}
+```
+</details>
 
 <a id="cited-in"></a>
 ## 📚 Cited in
