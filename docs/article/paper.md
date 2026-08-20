@@ -1,5 +1,5 @@
 ---
-title: "Cocofest: an Open-Source Python Package for Optimal Control-Driven Functional Electrical Stimulation"
+title: "Cocofest: an Open-Source Python Package for Optimal-Control-Driven Functional Electrical Stimulation"
 
 tags:
   - python
@@ -44,9 +44,9 @@ neurological impairment. Applying coordinated electrical pulses to muscles elici
 reaching, and grasping. FES rehabilitation mostly relies on empirical settings, as responses to stimulation vary across
 populations and muscles. Empirical settings often cause overstimulation and premature fatigue [@ibitoye2016strategies],
 shortening rehabilitation sessions and diminishing therapeutic benefit. Consequently, advanced control approaches like
-optimal control–driven FES are gaining interest in personalizing and improving FES rehabilitation efficiency, meanwhile
+optimal-control–driven FES are gaining interest in personalizing and improving FES rehabilitation efficiency, meanwhile
 delaying muscle fatigue [@co2025optimal]. To address this need, we designed `Cocofest` (Custom Optimal COntrol for
-Functional Electrical STimulation), an open-source Python package for optimal control–driven FES. `Cocofest` provides a
+Functional Electrical STimulation), an open-source Python package for optimal-control–driven FES. `Cocofest` provides a
 framework to generate personalized pulse trains (Fig. 1) based on nonlinear dynamics models for FES, for
 several musculoskeletal models and motor tasks. The package includes over 10 examples, covering optimization of
 FES-related pulse-train parameters (including frequency, pulse width, pulse intensity), FES model parameters
@@ -57,7 +57,7 @@ identification from in-vivo measurements, and long-duration predictive simulatio
 
 # Statement of Need
 
-Since the pioneer study on optimal control–driven FES [@hunt1997feedback], no code has been shared in the field,
+Since the pioneer study on optimal-control–driven FES [@hunt1997feedback], no code has been shared in the field,
 limiting objective comparison and replicability across studies. The lack of open-source practice led to an absence of
 consensus on how to choose nonlinear dynamics for FES, and which cost functions to use for dedicated clinical needs,
 hindering standardization and cumulative progress [@co2025optimal]. To address these challenges and support collective
@@ -89,7 +89,7 @@ patient-specific muscle response to FES is a crucial step. Unfortunately, curren
 barrier to clinical translation [@le2010identification]. Providing a robust and customizable framework for the
 development of more patient-friendly protocols would help to overcome this barrier.
 
-Despite its potential, optimal control–driven FES remains unadopted in clinical practice due to its low technology
+Despite its potential, optimal-control–driven FES remains unadopted in clinical practice due to its low technology
 readiness level [@co2025optimal]. `Cocofest` is a comprehensive package designed to bridge the gaps and foster clinical
 adoption. It integrates nonlinear muscle dynamics dedicated to FES, manages muscle fatigue, interfaces FES with
 musculoskeletal models, supports customizable cost functions and parameter identification routines. With the goal of
@@ -133,7 +133,7 @@ meanwhile benefiting from musculoskeletal model properties (e.g., muscle inserti
 
 `Cocofest` was developed to maintain a consistent structure between classes and functions to facilitate the OCP
 customization and new FES model implementation. This shared interface promotes reproducible work and comparisons of
-optimal control–driven FES strategies.
+optimal-control–driven FES strategies.
 
 
 # Research Impact Statement
