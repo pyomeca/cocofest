@@ -46,6 +46,7 @@ from cocofest import (
     FesMheMsk,
 )
 from examples.fes_multibody.cycling.cost_functions import CustomCostFunctions
+from examples.fes_multibody.cycling.numerical_options import build_cycling_mhe_info, resolve_ipopt_linear_solver
 
 
 # --------------------#
@@ -961,6 +962,7 @@ def run_initial_guess(mhe_info, cycling_info, model_path, stimulation, n_cycles_
         "n_cycles": 1,
         "ode_solver": mhe_info["ode_solver"],
         "use_sx": mhe_info["use_sx"],
+        "linear_solver": mhe_info.get("linear_solver"),
     }
 
     ode_solver = mhe_info["ode_solver"]
@@ -1041,7 +1043,7 @@ def run_optim(mhe_info, cycling_info, simulation_conditions, model_path, save_so
 
     # Set solver for the optimal control problem
     solver = Solver.IPOPT(show_online_optim=False, _max_iter=2000, show_options=dict(show_bounds=True))
-    linear_solver = "ma57" if platform == "linux" else "mumps"
+    linear_solver = resolve_ipopt_linear_solver(mhe_info.get("linear_solver"), platform)
     solver.set_linear_solver(linear_solver)
 
     # Solve the optimal control problem
@@ -1073,7 +1075,17 @@ def run_optim(mhe_info, cycling_info, simulation_conditions, model_path, save_so
 
 
 def main(
-    stimulation_frequency, n_total_cycle, n_cycles_simultaneous, resistive_torque, cost_fun_dict, init_guess, save
+    stimulation_frequency,
+    n_total_cycle,
+    n_cycles_simultaneous,
+    resistive_torque,
+    cost_fun_dict,
+    init_guess,
+    save,
+    *,
+    radau_stages=3,
+    use_sx=False,
+    linear_solver=None,
 ):
     # --- Simulation configuration --- #
     save_sol = save
@@ -1088,14 +1100,9 @@ def main(
     )
 
     # --- MHE parameters --- #
-    ode_solver = OdeSolver.COLLOCATION(polynomial_degree=3, method="radau")
-    mhe_info = {
-        "cycle_duration": 1,
-        "n_cycles_to_advance": 1,
-        "n_cycles": n_total_cycle,
-        "ode_solver": ode_solver,
-        "use_sx": False,
-    }
+    mhe_info = build_cycling_mhe_info(
+        n_total_cycle, radau_stages=radau_stages, use_sx=use_sx, linear_solver=linear_solver
+    )
 
     # --- Bike parameters --- #
     cycling_info = {
